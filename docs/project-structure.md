@@ -75,6 +75,7 @@ src/
 |-- app.js               Defines public and protected API endpoints
 |-- supabase.js          Creates the administrative Supabase client
 |-- checkSupabase.js     Separate script to check the cloud connection
+|-- auth/                Staff permission policy
 |-- config/              Server settings
 |-- middleware/          Shared request checks and error handling
 |-- modules/             Backend code grouped by feature
@@ -91,6 +92,8 @@ src/
 Put business logic in its matching module. For example, booking logic belongs in `modules/bookings/`.
 
 `middleware/requireAuth.js` verifies bearer tokens with Supabase and attaches trusted identity to `req.user`. `GET /api/auth/me` uses it to return the signed-in user. `GET /api/auth/config` exposes only the public project URL and publishable key.
+
+Staff permissions live in `auth/permissions.js`. `middleware/requirePermission.js` enforces them after authentication. `GET /api/internal/access` supplies the account screen's `StaffResponsibilities.jsx`. See [staff access](staff-access.md) before adding internal feature routes or record queries.
 
 The `/api/health` endpoint checks that Express is running. It does not check Supabase. The separate `checkSupabase.js` script checks access through the Supabase Auth admin API.
 
@@ -131,7 +134,7 @@ These files appear inside both `frontend/` and `backend/`:
 | `tests/e2e/`                 | Tests for a complete user journey through the app. |
 | `supabase/migrations/`       | Future SQL files for changes to Supabase Cloud.    |
 
-`backend/tests/integration/auth.test.js` now runs with Node's built-in test runner through `npm --prefix backend test` and CI. The other test folders and migrations folder remain reserved space. No automatic migrations or local Supabase setup are configured.
+`backend/tests/integration/auth.test.js` and `permissions.test.js` run with Node's built-in test runner through `npm --prefix backend test` and CI. The other test folders and migrations folder remain reserved space. No automatic migrations or local Supabase setup are configured.
 
 Keep the Supabase secret key on the backend, never in frontend code.
 

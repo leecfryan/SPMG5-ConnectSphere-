@@ -39,3 +39,9 @@ footer { text-align: center; color: #7d8a83; font-size: 11px; }
   .intro > p:not(.eyebrow) { font-size: 15px; margin-bottom: 0; }
   .card { padding: 28px 24px; }
 }
+
+.responsibilities { margin-top: 24px; }
+.responsibilities h2 { font-size: 17px; font-weight: 600; margin-bottom: 12px; }
+.responsibilities ul { padding-left: 20px; margin: 0; color: #426e60; font-size: 14px; line-height: 1.7; }
+.responsibilities li + li { margin-top: 6px; }
+.responsibilities > p { font-size: 14px; line-height: 1.6; }

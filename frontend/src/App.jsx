@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getAuthClient } from "./lib/supabase";
 import SignIn from "./features/auth/SignIn";
+import StaffResponsibilities from "./features/auth/StaffResponsibilities";
 import "./App.css";
 
 const roleLabels = {
@@ -113,6 +114,7 @@ function Account({ client, token }) {
             <div><dt>Account</dt><dd>{user.accountTypes.map((type) => type === "internal" ? "Internal staff" : "External user").join(" · ") || "Account setup pending"}</dd></div>
             <div><dt>Role</dt><dd>{user.roles.map((role) => roleLabels[role]).join(" · ") || "Not assigned"}</dd></div>
           </dl>
+          {user.accountTypes.includes("internal") && <StaffResponsibilities token={token} />}
           <p className="card-note">Your account is ready. Event features will appear here as they become available.</p>
         </>
       ) : !error && <p role="status">Confirming your access…</p>}

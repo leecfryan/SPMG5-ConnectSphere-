@@ -55,15 +55,29 @@ A person can have roles from both groups. User-editable metadata, form fields,
 and request parameters cannot grant roles.
 
 This story provides sign-in, a protected account screen, session restoration, and
-sign-out. The account screen is not an event dashboard. Detailed responsibility
-and event/client relationship permissions belong to the next story; role labels
-alone do not enforce them. Registration and password reset are outside this story.
+sign-out. The account screen is not an event dashboard. Registration and password
+reset are outside this story. See the staff-access implementation below for
+authorisation.
 
 Sign-out uses Supabase's local scope (the current session). As with Supabase JWT
 sessions generally, a previously issued access token may remain valid until its
 expiry; sign-out clears the browser session and revokes its refresh capability.
 Use HTTPS when deployed, protect against XSS because the SDK persists sessions in
 local storage, and keep Supabase's authentication rate limits enabled.
+
+## Restrict internal staff access by responsibility
+
+The backend verifies staff roles before serving /api/internal routes. A central
+permission matrix grants Venue Staff venue/booking reads, Technical Support Staff
+equipment/technical reads, and Event Coordinators coordination reads. External
+roles grant no internal access. The account screen displays responsibilities
+returned by GET /api/internal/access.
+
+Feature owners must attach requirePermission to their data endpoints. Sensitive
+record permissions also require a server-side relationship resolver. Production
+business endpoints and their database policies do not exist yet; full story
+acceptance requires this integration. See [staff access](docs/staff-access.md) for
+the agreed matrix, integration examples, tests and remaining work.
 
 ## Checks and story traceability
 
