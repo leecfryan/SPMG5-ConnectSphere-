@@ -1,58 +1,42 @@
-## Current Architecture
+# Current architecture
 
-The application currently uses the following stack:
+ConnectSphere uses React/Vite (JavaScript), Express/Node.js, and Supabase Cloud.
+Docker Compose runs the frontend and backend development servers; Supabase is
+hosted externally.
 
-- Frontend: React with Vite
+## Authentication flow
 
-- Backend: Node.js with Express
+1. React requests public Supabase configuration from Express at /api/auth/config.
+2. The browser Supabase SDK signs in directly with Supabase Auth using email and
+   password, and manages session persistence and refresh.
+3. React sends the access token as a bearer token to Express at /api/auth/me.
+4. Express verifies the token with Supabase Auth before returning a limited user
+   profile. Other protected APIs should reuse the authentication middleware.
+5. Admin-controlled roles determine the returned internal/external account types.
+   Detailed role and event-relationship permission checks are future work.
 
-- Database / Backend Platform: Supabase
+The browser never receives the Supabase secret key. Normal identity verification
+uses the publishable key. Administrative scripts such as seeding use the separate
+backend Supabase admin client.
 
-Containerisation: Docker
+The authenticated identity is attached to req.user. Roles remain an array so
+future work can handle a staff member who also has an external role. No role
+selector or browser-supplied claim grants access.
 
-Local orchestration: Docker Compose
+## Files
 
-### High-Level View
+- frontend/src/features/auth/SignIn.jsx: sign-in form.
+- frontend/src/lib/supabase.js: browser Auth client, public configuration and sessions.
+- frontend/src/App.jsx: session state and protected account screen.
+- backend/src/server.js: environment loading, stateless verification client and startup.
+- backend/src/app.js: Express app and public/protected endpoints.
+- backend/src/middleware/requireAuth.js: verified identity and trusted role metadata.
+- backend/src/supabase.js: administrative Supabase client used by scripts.
+- backend/scripts/seedUsers.js: repeatable creation of dummy Auth accounts.
+- backend/tests/integration/auth.test.js: authentication boundary tests.
+- supabase/migrations/: reserved for future SQL schema and policy changes.
 
-User Browser
-|
-| HTTP
-v
-React Frontend
-localhost:5173
-|
-| REST / JSON
-v
-Express Backend
-localhost:3000
-|
-| HTTPS
-v
-Supabase Cloud
-
-The React and Express applications run locally in Docker containers. Supabase is hosted externally and is not containerised as part of the local Docker Compose setup.
-
-ConnectSphere/
-|
-|-- frontend/
-| |-- src/
-| |-- public/
-| |-- Dockerfile
-| |-- .dockerignore
-| |-- package.json
-| `-- vite.config.js
-|
-|-- backend/
-|   |-- src/
-|   |   |-- server.js
-|   |   `-- supabase.js
-| |-- Dockerfile
-| |-- .dockerignore
-| |-- package.json
-| `-- package-lock.json
-|
-|-- docker-compose.yml
-|-- .env
-|-- .env.example
-|-- .gitignore
-|-- architecture.md
+Vite proxies /api to the backend: localhost:3000 for local npm development and
+backend:3000 inside Docker. Production hosting must route /api to Express behind
+the same HTTPS origin. See README.md for commands, configuration, acceptance
+criteria and session security considerations.

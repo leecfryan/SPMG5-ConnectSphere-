@@ -60,6 +60,10 @@ jobs:
         working-directory: backend
         run: npm run check
 
+      - name: Test authentication boundaries
+        working-directory: backend
+        run: npm test
+
   docker:
     name: Docker Checks
     runs-on: ubuntu-latest
