@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { SIGN_IN_LIMITS, signInWithCredentials } from "./signInService";
 
 export default function SignIn({ client }) {
   const [email, setEmail] = useState("");
@@ -6,27 +7,20 @@ export default function SignIn({ client }) {
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const submitting = useRef(false);
 
   async function submit(event) {
     event.preventDefault();
-    if (busy) return;
+    if (submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     setError("");
     try {
-      const { error: signInError } = await client.auth.signInWithPassword({
-        email: email.trim(), password,
-      });
-      if (signInError) {
-        setError(signInError.status === 429
-          ? "Too many sign-in attempts. Please wait a moment and try again."
-          : signInError.status >= 500 || !signInError.status
-            ? "Sign-in is temporarily unavailable. Please try again."
-            : "Unable to sign in. Check your email and password and try again.");
-      }
-    } catch {
-      setError("Unable to connect. Check your connection and try again.");
+      setError(await signInWithCredentials(client, { email, password }));
     } finally {
       setPassword("");
+      setVisible(false);
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -40,24 +34,54 @@ export default function SignIn({ client }) {
       </div>
       <form onSubmit={submit} aria-busy={busy}>
         <label htmlFor="email">Email address</label>
-        <input id="email" name="email" type="email" autoComplete="username"
-          placeholder="you@example.com" maxLength={254} required disabled={busy}
-          value={email} onChange={(event) => setEmail(event.target.value)} />
+        <input
+          id="email"
+          name="email"
+          type="email"
+          autoComplete="username"
+          placeholder="you@example.com"
+          maxLength={SIGN_IN_LIMITS.email}
+          required
+          disabled={busy}
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+        />
         <label htmlFor="password">Password</label>
         <div className="password-field">
-          <input id="password" name="password" type={visible ? "text" : "password"}
-            autoComplete="current-password" required maxLength={1024} disabled={busy}
-            value={password} onChange={(event) => setPassword(event.target.value)} />
-          <button className="password-toggle" type="button" disabled={busy}
-            aria-label={visible ? "Hide password" : "Show password"} aria-pressed={visible}
-            onClick={() => setVisible(!visible)}>{visible ? "Hide" : "Show"}</button>
+          <input
+            id="password"
+            name="password"
+            type={visible ? "text" : "password"}
+            autoComplete="current-password"
+            required
+            maxLength={SIGN_IN_LIMITS.password}
+            disabled={busy}
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+          <button
+            className="password-toggle"
+            type="button"
+            disabled={busy}
+            aria-label={visible ? "Hide password" : "Show password"}
+            aria-pressed={visible}
+            onClick={() => setVisible(!visible)}
+          >
+            {visible ? "Hide" : "Show"}
+          </button>
         </div>
-        {error && <p className="error" role="alert">{error}</p>}
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
         <button className="primary" type="submit" disabled={busy}>
           {busy ? "Signing in…" : "Sign in"}
         </button>
       </form>
-      <p className="card-note">Use the account provided to you by ConnectSphere.</p>
+      <p className="card-note">
+        Use the account provided to you by ConnectSphere.
+      </p>
     </section>
   );
 }
