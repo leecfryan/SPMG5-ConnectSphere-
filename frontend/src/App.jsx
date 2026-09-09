@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import "./App.css";
+import VenueCataloguePage from "./features/venues/pages/VenueCataloguePage";
 
 function App() {
   const [message, setMessage] = useState("Loading...");
@@ -10,9 +11,11 @@ function App() {
       .then((data) => setMessage(data.message))
       .catch((error) => console.error("Error fetching health status:", error));
   }, []);
+
   return (
     <>
       <h1>{message}</h1>
+      <VenueCataloguePage />
     </>
   );
 }
