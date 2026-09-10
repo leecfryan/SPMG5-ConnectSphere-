@@ -5,10 +5,12 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test \"tests/**/*.test.js\"",
+    "test:integration": "node --test tests/integration/*.test.js",
     "test:cov": "node --test --experimental-test-coverage \"tests/**/*.test.js\"",
     "dev": "nodemon src/server.js",
     "start": " node src/server.js",
-    "check": "node --check src/server.js && node --check src/supabase.js"
+    "check": "node --check src/server.js && node --check src/app.js && node --check src/middleware/requireAuth.js && node --check src/supabase.js && node --check scripts/seedUsers.js && node --check src/auth/permissions.js && node --check src/middleware/requirePermission.js",
+    "seed:users": "node scripts/seedUsers.js"
   },
   "keywords": [],
   "author": "",
