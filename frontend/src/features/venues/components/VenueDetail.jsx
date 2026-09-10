@@ -30,11 +30,15 @@ function OperatingHours({ hours }) {
   );
 }
 
-function VenueDetail({ venue, onBack }) {
+function VenueDetail({ venue, onBack, onEdit }) {
   return (
     <div className="venue-detail">
       <button type="button" onClick={onBack}>
         Back to catalogue
+      </button>
+
+      <button type="button" onClick={onEdit}>
+        Edit operating information
       </button>
 
       <h2>{venue.name}</h2>

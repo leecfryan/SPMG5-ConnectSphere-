@@ -1,11 +1,12 @@
 const API_BASE_URL = "http://localhost:3000";
 
-async function request(path) {
-  const response = await fetch(`${API_BASE_URL}${path}`);
+async function request(path, options = {}) {
+  const response = await fetch(`${API_BASE_URL}${path}`, options);
   const body = await response.json();
 
   if (!response.ok) {
-    throw new Error(body.error || "Request failed");
+    const detail = body.details ? `: ${body.details.join(", ")}` : "";
+    throw new Error((body.error || "Request failed") + detail);
   }
   return body.data;
 }
@@ -21,4 +22,17 @@ export function fetchVenues({ city, minCapacity } = {}) {
 
 export function fetchVenueById(id) {
   return request(`/api/venues/${id}`);
+}
+
+const DEV_ROLE = "Coordinator";
+
+export function updateVenue(id, changes) {
+  return request(`/api/venues/${id}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "x-user-role": DEV_ROLE,
+    },
+    body: JSON.stringify(changes),
+  });
 }

@@ -34,4 +34,16 @@ async function getVenueById(id) {
   return data;
 }
 
-module.exports = { listVenues, getVenueById };
+async function updateVenue(id, changes) {
+  const { data, error } = await supabase
+    .from("venues")
+    .update(changes)
+    .eq("id", id)
+    .select(VENUE_FIELDS)
+    .maybeSingle();
+
+  if (error) throw new Error(`Failed to update venue: ${error.message}`);
+  return data;
+}
+
+module.exports = { listVenues, getVenueById, updateVenue };
