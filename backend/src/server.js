@@ -12,8 +12,16 @@ if (!supabaseUrl || !publishableKey) {
 const authClient = createClient(supabaseUrl, publishableKey, {
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
 });
+
+const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
+const dataClient = supabaseSecretKey
+  ? createClient(supabaseUrl, supabaseSecretKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    })
+  : null;
+
 const app = createApp({
-  authClient, supabaseUrl, publishableKey,
+  authClient, dataClient, supabaseUrl, publishableKey,
   frontendOrigin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
 });
 const port = process.env.PORT || 3000;
