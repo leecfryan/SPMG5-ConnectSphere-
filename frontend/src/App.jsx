@@ -4,6 +4,7 @@ import SignIn from "./features/auth/SignIn";
 import StaffResponsibilities from "./features/auth/StaffResponsibilities";
 import "./App.css";
 import VenueCataloguePage from "./features/venues/pages/VenueCataloguePage";
+import EquipmentRequestPage from "./features/equipment/pages/EquipmentRequestPage";
 
 const roleLabels = {
   event_coordinator: "Event Coordinator",
@@ -97,6 +98,7 @@ export default function App() {
           <SignIn client={client} />
         )}
         <VenueCataloguePage />
+        <EquipmentRequestPage token={session?.access_token} />
       </main>
       <footer>ConnectSphere Event Services</footer>
     </div>

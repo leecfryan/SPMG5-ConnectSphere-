@@ -2,10 +2,12 @@ const supabase = require("../../supabase");
 const { UPDATABLE_FIELDS } = require("./equipment.validation");
 
 // equipment_type is a read-only catalogue for this story (SCRUM: equipment
-// request). Availability/reservation of individual units is a separate,
-// future functionality area - see the feature context doc.
+// request). Individual unit tracking lives in the separate `equipment`
+// table (see supabase/migrations/003_kl_create_equipment.sql); requests
+// reference the type, not a specific physical unit, so a Coordinator never
+// has to know an inventory id to ask for what they need.
 const TYPES_TABLE = "equipment_type";
-const REQUESTS_TABLE = "event_equipment_request";
+const REQUESTS_TABLE = "equipment_request";
 
 // Columns a caller may set when creating a request. requested_by is
 // deliberately excluded: it's never client input, it's passed as its own

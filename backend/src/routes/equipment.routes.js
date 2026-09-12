@@ -4,6 +4,7 @@ const {
   getEquipmentRequests,
   postEquipmentRequest,
   patchEquipmentRequest,
+  authorizeEventOwnership,
 } = require("../modules/equipment/equipment.controller");
 const requirePermission = require("../middleware/requirePermission");
 
@@ -13,26 +14,35 @@ const requirePermission = require("../middleware/requirePermission");
 // "Teammate integration": apply requireAuth before requirePermission on any
 // route outside /api/internal.
 //
-// Catalogue/list reads are intentionally left open for now, matching this
-// story's plan. Gating them with the equipment.read permission (already
-// defined in auth/permissions.js) is a reasonable next step, same open
-// item as VENUE_EDITOR_ROLES in venues.routes.js.
+// Role split (see auth/permissions.js and supabase/migrations/003_kl_create_equipment.sql):
+// Coordinators submit requests for their own events; Technical Support Staff
+// edit/manage requests. Neither role does both.
 function equipmentRoutes({ authenticate }) {
   const router = express.Router();
 
-  router.get("/equipment-types", getEquipmentTypes);
-  router.get("/events/:eventId/equipment-requests", getEquipmentRequests);
+  router.get(
+    "/equipment-types",
+    authenticate,
+    requirePermission("equipment.read"),
+    getEquipmentTypes,
+  );
+  router.get(
+    "/events/:eventId/equipment-requests",
+    authenticate,
+    requirePermission("equipment.read"),
+    getEquipmentRequests,
+  );
 
   router.post(
     "/events/:eventId/equipment-requests",
     authenticate,
-    requirePermission("equipment_requests.write"),
+    requirePermission("equipment_requests.create", authorizeEventOwnership),
     postEquipmentRequest,
   );
   router.patch(
     "/equipment-requests/:id",
     authenticate,
-    requirePermission("equipment_requests.write"),
+    requirePermission("equipment_requests.update"),
     patchEquipmentRequest,
   );
 

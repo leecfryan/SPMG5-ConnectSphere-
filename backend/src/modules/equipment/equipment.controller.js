@@ -9,9 +9,23 @@ const {
   validateCreateRequest,
   validateUpdateRequest,
 } = require("./equipment.validation");
+const { findById: findEventById } = require("../events/events.repository");
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Record-access resolver for requirePermission("equipment_requests.create"):
+// a Coordinator may only request equipment for an event they organise or
+// coordinate, matching the "Coordinators can insert requests for their
+// events" RLS policy in supabase/migrations/003_kl_create_equipment.sql.
+// Missing/unrelated events return false; a lookup failure denies access
+// (requirePermission's catch turns a throw into 503), same rule staff-access.md
+// documents for every other record-scoped permission.
+async function authorizeEventOwnership(req) {
+  const event = await findEventById(req.params.eventId);
+  if (!event) return false;
+  return event.coordinator_id === req.user.id || event.organiser_id === req.user.id;
+}
 
 async function getEquipmentTypes(req, res, next) {
   try {
@@ -89,4 +103,5 @@ module.exports = {
   getEquipmentRequests,
   postEquipmentRequest,
   patchEquipmentRequest,
+  authorizeEventOwnership,
 };

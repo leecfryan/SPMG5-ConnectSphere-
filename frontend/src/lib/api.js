@@ -36,3 +36,31 @@ export function updateVenue(id, changes) {
     body: JSON.stringify(changes),
   });
 }
+
+// Every equipment endpoint requires real Supabase auth (see
+// backend/src/routes/equipment.routes.js), unlike updateVenue's x-user-role
+// dev stub above - all of these need the signed-in user's session token.
+function authHeaders(token) {
+  return { Authorization: `Bearer ${token}` };
+}
+
+export function fetchEquipmentTypes(token) {
+  return request(`/api/equipment-types`, { headers: authHeaders(token) });
+}
+
+export function fetchEquipmentRequests(eventId, token) {
+  return request(`/api/events/${eventId}/equipment-requests`, {
+    headers: authHeaders(token),
+  });
+}
+
+export function createEquipmentRequest(eventId, fields, token) {
+  return request(`/api/events/${eventId}/equipment-requests`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(token),
+    },
+    body: JSON.stringify(fields),
+  });
+}
