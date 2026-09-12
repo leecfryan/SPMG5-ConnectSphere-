@@ -42,6 +42,15 @@ const policies = Object.freeze({
     label: "Event organiser information for managed events",
     record: true,
   },
+  // First mutation permission in this file (see header note above) - added for
+  // the equipment request story. Coordinator-only, matching that story's plan.
+  // Not record-scoped to the coordinator's own events yet: same open item as
+  // VENUE_EDITOR_ROLES in venues.routes.js. Revisit once an event/coordinator
+  // relationship model exists, the same way technical_requests.read is scoped.
+  "equipment_requests.write": {
+    roles: ["event_coordinator"],
+    label: "Equipment request management",
+  },
 });
 
 function getPolicy(permission) {

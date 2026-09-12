@@ -4,6 +4,7 @@ const requireAuth = require("./middleware/requireAuth");
 const requirePermission = require("./middleware/requirePermission");
 const { getResponsibilities } = require("./auth/permissions");
 const venueRoutes = require("./routes/venues.routes");
+const equipmentRoutes = require("./routes/equipment.routes");
 const errorHandler = require("./middleware/errorHandler");
 
 function createApp({ authClient, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
@@ -27,6 +28,7 @@ function createApp({ authClient, supabaseUrl, publishableKey, frontendOrigin = "
     res.json({ responsibilities: getResponsibilities(req.user.roles) });
   });
   app.use("/api/venues", venueRoutes);
+  app.use("/api", equipmentRoutes({ authenticate }));
   // Error-handling middleware must be registered last, after all routes.
   app.use(errorHandler);
   return app;
