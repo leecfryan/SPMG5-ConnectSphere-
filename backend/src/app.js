@@ -33,9 +33,9 @@ function createApp({ authClient, dataClient, supabaseUrl, publishableKey, fronte
     if (!dataClient) return res.status(503).json({ message: "This feature is not yet configured." });
     const { data: events, error } = await dataClient
       .from("events")
-      .select("id, name, description, proposed_start, status")
+      .select("id, name, description, start_time, status")
       .eq("status", "APPROVED")
-      .order("proposed_start", { ascending: true });
+      .order("start_time", { ascending: true });
     if (error) {
       if (error.code === "42P01") return res.json({ events: [] });
       console.error("Events list error:", error.message);
@@ -48,7 +48,7 @@ function createApp({ authClient, dataClient, supabaseUrl, publishableKey, fronte
     if (!dataClient) return res.status(503).json({ message: "This feature is not yet configured." });
     const { data: event, error } = await dataClient
       .from("events")
-      .select("id, name, purpose, description, proposed_start, expected_attendance, registration_notes, status")
+      .select("id, name, purpose, description, start_time, end_time, expected_attendance, other_comments, status, registration_fields")
       .eq("id", req.params.eventId)
       .eq("status", "APPROVED")
       .maybeSingle();
