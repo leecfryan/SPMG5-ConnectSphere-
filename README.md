@@ -34,6 +34,10 @@ The seed password is SEED_USER_PASSWORD in your private root .env.
 ## Sign in securely
 
 The shared sign-in page uses Supabase Auth email/password authentication.
+It accepts any valid email domain; Supabase determines whether the entered
+credentials belong to a registered account. Demo seed addresses are test data,
+not an allowlist. The form delegates authentication and safe error messages to
+`frontend/src/features/auth/signInService.js`; it never displays raw provider errors.
 The Supabase browser SDK stores the session in browser local storage, restores it
 on reload, refreshes access tokens and publishes sign-in/sign-out events.
 Passwords are cleared from form state after each attempt. No password or token
@@ -85,11 +89,16 @@ the agreed matrix, integration examples, tests and remaining work.
 npm --prefix backend test
 npm --prefix backend run check
 npm --prefix frontend run lint
+npm --prefix frontend test -- --run
 npm --prefix frontend run build
 ```
 
 Backend tests use Node's built-in test runner and a fake Auth provider; no cloud
 credentials or dummy accounts are needed in CI.
+Frontend tests use Vitest and fake Auth/API responses. CI runs both suites.
+Fixed UI copy, HTTP status codes and named input limits are application constants;
+credentials, account identity and tokens are supplied at runtime. Role permission
+rules remain server-controlled and must not come from the sign-in form.
 
 | Acceptance criterion | Verification |
 | --- | --- |
@@ -101,6 +110,21 @@ credentials or dummy accounts are needed in CI.
 Additional manual checks: sign out and reload; repeat with an internal staff
 account and an external account; try a narrow mobile viewport; stop the backend
 and confirm protected account information is not shown for a new session.
+
+Frontend regression coverage:
+
+| Test | Evidence |
+| --- | --- |
+| AUTH-01–03 | Required fields and invalid email syntax block submission. |
+| AUTH-04 | Multiple email domains submit the entered credentials; password is cleared. |
+| AUTH-05/07 | Credential failures show generic messages; rate limits/outages allow retry without leaking provider details. |
+| AUTH-06 | Concurrent submissions make one request; controls stay disabled while pending. |
+| App AC1/AC3 | Sign-in and restored sessions display only the backend-verified identity. |
+| App AC2 | Rejected credentials, rejected sessions, token refresh and late responses after sign-out cannot reveal protected account information. |
+
+These automated tests simulate Supabase and do not establish that the deployed
+service is configured correctly. Record live internal/external sign-in, wrong
+password, reload and sign-out results against the story before marking it Done.
 
 ## Configuration and deployment
 
