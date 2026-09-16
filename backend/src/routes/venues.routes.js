@@ -3,6 +3,7 @@ const {
   getVenues,
   getVenue,
   patchVenue,
+  getVenueAvailability,
 } = require("../modules/venues/venues.controller");
 const requireRole = require("../middleware/requireRole");
 
@@ -15,6 +16,9 @@ const VENUE_EDITOR_ROLES = ["Organizer", "Coordinator"];
 
 router.get("/", getVenues);
 router.get("/:id", getVenue);
+
+// SCRUM-17: read only, anyone who can view a venue can view its calendar
+router.get("/:id/availability", getVenueAvailability);
 router.patch("/:id", requireRole(...VENUE_EDITOR_ROLES), patchVenue);
 
 module.exports = router;

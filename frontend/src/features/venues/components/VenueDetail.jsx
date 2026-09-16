@@ -30,7 +30,7 @@ function OperatingHours({ hours }) {
   );
 }
 
-function VenueDetail({ venue, onBack, onEdit }) {
+function VenueDetail({ venue, onBack, onEdit, onViewAvailability }) {
   return (
     <div className="venue-detail">
       <button type="button" onClick={onBack}>
@@ -39,6 +39,11 @@ function VenueDetail({ venue, onBack, onEdit }) {
 
       <button type="button" onClick={onEdit}>
         Edit operating information
+      </button>
+
+      {/* SCRUM-17: view venue availability calendar */}
+      <button type="button" onClick={onViewAvailability}>
+        View availability calendar
       </button>
 
       <h2>{venue.name}</h2>

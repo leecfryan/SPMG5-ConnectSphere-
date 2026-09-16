@@ -3,11 +3,13 @@ import { fetchVenues, fetchVenueById, updateVenue } from "../../../lib/api";
 import VenueCard from "../components/VenueCard";
 import VenueDetail from "../components/VenueDetail";
 import VenueEditForm from "../components/VenueEditForm";
+import VenueAvailabilityCalendar from "../components/VenueAvailabilityCalendar";
 
 function VenueCataloguePage() {
   const [venues, setVenues] = useState([]);
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [isViewingAvailability, setIsViewingAvailability] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -56,6 +58,17 @@ function VenueCataloguePage() {
       .finally(() => setIsSaving(false));
   }
 
+  // SCRUM-17: availability is its own view, same state-driven switch as the
+  // edit form. Still no router installed.
+  if (selectedVenue && isViewingAvailability) {
+    return (
+      <VenueAvailabilityCalendar
+        venue={selectedVenue}
+        onBack={() => setIsViewingAvailability(false)}
+      />
+    );
+  }
+
   if (selectedVenue && isEditing) {
     return (
       <VenueEditForm
@@ -74,6 +87,7 @@ function VenueCataloguePage() {
         venue={selectedVenue}
         onBack={() => setSelectedVenue(null)}
         onEdit={() => setIsEditing(true)}
+        onViewAvailability={() => setIsViewingAvailability(true)}
       />
     );
   }

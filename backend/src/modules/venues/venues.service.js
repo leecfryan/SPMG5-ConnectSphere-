@@ -46,4 +46,41 @@ async function updateVenue(id, changes) {
   return data;
 }
 
-module.exports = { listVenues, getVenueById, updateVenue };
+// SCRUM-17 / SCRUM-92: the bookings the calendar draws. Rejected and cancelled
+// bookings never reach the calendar, so they are filtered out here rather than
+// in the view.
+async function listBookingsInRange(venueId, from, to) {
+  const { data, error } = await supabase
+    .from("venue_bookings")
+    .select("booking_date, slot, status, event_name")
+    .eq("venue_id", venueId)
+    .gte("booking_date", from)
+    .lte("booking_date", to)
+    .in("status", ["pending", "confirmed"]);
+
+  if (error) throw new Error(`Failed to list bookings: ${error.message}`);
+  return data;
+}
+
+// SCRUM-93: periods Venue Staff recorded as unavailable
+async function listUnavailabilityInRange(venueId, from, to) {
+  const { data, error } = await supabase
+    .from("venue_unavailability")
+    .select("unavailable_date, slot, reason")
+    .eq("venue_id", venueId)
+    .gte("unavailable_date", from)
+    .lte("unavailable_date", to);
+
+  if (error) {
+    throw new Error(`Failed to list unavailable periods: ${error.message}`);
+  }
+  return data;
+}
+
+module.exports = {
+  listVenues,
+  getVenueById,
+  updateVenue,
+  listBookingsInRange,
+  listUnavailabilityInRange,
+};

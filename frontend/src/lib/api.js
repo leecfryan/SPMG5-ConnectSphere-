@@ -36,3 +36,14 @@ export function updateVenue(id, changes) {
     body: JSON.stringify(changes),
   });
 }
+
+// SCRUM-17: availability calendar for one venue.
+// Leaving from/to out lets the backend default to a fortnight starting today.
+export function fetchVenueAvailability(id, { from, to } = {}) {
+  const params = new URLSearchParams();
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+
+  const query = params.toString();
+  return request(`/api/venues/${id}/availability${query ? `?${query}` : ""}`);
+}
