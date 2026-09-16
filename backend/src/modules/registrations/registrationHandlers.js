@@ -12,7 +12,7 @@ module.exports = function registrationRoutes(dataClient) {
 
     const { data: event, error: eventError } = await dataClient
       .from("events")
-      .select("id, status")
+      .select("id, status, registration_fields")
       .eq("id", eventId)
       .maybeSingle();
 
@@ -23,6 +23,14 @@ module.exports = function registrationRoutes(dataClient) {
     if (!event) return res.status(404).json({ message: "Event not found." });
     if (event.status !== "APPROVED") {
       return res.status(409).json({ message: "Registration is not open for this event." });
+    }
+
+    const requiredFields = (event.registration_fields ?? []).filter((f) => f.required);
+    for (const field of requiredFields) {
+      const val = registrationData?.[field.id];
+      if (!val || (typeof val === "string" && !val.trim())) {
+        return res.status(400).json({ message: `${field.label} is required.` });
+      }
     }
 
     const { data: existing } = await dataClient
@@ -59,7 +67,7 @@ module.exports = function registrationRoutes(dataClient) {
   router.get("/me", async (req, res) => {
     const { data: registrations, error } = await dataClient
       .from("registrations")
-      .select("id, event_id, status, created_at, updated_at, registration_data, events(name, proposed_start)")
+      .select("id, event_id, status, created_at, updated_at, registration_data, events(name, start_time)")
       .eq("attendee_id", req.user.id)
       .order("created_at", { ascending: false });
 
@@ -75,7 +83,7 @@ module.exports = function registrationRoutes(dataClient) {
   router.get("/me/:registrationId", async (req, res) => {
     const { data: registration, error } = await dataClient
       .from("registrations")
-      .select("id, event_id, status, created_at, updated_at, registration_data")
+      .select("id, event_id, status, created_at, updated_at, registration_data, events(start_time)")
       .eq("id", req.params.registrationId)
       .eq("attendee_id", req.user.id)
       .maybeSingle();
@@ -93,7 +101,7 @@ module.exports = function registrationRoutes(dataClient) {
   router.patch("/:registrationId/withdraw", async (req, res) => {
     const { data: existing, error: fetchError } = await dataClient
       .from("registrations")
-      .select("id, status")
+      .select("id, status, events(start_time)")
       .eq("id", req.params.registrationId)
       .eq("attendee_id", req.user.id)
       .maybeSingle();
@@ -105,6 +113,19 @@ module.exports = function registrationRoutes(dataClient) {
     if (!existing) return res.status(404).json({ message: "Registration not found." });
     if (existing.status === "withdrawn") {
       return res.status(409).json({ message: "This registration has already been withdrawn." });
+    }
+    if (existing.status === "confirmed") {
+      return res.status(403).json({ message: "Your registration has been confirmed and cannot be withdrawn. Contact the organiser." });
+    }
+
+    const eventStart = existing.events?.start_time ? new Date(existing.events.start_time) : null;
+    const now = new Date();
+    if (eventStart && now >= eventStart) {
+      return res.status(409).json({ message: "This event has already started and your registration cannot be withdrawn." });
+    }
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+    if (eventStart && eventStart - now < TWENTY_FOUR_HOURS) {
+      return res.status(409).json({ message: "Withdrawals are not permitted within 24 hours of the event." });
     }
 
     const { data: registration, error } = await dataClient

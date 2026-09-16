@@ -31,69 +31,77 @@
 
 ## Sprint 1 daily log
 
-### Week 1 — Database and backend
+Sprint duration: 2 weeks (10 working days). Today is Day 5.
 
-**Day 1–2 (done)**
-- Migration files written: registrations table, RLS policies, updated_at trigger, FK to events.
-- Backend routes implemented: events list/detail, registration submit, list own, view one, withdraw.
-- Files: `supabase/migrations/`, `backend/src/app.js`, `backend/src/modules/registrations/registrationHandlers.js`
-- Blockers: none.
+---
 
-**Day 3 — Apply migration and verify DB**
-- Apply `20260909000001_create_registrations.sql` in Supabase SQL editor.
-- Confirm registrations table, RLS policies, and trigger exist in the Supabase dashboard.
-- Files: `supabase/migrations/20260909000001_create_registrations.sql`
-- Blockers: need Supabase project credentials (SUPABASE_URL, SUPABASE_SECRET_KEY) in root `.env`. If not set up yet, get them from the team's Supabase project before starting.
+**Day 1**
+1. NA
+2. Starting on Scrum-32: accessing event info and event registration.
+3. NA
 
-**Day 4 — Backend tests**
-- Write integration tests for registration routes: duplicate rejection, non-APPROVED event rejection, ownership checks on withdraw, 404 on another attendee's registration.
-- Run `npm --prefix backend test` — all passing.
-- Files: `backend/tests/integration/registrations.test.js`
-- Blockers: none — tests run against a fake auth provider so no live Supabase or event data needed.
+---
 
-**Day 5 — Backend integration with real data**
-- Apply `20260910000001_registrations_event_fk.sql` once events table is confirmed live.
-- Test all routes with a REST client (Postman / Thunder Client) using a real attendee bearer token.
-- Files: `supabase/migrations/20260910000001_registrations_event_fk.sql`, `backend/src/app.js`
-- Blockers: **events team must have merged their events table migration and added `APPROVED` as a valid status before this can run.** Also need at least one APPROVED event row seeded in Supabase to test against. Follow up with the events feature owner before Day 5.
+**Day 2**
+1. Started on Scrum-32: set up registrations table on Supabase with RLS policies.
+2. Continue on backend routing for Scrum-32.
+3. NA
 
-### Week 2 — Frontend and wrap-up
+---
 
-**Day 6 — Scrum-32 frontend (register for an event)**
-- Sign in as an attendee demo account. Confirm Browse Events shows only APPROVED events.
-- Submit a registration via the form. Confirm redirect to My Registrations and row visible in Supabase.
-- Test edge: register twice for the same event — confirm error message shown.
-- Files: `frontend/src/features/registrations/pages/EventListPage.jsx`, `EventDetailPage.jsx`, `components/RegistrationForm.jsx`
-- Blockers: depends on Day 5 being unblocked. If events team is still not ready, frontend will show an empty events list and registration cannot be tested end-to-end.
+**Day 3**
+1. Scrum-32–34: backend routes implemented (events list/detail, registration submit, list own, view one, withdraw).
+2. Scrum-32–34: write integration tests for backend.
+3. NA
 
-**Day 7 — Scrum-33 frontend (view own registration status)**
-- Confirm My Registrations shows correct event name, date, and status badge for each registration.
-- Open a single registration detail — confirm status is correct.
-- Confirm direct URL access to another attendee's registration ID returns a 404 error.
-- Files: `frontend/src/features/registrations/pages/MyRegistrationsPage.jsx`, `RegistrationDetailPage.jsx`, `components/RegistrationCard.jsx`, `RegistrationStatusBadge.jsx`
-- Blockers: needs at least one registration submitted from Day 6. Needs a second seeded attendee account to test the privacy check (use `attendee2.demo@example.com`).
+---
 
-**Day 8 — Scrum-34 frontend (withdraw)**
-- Withdraw a registration — confirm status updates to Withdrawn in the UI and in Supabase.
-- Confirm the Withdraw button is gone after withdrawal, registration row still exists.
-- Confirm withdrawn registration no longer appears as active (status badge shows Withdrawn).
-- Files: `frontend/src/features/registrations/pages/RegistrationDetailPage.jsx`, `components/WithdrawButton.jsx`
-- Blockers: needs an existing active registration from Day 6 or 7. No new external dependencies.
+**Day 4**
+1. Scrum-32–34: finished writing backend tests and working on frontend UI for registration.
+2. Scrum-32–34: finish frontend UI for registration and test with data.
+3. NA
 
-**Day 9 — Error states, polish, and checks**
-- Test all pages with backend stopped — confirm clean error messages, no broken UI.
-- Test with expired token — confirm 401 handled gracefully on all routes.
-- `npm --prefix frontend run lint` — fix any warnings.
-- Mobile viewport walkthrough across all pages.
-- Files: `frontend/src/lib/api.js`, `frontend/src/App.css`, any flagged component files
-- Blockers: none — all self-contained.
+---
 
-**Day 10 — PR**
-- Run `npm --prefix frontend run build` and `npm --prefix backend test` — both clean.
-- Final check against Scrum-32, 33, 34 acceptance criteria.
-- Open pull request from `feature/Registration` into `main`.
-- Files: all
-- Blockers: `main` must not have merge conflicts with `feature/Registration`. Pull the latest `main` and rebase before opening the PR.
+**Day 5 (today — 2026-09-12)**
+1. Scrum-32: finished frontend UI for event list and event detail — dynamic registration form (driven by the event's `registration_fields`, server-side required field validation). Seeded data and successfully tested for events opened for registration.
+2. Scrum-33: frontend UI for My Registrations page and registration detail page.
+3. NA
+
+---
+
+**Day 6 (planned)**
+1. Scrum-33: My Registrations and registration detail page UI done (submitted field values displayed, status badge, dates).
+2. Scrum-34: frontend UI for withdrawal — withdraw button with confirmation, withdrawal guards (confirmed status, event already started, 24-hour cutoff) surfaced as plain-text message.
+3. NA
+
+---
+
+**Day 7 (planned)**
+1. Scrum-34: withdrawal UI and guards done.
+2. Scrum-32–34: E2E testing with live Supabase data — all three tickets, edge cases (duplicate registration, withdrawal guard messages, privacy check).
+3. NA
+
+---
+
+**Day 8 (planned)**
+1. Scrum-32–34: E2E testing done.
+2. Error states and polish — test with backend stopped and expired token, mobile viewport walkthrough.
+3. NA
+
+---
+
+**Day 9 (planned)**
+1. Error states and polish done.
+2. Run `npm --prefix frontend run lint`, `npm --prefix frontend run build`, `npm --prefix backend test`. Final check against acceptance criteria. Rebase onto latest `main` and open PR.
+3. `main` must be up to date before rebasing.
+
+---
+
+**Day 10 (planned)**
+1. All checks clean, PR open.
+2. NA
+3. NA
 
 ---
 
@@ -138,8 +146,8 @@ New module at `backend/src/modules/registrations/`.
 
 ### Rules enforced server-side
 
-- POST: reject if event `status !== APPROVED`. Reject duplicate registration for the same attendee + event.
-- PATCH withdraw: verify the row belongs to `req.user.id` before updating. Return 403 otherwise. Reject if already withdrawn.
+- POST: reject if event `status !== APPROVED`. Reject duplicate registration for the same attendee + event. Validate required fields from `registration_fields` — missing or blank required fields return 400 with the field's label.
+- PATCH withdraw: verify the row belongs to `req.user.id`. Reject if already withdrawn. Reject if `status = confirmed` (organiser has locked it). Reject if the event has already started. Reject if the event starts within 24 hours.
 - GET /me routes: always filter by `attendee_id = req.user.id` — never trust a client-supplied attendee ID.
 
 ---
@@ -161,9 +169,9 @@ New feature folder at `frontend/src/features/registrations/`.
 
 | File | Used by | Description |
 | --- | --- | --- |
-| `components/RegistrationForm.jsx` | EventDetailPage | Form to submit registration |
+| `components/RegistrationForm.jsx` | EventDetailPage | Form driven by the event's `registration_fields` array — renders one input per field, respects `required`, `label`, and `type`. No fields = submit-only form. |
 | `components/RegistrationStatusBadge.jsx` | MyRegistrationsPage, RegistrationDetailPage | Displays `pending` / `confirmed` / `withdrawn` |
-| `components/WithdrawButton.jsx` | RegistrationDetailPage | Withdraw action with confirmation |
+| `components/WithdrawButton.jsx` | RegistrationDetailPage | Withdraw action with confirmation step. Only rendered when withdrawal is permitted; replaced by an explanatory note otherwise. |
 | `components/RegistrationCard.jsx` | MyRegistrationsPage | Summary card showing event name, date, status |
 
 ### Hooks
@@ -179,6 +187,28 @@ New feature folder at `frontend/src/features/registrations/`.
 
 | Scrum | Done when |
 | --- | --- |
-| 32 | Signed-in attendee can submit a registration for an APPROVED event. Duplicate submissions are rejected. Registration is persisted linked to the attendee and event. Non-APPROVED events are not accessible. |
-| 33 | Attendee can see all their own registrations with event name and current status. Cannot access another attendee's registration via URL. |
-| 34 | Attendee can withdraw an eligible registration. Status updates to `withdrawn`. The record is retained (not deleted). Withdrawn registrations no longer appear as active. |
+| 32 | Signed-in attendee can submit a registration for an APPROVED event. Form fields match the event's `registration_fields` definition. Required fields are validated both client-side (HTML `required`) and server-side. Duplicate submissions are rejected. Registration is persisted linked to the attendee and event. Non-APPROVED events are not accessible. |
+| 33 | Attendee can see all their own registrations with event name and current status. Single registration detail shows status, submitted field values, and date. Cannot access another attendee's registration via URL. |
+| 34 | Attendee can withdraw an eligible registration. Status updates to `withdrawn`. The record is retained (not deleted). Withdrawn registrations no longer appear as active. Withdrawal is blocked (with a message) if: registration is confirmed, event has started, or event starts within 24 hours. |
+
+---
+
+## Current status (as of 2026-09-12, Day 5)
+
+### Done
+
+- Backend routes: all implemented and live.
+- Backend integration tests: written and passing.
+- Dynamic registration fields: form renders from `registration_fields` per event; server validates required fields.
+- Withdrawal guards: confirmed status, event already started, 24-hour cutoff — enforced on server, surfaced to user in UI.
+- Registration detail: submitted field values displayed.
+- Seed data: 8 events with varied `registration_fields` (`backend/scripts/seedData.js`).
+
+### Remaining
+
+- E2E testing with live Supabase data (today).
+- Error-state and mobile polish, lint + build, PR (Day 6).
+
+### Current blockers
+
+- E2E testing requires events seeded in Supabase. Run `node backend/scripts/seedData.js` if not done. Need a valid attendee bearer token (sign in via the app).

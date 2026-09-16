@@ -1,4 +1,3 @@
-const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { once } = require("node:events");
 const createApp = require("../../src/app");
@@ -62,7 +61,7 @@ async function setup(t, { getUser, tables } = {}) {
   });
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
-  t.after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
+  t.onTestFinished(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
   return "http://127.0.0.1:" + server.address().port;
 }
 
