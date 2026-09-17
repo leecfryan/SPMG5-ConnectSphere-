@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { EVENT_LIMITS, createEventRequest } from "../eventsService";
+import { EVENT_LIMITS, submitEventRequest } from "../eventsService";
 
 // Mirrors WRITABLE_COLS in backend/src/modules/events/events.repository.js. The
 // backend ignores anything outside that list, so an extra key here is inert -
@@ -20,11 +20,12 @@ const EMPTY = {
 // Declared at module scope, not inside EventRequestForm. A component defined
 // during render is a new type on every render, so React would unmount and
 // remount the input on each keystroke and the field would lose focus.
-function FieldShell({ id, label, hint, error, children }) {
+function FieldShell({ id, label, hint, error, required, children }) {
   return (
     <>
       <label htmlFor={id}>
         {label}
+        {required && <span className="field-required"> (required)</span>}
         {hint && <span className="field-hint">{hint}</span>}
       </label>
       {children}
@@ -41,12 +42,29 @@ function describedBy(id, error) {
   return error ? `${id}-error` : undefined;
 }
 
-function TextField({ id, label, hint, error, busy, value, onChange, ...rest }) {
+function TextField({
+  id,
+  label,
+  hint,
+  error,
+  required,
+  busy,
+  value,
+  onChange,
+  ...rest
+}) {
   return (
-    <FieldShell id={id} label={label} hint={hint} error={error}>
+    <FieldShell
+      id={id}
+      label={label}
+      hint={hint}
+      error={error}
+      required={required}
+    >
       <input
         id={id}
         name={id}
+        required={required}
         disabled={busy}
         value={value}
         onChange={onChange}
@@ -58,12 +76,22 @@ function TextField({ id, label, hint, error, busy, value, onChange, ...rest }) {
   );
 }
 
-function TextAreaField({ id, label, error, busy, value, onChange, placeholder }) {
+function TextAreaField({
+  id,
+  label,
+  error,
+  required,
+  busy,
+  value,
+  onChange,
+  placeholder,
+}) {
   return (
-    <FieldShell id={id} label={label} error={error}>
+    <FieldShell id={id} label={label} error={error} required={required}>
       <textarea
         id={id}
         name={id}
+        required={required}
         rows={3}
         maxLength={EVENT_LIMITS.text}
         placeholder={placeholder}
@@ -77,7 +105,7 @@ function TextAreaField({ id, label, error, busy, value, onChange, placeholder })
   );
 }
 
-export default function EventRequestForm({ onCreated }) {
+export default function EventRequestForm({ onSubmitted }) {
   const [fields, setFields] = useState(EMPTY);
   const [errors, setErrors] = useState([]);
   const [message, setMessage] = useState("");
@@ -103,10 +131,10 @@ export default function EventRequestForm({ onCreated }) {
     setErrors([]);
     setMessage("");
     try {
-      const result = await createEventRequest(fields);
+      const result = await submitEventRequest(fields);
       if (result.event) {
         setFields(EMPTY);
-        onCreated(result.event);
+        onSubmitted(result.event);
         return;
       }
       setErrors(result.errors);
@@ -130,9 +158,9 @@ export default function EventRequestForm({ onCreated }) {
   return (
     <form onSubmit={submit} aria-busy={busy} noValidate>
       <div className="form-section">
-        {/* Only `name` is required to save a draft - that split is the whole
-            point of validateDraft vs validateForSubmission. Everything else
-            stays optional so a half-formed idea can still be saved. */}
+        {/* `required` marks what validateForSubmission demands. The form keeps
+            noValidate, so the browser doesn't block the send: the server
+            returns every missing field at once, shown against each field. */}
         <TextField
           {...wire("name")}
           label="Event name"
@@ -145,23 +173,26 @@ export default function EventRequestForm({ onCreated }) {
           {...wire("purpose")}
           label="Purpose"
           placeholder="What is this event for?"
+          required
         />
         <TextAreaField
           {...wire("description")}
           label="Description"
           placeholder="What will happen on the day?"
+          required
         />
       </div>
 
       <div className="form-section">
         <h2>Schedule</h2>
-        <p>Leave these blank for now if the date is not settled.</p>
+        <p>The event must start in the future and end after it starts.</p>
         <div className="field-pair">
           <div>
             <TextField
               {...wire("start_time")}
               label="Starts"
               type="datetime-local"
+              required
             />
           </div>
           <div>
@@ -169,11 +200,13 @@ export default function EventRequestForm({ onCreated }) {
               {...wire("end_time")}
               label="Ends"
               type="datetime-local"
+              required
             />
           </div>
         </div>
         <TextField
           {...wire("expected_attendance")}
+          required
           label="Expected attendance"
           type="number"
           min="1"
@@ -186,8 +219,8 @@ export default function EventRequestForm({ onCreated }) {
       <div className="form-section">
         <h2>Requirements</h2>
         <p>
-          Free text. The venue and equipment teams read these later — describe
-          what you need in your own words.
+          Optional free text. The venue and equipment teams read these later —
+          describe what you need in your own words.
         </p>
         <TextAreaField
           {...wire("venue_requirements")}
@@ -225,10 +258,11 @@ export default function EventRequestForm({ onCreated }) {
       )}
 
       <button className="primary" type="submit" disabled={busy}>
-        {busy ? "Saving…" : "Save draft"}
+        {busy ? "Submitting…" : "Submit request"}
       </button>
       <p className="card-note">
-        Saved as a draft. Submitting a request for review comes later.
+        Submitting sends your request to ConnectSphere for coordinator
+        assignment and review.
       </p>
     </form>
   );

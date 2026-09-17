@@ -1,5 +1,5 @@
 const repository = require("./events.repository");
-const { validateDraft } = require("./events.validation");
+const { validateForSubmission } = require("./events.validation");
 
 const TIME_FIELDS = new Set(["start_time", "end_time"]);
 const NUMBER_FIELDS = new Set(["expected_attendance"]);
@@ -50,7 +50,7 @@ function normalise(input) {
     } else if (typeof raw === "string") {
       fields[column] = raw.trim();
     } else {
-      // Left as-is so validateDraft reports the wrong type under its own rules.
+      // Left as-is so the validator reports the wrong type under its own rules.
       fields[column] = raw;
     }
   }
@@ -58,16 +58,27 @@ function normalise(input) {
   return { fields, errors };
 }
 
+// US-14: the form submits straight to SUBMITTED. Phase one has no drafts;
+// US-13 adds a draft path that runs validateDraft instead.
+//
 // Returns { ok: true, event } or { ok: false, errors } - the same errors shape
 // events.validation.js produces, so the controller has one branch to write.
-async function createDraft(input, organiserId) {
+async function submitRequest(input, organiserId) {
   const { fields, errors } = normalise(input);
-  const validation = validateDraft(fields);
-  const problems = [...errors, ...validation.errors];
+
+  // A value normalise could not read is left undefined, which the validator
+  // would also report as "required". One mistake, one message: the parse error
+  // is the accurate one, so the validator's entry for that field is dropped.
+  const unreadable = new Set(errors.map((problem) => problem.field));
+  const validation = validateForSubmission(fields).errors.filter(
+    (problem) => !unreadable.has(problem.field),
+  );
+
+  const problems = [...errors, ...validation];
   if (problems.length > 0) return { ok: false, errors: problems };
 
-  const event = await repository.create(fields, organiserId);
+  const event = await repository.createSubmitted(fields, organiserId);
   return { ok: true, event };
 }
 
-module.exports = { createDraft };
+module.exports = { submitRequest };

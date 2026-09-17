@@ -19,8 +19,8 @@ export default function App() {
             Share it with everyone.
           </h2>
           <p>
-            Describe the event you have in mind. Save it as a draft and keep
-            editing until it is ready to go to the team.
+            Describe the event you have in mind and submit it to the team. An
+            Event Coordinator takes it from there.
           </p>
           <div className="intro-line" aria-hidden="true" />
           <span className="intro-caption">

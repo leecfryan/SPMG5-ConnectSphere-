@@ -1,5 +1,3 @@
-// HTTP in, HTTP out. No Supabase, no rules - those live in the service.
-
 const service = require("./events.service");
 
 // TODO(SignIn rebase): delete this and read req.user.id behind requireAuth.
@@ -12,7 +10,7 @@ const DEV_ORGANISER_ID = "00000000-0000-0000-0000-000000000001";
 
 async function create(req, res) {
   try {
-    const result = await service.createDraft(req.body, DEV_ORGANISER_ID);
+    const result = await service.submitRequest(req.body, DEV_ORGANISER_ID);
     if (!result.ok) return res.status(400).json({ errors: result.errors });
     return res.status(201).json({ event: result.event });
   } catch (error) {
@@ -21,7 +19,7 @@ async function create(req, res) {
     console.error("POST /api/events failed:", error.message);
     return res
       .status(500)
-      .json({ error: "Could not save the event request. Please try again." });
+      .json({ error: "Could not submit the event request. Please try again." });
   }
 }
 

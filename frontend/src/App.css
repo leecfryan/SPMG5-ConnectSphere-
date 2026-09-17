@@ -63,6 +63,9 @@ textarea::placeholder { color: #8b9892; }
 .status-line { color: #66756f; font-size: 13px; margin: 16px 0 0; }
 .event-summary { margin: 24px 0 0; border-top: 1px solid #e7ece8; }
 .event-summary div { padding: 14px 0; border-bottom: 1px solid #e7ece8; }
+.field-required { color: #748179; font-size: 12px; font-weight: 400; }
+.status-badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.7; color: #426e60; background: #e6f0ea; }
+.status-badge.status-draft { color: #66756f; background: #eef1ef; }
 @media (max-width: 760px) {
   .field-pair { grid-template-columns: 1fr; gap: 0; }
   /* Outranks the shared `main` rule above on specificity, so it has to restate

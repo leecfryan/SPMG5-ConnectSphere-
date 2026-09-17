@@ -32,11 +32,23 @@ function unwrap({ data, error }, action) {
   return data;
 }
 
-async function create(fields, organiserId) {
-  const row = { ...pickCol(fields), organiser_id: organiserId };
+// Every request is inserted already SUBMITTED - phase one has no drafts (US-13
+// brings them). status and submitted_at are set here, never picked from the
+// caller's fields, so a client cannot choose them.
+async function createSubmitted(
+  fields,
+  organiserId,
+  submittedAt = new Date().toISOString(),
+) {
+  const row = {
+    ...pickCol(fields),
+    organiser_id: organiserId,
+    status: "SUBMITTED",
+    submitted_at: submittedAt,
+  };
   return unwrap(
     await supabase.from(TABLE).insert(row).select().single(),
-    "create",
+    "createSubmitted",
   );
 }
 
@@ -95,7 +107,7 @@ async function findSubmittedUnassigned() {
 
 module.exports = {
   WRITABLE_COLS,
-  create,
+  createSubmitted,
   findById,
   update,
   markSubmitted,
