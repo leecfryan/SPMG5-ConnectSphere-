@@ -19,7 +19,17 @@ function requirePermission(permission, authorizeRecord) {
       try {
         // Require an explicit boolean true. Missing records and unresolved checks deny access.
         if (await authorizeRecord(req) !== true) {
-          return res.status(403).json({ message: "You do not have permission to access this information." });
+          // A record-scoped denial can safely explain *why* (e.g. "not your
+          // event") without leaking anything - it's the same rule for every
+          // holder of this role, not information about a specific record.
+          // The role-check denial above stays generic: which permission a
+          // user lacks is not something to spell out.
+          return res.status(403).json({
+            message:
+              policy.recordDeniedMessage ||
+              "You do not have permission to access this information.",
+            ...(policy.recordDeniedCode ? { code: policy.recordDeniedCode } : {}),
+          });
         }
       } catch {
         return res.status(503).json({ message: "Unable to check access. Please try again." });

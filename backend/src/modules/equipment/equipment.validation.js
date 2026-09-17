@@ -1,30 +1,37 @@
-// Field rules for an equipment request. Two gates, mirroring events.validation.js:
+// Field rules for an equipment request. Two gates:
 //   validateCreateRequest  - everything needed to insert a new request row.
-//   validateUpdateRequest  - a strict subset; only the fields a requester may
-//                            change after creation.
+//   validateStatusUpdate   - the review action: PENDING -> APPROVED/REJECTED.
 //
-// Both return { ok: boolean, errors: [{ field, message }] }. `errors` lists
-// EVERY problem, not just the first.
+// Both return { ok: boolean, errors: [{ field, message }], value }. `errors`
+// lists EVERY problem, not just the first - `value` is the normalised
+// (trimmed) payload built only when ok is true, same shape as
+// venues.validation.js.
 //
-// Validation reads, never mutates. Trimming for storage is the service's job.
+// Validation reads, never mutates. This file does not import the Supabase
+// client, so these tests run without SUPABASE_URL / SUPABASE_SECRET_KEY set -
+// same reasoning as events.validation.js.
 //
-// This file does not import the Supabase client (see equipment.service.js),
-// so these tests run without SUPABASE_URL / SUPABASE_SECRET_KEY set - same
-// reasoning as events.validation.js.
-//
-// `requested_by` is deliberately not validated here: it is never client
-// input. It comes from the authenticated caller and is attached by the
-// controller/service layer, same as organiser_id in events.repository.js.
+// `requested_by` and `status` are deliberately not accepted here: requested_by
+// is never client input (the controller attaches the authenticated caller's
+// id), and status starts at PENDING and only ever changes through
+// validateStatusUpdate.
 
-const TECH_REQUIREMENTS_MAX = 2000;
+const TECH_REQUIREMENT_MAX = 2000;
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Fields a requester may change after creation. event_id and
-// equipment_type_id identify what the row *is* - changing either is a new
-// request, not an edit, so they're excluded here on purpose.
-const UPDATABLE_FIELDS = ["quantity_requested", "technical_requirements"];
+// Columns a caller may set when creating a request.
+const WRITABLE_COLS = [
+  "event_id",
+  "equipment_id",
+  "quantity_requested",
+  "technical_requirement",
+  "borrow_start",
+  "borrow_end",
+];
+
+const REVIEW_STATUSES = ["APPROVED", "REJECTED"];
 
 function asObject(input) {
   return input && typeof input === "object" && !Array.isArray(input)
@@ -40,6 +47,18 @@ function isUuid(value) {
   return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
+// AC1 + AC4: which equipment and which event this request belongs to. Both
+// are foreign keys - a well-formed UUID is all this layer can check; whether
+// the row actually exists is the service's job.
+function checkForeignKey(data, field, errors) {
+  const value = data[field];
+  if (value === undefined || value === null || value === "") {
+    errors.push(err(field, "required"));
+  } else if (!isUuid(value)) {
+    errors.push(err(field, "must be a valid id"));
+  }
+}
+
 // AC2: required quantity, must be a positive whole number.
 function checkQuantity(data, errors) {
   const value = data.quantity_requested;
@@ -52,32 +71,37 @@ function checkQuantity(data, errors) {
   }
 }
 
-// AC3: optional technical requirements, free text within a sane length.
-function checkTechnicalRequirements(data, errors) {
-  const value = data.technical_requirements;
+// AC3: optional technical requirement, free text within a sane length.
+function checkTechnicalRequirement(data, errors) {
+  const value = data.technical_requirement;
   if (value === undefined || value === null) return;
   if (typeof value !== "string") {
-    errors.push(err("technical_requirements", "must be text"));
-  } else if (value.length > TECH_REQUIREMENTS_MAX) {
+    errors.push(err("technical_requirement", "must be text"));
+  } else if (value.length > TECH_REQUIREMENT_MAX) {
     errors.push(
       err(
-        "technical_requirements",
-        `must be ${TECH_REQUIREMENTS_MAX} characters or fewer`,
+        "technical_requirement",
+        `must be ${TECH_REQUIREMENT_MAX} characters or fewer`,
       ),
     );
   }
 }
 
-// AC1 + AC4: the equipment type and the event this request belongs to.
-// Both are foreign keys - a well-formed UUID is all this layer can check;
-// whether the row actually exists is the service's job.
-function checkForeignKey(data, field, errors) {
+// Returns the field's value in epoch millis, or null when missing/unparseable
+// - an error is pushed in both cases. Callers use that null to skip
+// comparisons that would be meaningless against a value we could not read.
+function checkRequiredTime(data, field, errors) {
   const value = data[field];
   if (value === undefined || value === null || value === "") {
     errors.push(err(field, "required"));
-  } else if (!isUuid(value)) {
-    errors.push(err(field, "must be a valid id"));
+    return null;
   }
+  const millis = new Date(value).getTime();
+  if (Number.isNaN(millis)) {
+    errors.push(err(field, "must be a valid date/time"));
+    return null;
+  }
+  return millis;
 }
 
 function validateCreateRequest(input) {
@@ -85,41 +109,57 @@ function validateCreateRequest(input) {
   const errors = [];
 
   checkForeignKey(data, "event_id", errors);
-  checkForeignKey(data, "equipment_type_id", errors);
+  checkForeignKey(data, "equipment_id", errors);
   checkQuantity(data, errors);
-  checkTechnicalRequirements(data, errors);
+  checkTechnicalRequirement(data, errors);
 
-  return { ok: errors.length === 0, errors };
+  const startMillis = checkRequiredTime(data, "borrow_start", errors);
+  const endMillis = checkRequiredTime(data, "borrow_end", errors);
+  if (startMillis !== null && endMillis !== null && endMillis <= startMillis) {
+    errors.push(err("borrow_end", "must be after borrow_start"));
+  }
+
+  if (errors.length > 0) return { ok: false, errors, value: null };
+
+  const value = {
+    event_id: data.event_id,
+    equipment_id: data.equipment_id,
+    quantity_requested: data.quantity_requested,
+    borrow_start: new Date(data.borrow_start).toISOString(),
+    borrow_end: new Date(data.borrow_end).toISOString(),
+  };
+  if (typeof data.technical_requirement === "string") {
+    value.technical_requirement = data.technical_requirement.trim();
+  }
+
+  return { ok: true, errors: [], value };
 }
 
-function validateUpdateRequest(input) {
+// The review action. Only a transition to APPROVED or REJECTED is a valid
+// request body - PENDING is a starting state, never a target, and no other
+// field on the request may change through this endpoint.
+function validateStatusUpdate(input) {
   const data = asObject(input);
   const errors = [];
 
-  const unknown = Object.keys(data).filter(
-    (key) => !UPDATABLE_FIELDS.includes(key),
-  );
+  const unknown = Object.keys(data).filter((key) => key !== "status");
   for (const field of unknown) {
     errors.push(err(field, "cannot be changed on an existing request"));
   }
 
-  const known = Object.keys(data).filter((key) =>
-    UPDATABLE_FIELDS.includes(key),
-  );
-  if (known.length === 0) {
-    errors.push(err("_", "at least one updatable field is required"));
+  if (!REVIEW_STATUSES.includes(data.status)) {
+    errors.push(
+      err("status", `must be one of ${REVIEW_STATUSES.join(", ")}`),
+    );
   }
 
-  if ("quantity_requested" in data) checkQuantity(data, errors);
-  if ("technical_requirements" in data) {
-    checkTechnicalRequirements(data, errors);
-  }
-
-  return { ok: errors.length === 0, errors };
+  if (errors.length > 0) return { ok: false, errors, value: null };
+  return { ok: true, errors: [], value: { status: data.status } };
 }
 
 module.exports = {
   validateCreateRequest,
-  validateUpdateRequest,
-  UPDATABLE_FIELDS,
+  validateStatusUpdate,
+  WRITABLE_COLS,
+  REVIEW_STATUSES,
 };

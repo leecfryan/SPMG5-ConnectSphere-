@@ -1,49 +1,41 @@
 const express = require("express");
-const {
-  getEquipmentTypes,
-  getEquipmentRequests,
-  postEquipmentRequest,
-  patchEquipmentRequest,
-  authorizeEventOwnership,
-} = require("../modules/equipment/equipment.controller");
-const requirePermission = require("../middleware/requirePermission");
+const supabase = require("../supabase");
+const requireDbRole = require("../middleware/requireDbRole");
+const { createEquipmentService } = require("../modules/equipment/equipment.service");
+const { createEquipmentController } = require("../modules/equipment/equipment.controller");
+const { findById: findEventById } = require("../modules/events/events.repository");
 
 // Mounted at "/api" in app.js so the paths below become the full API routes.
 // Takes the already-built `authenticate` middleware from app.js instead of
 // constructing its own requireAuth(authClient) - see docs/staff-access.md
-// "Teammate integration": apply requireAuth before requirePermission on any
-// route outside /api/internal.
+// "Teammate integration": apply requireAuth before any authorization check
+// on any route outside /api/internal.
 //
-// Role split (see auth/permissions.js and supabase/migrations/003_kl_create_equipment.sql):
-// Coordinators submit requests for their own events; Technical Support Staff
-// edit/manage requests. Neither role does both.
+// Role split: Event Coordinators submit requests for an event; Technical
+// Support Staff review them (PENDING -> APPROVED/REJECTED). Neither role
+// does both. Any authenticated user can list an event's requests.
 function equipmentRoutes({ authenticate }) {
   const router = express.Router();
+  const equipmentService = createEquipmentService(supabase);
+  const controller = createEquipmentController({ equipmentService, findEventById });
 
-  router.get(
-    "/equipment-types",
-    authenticate,
-    requirePermission("equipment.read"),
-    getEquipmentTypes,
-  );
+  router.get("/equipment", authenticate, controller.getEquipmentCatalogue);
   router.get(
     "/events/:eventId/equipment-requests",
     authenticate,
-    requirePermission("equipment.read"),
-    getEquipmentRequests,
+    controller.getEquipmentRequests,
   );
-
   router.post(
     "/events/:eventId/equipment-requests",
     authenticate,
-    requirePermission("equipment_requests.create", authorizeEventOwnership),
-    postEquipmentRequest,
+    requireDbRole("event_coordinator", supabase),
+    controller.postEquipmentRequest,
   );
   router.patch(
-    "/equipment-requests/:id",
+    "/equipment-requests/:id/status",
     authenticate,
-    requirePermission("equipment_requests.update"),
-    patchEquipmentRequest,
+    requireDbRole("tech_support", supabase),
+    controller.patchRequestStatus,
   );
 
   return router;

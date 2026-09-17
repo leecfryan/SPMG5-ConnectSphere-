@@ -40,6 +40,19 @@ footer { text-align: center; color: #7d8a83; font-size: 11px; }
   .card { padding: 28px 24px; }
 }
 
+dialog.modal {
+  border: none;
+  border-radius: 14px;
+  padding: 28px 30px;
+  max-width: 420px;
+  width: calc(100% - 48px);
+  box-shadow: 0 20px 60px #152c372e;
+}
+dialog.modal::backdrop { background: #152c3759; }
+dialog.modal h2 { font-size: 18px; margin: 0 0 10px; }
+dialog.modal p { font-size: 14px; line-height: 1.6; color: #4a5568; margin: 0 0 20px; }
+dialog.modal .primary { margin-top: 0; width: auto; min-width: 96px; padding: 10px 20px; }
+
 .responsibilities { margin-top: 24px; }
 .responsibilities h2 { font-size: 17px; font-weight: 600; margin-bottom: 12px; }
 .responsibilities ul { padding-left: 20px; margin: 0; color: #426e60; font-size: 14px; line-height: 1.7; }

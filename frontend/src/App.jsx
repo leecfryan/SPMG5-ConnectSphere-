@@ -98,7 +98,7 @@ export default function App() {
           <SignIn client={client} />
         )}
         <VenueCataloguePage />
-        <EquipmentRequestPage token={session?.access_token} />
+        {session && <EquipmentRequestPage token={session.access_token} />}
       </main>
       <footer>ConnectSphere Event Services</footer>
     </div>

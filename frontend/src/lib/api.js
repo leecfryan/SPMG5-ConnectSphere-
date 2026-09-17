@@ -5,8 +5,20 @@ async function request(path, options = {}) {
   const body = await response.json();
 
   if (!response.ok) {
-    const detail = body.details ? `: ${body.details.join(", ")}` : "";
-    throw new Error((body.error || "Request failed") + detail);
+    // Validation details come as plain strings (venues) or { field, message }
+    // objects (events/equipment) depending on the feature - handle both.
+    const detail =
+      Array.isArray(body.details) && body.details.length > 0
+        ? ": " +
+          body.details
+            .map((d) => (typeof d === "string" ? d : `${d.field} ${d.message}`))
+            .join(", ")
+        : "";
+    // Auth/role middleware replies with { message }; feature controllers
+    // reply with { error }. Read either so the caller always gets real text.
+    const error = new Error((body.error || body.message || "Request failed") + detail);
+    error.status = response.status;
+    throw error;
   }
   return body.data;
 }
@@ -37,20 +49,15 @@ export function updateVenue(id, changes) {
   });
 }
 
-// Every equipment endpoint requires real Supabase auth (see
-// backend/src/routes/equipment.routes.js), unlike updateVenue's x-user-role
-// dev stub above - all of these need the signed-in user's session token.
-function authHeaders(token) {
-  return { Authorization: `Bearer ${token}` };
-}
-
-export function fetchEquipmentTypes(token) {
-  return request(`/api/equipment-types`, { headers: authHeaders(token) });
+export function fetchEquipmentCatalogue(token) {
+  return request("/api/equipment", {
+    headers: { Authorization: "Bearer " + token },
+  });
 }
 
 export function fetchEquipmentRequests(eventId, token) {
   return request(`/api/events/${eventId}/equipment-requests`, {
-    headers: authHeaders(token),
+    headers: { Authorization: "Bearer " + token },
   });
 }
 
@@ -59,7 +66,7 @@ export function createEquipmentRequest(eventId, fields, token) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...authHeaders(token),
+      Authorization: "Bearer " + token,
     },
     body: JSON.stringify(fields),
   });

@@ -42,25 +42,6 @@ const policies = Object.freeze({
     label: "Event organiser information for managed events",
     record: true,
   },
-  // First mutation permissions in this file (see header note above) - added
-  // for the equipment request story. Coordinators request equipment;
-  // technical support staff edit those requests. Neither role does both:
-  // a Coordinator cannot edit after submitting, and Technical Support Staff
-  // does not submit new requests on a Coordinator's behalf.
-  "equipment_requests.create": {
-    roles: ["event_coordinator"],
-    label: "Equipment request submission",
-    // Coordinators may only request equipment for an event they organise
-    // or coordinate - see events.coordinator_id/organiser_id, enforced via
-    // an authorizeRecord resolver (equipment.controller.js#authorizeEventOwnership).
-    record: true,
-  },
-  "equipment_requests.update": {
-    roles: ["technical_support_staff"],
-    label: "Equipment request management",
-    // Deliberately unrestricted by event, matching the "Tech support can
-    // manage equipment requests" RLS policy in the same migration.
-  },
 });
 
 function getPolicy(permission) {

@@ -1,23 +1,13 @@
-const supabase = require("../../supabase");
-const { UPDATABLE_FIELDS } = require("./equipment.validation");
+// Data access for equipment requests. Exports a factory rather than binding
+// straight to the shared Supabase client (contrast venues.service.js /
+// events.repository.js): equipment.routes.js binds it to the real client in
+// production, and equipment.functional.test.js binds it to an in-memory fake
+// so role gating, overlap rejection, and event scoping can be exercised
+// without touching the live database (see that test file's header for why).
+const { WRITABLE_COLS } = require("./equipment.validation");
 
-// equipment_type is a read-only catalogue for this story (SCRUM: equipment
-// request). Individual unit tracking lives in the separate `equipment`
-// table (see supabase/migrations/003_kl_create_equipment.sql); requests
-// reference the type, not a specific physical unit, so a Coordinator never
-// has to know an inventory id to ask for what they need.
-const TYPES_TABLE = "equipment_type";
-const REQUESTS_TABLE = "equipment_request";
-
-// Columns a caller may set when creating a request. requested_by is
-// deliberately excluded: it's never client input, it's passed as its own
-// argument by the controller, same as organiser_id in events.repository.js.
-const WRITABLE_COLS = [
-  "event_id",
-  "equipment_type_id",
-  "quantity_requested",
-  "technical_requirements",
-];
+const REQUESTS_TABLE = "equipment_requests";
+const EQUIPMENT_TABLE = "equipment";
 
 function pickCol(input, cols) {
   const source = input && typeof input === "object" ? input : {};
@@ -35,73 +25,104 @@ function unwrap({ data, error }, action) {
   return data;
 }
 
-async function listEquipmentTypes() {
-  return unwrap(
-    await supabase
-      .from(TYPES_TABLE)
-      .select("id, name, category, description")
-      .eq("is_active", true)
-      .order("name", { ascending: true }),
-    "listEquipmentTypes",
-  );
+function createEquipmentService(client) {
+  // The requestable catalogue for the create form's equipment dropdown.
+  async function listEquipment() {
+    return unwrap(
+      await client.from(EQUIPMENT_TABLE).select("*").order("type", { ascending: true }),
+      "listEquipment",
+    );
+  }
+
+  async function findEquipmentById(id) {
+    return unwrap(
+      await client.from(EQUIPMENT_TABLE).select("*").eq("id", id).maybeSingle(),
+      "findEquipmentById",
+    );
+  }
+
+  // AC4: requests are always looked up by the event they belong to. The
+  // equipment_requests.event_id foreign key is declared "on delete cascade"
+  // in the existing schema, so removing an event removes its requests at the
+  // database level - that guarantee lives in Postgres, not here.
+  async function listRequestsByEvent(eventId) {
+    return unwrap(
+      await client
+        .from(REQUESTS_TABLE)
+        .select("*")
+        .eq("event_id", eventId)
+        .order("created_at", { ascending: true }),
+      "listRequestsByEvent",
+    );
+  }
+
+  async function findRequestById(id) {
+    return unwrap(
+      await client.from(REQUESTS_TABLE).select("*").eq("id", id).maybeSingle(),
+      "findRequestById",
+    );
+  }
+
+  // Overlap guard: true when the same equipment already has a non-REJECTED
+  // request whose borrow window intersects [borrowStart, borrowEnd).
+  // Standard interval-overlap test: existing.start < new.end AND
+  // existing.end > new.start.
+  async function hasOverlappingRequest(equipmentId, borrowStart, borrowEnd) {
+    const rows = await unwrap(
+      await client
+        .from(REQUESTS_TABLE)
+        .select("id")
+        .eq("equipment_id", equipmentId)
+        .neq("status", "REJECTED")
+        .lt("borrow_start", borrowEnd)
+        .gt("borrow_end", borrowStart)
+        .limit(1),
+      "hasOverlappingRequest",
+    );
+    return rows.length > 0;
+  }
+
+  // requestedBy is passed as its own argument, never taken from `fields` -
+  // same pattern as organiser_id in events.repository.js.
+  async function createRequest(fields, requestedBy) {
+    const row = {
+      ...pickCol(fields, WRITABLE_COLS),
+      requested_by: requestedBy,
+      status: "PENDING",
+    };
+    return unwrap(
+      await client.from(REQUESTS_TABLE).insert(row).select().single(),
+      "createRequest",
+    );
+  }
+
+  // Atomically guards the PENDING -> APPROVED/REJECTED transition in the
+  // query itself (the `.eq("status", "PENDING")` filter), the same pattern
+  // markSubmitted() uses in events.repository.js: it avoids a race between a
+  // separate check and the update, and returns null instead of throwing when
+  // the row was not PENDING (or did not exist).
+  async function updateStatus(id, status) {
+    return unwrap(
+      await client
+        .from(REQUESTS_TABLE)
+        .update({ status })
+        .eq("id", id)
+        .eq("status", "PENDING")
+        .select()
+        .maybeSingle(),
+      "updateStatus",
+    );
+  }
+
+  return {
+    listEquipment,
+    findEquipmentById,
+    listRequestsByEvent,
+    findRequestById,
+    hasOverlappingRequest,
+    createRequest,
+    updateStatus,
+  };
 }
 
-// AC4: requests are always looked up by the event they belong to.
-async function listRequestsByEvent(eventId) {
-  return unwrap(
-    await supabase
-      .from(REQUESTS_TABLE)
-      .select("*")
-      .eq("event_id", eventId)
-      .order("created_at", { ascending: true }),
-    "listRequestsByEvent",
-  );
-}
-
-async function findRequestById(id) {
-  return unwrap(
-    await supabase
-      .from(REQUESTS_TABLE)
-      .select("*")
-      .eq("id", id)
-      .maybeSingle(),
-    "findRequestById",
-  );
-}
-
-async function createRequest(fields, requestedBy) {
-  const row = { ...pickCol(fields, WRITABLE_COLS), requested_by: requestedBy };
-  return unwrap(
-    await supabase.from(REQUESTS_TABLE).insert(row).select().single(),
-    "createRequest",
-  );
-}
-
-// Reuses validation's UPDATABLE_FIELDS as the write allowlist too, so the
-// two never drift apart - unlike events.validation.js/events.repository.js,
-// which keep separate lists on purpose because importing repository.js into
-// validation.js would pull in the Supabase client. That risk only runs one
-// direction: validation.js has no side-effecting imports, so service.js
-// importing from it is safe.
-async function updateRequest(id, changes) {
-  const row = pickCol(changes, UPDATABLE_FIELDS);
-  if (Object.keys(row).length === 0) return findRequestById(id);
-  return unwrap(
-    await supabase
-      .from(REQUESTS_TABLE)
-      .update(row)
-      .eq("id", id)
-      .select()
-      .maybeSingle(),
-    "updateRequest",
-  );
-}
-
-module.exports = {
-  WRITABLE_COLS,
-  listEquipmentTypes,
-  listRequestsByEvent,
-  findRequestById,
-  createRequest,
-  updateRequest,
-};
+module.exports = { createEquipmentService, WRITABLE_COLS };

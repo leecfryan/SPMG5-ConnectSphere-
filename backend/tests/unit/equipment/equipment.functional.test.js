@@ -1,0 +1,358 @@
+// Functional tests for the equipment request routes: role gating, the
+// overlap guard, and event association (AC1-AC4). These build a small
+// Express app directly from the real requireDbRole middleware and the real
+// controller/validation logic, but inject fakes for the two things that
+// would otherwise touch the live Supabase project:
+//   - the user_roles lookup requireDbRole makes (see requireDbRole.js)
+//   - the equipment/event data equipment.service.js and events.repository.js
+//     would otherwise fetch
+// The live public.user_roles table is currently empty for every seeded
+// account (verified directly against the dev project), so a test relying on
+// real rows would only ever see 403 - these fakes are what make "a
+// coordinator CAN create" provable at all right now, not just "everyone is
+// denied". Validation itself is covered separately in
+// equipment.validation.test.js.
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+const { once } = require("node:events");
+const express = require("express");
+
+const requireDbRole = require("../../../src/middleware/requireDbRole");
+const { createEquipmentController } = require("../../../src/modules/equipment/equipment.controller");
+
+const VALID_EVENT_ID = "11111111-1111-1111-1111-111111111111";
+const VALID_EQUIPMENT_ID = "22222222-2222-2222-2222-222222222222";
+const OTHER_EQUIPMENT_ID = "33333333-3333-3333-3333-333333333333";
+
+function validCreatePayload(overrides = {}) {
+  const start = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const end = new Date(start.getTime() + 3 * 60 * 60 * 1000);
+  return {
+    equipment_id: VALID_EQUIPMENT_ID,
+    quantity_requested: 2,
+    technical_requirement: "Needs HDMI",
+    borrow_start: start.toISOString(),
+    borrow_end: end.toISOString(),
+    ...overrides,
+  };
+}
+
+// A minimal fake for the one query shape requireDbRole issues:
+// .from("user_roles").select(...).eq("user_id", id).eq("role", role).maybeSingle()
+function fakeRoleClient(roleAssignments) {
+  return {
+    from(table) {
+      assert.equal(table, "user_roles");
+      const filters = {};
+      const builder = {
+        select() { return builder; },
+        eq(field, value) { filters[field] = value; return builder; },
+        async maybeSingle() {
+          const roles = roleAssignments[filters.user_id] || [];
+          const match = roles.includes(filters.role);
+          return { data: match ? { role: filters.role } : null, error: null };
+        },
+      };
+      return builder;
+    },
+  };
+}
+
+function fakeEquipmentService({ equipmentById = {}, requestsByEvent = {}, requestById = {}, overlapping = false } = {}) {
+  const calls = { createRequest: [], updateStatus: [], hasOverlappingRequest: [] };
+  return {
+    calls,
+    async listEquipment() {
+      return Object.values(equipmentById);
+    },
+    async findEquipmentById(id) {
+      return equipmentById[id] || null;
+    },
+    async listRequestsByEvent(eventId) {
+      return requestsByEvent[eventId] || [];
+    },
+    async findRequestById(id) {
+      return requestById[id] || null;
+    },
+    async hasOverlappingRequest(equipmentId, borrowStart, borrowEnd) {
+      calls.hasOverlappingRequest.push({ equipmentId, borrowStart, borrowEnd });
+      return overlapping;
+    },
+    async createRequest(fields, requestedBy) {
+      calls.createRequest.push({ fields, requestedBy });
+      return { id: "new-request-id", status: "PENDING", requested_by: requestedBy, ...fields };
+    },
+    async updateStatus(id, status) {
+      calls.updateStatus.push({ id, status });
+      const existing = requestById[id];
+      if (!existing || existing.status !== "PENDING") return null;
+      return { ...existing, status };
+    },
+  };
+}
+
+// Builds an app wired the same way equipment.routes.js wires the real one,
+// but with a stub auth middleware (identity comes from a test-only header -
+// requireAuth itself is covered by auth.test.js, not re-tested here) and
+// injected fakes in place of the real Supabase-backed client/service.
+async function setup(t, { roleAssignments = {}, equipmentService, findEventById = async () => ({ id: VALID_EVENT_ID }) }) {
+  const app = express();
+  app.use(express.json());
+  app.use((req, res, next) => {
+    const header = req.get("x-test-user-id");
+    if (header) req.user = { id: header };
+    next();
+  });
+
+  const dbClient = fakeRoleClient(roleAssignments);
+  const controller = createEquipmentController({ equipmentService, findEventById });
+
+  app.get("/api/equipment", controller.getEquipmentCatalogue);
+  app.get("/api/events/:eventId/equipment-requests", controller.getEquipmentRequests);
+  app.post(
+    "/api/events/:eventId/equipment-requests",
+    requireDbRole("event_coordinator", dbClient),
+    controller.postEquipmentRequest,
+  );
+  app.patch(
+    "/api/equipment-requests/:id/status",
+    requireDbRole("tech_support", dbClient),
+    controller.patchRequestStatus,
+  );
+
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
+  return "http://127.0.0.1:" + server.address().port;
+}
+
+// --- Scrum-27 AC1: equipment type can be recorded (equipment_id link resolves) ---
+
+test("Scrum-27 AC1: a request created with a valid equipment_id resolves to that equipment", async (t) => {
+  const equipmentService = fakeEquipmentService({
+    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID, type: "PROJECTOR" } },
+  });
+  const base = await setup(t, { roleAssignments: { "coord-1": ["event_coordinator"] }, equipmentService });
+
+  const response = await fetch(base + `/api/events/${VALID_EVENT_ID}/equipment-requests`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-test-user-id": "coord-1" },
+    body: JSON.stringify(validCreatePayload()),
+  });
+  assert.equal(response.status, 201);
+  const { data } = await response.json();
+  assert.equal(data.equipment_id, VALID_EQUIPMENT_ID);
+  assert.equal(equipmentService.calls.createRequest.length, 1);
+});
+
+test("Scrum-27 AC1: an equipment_id that does not exist is rejected", async (t) => {
+  const equipmentService = fakeEquipmentService({ equipmentById: {} });
+  const base = await setup(t, { roleAssignments: { "coord-1": ["event_coordinator"] }, equipmentService });
+
+  const response = await fetch(base + `/api/events/${VALID_EVENT_ID}/equipment-requests`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-test-user-id": "coord-1" },
+    body: JSON.stringify(validCreatePayload()),
+  });
+  assert.equal(response.status, 404);
+  assert.equal(equipmentService.calls.createRequest.length, 0);
+});
+
+test("the equipment catalogue is listed for any authenticated user", async (t) => {
+  const equipmentService = fakeEquipmentService({
+    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID, type: "PROJECTOR" } },
+  });
+  const base = await setup(t, { equipmentService });
+
+  const response = await fetch(base + "/api/equipment", {
+    headers: { "x-test-user-id": "anyone-authenticated" },
+  });
+  assert.equal(response.status, 200);
+  const { data } = await response.json();
+  assert.deepEqual(data.map((e) => e.id), [VALID_EQUIPMENT_ID]);
+});
+
+// --- Scrum-27 AC2: required quantity can be recorded ---
+
+test("Scrum-27 AC2: a valid quantity is persisted on the created request", async (t) => {
+  const equipmentService = fakeEquipmentService({
+    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID } },
+  });
+  const base = await setup(t, { roleAssignments: { "coord-1": ["event_coordinator"] }, equipmentService });
+
+  const response = await fetch(base + `/api/events/${VALID_EVENT_ID}/equipment-requests`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-test-user-id": "coord-1" },
+    body: JSON.stringify(validCreatePayload({ quantity_requested: 5 })),
+  });
+  assert.equal(response.status, 201);
+  assert.equal((await response.json()).data.quantity_requested, 5);
+});
+
+test("Scrum-27 AC2: quantity <= 0 is rejected before reaching the data layer", async (t) => {
+  const equipmentService = fakeEquipmentService({
+    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID } },
+  });
+  const base = await setup(t, { roleAssignments: { "coord-1": ["event_coordinator"] }, equipmentService });
+
+  const response = await fetch(base + `/api/events/${VALID_EVENT_ID}/equipment-requests`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-test-user-id": "coord-1" },
+    body: JSON.stringify(validCreatePayload({ quantity_requested: 0 })),
+  });
+  assert.equal(response.status, 400);
+  assert.equal(equipmentService.calls.createRequest.length, 0);
+});
+
+// --- Scrum-27 AC3: relevant technical requirements can be recorded ---
+
+test("Scrum-27 AC3: technical_requirement is persisted on the created request", async (t) => {
+  const equipmentService = fakeEquipmentService({
+    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID } },
+  });
+  const base = await setup(t, { roleAssignments: { "coord-1": ["event_coordinator"] }, equipmentService });
+
+  const response = await fetch(base + `/api/events/${VALID_EVENT_ID}/equipment-requests`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-test-user-id": "coord-1" },
+    body: JSON.stringify(validCreatePayload({ technical_requirement: "Needs a wireless lapel mic." })),
+  });
+  assert.equal(response.status, 201);
+  assert.equal((await response.json()).data.technical_requirement, "Needs a wireless lapel mic.");
+});
+
+// --- Scrum-27 AC4: the request remains associated with the relevant event ---
+
+test("Scrum-27 AC4: a request is retrievable via its event_id; cascade delete is enforced by the events.id foreign key in the schema (not re-verified by this app-layer test)", async (t) => {
+  const requestsByEvent = {
+    [VALID_EVENT_ID]: [{ id: "44444444-4444-4444-4444-444444444444", event_id: VALID_EVENT_ID, equipment_id: VALID_EQUIPMENT_ID }],
+  };
+  const equipmentService = fakeEquipmentService({ requestsByEvent });
+  const base = await setup(t, { equipmentService });
+
+  const response = await fetch(base + `/api/events/${VALID_EVENT_ID}/equipment-requests`, {
+    headers: { "x-test-user-id": "anyone-authenticated" },
+  });
+  assert.equal(response.status, 200);
+  const { data } = await response.json();
+  assert.deepEqual(data.map((r) => r.id), ["44444444-4444-4444-4444-444444444444"]);
+});
+
+// --- role gating: create is coordinator-only ---
+
+test("a Coordinator can create a request; a Technical Support Staff member cannot (403)", async (t) => {
+  const equipmentService = fakeEquipmentService({
+    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID } },
+  });
+  const base = await setup(t, {
+    roleAssignments: { "coord-1": ["event_coordinator"], "tech-1": ["tech_support"] },
+    equipmentService,
+  });
+
+  const asCoordinator = await fetch(base + `/api/events/${VALID_EVENT_ID}/equipment-requests`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-test-user-id": "coord-1" },
+    body: JSON.stringify(validCreatePayload()),
+  });
+  assert.equal(asCoordinator.status, 201);
+
+  const asTechSupport = await fetch(base + `/api/events/${VALID_EVENT_ID}/equipment-requests`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-test-user-id": "tech-1" },
+    body: JSON.stringify(validCreatePayload()),
+  });
+  assert.equal(asTechSupport.status, 403);
+  assert.equal(equipmentService.calls.createRequest.length, 1, "only the coordinator's request should reach the data layer");
+});
+
+// --- role gating: status update is tech_support-only ---
+
+test("Technical Support Staff can update status; a Coordinator cannot (403)", async (t) => {
+  const requestById = { "44444444-4444-4444-4444-444444444444": { id: "44444444-4444-4444-4444-444444444444", status: "PENDING" } };
+  const equipmentService = fakeEquipmentService({ requestById });
+  const base = await setup(t, {
+    roleAssignments: { "coord-1": ["event_coordinator"], "tech-1": ["tech_support"] },
+    equipmentService,
+  });
+
+  const asCoordinator = await fetch(base + "/api/equipment-requests/44444444-4444-4444-4444-444444444444/status", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "x-test-user-id": "coord-1" },
+    body: JSON.stringify({ status: "APPROVED" }),
+  });
+  assert.equal(asCoordinator.status, 403);
+  assert.equal(equipmentService.calls.updateStatus.length, 0);
+
+  const asTechSupport = await fetch(base + "/api/equipment-requests/44444444-4444-4444-4444-444444444444/status", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "x-test-user-id": "tech-1" },
+    body: JSON.stringify({ status: "APPROVED" }),
+  });
+  assert.equal(asTechSupport.status, 200);
+  assert.equal((await asTechSupport.json()).data.status, "APPROVED");
+});
+
+// --- overlap guard ---
+
+test("an overlapping borrow window for the same equipment is rejected", async (t) => {
+  const equipmentService = fakeEquipmentService({
+    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID } },
+    overlapping: true,
+  });
+  const base = await setup(t, { roleAssignments: { "coord-1": ["event_coordinator"] }, equipmentService });
+
+  const response = await fetch(base + `/api/events/${VALID_EVENT_ID}/equipment-requests`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-test-user-id": "coord-1" },
+    body: JSON.stringify(validCreatePayload()),
+  });
+  assert.equal(response.status, 409);
+  assert.equal(equipmentService.calls.createRequest.length, 0);
+});
+
+test("a non-overlapping borrow window for the same equipment is accepted", async (t) => {
+  const equipmentService = fakeEquipmentService({
+    equipmentById: { [OTHER_EQUIPMENT_ID]: { id: OTHER_EQUIPMENT_ID } },
+    overlapping: false,
+  });
+  const base = await setup(t, { roleAssignments: { "coord-1": ["event_coordinator"] }, equipmentService });
+
+  const response = await fetch(base + `/api/events/${VALID_EVENT_ID}/equipment-requests`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-test-user-id": "coord-1" },
+    body: JSON.stringify(validCreatePayload({ equipment_id: OTHER_EQUIPMENT_ID })),
+  });
+  assert.equal(response.status, 201);
+});
+
+// --- authentication ---
+
+test("unauthenticated requests are rejected before any role or data check", async (t) => {
+  const equipmentService = fakeEquipmentService({
+    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID } },
+  });
+  const base = await setup(t, { roleAssignments: { "coord-1": ["event_coordinator"] }, equipmentService });
+
+  const response = await fetch(base + `/api/events/${VALID_EVENT_ID}/equipment-requests`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(validCreatePayload()),
+  });
+  assert.equal(response.status, 401);
+  assert.equal(equipmentService.calls.createRequest.length, 0);
+});
+
+// --- status transition guard ---
+
+test("only a PENDING request can be reviewed; an already-reviewed request is rejected", async (t) => {
+  const requestById = { "44444444-4444-4444-4444-444444444444": { id: "44444444-4444-4444-4444-444444444444", status: "APPROVED" } };
+  const equipmentService = fakeEquipmentService({ requestById });
+  const base = await setup(t, { roleAssignments: { "tech-1": ["tech_support"] }, equipmentService });
+
+  const response = await fetch(base + "/api/equipment-requests/44444444-4444-4444-4444-444444444444/status", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "x-test-user-id": "tech-1" },
+    body: JSON.stringify({ status: "REJECTED" }),
+  });
+  assert.equal(response.status, 409);
+});
