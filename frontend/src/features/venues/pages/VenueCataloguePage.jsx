@@ -6,6 +6,10 @@ import VenueEditForm from "../components/VenueEditForm";
 import VenueAvailabilityCalendar from "../components/VenueAvailabilityCalendar";
 import VenueBookingRequestForm from "../components/VenueBookingRequestForm";
 import VenueBookingRequestList from "../components/VenueBookingRequestList";
+import { IconAlert, IconInbox, IconSearch, IconUsers } from "../components/VenueIcons";
+import "../venues.css";
+
+const SKELETON_CARDS = [0, 1, 2];
 
 function VenueCataloguePage() {
   const [venues, setVenues] = useState([]);
@@ -62,52 +66,63 @@ function VenueCataloguePage() {
       .finally(() => setIsSaving(false));
   }
 
+  // There is no router, so switching views does not reset the scroll position.
+  // Without this, opening a venue from lower down the list lands mid-page.
+  const viewKey = [
+    selectedVenueId,
+    isEditing,
+    isViewingAvailability,
+    isRequestingBooking,
+    isReviewingRequests,
+  ].join("|");
+
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [viewKey]);
+
+  let view;
+
   // SCRUM-88: the Venue Staff review queue is not tied to one venue, so it is
   // checked before anything that needs a selected venue.
   if (isReviewingRequests) {
-    return (
+    view = (
       <VenueBookingRequestList onBack={() => setIsReviewingRequests(false)} />
     );
-  }
-
-  // SCRUM-21: opened from the calendar, and both ways out return to it. The
-  // calendar refetches when it mounts, so a new request shows as Requested.
-  if (selectedVenue && isViewingAvailability && isRequestingBooking) {
-    return (
+  } else if (selectedVenue && isViewingAvailability && isRequestingBooking) {
+    // SCRUM-21: opened from the calendar, and both ways out return to it. The
+    // calendar refetches when it mounts, so a new request shows as Requested.
+    view = (
       <VenueBookingRequestForm
         venue={selectedVenue}
         onDone={() => setIsRequestingBooking(false)}
         onCancel={() => setIsRequestingBooking(false)}
       />
     );
-  }
-
-  // SCRUM-17: availability is its own view, same state-driven switch as the
-  // edit form. Still no router installed.
-  if (selectedVenue && isViewingAvailability) {
-    return (
+  } else if (selectedVenue && isViewingAvailability) {
+    // SCRUM-17: availability is its own view, same state-driven switch as the
+    // edit form. Still no router installed.
+    view = (
       <VenueAvailabilityCalendar
         venue={selectedVenue}
         onBack={() => setIsViewingAvailability(false)}
         onRequestBooking={() => setIsRequestingBooking(true)}
       />
     );
-  }
-
-  if (selectedVenue && isEditing) {
-    return (
+  } else if (selectedVenue && isEditing) {
+    view = (
       <VenueEditForm
         venue={selectedVenue}
         onSave={handleSave}
-        onCancel={() => { setIsEditing(false); setSaveError(null); }}
+        onCancel={() => {
+          setIsEditing(false);
+          setSaveError(null);
+        }}
         isSaving={isSaving}
         saveError={saveError}
       />
     );
-  }
-
-  if (selectedVenue) {
-    return (
+  } else if (selectedVenue) {
+    view = (
       <VenueDetail
         venue={selectedVenue}
         onBack={() => setSelectedVenue(null)}
@@ -115,53 +130,111 @@ function VenueCataloguePage() {
         onViewAvailability={() => setIsViewingAvailability(true)}
       />
     );
+  } else {
+    view = (
+      <>
+        <header className="v-page-header">
+          <div>
+            <p className="v-eyebrow">Venues</p>
+            <h1 className="v-title">Venue catalogue</h1>
+            <p className="v-subtitle">
+              Compare venues by location and capacity, check availability, and
+              request a booking for your event.
+            </p>
+          </div>
+
+          {/* SCRUM-88: entry point for Venue Staff until there is real navigation */}
+          <div className="v-actions">
+            <button
+              type="button"
+              className="v-btn v-btn-secondary"
+              onClick={() => setIsReviewingRequests(true)}
+            >
+              <IconInbox />
+              Review booking requests (Venue Staff)
+            </button>
+          </div>
+        </header>
+
+        <div className="v-card v-toolbar">
+          <label className="v-field">
+            <span className="v-label">City</span>
+            <span className="v-input-with-icon">
+              <IconSearch />
+              <input
+                className="v-input"
+                type="text"
+                value={cityFilter}
+                onChange={(e) => setCityFilter(e.target.value)}
+                placeholder="e.g. Singapore"
+              />
+            </span>
+          </label>
+
+          <label className="v-field">
+            <span className="v-label">Minimum capacity</span>
+            <span className="v-input-with-icon">
+              <IconUsers />
+              <input
+                className="v-input"
+                type="number"
+                min="0"
+                value={minCapacityFilter}
+                onChange={(e) => setMinCapacityFilter(e.target.value)}
+                placeholder="e.g. 100"
+              />
+            </span>
+          </label>
+
+          {!isLoading && !error && (
+            <p className="v-toolbar-meta">
+              {venues.length} {venues.length === 1 ? "venue" : "venues"}
+            </p>
+          )}
+        </div>
+
+        {error && (
+          <p className="v-alert v-alert-error" role="alert">
+            <IconAlert />
+            <span>Could not load venues: {error}</span>
+          </p>
+        )}
+
+        {isLoading && (
+          <div className="v-venue-grid" aria-label="Loading venues...">
+            {SKELETON_CARDS.map((key) => (
+              <div key={key} className="v-card v-skeleton-card">
+                <div className="v-skeleton" style={{ width: 46, height: 46 }} />
+                <div className="v-skeleton" style={{ width: "70%", height: 18 }} />
+                <div className="v-skeleton" style={{ width: "45%", height: 14 }} />
+                <div className="v-skeleton" style={{ width: "90%", height: 28 }} />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!isLoading && !error && venues.length === 0 && (
+          <div className="v-card v-empty">
+            <div className="v-empty-icon">
+              <IconSearch size={22} />
+            </div>
+            <p className="v-empty-title">No venues match those filters.</p>
+            <p>Try a different city or a lower minimum capacity.</p>
+          </div>
+        )}
+
+        {!isLoading && venues.length > 0 && (
+          <div className="v-venue-grid">
+            {venues.map((venue) => (
+              <VenueCard key={venue.id} venue={venue} onSelect={handleSelectVenue} />
+            ))}
+          </div>
+        )}
+      </>
+    );
   }
 
-  return (
-    <div className="venue-catalogue">
-      <h2>Venue catalogue</h2>
-
-      {/* SCRUM-88: entry point for Venue Staff until there is real navigation */}
-      <button type="button" onClick={() => setIsReviewingRequests(true)}>
-        Review booking requests (Venue Staff)
-      </button>
-
-      <div className="venue-filters">
-        <label>
-          City
-          <input
-            type="text"
-            value={cityFilter}
-            onChange={(e) => setCityFilter(e.target.value)}
-            placeholder="e.g. Singapore"
-          />
-        </label>
-
-        <label>
-          Minimum capacity
-          <input
-            type="number" min="0"
-            value={minCapacityFilter}
-            onChange={(e) => setMinCapacityFilter(e.target.value)}
-            placeholder="e.g. 100"
-          />
-        </label>
-      </div>
-
-      {isLoading && <p>Loading venues...</p>}
-      {error && <p className="venue-error">Could not load venues: {error}</p>}
-
-      {!isLoading && !error && venues.length === 0 && (
-        <p>No venues match those filters.</p>
-      )}
-
-      <div className="venue-list">
-        {venues.map((venue) => (
-          <VenueCard key={venue.id} venue={venue} onSelect={handleSelectVenue} />
-        ))}
-      </div>
-    </div>
-  );
+  return <div className="venues">{view}</div>;
 }
 
 export default VenueCataloguePage;

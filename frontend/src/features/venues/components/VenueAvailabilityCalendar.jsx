@@ -1,10 +1,24 @@
 import { useState, useEffect } from "react";
 import { fetchVenueAvailability } from "../../../lib/api";
-import "./VenueAvailabilityCalendar.css";
+import {
+  IconAlert,
+  IconArrowLeft,
+  IconCalendar,
+  IconChevronLeft,
+  IconChevronRight,
+} from "./VenueIcons";
+import { formatDate } from "../venueFormat";
 
 // SCRUM-95: a day is three slots. A full day booking fills all three.
 const SLOTS = ["am", "pm", "night"];
 const SLOT_LABELS = { am: "AM", pm: "PM", night: "Night" };
+
+// Same windows as SLOT_WINDOWS in backend venues.availability.js
+const SLOT_TIMES = {
+  am: "08:00 - 12:00",
+  pm: "12:00 - 18:00",
+  night: "18:00 - 23:00",
+};
 
 const DAY_LABELS = {
   mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu",
@@ -21,6 +35,15 @@ const STATUS_LABELS = {
 
 // a slot whose label repeats the status adds nothing to the cell
 const STATUSES_WITH_DETAIL = ["booked", "pending", "unavailable"];
+
+// SCRUM-89 closed, SCRUM-93 unavailable, SCRUM-94 booked vs requested
+const LEGEND = [
+  { status: "available", text: "Available, open for booking" },
+  { status: "pending", text: "Requested, awaiting Venue Staff, still bookable" },
+  { status: "booked", text: "Booked, confirmed booking" },
+  { status: "unavailable", text: "Unavailable, recorded by Venue Staff" },
+  { status: "closed", text: "Closed, outside operating hours" },
+];
 
 const RANGE_DAYS = 14;
 
@@ -49,6 +72,7 @@ function VenueAvailabilityCalendar({ venue, onBack, onRequestBooking }) {
   const [error, setError] = useState(null);
 
   const to = shiftDate(from, RANGE_DAYS - 1);
+  const today = todayString();
 
   useEffect(() => {
     setIsLoading(true);
@@ -60,103 +84,166 @@ function VenueAvailabilityCalendar({ venue, onBack, onRequestBooking }) {
       .finally(() => setIsLoading(false));
   }, [venueId, from, to]);
 
+  function handleStartDateChange(value) {
+    // Clearing a date input gives "", and shiftDate("") throws, which would
+    // blank the whole page. Keep the current range until a real date is picked.
+    if (value) setFrom(value);
+  }
+
   return (
     <div className="venue-availability">
-      <button type="button" onClick={onBack}>
+      <button type="button" className="v-back" onClick={onBack}>
+        <IconArrowLeft />
         Back to venue
       </button>
 
-      {/* SCRUM-21: request slots straight from the calendar that shows them */}
-      <button type="button" onClick={onRequestBooking}>
-        Request a booking
-      </button>
+      <header className="v-page-header">
+        <div>
+          <p className="v-eyebrow">Availability calendar</p>
+          <h1 className="v-title">{venue.name}</h1>
+          <p className="v-subtitle">
+            Each day is split into AM, PM and Night. Only a confirmed booking
+            takes a slot, so Requested slots can still be requested.
+          </p>
+        </div>
 
-      <h2>Availability calendar</h2>
-      <p>{venue.name}</p>
+        {/* SCRUM-21: request slots straight from the calendar that shows them */}
+        <div className="v-actions">
+          <button
+            type="button"
+            className="v-btn v-btn-primary"
+            onClick={onRequestBooking}
+          >
+            <IconCalendar />
+            Request a booking
+          </button>
+        </div>
+      </header>
 
-      <div className="venue-availability-controls">
-        <button
-          type="button"
-          onClick={() => setFrom(shiftDate(from, -RANGE_DAYS))}
-        >
-          Previous 2 weeks
-        </button>
-        <button type="button" onClick={() => setFrom(todayString())}>
-          Today
-        </button>
-        <button
-          type="button"
-          onClick={() => setFrom(shiftDate(from, RANGE_DAYS))}
-        >
-          Next 2 weeks
-        </button>
+      <div className="v-card v-cal-toolbar">
+        <div className="v-cal-toolbar-left">
+          <div className="v-segmented" role="group" aria-label="Change dates">
+            <button
+              type="button"
+              onClick={() => setFrom(shiftDate(from, -RANGE_DAYS))}
+            >
+              <IconChevronLeft size={15} />
+              Previous 2 weeks
+            </button>
+            <button type="button" onClick={() => setFrom(todayString())}>
+              Today
+            </button>
+            <button
+              type="button"
+              onClick={() => setFrom(shiftDate(from, RANGE_DAYS))}
+            >
+              Next 2 weeks
+              <IconChevronRight size={15} />
+            </button>
+          </div>
 
-        <label>
+          <p className="v-cal-range" aria-live="polite">
+            Showing {formatDate(from)} to {formatDate(to, { year: true })}
+          </p>
+        </div>
+
+        <label className="v-cal-date-field">
           Start date
           <input
+            className="v-input"
             type="date"
             value={from}
-            onChange={(e) => setFrom(e.target.value)}
+            onChange={(e) => handleStartDateChange(e.target.value)}
           />
         </label>
       </div>
 
-      <p className="venue-availability-range">
-        Showing {from} to {to}
-      </p>
-
-      {isLoading && <p>Loading availability...</p>}
       {error && (
-        <p className="venue-error">Could not load availability: {error}</p>
+        <p className="v-alert v-alert-error" role="alert">
+          <IconAlert />
+          <span>Could not load availability: {error}</span>
+        </p>
       )}
 
-      {!isLoading && !error && (
-        <table className="venue-availability-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              {SLOTS.map((slot) => (
-                <th key={slot}>{SLOT_LABELS[slot]}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {days.map((day) => (
-              <tr key={day.date}>
-                <td className="venue-availability-date">
-                  {DAY_LABELS[day.day]} {day.date}
-                </td>
+      {!error && (
+        <div className="v-card v-table-card">
+          <div className="v-table-scroll">
+            <table className="v-cal">
+              <thead>
+                <tr>
+                  <th scope="col">Date</th>
+                  {SLOTS.map((slot) => (
+                    <th key={slot} scope="col">
+                      {SLOT_LABELS[slot]}
+                      <small>{SLOT_TIMES[slot]}</small>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
 
-                {SLOTS.map((slot) => {
-                  const cell = day.slots[slot];
-                  return (
-                    <td
-                      key={slot}
-                      className={`venue-slot venue-slot-${cell.status}`}
+              <tbody>
+                {isLoading &&
+                  Array.from({ length: 7 }, (_, index) => (
+                    <tr key={index}>
+                      <td className="v-cal-date">
+                        <div className="v-skeleton" style={{ width: 70, height: 30 }} />
+                      </td>
+                      {SLOTS.map((slot) => (
+                        <td key={slot}>
+                          <div className="v-skeleton" style={{ height: 54 }} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+
+                {!isLoading &&
+                  days.map((day) => (
+                    <tr
+                      key={day.date}
+                      className={`v-cal-row ${day.date === today ? "is-today" : ""}`}
                     >
-                      <span className="venue-slot-status">
-                        {STATUS_LABELS[cell.status]}
-                      </span>
-                      {STATUSES_WITH_DETAIL.includes(cell.status) && (
-                        <span className="venue-slot-detail">{cell.label}</span>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                      <th scope="row" className="v-cal-date">
+                        <span className="v-cal-weekday">{DAY_LABELS[day.day]}</span>
+                        <span className="v-cal-day">
+                          {formatDate(day.date)}
+                          {day.date === today && <span className="v-tag">Today</span>}
+                        </span>
+                      </th>
+
+                      {SLOTS.map((slot) => {
+                        const cell = day.slots[slot];
+                        return (
+                          <td key={slot}>
+                            <div className={`v-slot v-slot-${cell.status}`}>
+                              <span className="v-slot-status">
+                                {STATUS_LABELS[cell.status]}
+                              </span>
+                              {STATUSES_WITH_DETAIL.includes(cell.status) && (
+                                <span className="v-slot-detail" title={cell.label}>
+                                  {cell.label}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {/* SCRUM-94: "Requested" is deliberately not a blocker. Only a confirmed
           booking consumes the slot, which is why it reads differently here. */}
-      <ul className="venue-availability-legend">
-        <li className="venue-slot-available">Available, open for booking</li>
-        <li className="venue-slot-booked">Booked, confirmed booking (SCRUM-94)</li>
-        <li className="venue-slot-pending">Requested, awaiting Venue Staff, still bookable</li>
-        <li className="venue-slot-unavailable">Unavailable, recorded by Venue Staff (SCRUM-93)</li>
-        <li className="venue-slot-closed">Closed, outside operating hours (SCRUM-89)</li>
+      <ul className="v-legend" aria-label="Legend">
+        {LEGEND.map((item) => (
+          <li key={item.status}>
+            <span className={`v-legend-swatch v-slot-${item.status}`} aria-hidden="true" />
+            {item.text}
+          </li>
+        ))}
       </ul>
     </div>
   );

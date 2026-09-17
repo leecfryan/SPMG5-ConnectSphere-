@@ -1,6 +1,15 @@
 import { useState, useEffect } from "react";
 import { fetchBookingRequests } from "../../../lib/api";
-import "./VenueBookingRequest.css";
+import {
+  IconAlert,
+  IconArrowLeft,
+  IconCalendar,
+  IconClock,
+  IconInbox,
+  IconMapPin,
+  IconUsers,
+} from "./VenueIcons";
+import { formatDate, formatDateTime } from "../venueFormat";
 
 // SCRUM-88: submitted requests available to Venue Staff for review.
 // Approving and rejecting are a later story. This view only makes every request
@@ -27,16 +36,6 @@ const STATUS_LABELS = {
   unknown: "Unknown",
 };
 
-const VENUE_TIME_ZONE = "Asia/Singapore";
-
-function formatDateTime(instant) {
-  return new Date(instant).toLocaleString("en-SG", {
-    timeZone: VENUE_TIME_ZONE,
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
 function slotSummary(slotRows) {
   const slots = slotRows.map((row) => row.slot);
   if (slots.length === SLOT_ORDER.length) return "Full day (AM, PM, Night)";
@@ -45,8 +44,106 @@ function slotSummary(slotRows) {
     .join(", ");
 }
 
-function listOrNone(items) {
-  return items.length > 0 ? items.join(", ") : "None";
+function ChipsOrNone({ items }) {
+  if (items.length === 0) return <p className="v-none">None</p>;
+  return (
+    <ul className="v-chips">
+      {items.map((item) => (
+        <li key={item} className="v-chip">
+          {item}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function RequestCard({ request }) {
+  const hasTiming = Boolean(request.event.start_time && request.event.end_time);
+
+  return (
+    <article className="v-card v-request">
+      <header className="v-request-header">
+        <div>
+          <h2 className="v-request-title">{request.event.name}</h2>
+          {/* SCRUM-85 */}
+          <p className="v-meta">
+            <span>
+              <IconMapPin size={14} />
+              {request.venue.name}, {request.venue.city}
+            </span>
+          </p>
+        </div>
+        <span className={`v-status v-status-${request.status}`}>
+          {STATUS_LABELS[request.status] || request.status}
+        </span>
+      </header>
+
+      <div className="v-request-body">
+        {/* SCRUM-86: what was asked for, next to when the event actually runs */}
+        <div className="v-facts">
+          <div className="v-fact">
+            <p className="v-fact-label">
+              <IconCalendar size={13} />
+              Requested
+            </p>
+            <p className="v-fact-value">{formatDate(request.booking_date, { weekday: true, year: true })}</p>
+            <p className="v-fact-sub">{slotSummary(request.slots)}</p>
+          </div>
+
+          <div className="v-fact">
+            <p className="v-fact-label">
+              <IconClock size={13} />
+              Event timing
+            </p>
+            {hasTiming ? (
+              <>
+                <p className="v-fact-value">{formatDateTime(request.event.start_time)}</p>
+                <p className="v-fact-sub">to {formatDateTime(request.event.end_time)}</p>
+              </>
+            ) : (
+              <p className="v-fact-value">No timing recorded</p>
+            )}
+          </div>
+
+          {/* SCRUM-87 */}
+          <div className="v-fact">
+            <p className="v-fact-label">
+              <IconUsers size={13} />
+              Attendees
+            </p>
+            <p className="v-fact-value">
+              {request.expected_attendees} of {request.venue.capacity} capacity
+            </p>
+            <p className="v-fact-sub">{request.room_layout} layout</p>
+          </div>
+        </div>
+
+        <div className="v-request-requirements">
+          <div>
+            <p className="v-subheading">Facilities</p>
+            <ChipsOrNone items={request.required_facilities} />
+          </div>
+          <div>
+            <p className="v-subheading">Accessibility</p>
+            <ChipsOrNone items={request.accessibility_requirements} />
+          </div>
+          <div>
+            <p className="v-subheading">Other requirements</p>
+            <p className={request.additional_requirements ? "v-notes" : "v-none"}>
+              {request.additional_requirements || "None"}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <footer className="v-request-footer">
+        <span>Submitted {formatDateTime(request.submitted_at)}</span>
+        <span>
+          Reference <span className="v-mono">{request.id}</span>
+        </span>
+      </footer>
+    </article>
+  );
 }
 
 function VenueBookingRequestList({ onBack }) {
@@ -67,79 +164,78 @@ function VenueBookingRequestList({ onBack }) {
 
   return (
     <div className="venue-booking-requests">
-      <button type="button" onClick={onBack}>
+      <button type="button" className="v-back" onClick={onBack}>
+        <IconArrowLeft />
         Back to catalogue
       </button>
 
-      <h2>Venue booking requests</h2>
-      <p>For Venue Staff to review</p>
+      <header className="v-page-header">
+        <div>
+          <p className="v-eyebrow">For Venue Staff to review</p>
+          <h1 className="v-title">Venue booking requests</h1>
+          <p className="v-subtitle">
+            Requests submitted by event coordinators, with the event timing and
+            venue requirements needed to assess them.
+          </p>
+        </div>
 
-      <label>
-        Show
-        <select value={status} onChange={(e) => setStatus(e.target.value)}>
-          {STATUS_FILTERS.map((filter) => (
-            <option key={filter.value} value={filter.value}>
-              {filter.label}
-            </option>
-          ))}
-        </select>
-      </label>
+        <label className="v-filter-field">
+          Show
+          <select
+            className="v-input"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+          >
+            {STATUS_FILTERS.map((filter) => (
+              <option key={filter.value} value={filter.value}>
+                {filter.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </header>
 
-      {isLoading && <p>Loading requests...</p>}
-      {error && <p className="venue-error">Could not load requests: {error}</p>}
-      {!isLoading && !error && requests.length === 0 && (
-        <p>No requests to show.</p>
+      {error && (
+        <p className="v-alert v-alert-error" role="alert">
+          <IconAlert />
+          <span>Could not load requests: {error}</span>
+        </p>
       )}
 
-      {!isLoading && !error && requests.map((request) => (
-        <article key={request.id} className="venue-request-card">
-          <header>
-            <h3>{request.event.name}</h3>
-            <span className={`venue-request-status venue-request-status-${request.status}`}>
-              {STATUS_LABELS[request.status] || request.status}
-            </span>
-          </header>
+      {isLoading && (
+        <div className="v-request-list" aria-label="Loading requests...">
+          {[0, 1].map((key) => (
+            <div key={key} className="v-card v-skeleton-card">
+              <div className="v-skeleton" style={{ width: "40%", height: 20 }} />
+              <div className="v-skeleton" style={{ width: "25%", height: 14 }} />
+              <div className="v-skeleton" style={{ height: 76 }} />
+            </div>
+          ))}
+        </div>
+      )}
 
-          <dl className="venue-request-summary">
-            {/* SCRUM-85 */}
-            <dt>Venue</dt>
-            <dd>
-              {request.venue.name}, {request.venue.city}
-            </dd>
+      {!isLoading && !error && requests.length === 0 && (
+        <div className="v-card v-empty">
+          <div className="v-empty-icon">
+            <IconInbox size={22} />
+          </div>
+          <p className="v-empty-title">No requests to show.</p>
+          <p>New requests appear here as soon as a coordinator submits them.</p>
+        </div>
+      )}
 
-            {/* SCRUM-86: what was asked for, next to when the event actually runs */}
-            <dt>Requested</dt>
-            <dd>
-              {request.booking_date}, {slotSummary(request.slots)}
-            </dd>
-            <dt>Event timing</dt>
-            <dd>
-              {request.event.start_time && request.event.end_time
-                ? `${formatDateTime(request.event.start_time)} to ${formatDateTime(request.event.end_time)}`
-                : "No timing recorded"}
-            </dd>
-
-            {/* SCRUM-87 */}
-            <dt>Attendees</dt>
-            <dd>
-              {request.expected_attendees} of {request.venue.capacity} capacity
-            </dd>
-            <dt>Room layout</dt>
-            <dd>{request.room_layout}</dd>
-            <dt>Facilities</dt>
-            <dd>{listOrNone(request.required_facilities)}</dd>
-            <dt>Accessibility</dt>
-            <dd>{listOrNone(request.accessibility_requirements)}</dd>
-            <dt>Other requirements</dt>
-            <dd>{request.additional_requirements || "None"}</dd>
-
-            <dt>Submitted</dt>
-            <dd>{formatDateTime(request.submitted_at)}</dd>
-            <dt>Reference</dt>
-            <dd className="venue-request-reference">{request.id}</dd>
-          </dl>
-        </article>
-      ))}
+      {!isLoading && !error && requests.length > 0 && (
+        <>
+          <p className="v-results-count">
+            {requests.length} {requests.length === 1 ? "request" : "requests"}
+          </p>
+          <div className="v-request-list">
+            {requests.map((request) => (
+              <RequestCard key={request.id} request={request} />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

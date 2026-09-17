@@ -1,0 +1,1696 @@
+/* ==========================================================================
+   Venue pages: SCRUM-15 catalogue, SCRUM-16 edit, SCRUM-17 calendar,
+   SCRUM-21 booking requests.
+
+   One stylesheet for the feature, same convention as
+   features/equipment/equipment.css on feature/Equipment.
+
+   Everything is scoped under .venues. The develop branch App.css styles bare
+   elements globally (label, input, dt, dd, main, form) for the sign-in page,
+   for example `input { width: 100% }`, which would stretch every checkbox.
+   The resets at the top of this file keep the venue pages looking the same
+   before and after develop is merged in.
+
+   Colours follow develop's palette: #185c4b green, #f4f6f5 page, #152c37 text.
+   ========================================================================== */
+
+.venues {
+  --v-surface: #ffffff;
+  --v-surface-muted: #f8faf9;
+  --v-border: #e0e7e2;
+  --v-border-strong: #cbd7d0;
+  --v-text: #152c37;
+  --v-text-muted: #5d6e69;
+  --v-text-subtle: #7d8a83;
+  --v-primary: #185c4b;
+  --v-primary-hover: #104a3b;
+  --v-primary-soft: #e8f2ee;
+  --v-primary-text: #426e60;
+  --v-focus-ring: 0 0 0 3px rgb(86 169 147 / 0.3);
+  --v-danger: #97372c;
+  --v-danger-soft: #fff2ee;
+  --v-danger-border: #f3d3cb;
+  --v-success: #1d6b4f;
+  --v-success-soft: #e6f4ec;
+
+  --v-radius-lg: 18px;
+  --v-radius-md: 12px;
+  --v-radius-sm: 8px;
+  --v-shadow-sm: 0 1px 2px rgb(21 44 55 / 0.04);
+  --v-shadow-md: 0 14px 40px rgb(21 62 43 / 0.08);
+
+  /* Slot and request states. Each state is always spelled out in words as
+     well, so colour is a hint and never the only signal. */
+  --v-available-bg: #eaf6ef;
+  --v-available-fg: #1b6a4d;
+  --v-available-bd: #cbe6d7;
+  --v-booked-bg: #fdeeeb;
+  --v-booked-fg: #9a2d24;
+  --v-booked-bd: #f3cec8;
+  --v-pending-bg: #fff5e0;
+  --v-pending-fg: #83530a;
+  --v-pending-bd: #efd9a6;
+  --v-unavailable-bg: #eef1f4;
+  --v-unavailable-fg: #475361;
+  --v-unavailable-bd: #d9dfe6;
+  --v-closed-bg: #f6f7f7;
+  --v-closed-fg: #929d98;
+  --v-closed-bd: #e3e8e5;
+
+  width: 100%;
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 32px 0 56px;
+  color: var(--v-text);
+  text-align: left;
+  /* fills develop's .app-shell column so the footer sits at the bottom of
+     short pages instead of floating mid-screen */
+  flex: 1 0 auto;
+}
+
+/* --- Resets against develop's global element styles ----------------------
+   Wrapped in :where() so each reset weighs exactly one class (.venues). That
+   is enough to beat develop's bare element rules like `label` or `dt`, but no
+   more than a component class such as .v-subtitle, so the component's own
+   margins and display values further down this file still apply. */
+
+.venues :where(*, *::before, *::after) {
+  box-sizing: border-box;
+}
+
+.venues :where(h1, h2, h3, p, dl, dt, dd, ul) {
+  margin: 0;
+}
+
+.venues :where(ul) {
+  padding: 0;
+  list-style: none;
+}
+
+.venues :where(label) {
+  display: block;
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.venues :where(dt) {
+  color: inherit;
+  font-size: inherit;
+}
+
+.venues :where(button, input, select, textarea) {
+  font: inherit;
+}
+
+.venues :where(input[type="checkbox"]) {
+  width: 17px;
+  height: 17px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  flex: none;
+  accent-color: var(--v-primary);
+  cursor: pointer;
+}
+
+.venues :where(input[type="checkbox"]:disabled) {
+  cursor: not-allowed;
+}
+
+.v-icon {
+  flex: none;
+}
+
+/* --- Page layout ---------------------------------------------------------- */
+
+.v-page-narrow {
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.v-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px 32px;
+  margin-bottom: 28px;
+}
+
+.v-page-header > div:first-child {
+  min-width: 0;
+  flex: 1 1 380px;
+}
+
+.v-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: var(--v-primary-text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+}
+
+.v-title {
+  font-size: clamp(28px, 3.4vw, 38px);
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -1px;
+  color: var(--v-text);
+}
+
+.v-subtitle {
+  margin-top: 10px;
+  max-width: 72ch;
+  color: var(--v-text-muted);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.v-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.v-stack {
+  display: grid;
+  gap: 20px;
+  align-content: start;
+}
+
+/* --- Buttons -------------------------------------------------------------- */
+
+.v-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: var(--v-radius-sm);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.v-btn-primary {
+  color: #fff;
+  background: var(--v-primary);
+  border-color: var(--v-primary);
+  box-shadow: 0 1px 2px rgb(16 74 59 / 0.2);
+}
+
+.v-btn-primary:hover:not(:disabled) {
+  background: var(--v-primary-hover);
+  border-color: var(--v-primary-hover);
+}
+
+.v-btn-secondary {
+  color: var(--v-text);
+  background: var(--v-surface);
+  border-color: var(--v-border-strong);
+}
+
+.v-btn-secondary:hover:not(:disabled) {
+  color: var(--v-primary);
+  border-color: var(--v-primary);
+  background: var(--v-surface-muted);
+}
+
+.v-btn-lg {
+  min-height: 48px;
+  padding: 0 22px;
+  font-size: 15px;
+}
+
+.venues .v-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.venues .v-btn:focus-visible,
+.venues .v-back:focus-visible,
+.venues .v-segmented button:focus-visible {
+  outline: none;
+  box-shadow: var(--v-focus-ring);
+}
+
+.v-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 18px -8px;
+  padding: 7px 12px 7px 8px;
+  border: none;
+  border-radius: var(--v-radius-sm);
+  color: var(--v-text-muted);
+  background: transparent;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.v-back:hover:not(:disabled) {
+  color: var(--v-primary);
+  background: var(--v-primary-soft);
+}
+
+/* --- Cards ---------------------------------------------------------------- */
+
+.v-card {
+  padding: 24px;
+  background: var(--v-surface);
+  border: 1px solid var(--v-border);
+  border-radius: var(--v-radius-lg);
+  box-shadow: var(--v-shadow-sm);
+  min-width: 0;
+}
+
+.v-card-header {
+  margin-bottom: 18px;
+}
+
+.v-card-title {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  color: var(--v-text);
+}
+
+.v-card-desc {
+  margin-top: 4px;
+  color: var(--v-text-muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+/* --- Form fields ---------------------------------------------------------- */
+
+.v-field {
+  display: grid;
+  gap: 7px;
+  align-content: start;
+  min-width: 0;
+}
+
+.v-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--v-text);
+}
+
+.v-hint {
+  color: var(--v-text-subtle);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.venues .v-input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--v-border-strong);
+  border-radius: var(--v-radius-sm);
+  color: var(--v-text);
+  background: var(--v-surface);
+  font-size: 15px;
+  line-height: 1.4;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.venues .v-input::placeholder {
+  color: #97a39d;
+}
+
+.venues .v-input:hover:not(:disabled) {
+  border-color: #b1c3b9;
+}
+
+.venues .v-input:focus,
+.venues .v-input:focus-visible {
+  outline: none;
+  border-color: var(--v-primary);
+  box-shadow: var(--v-focus-ring);
+}
+
+.venues .v-input:disabled {
+  color: var(--v-text-subtle);
+  background: var(--v-surface-muted);
+  border-color: var(--v-border);
+  cursor: not-allowed;
+}
+
+.venues select.v-input {
+  appearance: none;
+  padding-right: 38px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235d6e69' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  cursor: pointer;
+}
+
+.venues textarea.v-input {
+  min-height: 104px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.v-input-with-icon {
+  position: relative;
+}
+
+.v-input-with-icon .v-icon {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  transform: translateY(-50%);
+  color: var(--v-text-subtle);
+  pointer-events: none;
+}
+
+.venues .v-input-with-icon .v-input {
+  padding-left: 38px;
+}
+
+.v-input-with-suffix {
+  position: relative;
+}
+
+.v-input-suffix {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  color: var(--v-text-subtle);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.venues .v-input-with-suffix .v-input {
+  padding-right: 60px;
+}
+
+.v-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  align-items: start;
+  gap: 16px;
+}
+
+.v-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.v-fieldset legend {
+  margin-bottom: 10px;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--v-text);
+}
+
+.v-divider {
+  height: 1px;
+  margin: 22px 0;
+  border: none;
+  background: var(--v-border);
+}
+
+.v-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+/* --- Chips ---------------------------------------------------------------- */
+
+.v-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.v-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 1px solid var(--v-border);
+  border-radius: 999px;
+  color: var(--v-text);
+  background: var(--v-surface-muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.v-chip-more {
+  color: var(--v-text-subtle);
+  background: transparent;
+}
+
+.v-none {
+  color: var(--v-text-subtle);
+  font-size: 14px;
+}
+
+/* selectable chip wrapping a real checkbox, state class set from React */
+.venues .v-chip-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border: 1px solid var(--v-border-strong);
+  border-radius: 999px;
+  color: var(--v-text);
+  background: var(--v-surface);
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.venues .v-chip-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.venues .v-chip-toggle .v-icon {
+  display: none;
+}
+
+.venues .v-chip-toggle:hover {
+  border-color: var(--v-primary);
+}
+
+.venues .v-chip-toggle:focus-within {
+  box-shadow: var(--v-focus-ring);
+}
+
+.venues .v-chip-toggle.is-selected {
+  color: var(--v-primary);
+  background: var(--v-primary-soft);
+  border-color: var(--v-primary);
+  font-weight: 600;
+}
+
+.venues .v-chip-toggle.is-selected .v-icon {
+  display: inline;
+}
+
+/* --- Status pills --------------------------------------------------------- */
+
+.v-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 11px 4px 9px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.v-status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.v-status-available,
+.v-status-confirmed {
+  color: var(--v-available-fg);
+  background: var(--v-available-bg);
+  border-color: var(--v-available-bd);
+}
+
+.v-status-booked,
+.v-status-rejected,
+.v-status-cancelled {
+  color: var(--v-booked-fg);
+  background: var(--v-booked-bg);
+  border-color: var(--v-booked-bd);
+}
+
+.v-status-pending {
+  color: var(--v-pending-fg);
+  background: var(--v-pending-bg);
+  border-color: var(--v-pending-bd);
+}
+
+.v-status-unavailable,
+.v-status-mixed,
+.v-status-unknown {
+  color: var(--v-unavailable-fg);
+  background: var(--v-unavailable-bg);
+  border-color: var(--v-unavailable-bd);
+}
+
+.v-status-closed {
+  color: var(--v-closed-fg);
+  background: var(--v-closed-bg);
+  border-color: var(--v-closed-bd);
+}
+
+.v-tag {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--v-primary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+
+/* --- Feedback: alerts, empty states, loading ------------------------------ */
+
+.v-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--v-radius-md);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.v-alert .v-icon {
+  margin-top: 2px;
+}
+
+.v-alert-error {
+  color: var(--v-danger);
+  background: var(--v-danger-soft);
+  border: 1px solid var(--v-danger-border);
+}
+
+.v-empty {
+  padding: 56px 24px;
+  text-align: center;
+  color: var(--v-text-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.v-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 16px;
+  border-radius: 16px;
+  color: var(--v-primary);
+  background: var(--v-primary-soft);
+}
+
+.v-empty-title {
+  margin-bottom: 4px;
+  color: var(--v-text);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.v-skeleton {
+  border-radius: 8px;
+  background: linear-gradient(90deg, #edf1ef 25%, #f6f8f7 50%, #edf1ef 75%);
+  background-size: 200% 100%;
+  animation: v-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes v-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.v-loading-line {
+  color: var(--v-text-muted);
+  font-size: 14px;
+}
+
+/* --- SCRUM-15 catalogue ---------------------------------------------------- */
+
+.v-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding: 18px 20px;
+}
+
+.v-toolbar .v-field {
+  flex: 1 1 220px;
+}
+
+.v-toolbar-meta {
+  margin-left: auto;
+  padding-bottom: 12px;
+  color: var(--v-text-muted);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.v-venue-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 20px;
+}
+
+.venues .v-venue-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  padding: 22px;
+  border: 1px solid var(--v-border);
+  border-radius: var(--v-radius-lg);
+  color: var(--v-text);
+  background: var(--v-surface);
+  box-shadow: var(--v-shadow-sm);
+  text-align: left;
+  transition: transform 0.18s ease, box-shadow 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.venues .v-venue-card:hover {
+  transform: translateY(-2px);
+  border-color: #c6d6cd;
+  box-shadow: var(--v-shadow-md);
+}
+
+.venues .v-venue-card:focus-within {
+  border-color: var(--v-primary);
+  box-shadow: var(--v-focus-ring);
+}
+
+/* the venue name button, stretched over the whole card */
+.venues .v-venue-card-link {
+  padding: 0;
+  border: none;
+  color: inherit;
+  background: none;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.venues .v-venue-card-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.venues .v-venue-card-link:focus-visible {
+  outline: none;
+}
+
+.v-venue-card-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.v-monogram {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  flex: none;
+  border-radius: 13px;
+  color: var(--v-primary);
+  background: var(--v-primary-soft);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+.v-venue-card-name {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.3px;
+}
+
+.v-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 3px;
+  color: var(--v-text-muted);
+  font-size: 13px;
+}
+
+.v-meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.v-venue-card-section-label {
+  margin-bottom: 7px;
+  color: var(--v-text-subtle);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.v-venue-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--v-border);
+  color: var(--v-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.v-venue-card-footer .v-icon {
+  transition: transform 0.18s ease;
+}
+
+.venues .v-venue-card:hover .v-venue-card-footer .v-icon {
+  transform: translateX(3px);
+}
+
+.v-skeleton-card {
+  display: grid;
+  gap: 14px;
+  padding: 22px;
+}
+
+/* --- SCRUM-15 / SCRUM-84 detail -------------------------------------------- */
+
+.v-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.v-stat {
+  padding: 18px 20px;
+}
+
+.v-stat-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--v-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.v-stat-value {
+  margin-top: 8px;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.v-stat-unit {
+  margin-left: 5px;
+  color: var(--v-text-muted);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.v-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.v-hours {
+  display: grid;
+  gap: 2px;
+}
+
+.v-hours-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: var(--v-radius-sm);
+  font-size: 14px;
+}
+
+.v-hours-row.is-today {
+  background: var(--v-primary-soft);
+  font-weight: 600;
+}
+
+.v-hours-day {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.v-hours-time {
+  font-variant-numeric: tabular-nums;
+}
+
+.v-hours-closed {
+  color: var(--v-text-subtle);
+}
+
+.v-notes {
+  color: var(--v-text-muted);
+  font-size: 15px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+/* --- SCRUM-16 edit form ---------------------------------------------------- */
+
+.v-hours-editor-row {
+  display: grid;
+  grid-template-columns: 120px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px 20px;
+  padding: 12px 0;
+  border-top: 1px solid var(--v-border);
+}
+
+.v-hours-editor-row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.v-hours-editor-row:last-child {
+  padding-bottom: 0;
+}
+
+.v-day-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.v-hours-editor-row.is-closed .v-day-name {
+  color: var(--v-text-subtle);
+}
+
+.venues .v-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--v-text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.v-time-range {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.venues .v-time-range .v-input {
+  width: 100%;
+  max-width: 150px;
+  min-height: 40px;
+  padding: 8px 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.v-time-sep {
+  color: var(--v-text-subtle);
+  font-size: 14px;
+}
+
+/* --- SCRUM-17 calendar ----------------------------------------------------- */
+
+.v-cal-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+}
+
+.v-cal-toolbar-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+}
+
+.v-segmented {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--v-border-strong);
+  border-radius: var(--v-radius-sm);
+  background: var(--v-surface);
+}
+
+.venues .v-segmented button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 38px;
+  padding: 0 12px;
+  border: none;
+  color: var(--v-text);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.venues .v-segmented button + button {
+  border-left: 1px solid var(--v-border-strong);
+}
+
+.venues .v-segmented button:hover {
+  color: var(--v-primary);
+  background: var(--v-surface-muted);
+}
+
+.v-cal-range {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.venues .v-cal-date-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--v-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.venues .v-cal-date-field .v-input {
+  width: auto;
+  min-height: 38px;
+  padding: 6px 10px;
+  font-size: 14px;
+}
+
+.v-table-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.v-table-scroll {
+  overflow-x: auto;
+}
+
+.v-cal {
+  width: 100%;
+  min-width: 660px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.v-cal th {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--v-border);
+  color: var(--v-text-subtle);
+  background: var(--v-surface-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.v-cal th:first-child {
+  padding-left: 20px;
+}
+
+.v-cal th small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.v-cal td {
+  padding: 6px;
+  border-bottom: 1px solid var(--v-border);
+  vertical-align: middle;
+}
+
+.v-cal td:last-child {
+  padding-right: 12px;
+}
+
+.v-cal-date {
+  width: 150px;
+  white-space: nowrap;
+}
+
+/* each row's date is a row header for screen readers, styled as a plain cell */
+.venues .v-cal tbody th,
+.venues .v-cal td.v-cal-date {
+  padding: 8px 10px 8px 20px;
+  border-bottom: 1px solid var(--v-border);
+  color: var(--v-text);
+  background: var(--v-surface);
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: 0;
+  text-align: left;
+  text-transform: none;
+  vertical-align: middle;
+}
+
+.venues .v-cal tbody tr:last-child td,
+.venues .v-cal tbody tr:last-child th {
+  border-bottom: none;
+}
+
+.v-cal-weekday {
+  display: block;
+  color: var(--v-text-subtle);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.v-cal-day {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.venues .v-cal-row.is-today .v-cal-date {
+  box-shadow: inset 3px 0 0 var(--v-primary);
+  background: var(--v-primary-soft);
+}
+
+.v-slot {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-height: 54px;
+  padding: 8px 12px;
+  border: 1px solid;
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.v-slot-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+}
+
+.v-slot-status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.v-slot-detail {
+  max-width: 220px;
+  overflow: hidden;
+  padding-left: 14px;
+  font-size: 12px;
+  opacity: 0.85;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.v-slot-available {
+  color: var(--v-available-fg);
+  background: var(--v-available-bg);
+  border-color: var(--v-available-bd);
+}
+
+.v-slot-booked {
+  color: var(--v-booked-fg);
+  background: var(--v-booked-bg);
+  border-color: var(--v-booked-bd);
+}
+
+.v-slot-pending {
+  color: var(--v-pending-fg);
+  background: var(--v-pending-bg);
+  border-color: var(--v-pending-bd);
+}
+
+.v-slot-unavailable {
+  color: var(--v-unavailable-fg);
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--v-unavailable-bg),
+    var(--v-unavailable-bg) 6px,
+    #e6eaee 6px,
+    #e6eaee 12px
+  );
+  border-color: var(--v-unavailable-bd);
+}
+
+.v-slot-closed {
+  color: var(--v-closed-fg);
+  background: var(--v-closed-bg);
+  border-color: var(--v-closed-bd);
+  border-style: dashed;
+}
+
+.v-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  margin-top: 16px;
+  color: var(--v-text-muted);
+  font-size: 13px;
+}
+
+.v-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.v-legend-swatch {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border: 1px solid;
+  border-radius: 4px;
+}
+
+.v-legend-swatch.v-slot-closed {
+  border-style: dashed;
+}
+
+/* --- SCRUM-21 request form ------------------------------------------------- */
+
+.v-steps {
+  display: grid;
+  gap: 20px;
+}
+
+.v-step-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.v-step-number {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 50%;
+  color: var(--v-primary);
+  background: var(--v-primary-soft);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.v-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--v-border);
+  border-radius: var(--v-radius-md);
+  color: var(--v-text);
+  background: var(--v-surface-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.v-callout .v-icon {
+  margin-top: 2px;
+  color: var(--v-primary);
+}
+
+.v-slot-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.venues .v-slot-option {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px 16px;
+  border: 1.5px solid var(--v-border-strong);
+  border-radius: var(--v-radius-md);
+  background: var(--v-surface);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.venues .v-slot-option input {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+}
+
+.v-slot-option-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.v-slot-option-time {
+  color: var(--v-text-subtle);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.v-slot-option .v-status {
+  align-self: flex-start;
+  margin-top: 8px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.venues .v-slot-option:hover:not(.is-disabled) {
+  border-color: var(--v-primary);
+}
+
+.venues .v-slot-option:focus-within {
+  box-shadow: var(--v-focus-ring);
+}
+
+.venues .v-slot-option.is-selected {
+  border-color: var(--v-primary);
+  background: var(--v-primary-soft);
+}
+
+.venues .v-slot-option.is-disabled {
+  background: var(--v-surface-muted);
+  border-color: var(--v-border);
+  cursor: not-allowed;
+}
+
+.venues .v-slot-option.is-disabled .v-slot-option-name {
+  color: var(--v-text-subtle);
+}
+
+.v-capacity-meter {
+  display: block;
+  height: 6px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--v-border);
+}
+
+.v-capacity-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--v-primary);
+  transition: width 0.2s ease;
+}
+
+.v-capacity-meter.is-over > span {
+  background: var(--v-danger);
+}
+
+.v-action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  padding: 16px 20px;
+}
+
+.v-action-bar-note {
+  color: var(--v-text-subtle);
+  font-size: 13px;
+}
+
+.v-success {
+  padding: 44px 32px;
+  text-align: center;
+}
+
+.v-success-icon {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  margin: 0 auto 18px;
+  border-radius: 50%;
+  color: var(--v-success);
+  background: var(--v-success-soft);
+}
+
+.v-summary {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 10px 24px;
+  max-width: 540px;
+  margin: 26px auto;
+  padding: 18px 22px;
+  border: 1px solid var(--v-border);
+  border-radius: var(--v-radius-md);
+  background: var(--v-surface-muted);
+  text-align: left;
+}
+
+.venues .v-summary dt {
+  color: var(--v-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.venues .v-summary dd {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+/* --- SCRUM-88 review list -------------------------------------------------- */
+
+.venues .v-filter-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--v-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.venues .v-filter-field .v-input {
+  width: auto;
+  min-width: 170px;
+}
+
+.v-request-list {
+  display: grid;
+  gap: 16px;
+}
+
+.v-results-count {
+  margin-bottom: 14px;
+  color: var(--v-text-muted);
+  font-size: 14px;
+}
+
+.v-request {
+  padding: 0;
+  overflow: hidden;
+}
+
+.v-request-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 16px;
+  padding: 20px 24px 16px;
+}
+
+.v-request-title {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+
+.v-request-body {
+  display: grid;
+  gap: 18px;
+  padding: 0 24px 22px;
+}
+
+.v-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  gap: 12px;
+}
+
+.v-fact {
+  padding: 13px 15px;
+  border: 1px solid var(--v-border);
+  border-radius: var(--v-radius-md);
+  background: var(--v-surface-muted);
+}
+
+.v-fact-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--v-text-subtle);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.v-fact-value {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.v-fact-sub {
+  margin-top: 2px;
+  color: var(--v-text-muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.v-request-requirements {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 16px;
+}
+
+.v-request-requirements .v-notes {
+  font-size: 14px;
+}
+
+.v-subheading {
+  margin-bottom: 8px;
+  color: var(--v-text-subtle);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.v-request-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 16px;
+  padding: 12px 24px;
+  border-top: 1px solid var(--v-border);
+  color: var(--v-text-subtle);
+  background: var(--v-surface-muted);
+  font-size: 12px;
+}
+
+.v-mono {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+}
+
+/* --- Small screens --------------------------------------------------------- */
+
+@media (max-width: 860px) {
+  .v-detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .venues {
+    padding-top: 20px;
+  }
+
+  .v-card {
+    padding: 18px;
+  }
+
+  .v-actions,
+  .v-actions .v-btn {
+    width: 100%;
+  }
+
+  .v-toolbar-meta {
+    margin-left: 0;
+    padding-bottom: 0;
+  }
+
+  .v-hours-editor-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .v-time-range {
+    grid-column: 1 / -1;
+  }
+
+  .v-summary {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .venues .v-summary dd {
+    margin-bottom: 10px;
+  }
+
+  .v-action-bar {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .v-action-bar .v-form-actions,
+  .v-action-bar .v-form-actions .v-btn {
+    width: 100%;
+  }
+
+  /* SCRUM-17 calendar on a phone: all three slots fit on screen at once.
+     Scrolling sideways would hide PM and Night behind AM, which reads as if
+     those slots do not exist. */
+  .venues .v-table-card {
+    padding: 0;
+  }
+
+  .v-cal {
+    min-width: 0;
+    table-layout: fixed;
+  }
+
+  .v-cal th {
+    padding: 10px 4px;
+    font-size: 10px;
+    letter-spacing: 0.6px;
+  }
+
+  .v-cal th:first-child {
+    width: 66px;
+    padding-left: 12px;
+  }
+
+  .v-cal th small {
+    display: none;
+  }
+
+  .venues .v-cal tbody th,
+  .venues .v-cal td.v-cal-date {
+    width: 66px;
+    padding: 8px 2px 8px 12px;
+    white-space: normal;
+  }
+
+  .v-cal td {
+    padding: 4px 2px;
+  }
+
+  .v-cal td:last-child {
+    padding-right: 8px;
+  }
+
+  .v-cal-weekday {
+    font-size: 10px;
+  }
+
+  .v-cal-day {
+    flex-wrap: wrap;
+    gap: 3px;
+    font-size: 13px;
+  }
+
+  .v-slot {
+    min-height: 46px;
+    padding: 6px 7px;
+    border-radius: 8px;
+    font-size: 11px;
+  }
+
+  .v-slot-status {
+    gap: 4px;
+  }
+
+  .v-slot-status::before {
+    width: 6px;
+    height: 6px;
+  }
+
+  .v-slot-detail {
+    max-width: none;
+    padding-left: 0;
+    font-size: 10px;
+    line-height: 1.25;
+    white-space: normal;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .v-skeleton {
+    animation: none;
+  }
+
+  .venues .v-venue-card,
+  .venues .v-venue-card:hover,
+  .v-venue-card-footer .v-icon {
+    transition: none;
+    transform: none;
+  }
+}
