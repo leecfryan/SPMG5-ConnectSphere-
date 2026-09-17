@@ -4,12 +4,16 @@ import VenueCard from "../components/VenueCard";
 import VenueDetail from "../components/VenueDetail";
 import VenueEditForm from "../components/VenueEditForm";
 import VenueAvailabilityCalendar from "../components/VenueAvailabilityCalendar";
+import VenueBookingRequestForm from "../components/VenueBookingRequestForm";
+import VenueBookingRequestList from "../components/VenueBookingRequestList";
 
 function VenueCataloguePage() {
   const [venues, setVenues] = useState([]);
   const [selectedVenue, setSelectedVenue] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isViewingAvailability, setIsViewingAvailability] = useState(false);
+  const [isRequestingBooking, setIsRequestingBooking] = useState(false);
+  const [isReviewingRequests, setIsReviewingRequests] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -58,6 +62,26 @@ function VenueCataloguePage() {
       .finally(() => setIsSaving(false));
   }
 
+  // SCRUM-88: the Venue Staff review queue is not tied to one venue, so it is
+  // checked before anything that needs a selected venue.
+  if (isReviewingRequests) {
+    return (
+      <VenueBookingRequestList onBack={() => setIsReviewingRequests(false)} />
+    );
+  }
+
+  // SCRUM-21: opened from the calendar, and both ways out return to it. The
+  // calendar refetches when it mounts, so a new request shows as Requested.
+  if (selectedVenue && isViewingAvailability && isRequestingBooking) {
+    return (
+      <VenueBookingRequestForm
+        venue={selectedVenue}
+        onDone={() => setIsRequestingBooking(false)}
+        onCancel={() => setIsRequestingBooking(false)}
+      />
+    );
+  }
+
   // SCRUM-17: availability is its own view, same state-driven switch as the
   // edit form. Still no router installed.
   if (selectedVenue && isViewingAvailability) {
@@ -65,6 +89,7 @@ function VenueCataloguePage() {
       <VenueAvailabilityCalendar
         venue={selectedVenue}
         onBack={() => setIsViewingAvailability(false)}
+        onRequestBooking={() => setIsRequestingBooking(true)}
       />
     );
   }
@@ -95,6 +120,11 @@ function VenueCataloguePage() {
   return (
     <div className="venue-catalogue">
       <h2>Venue catalogue</h2>
+
+      {/* SCRUM-88: entry point for Venue Staff until there is real navigation */}
+      <button type="button" onClick={() => setIsReviewingRequests(true)}>
+        Review booking requests (Venue Staff)
+      </button>
 
       <div className="venue-filters">
         <label>

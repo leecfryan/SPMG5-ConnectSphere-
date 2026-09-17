@@ -47,3 +47,34 @@ export function fetchVenueAvailability(id, { from, to } = {}) {
   const query = params.toString();
   return request(`/api/venues/${id}/availability${query ? `?${query}` : ""}`);
 }
+
+// SCRUM-21: placeholder roles until real sign-in is merged. Named with the
+// develop branch role slugs so the backend guard already matches them.
+const DEV_REQUESTER_ROLE = "event_coordinator";
+const DEV_REVIEWER_ROLE = "venue_staff";
+
+// SCRUM-85: events a coordinator can attach a venue request to
+export function fetchBookableEvents() {
+  return request("/api/venues/booking-events", {
+    headers: { "x-user-role": DEV_REQUESTER_ROLE },
+  });
+}
+
+export function submitBookingRequest(venueId, payload) {
+  return request(`/api/venues/${venueId}/booking-requests`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-user-role": DEV_REQUESTER_ROLE,
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+// SCRUM-88: what Venue Staff review
+export function fetchBookingRequests({ status } = {}) {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  return request(`/api/venues/booking-requests${query}`, {
+    headers: { "x-user-role": DEV_REVIEWER_ROLE },
+  });
+}

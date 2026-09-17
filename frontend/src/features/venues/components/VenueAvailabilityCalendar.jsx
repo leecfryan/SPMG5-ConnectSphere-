@@ -37,7 +37,7 @@ function shiftDate(dateString, days) {
   return date.toISOString().slice(0, 10);
 }
 
-function VenueAvailabilityCalendar({ venue, onBack }) {
+function VenueAvailabilityCalendar({ venue, onBack, onRequestBooking }) {
   // Read the id once here rather than inside the effect or a handler. The
   // React Compiler hoists a closure's property reads into its memo check, and
   // that is what crashed the catalogue page in SCRUM-16.
@@ -64,6 +64,11 @@ function VenueAvailabilityCalendar({ venue, onBack }) {
     <div className="venue-availability">
       <button type="button" onClick={onBack}>
         Back to venue
+      </button>
+
+      {/* SCRUM-21: request slots straight from the calendar that shows them */}
+      <button type="button" onClick={onRequestBooking}>
+        Request a booking
       </button>
 
       <h2>Availability calendar</h2>
