@@ -1,6 +1,6 @@
 import react, { reactCompilerPreset } from '@vitejs/plugin-react'
 import babel from '@rolldown/plugin-babel'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import process from 'node:process'
 
 const proxy = {
@@ -14,4 +14,9 @@ export default defineConfig({
   plugins: [react(), babel({ presets: [reactCompilerPreset()] })],
   server: { proxy },
   preview: { proxy },
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.js'],
+    globals: true,
+  },
 })
