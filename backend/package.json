@@ -8,7 +8,7 @@
     "test:cov": "node --test --experimental-test-coverage \"tests/**/*.test.js\"",
     "dev": "nodemon src/server.js",
     "start": " node src/server.js",
-    "check": "node --check src/server.js && node --check src/supabase.js"
+    "check": "eslint ."
   },
   "keywords": [],
   "author": "",
@@ -21,6 +21,9 @@
     "express": "^5.2.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.10.0",
+    "globals": "^17.12.0",
     "nodemon": "^3.1.14"
   }
 }
