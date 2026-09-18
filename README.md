@@ -100,6 +100,11 @@ The existing frontend tests have a live browser dashboard and automatically save
 a self-contained HTML report after each completed run. See
 [test reporting](docs/test-reporting.md) for local and Docker commands.
 
+Playwright also runs browser-to-backend sign-in/RBAC scenarios and direct HTTP
+API tests. From the repository root, run `npm run test:playwright` after the
+one-time setup in the [Playwright acceptance guide](docs/testing/playwright-acceptance.md).
+Use `npm run test:playwright:report` to inspect the saved results.
+
 ## Checks and story traceability
 
 ```sh
@@ -128,16 +133,16 @@ Additional manual checks: sign out and reload; repeat with an internal staff
 account and an external account; try a narrow mobile viewport; stop the backend
 and confirm protected account information is not shown for a new session.
 
-Frontend regression coverage:
+Frontend regression coverage uses unique IDs and descriptive titles. See the
+[frontend acceptance test guide](docs/testing/frontend-acceptance.md) for the
+criterion mapping, full test catalog, commands and remaining acceptance evidence.
 
-| Test | Evidence |
+| Test group | Evidence |
 | --- | --- |
-| AUTH-01–03 | Required fields and invalid email syntax block submission. |
-| AUTH-04 | Multiple email domains submit the entered credentials; password is cleared. |
-| AUTH-05/07 | Credential failures show generic messages; rate limits/outages allow retry without leaking provider details. |
-| AUTH-06 | Concurrent submissions make one request; controls stay disabled while pending. |
-| App AC1/AC3 | Sign-in and restored sessions display only the backend-verified identity. |
-| App AC2 | Rejected credentials, rejected sessions, token refresh and late responses after sign-out cannot reveal protected account information. |
+| AUTH-FORM / AUTH-SERVICE / AUTH-CONFIG | Form validation, credential forwarding, safe failures, retries and client configuration. |
+| AUTH-FLOW / ROUTE | Verified identity, session changes, sign-out, direct links, return URLs and browser history. |
+| RBAC-ROLE / RBAC-GUARD / RBAC-SCOPE | Current role policy, 48 role/permission guard combinations and responsibility-based guard eligibility. |
+| RBAC-ACCESS / RBAC-DENY / RBAC-DATA | Forbidden navigation, permission revocation, malformed claims and denied staff API responses. |
 
 These automated tests simulate Supabase and do not establish that the deployed
 service is configured correctly. Record live internal/external sign-in, wrong

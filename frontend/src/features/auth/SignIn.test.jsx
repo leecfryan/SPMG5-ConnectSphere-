@@ -14,7 +14,7 @@ import SignIn from "./SignIn";
 
 afterEach(cleanup);
 
-test("AUTH-01: does not submit when email is empty", async () => {
+test("[AUTH-FORM-001] Empty email prevents authentication", async () => {
   const user = userEvent.setup();
 
   const signInWithPassword = vi.fn().mockResolvedValue({ error: null });
@@ -42,7 +42,7 @@ test("AUTH-01: does not submit when email is empty", async () => {
   expect(signInWithPassword).not.toHaveBeenCalled();
 });
 
-test("AUTH-02: does not submit when password is empty", async () => {
+test("[AUTH-FORM-002] Empty password prevents authentication", async () => {
   const user = userEvent.setup();
 
   const signInWithPassword = vi.fn().mockResolvedValue({ error: null });
@@ -70,7 +70,7 @@ test("AUTH-02: does not submit when password is empty", async () => {
   expect(signInWithPassword).not.toHaveBeenCalled();
 });
 
-test("AUTH-03: does not submit when email format is invalid", async () => {
+test("[AUTH-FORM-003] Invalid email syntax prevents authentication", async () => {
   //Arrange
   const user = userEvent.setup();
 
@@ -102,10 +102,10 @@ test("AUTH-03: does not submit when email format is invalid", async () => {
 });
 
 test.each([
-  "ryan@gmail.com",
-  "staff@connectsphere.sg",
-  "attendee.demo@example.com",
-])("AUTH-04: submits entered credentials for %s", async (email) => {
+  ["AUTH-FORM-004", "ryan@gmail.com"],
+  ["AUTH-FORM-005", "staff@connectsphere.sg"],
+  ["AUTH-FORM-006", "attendee.demo@example.com"],
+])("[%s] Submit entered credentials for %s without a domain allowlist", async (_id, email) => {
   //Arrange
   const user = userEvent.setup();
 
@@ -143,14 +143,14 @@ test.each([
 });
 
 test.each([
-  [400, "Unable to sign in. Check your email and password and try again."],
-  [422, "Unable to sign in. Check your email and password and try again."],
-  [429, "Too many sign-in attempts. Please wait a moment and try again."],
-  [503, "Sign-in is temporarily unavailable. Please try again."],
-  [undefined, "Sign-in is temporarily unavailable. Please try again."],
+  ["AUTH-FORM-007", 400, "Unable to sign in. Check your email and password and try again."],
+  ["AUTH-FORM-008", 422, "Unable to sign in. Check your email and password and try again."],
+  ["AUTH-FORM-009", 429, "Too many sign-in attempts. Please wait a moment and try again."],
+  ["AUTH-FORM-010", 503, "Sign-in is temporarily unavailable. Please try again."],
+  ["AUTH-FORM-011", undefined, "Sign-in is temporarily unavailable. Please try again."],
 ])(
-  "AUTH-05/07: handles provider status %s without revealing details",
-  async (status, message) => {
+  "[%s] Provider status %s displays a safe message and clears the password",
+  async (_id, status, message) => {
     const user = userEvent.setup();
     const signInWithPassword = vi.fn().mockResolvedValue({
       error: { status, message: "Private account and provider details" },
@@ -174,7 +174,7 @@ test.each([
   },
 );
 
-test("AUTH-06: concurrent submissions send only one request and disable the form", async () => {
+test("[AUTH-FORM-012] Concurrent submissions send one request and disable the form", async () => {
   let finish;
   const signInWithPassword = vi.fn().mockReturnValue(
     new Promise((resolve) => {
@@ -210,7 +210,7 @@ test("AUTH-06: concurrent submissions send only one request and disable the form
   ).toBe(false);
 });
 
-test("AUTH-07: connection failure clears the password and allows a successful retry", async () => {
+test("[AUTH-FORM-013] Network failure clears the password and permits a successful retry", async () => {
   const user = userEvent.setup();
   const signInWithPassword = vi
     .fn()
@@ -237,4 +237,30 @@ test("AUTH-07: connection failure clears the password and allows a successful re
     email: "user@client.sg",
     password: "CorrectPassword!",
   });
+});
+
+test("[AUTH-FORM-014] Password visibility toggles without submitting or changing the password", async () => {
+  const user = userEvent.setup();
+  const signInWithPassword = vi.fn();
+  render(<SignIn client={{ auth: { signInWithPassword } }} />);
+  const password = screen.getByLabelText("Password", { exact: true });
+  await user.type(password, "Secret with spaces");
+  expect(password.type).toBe("password");
+  await user.click(screen.getByRole("button", { name: "Show password" }));
+  expect(password.type).toBe("text");
+  expect(screen.getByRole("button", { name: "Hide password" }).getAttribute("aria-pressed")).toBe("true");
+  await user.click(screen.getByRole("button", { name: "Hide password" }));
+  expect(password.type).toBe("password");
+  expect(password.value).toBe("Secret with spaces");
+  expect(signInWithPassword).not.toHaveBeenCalled();
+});
+
+test("[AUTH-FORM-015] Keyboard Enter submits the filled form exactly once", async () => {
+  const user = userEvent.setup();
+  const signInWithPassword = vi.fn().mockResolvedValue({ error: null });
+  render(<SignIn client={{ auth: { signInWithPassword } }} />);
+  await user.type(screen.getByLabelText("Email address"), "user@client.sg");
+  await user.type(screen.getByLabelText("Password", { exact: true }), "TypedPassword!{Enter}");
+  expect(signInWithPassword).toHaveBeenCalledExactlyOnceWith({ email: "user@client.sg", password: "TypedPassword!" });
+  expect(screen.getByLabelText("Password", { exact: true }).value).toBe("");
 });

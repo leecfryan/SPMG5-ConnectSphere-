@@ -1,5 +1,16 @@
 {
   "dependencies": {
     "react-router-dom": "^7.18.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  },
+  "private": true,
+  "scripts": {
+    "test:playwright": "playwright test",
+    "test:e2e": "playwright test --project=chromium",
+    "test:api": "playwright test --project=api",
+    "test:playwright:ui": "playwright test --ui",
+    "test:playwright:report": "playwright show-report"
   }
 }

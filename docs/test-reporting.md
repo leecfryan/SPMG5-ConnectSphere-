@@ -23,7 +23,7 @@ Start the live dashboard:
 npm --prefix frontend run test:ui
 ```
 
-Open the UI URL printed in the terminal (port 51204, path /__vitest__/).
+Open the UI URL printed in the terminal (port 51204, path /**vitest**/).
 Keep its token query parameter if present. Tests rerun when source files change;
 you can also rerun tests from the dashboard. Stop the process with Ctrl+C.
 

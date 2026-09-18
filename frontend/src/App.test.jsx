@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { getAuthClient } from "./lib/supabase";
@@ -76,7 +76,7 @@ async function submitSignIn() {
   await user.click(screen.getByRole("button", { name: "Sign in", exact: true }));
 }
 
-test("AC1/AC3: sign-in displays only the identity verified by the backend", async () => {
+test("[AUTH-FLOW-001] Valid sign-in displays the backend-verified identity", async () => {
   const { auth, fetchMock } = setup();
   const user = userEvent.setup();
   renderApp();
@@ -93,7 +93,7 @@ test("AC1/AC3: sign-in displays only the identity verified by the backend", asyn
   expect(screen.queryByText("unverified@client.sg")).toBeNull();
 });
 
-test("AC2: rejected credentials never request protected account information", async () => {
+test("[AUTH-FLOW-002] Rejected credentials leave protected account information inaccessible", async () => {
   const { auth, fetchMock } = setup();
   auth.signInWithPassword.mockResolvedValue({ error: { status: 400 } });
   const user = userEvent.setup();
@@ -106,7 +106,7 @@ test("AC2: rejected credentials never request protected account information", as
   expect(screen.queryByText("You’re signed in")).toBeNull();
 });
 
-test.each([401, 503])("AC2: a restored session denied with %s reveals no account data", async (status) => {
+test.each([["AUTH-FLOW-003", 401], ["AUTH-FLOW-004", 503]])("[%s] Restored session denied with HTTP %s reveals no account data", async (_id, status) => {
   const { fetchMock } = setup(session);
   fetchMock.mockResolvedValue(reply(status, { message: "Private upstream details" }));
   renderApp();
@@ -116,7 +116,7 @@ test.each([401, 503])("AC2: a restored session denied with %s reveals no account
   expect(screen.queryByText("Private upstream details")).toBeNull();
 });
 
-test("AC1: restored sessions are verified again; sign-out and reload remove the account", async () => {
+test("[AUTH-FLOW-005] Session restoration verifies identity and sign-out survives a simulated reload", async () => {
   const { auth, fetchMock, unsubscribe } = setup(session);
   const user = userEvent.setup();
   const view = renderApp();
@@ -136,7 +136,7 @@ test("AC1: restored sessions are verified again; sign-out and reload remove the 
   expect(next.fetchMock).not.toHaveBeenCalled();
 });
 
-test("AC2: token refresh hides the previous account until the new token is verified", async () => {
+test("[AUTH-FLOW-006] Token refresh hides the previous identity until verification succeeds", async () => {
   const { emit, fetchMock } = setup(session);
   renderApp();
   expect(await screen.findByText("Welcome, Verified Person.")).toBeTruthy();
@@ -150,7 +150,7 @@ test("AC2: token refresh hides the previous account until the new token is verif
   expect(screen.queryByText("You’re signed in")).toBeNull();
 });
 
-test("AC2: a late verification response cannot restore account data after sign-out", async () => {
+test("[AUTH-FLOW-007] Late verification cannot restore protected content after sign-out", async () => {
   const { emit, fetchMock } = setup(session);
   let finish;
   fetchMock.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
@@ -163,7 +163,7 @@ test("AC2: a late verification response cannot restore account data after sign-o
   expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
 });
 
-test("routing: direct staff link signs in and returns to the requested URL", async () => {
+test("[ROUTE-001] Successful sign-in returns to the requested staff URL", async () => {
   const { fetchMock } = setup(null, staffUser, ["internal.access", "venues.read"]);
   renderApp(["/staff/responsibilities?view=all#list"]);
   await screen.findByLabelText("Email address");
@@ -175,11 +175,11 @@ test("routing: direct staff link signs in and returns to the requested URL", asy
 });
 
 test.each([
-  ["external user", verifiedUser, []],
-  ["internal classification alone", staffUser, []],
-  ["unrecognised permission", staffUser, ["administrator"]],
-  ["existing manager policy", { ...staffUser, roles: ["event_ops_manager"] }, ["event_organisers.read"]],
-])("RBAC: %s cannot access a staff page by URL", async (_name, identity, permissions) => {
+  ["RBAC-ACCESS-001", "external user", verifiedUser, []],
+  ["RBAC-ACCESS-002", "internal classification alone", staffUser, []],
+  ["RBAC-ACCESS-003", "unrecognised permission", staffUser, ["administrator"]],
+  ["RBAC-ACCESS-004", "existing manager policy", { ...staffUser, roles: ["event_ops_manager"] }, ["event_organisers.read"]],
+])("[%s] %s cannot access a staff page by URL", async (_id, _name, identity, permissions) => {
   const { fetchMock } = setup(session, identity, permissions);
   renderApp(["/staff/responsibilities"]);
   expect(await screen.findByRole("heading", { name: "Access denied" })).toBeTruthy();
@@ -188,7 +188,7 @@ test.each([
   expect(fetchMock).not.toHaveBeenCalledWith("/api/internal/access", expect.anything());
 });
 
-test("RBAC: sign-in to a forbidden return URL still enforces permission", async () => {
+test("[RBAC-ACCESS-005] Sign-in to a forbidden return URL still enforces permission", async () => {
   const { fetchMock } = setup();
   renderApp(["/staff/responsibilities"]);
   await submitSignIn();
@@ -196,7 +196,7 @@ test("RBAC: sign-in to a forbidden return URL still enforces permission", async 
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
-test("routing: navigation and browser history share one verified identity", async () => {
+test("[ROUTE-002] Page navigation and Back/Forward share one verified identity", async () => {
   const { auth, fetchMock } = setup(session, staffUser, ["internal.access", "venues.read"]);
   const user = userEvent.setup();
   renderApp(["/account"]);
@@ -213,7 +213,7 @@ test("routing: navigation and browser history share one verified identity", asyn
   expect(auth.onAuthStateChange).toHaveBeenCalledTimes(1);
 });
 
-test("routing: sign-out on a staff page prevents back navigation from exposing it", async () => {
+test("[ROUTE-003] Browser Back after sign-out cannot reveal protected staff content", async () => {
   setup(session, staffUser, ["internal.access"]);
   const user = userEvent.setup();
   renderApp(["/account"]);
@@ -227,7 +227,7 @@ test("routing: sign-out on a staff page prevents back navigation from exposing i
   expect(screen.getByTestId("location").textContent).toBe("/sign-in");
 });
 
-test("RBAC: re-verification of the same token removes revoked navigation and page access", async () => {
+test("[RBAC-ACCESS-006] Re-verification removes revoked navigation and page access", async () => {
   const { emit, fetchMock } = setup(session, staffUser, ["internal.access"]);
   renderApp(["/staff/responsibilities"]);
   await screen.findByText("Venue information and availability");
@@ -240,7 +240,7 @@ test("RBAC: re-verification of the same token removes revoked navigation and pag
   expect(await screen.findByRole("heading", { name: "Access denied" })).toBeTruthy();
 });
 
-test("RBAC: the server can reject staff data even when navigation was previously allowed", async () => {
+test("[RBAC-ACCESS-007] Backend denial hides staff data despite previously allowed navigation", async () => {
   const { fetchMock } = setup(session, staffUser, ["internal.access"]);
   fetchMock.mockImplementation(async (url) => url === "/api/auth/me"
     ? reply(200, { user: staffUser, permissions: ["internal.access"] })
@@ -251,7 +251,7 @@ test("RBAC: the server can reject staff data even when navigation was previously
   expect(screen.queryByText("Venue information and availability")).toBeNull();
 });
 
-test("AC2: backend outage keeps protected routes hidden and supports retry", async () => {
+test("[AUTH-FLOW-008] Verification outage hides protected routes and permits retry", async () => {
   const { fetchMock } = setup(session);
   fetchMock.mockResolvedValueOnce(reply(503, {}));
   const user = userEvent.setup();
@@ -262,7 +262,7 @@ test("AC2: backend outage keeps protected routes hidden and supports retry", asy
   expect(await screen.findByText("Welcome, Verified Person.")).toBeTruthy();
 });
 
-test("connection initialization can be retried without a page reload", async () => {
+test("[AUTH-FLOW-009] Authentication initialization failure supports retry", async () => {
   setup();
   getAuthClient.mockRejectedValueOnce(new Error("Private connection details"));
   const user = userEvent.setup();
@@ -272,7 +272,7 @@ test("connection initialization can be retried without a page reload", async () 
   expect(await screen.findByLabelText("Email address")).toBeTruthy();
 });
 
-test("failed sign-out displays a safe error and allows retry", async () => {
+test("[AUTH-FLOW-010] Failed sign-out displays a safe message and supports retry", async () => {
   const { auth } = setup(session);
   auth.signOut.mockResolvedValueOnce({ error: new Error("Private provider details") });
   const user = userEvent.setup();
@@ -284,8 +284,8 @@ test("failed sign-out displays a safe error and allows retry", async () => {
   expect(await screen.findByLabelText("Email address")).toBeTruthy();
 });
 
-test.each(["https://outside.example", "//outside.example", "/\\outside.example", "/SIGN-IN/", "/a/../sign-in"])(
-  "routing: unsafe or looping return destination %s falls back to account", async (from) => {
+test.each([["ROUTE-004", "https://outside.example"], ["ROUTE-005", "//outside.example"], ["ROUTE-006", "/\\outside.example"], ["ROUTE-007", "/SIGN-IN/"], ["ROUTE-008", "/a/../sign-in"]])(
+  "[%s] Unsafe or looping return destination %s falls back to account", async (_id, from) => {
     setup(session);
     renderApp([{ pathname: "/sign-in", state: { from } }]);
     await screen.findByText("Welcome, Verified Person.");
@@ -293,7 +293,7 @@ test.each(["https://outside.example", "//outside.example", "/\\outside.example",
   },
 );
 
-test("routing: unknown URLs show a usable not-found page", async () => {
+test("[ROUTE-009] Unknown URL displays a usable not-found page", async () => {
   setup();
   const user = userEvent.setup();
   renderApp(["/does-not-exist"]);
@@ -302,10 +302,116 @@ test("routing: unknown URLs show a usable not-found page", async () => {
   expect(await screen.findByLabelText("Email address")).toBeTruthy();
 });
 
-test("session subscription survives StrictMode cleanup without stale listeners", async () => {
+test("[AUTH-FLOW-011] StrictMode initialization and cleanup preserve session handling", async () => {
   const { unsubscribe } = setup(session);
   const view = renderApp(["/account"], true);
   expect(await screen.findByText("Welcome, Verified Person.")).toBeTruthy();
   view.unmount();
   expect(unsubscribe).toHaveBeenCalled();
+});
+
+test("[AUTH-FLOW-012] Successful SDK sign-in waits for backend verification before granting access", async () => {
+  const { fetchMock } = setup();
+  let finish;
+  fetchMock.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+  renderApp(["/account"]);
+  await submitSignIn();
+  expect(screen.getByText("Confirming your access…")).toBeTruthy();
+  expect(screen.queryByText("Welcome, Verified Person.")).toBeNull();
+  expect(screen.queryByRole("navigation", { name: "Workspace" })).toBeNull();
+  expect(screen.queryByText("unverified@client.sg")).toBeNull();
+
+  await act(async () => { finish(reply(200, { user: verifiedUser, permissions: [] })); });
+  expect(await screen.findByText("Welcome, Verified Person.")).toBeTruthy();
+  expect(screen.getByTestId("location").textContent).toBe("/account");
+});
+
+test("[AUTH-FLOW-013] Rejected backend verification blocks access after SDK sign-in succeeds", async () => {
+  const { fetchMock } = setup();
+  fetchMock.mockResolvedValue(reply(401, { message: "Private rejection details" }));
+  renderApp(["/account"]);
+  await submitSignIn();
+  expect((await screen.findByRole("alert")).textContent).toMatch(/session is no longer valid/);
+  expect(screen.queryByRole("navigation", { name: "Workspace" })).toBeNull();
+  expect(screen.queryByText("You’re signed in")).toBeNull();
+  expect(screen.queryByText("Private rejection details")).toBeNull();
+});
+
+test.each([
+  ["AUTH-FLOW-014", "missing user", { user: null }],
+  ["AUTH-FLOW-015", "missing user ID", { user: { ...verifiedUser, id: undefined } }],
+  ["AUTH-FLOW-016", "malformed roles", { user: { ...verifiedUser, roles: "venue_staff" } }],
+  ["AUTH-FLOW-017", "malformed account types", { user: { ...verifiedUser, accountTypes: "internal" } }],
+])("[%s] A successful HTTP response with %s cannot establish identity", async (_id, _title, body) => {
+  const { fetchMock } = setup(session);
+  fetchMock.mockResolvedValue(reply(200, body));
+  renderApp(["/account"]);
+  expect((await screen.findByRole("alert")).textContent).toMatch(/couldn’t verify/);
+  expect(screen.queryByText("You’re signed in")).toBeNull();
+  expect(screen.queryByRole("navigation", { name: "Workspace" })).toBeNull();
+});
+
+test("[AUTH-FLOW-018] A verification network error hides protected content without leaking details", async () => {
+  const { fetchMock } = setup(session);
+  fetchMock.mockRejectedValue(new Error("Private network trace"));
+  renderApp(["/account"]);
+  expect((await screen.findByRole("alert")).textContent).toMatch(/couldn’t verify/);
+  expect(screen.queryByText("Private network trace")).toBeNull();
+  expect(screen.queryByRole("navigation", { name: "Workspace" })).toBeNull();
+});
+
+test("[AUTH-FLOW-019] Invalid verification JSON cannot establish an authenticated identity", async () => {
+  const { fetchMock } = setup(session);
+  fetchMock.mockResolvedValue({ status: 200, ok: true, json: async () => { throw new Error("Private parser details"); } });
+  renderApp(["/account"]);
+  expect((await screen.findByRole("alert")).textContent).toMatch(/couldn’t verify/);
+  expect(screen.queryByText("Private parser details")).toBeNull();
+  expect(screen.queryByText("You’re signed in")).toBeNull();
+});
+
+test("[AUTH-FLOW-020] A late previous-account response cannot replace the current identity", async () => {
+  const { fetchMock, emit } = setup(session);
+  let finishOld;
+  fetchMock.mockReturnValueOnce(new Promise((resolve) => { finishOld = resolve; }));
+  const nextIdentity = { ...verifiedUser, id: "next-id", fullName: "Next Person", email: "next@client.sg" };
+  fetchMock.mockResolvedValueOnce(reply(200, { user: nextIdentity, permissions: [] }));
+  renderApp(["/account"]);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  act(() => emit("SIGNED_IN", { access_token: "next-token" }));
+  expect(await screen.findByText("Welcome, Next Person.")).toBeTruthy();
+  expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
+
+  await act(async () => { finishOld(reply(200, { user: staffUser, permissions: ["internal.access"] })); });
+  expect(screen.getByText("Welcome, Next Person.")).toBeTruthy();
+  expect(screen.queryByText("Welcome, Verified Person.")).toBeNull();
+  expect(screen.queryByRole("link", { name: "Responsibilities" })).toBeNull();
+});
+
+test("[AUTH-FLOW-021] Successful token refresh uses the new token for subsequent authorised requests", async () => {
+  const { fetchMock, emit } = setup(session, staffUser, ["internal.access"]);
+  const user = userEvent.setup();
+  renderApp(["/account"]);
+  await screen.findByText("Welcome, Verified Person.");
+  act(() => emit("TOKEN_REFRESHED", { access_token: "new-token" }));
+  await screen.findByText("Welcome, Verified Person.");
+  await user.click(screen.getByRole("link", { name: "Responsibilities" }));
+  await screen.findByText("Venue information and availability");
+  expect(fetchMock).toHaveBeenCalledWith("/api/auth/me", expect.objectContaining({ headers: { Authorization: "Bearer new-token" } }));
+  expect(fetchMock).toHaveBeenCalledWith("/api/internal/access", expect.objectContaining({ headers: { Authorization: "Bearer new-token" } }));
+});
+
+test("[AUTH-FLOW-022] Duplicate sign-out clicks send one request and clear access after success", async () => {
+  const { auth } = setup(session);
+  let finish;
+  // No SDK event: successful sign-out must still clear the provider's local identity.
+  auth.signOut.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+  renderApp(["/account"]);
+  await screen.findByText("Welcome, Verified Person.");
+  const button = screen.getByRole("button", { name: "Sign out", exact: true });
+  act(() => { fireEvent.click(button); fireEvent.click(button); });
+  expect(auth.signOut).toHaveBeenCalledExactlyOnceWith({ scope: "local" });
+  expect(screen.getByRole("button", { name: "Signing out…" }).disabled).toBe(true);
+  await act(async () => { finish({ error: null }); });
+  expect(await screen.findByLabelText("Email address")).toBeTruthy();
+  expect(screen.queryByRole("navigation", { name: "Workspace" })).toBeNull();
 });
