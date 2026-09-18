@@ -70,6 +70,11 @@ function createApp({ authClient, dataClient, supabaseUrl, publishableKey, fronte
     });
   }
 
+  // Test control route — only active when PW_CONTROL_KEY is set (E2E test runs only)
+  if (process.env.PW_CONTROL_KEY && dataClient) {
+    app.use("/api/test/control", require("./modules/test/testControlHandler")(dataClient));
+  }
+
   return app;
 }
 

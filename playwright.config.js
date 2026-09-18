@@ -1,26 +1,47 @@
-import { defineConfig, devices } from '@playwright/test'
+const { defineConfig, devices } = require('@playwright/test')
+const { randomUUID } = require('node:crypto')
+const { frontendURL, backendURL } = require('./tests/playwright/support/settings.cjs')
 
-export default defineConfig({
-  testDir: './tests/e2e',
-  // E2E tests hit a shared database — keep them serial so tests don't
-  // stomp on each other's seed state.
+// Assign a fresh key each run so the control endpoint is only reachable during
+// this process's lifetime. Server inherits it via webServer.env.
+process.env.PW_CONTROL_KEY ||= randomUUID()
+
+module.exports = defineConfig({
+  testDir: './tests/playwright',
   fullyParallel: false,
+  forbidOnly: Boolean(process.env.CI),
+  retries: process.env.CI ? 1 : 0,
+  workers: 1,
   timeout: 30_000,
+  expect: { timeout: 10_000 },
+  reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:5173',
-    headless: true,
-    screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'chromium',
+      testMatch: '**/browser.spec.cjs',
+      use: { ...devices['Desktop Chrome'], baseURL: frontendURL },
+    },
   ],
-  webServer: {
-    command: 'npm --prefix frontend run dev',
-    url: 'http://localhost:5173',
-    // Reuse an already-running dev server in local dev; always start fresh in CI.
-    reuseExistingServer: !process.env.CI,
-  },
-  outputDir: 'tests/e2e/results',
+  webServer: [
+    {
+      command: 'node tests/playwright/support/server.cjs',
+      url: `${backendURL}/api/health`,
+      env: { PW_CONTROL_KEY: process.env.PW_CONTROL_KEY },
+      reuseExistingServer: false,
+      timeout: 60_000,
+    },
+    {
+      command: 'node tests/playwright/support/frontend.cjs',
+      url: frontendURL,
+      env: { API_PROXY_TARGET: backendURL },
+      reuseExistingServer: false,
+      timeout: 60_000,
+    },
+  ],
+  outputDir: 'tests/playwright/results',
 })
