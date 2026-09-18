@@ -1,22 +1,34 @@
 # Event Request — Test Documentation
 
 **Deliverable 3 evidence for SCRUM-23 (Create event request) and SCRUM-25 (Submit event request), both under epic SCRUM-7 (Event Request).**
-Branch: `feature/eventRequest` · Written 18 Sep · **64 documented cases, all passing**
+Branch: `feature/eventRequest` · Written 18 Sep · **80 documented cases, all passing**
+— 64 backend (§3–§5) and 16 frontend (§6).
 
 Run everything:
 
 ```bash
-npm --prefix backend test         # 70 tests — see the note below
-npm --prefix backend run test:cov # same, with coverage
-npm --prefix backend run check    # ESLint across src/ and tests/
+npm --prefix backend test          # 64 tests
+npm --prefix frontend test         # 16 tests
+npm --prefix backend run test:cov  # backend, with coverage
+npm --prefix frontend run test:cov # frontend, with coverage
+npm --prefix backend run check     # ESLint across src/ and tests/
+npm --prefix frontend run lint     # ESLint across the frontend
 ```
 
-> **64 cases, 70 tests.** This document covers the four files that belong to
-> SCRUM-23 and SCRUM-25 — 64 cases. `node --test` also runs
-> `tests/unit/events/events.status.test.js` (6 tests), which covers
-> `events.status.js`: a DRAFT → SUBMITTED lifecycle module that **nothing imports**
-> and that is not part of either story. It is excluded here deliberately, not
-> overlooked.
+Both suites run on **Vitest**, and both run in CI on every pull request to `main`
+(`.github/workflows/ci.yml`).
+
+> **On the runner.** The backend suite was written against `node --test` and moved
+> to Vitest so one runner covers both halves of the app. The tests themselves are
+> unchanged in substance — same cases, same names, same 64 — only the assertion
+> and spy APIs were rewritten (`assert.equal` → `expect().toBe`, `mock.method` →
+> `vi.spyOn`). The modules under test are still CommonJS and are loaded with
+> `createRequire`, so a spy set in a test and the reference the source closes over
+> stay the same object.
+>
+> **An earlier draft of this document claimed 70 tests**, counting six for an
+> `events.status.js` lifecycle module. Neither that module nor its test file
+> exists on this branch; the count has always been 64. Corrected here.
 
 Every row below names the automated test that executes it. Test names lead with the
 story and criterion, so `npm test` output *is* the traceability report — the last
@@ -31,7 +43,7 @@ column is a copy of a line you can read in the terminal.
 >
 > **`US-13` is the one label here that is not a Jira key.** The draft story has
 > not been raised on the board, so the eight `validateDraft` tests keep the
-> phase-one list's number until it is. Relabel them when the issue exists — see §6.
+> phase-one list's number until it is. Relabel them when the issue exists — see §7.
 
 ---
 
@@ -46,12 +58,12 @@ column is a copy of a line you can read in the terminal.
 | **SCRUM-46 / 47** | The Organiser can provide venue, accessibility, equipment and registration needs where relevant | `SCRUM-46/47:` ×4 — two prove the field is *accepted*, two prove it is *stored* | **Direct.** See the mutation check under §3 |
 | **SCRUM-23** (story level) | A request is judged as a whole: the required set, and a body that is not an object at all | `SCRUM-23:` ×4 + `SCRUM-23 design:` ×2 | **Direct.** Spans all four subtasks, so no single one owns it |
 
-**SCRUM-25 — Submit event request** (In Progress; subtasks SCRUM-49–51 still To Do on the board — see §6):
+**SCRUM-25 — Submit event request** (In Progress; subtasks SCRUM-49–51 still To Do on the board — see §7):
 
 | Criterion | Statement | Proven by | Strength |
 | --- | --- | --- | --- |
 | **SCRUM-49** | When the Organiser submits a request, it is no longer treated as a draft | `SCRUM-49:` ×2 — service + repository | **Direct.** The row is built with `status: "SUBMITTED"` outside `pickCol` |
-| **SCRUM-50** | The submitted request becomes available for coordinator assignment and subsequent review | `SCRUM-50:` ×1, plus `SCRUM-25 design: status, owner and coordinator in the fields are ignored` | **Indirect** — see §6 |
+| **SCRUM-50** | The submitted request becomes available for coordinator assignment and subsequent review | `SCRUM-50:` ×1, plus `SCRUM-25 design: status, owner and coordinator in the fields are ignored` | **Indirect** — see §7 |
 | **SCRUM-51** | The event status reflects that the request has been submitted | `SCRUM-51:` ×1 — the 201 response carries `status: "SUBMITTED"` | **Direct** |
 | **SCRUM-25** (story level) | Ownership, lifecycle and error leakage — rules the story needs that no subtask states | `SCRUM-25 design:` ×5 | **Direct** |
 
@@ -64,9 +76,9 @@ happy path → cross-cutting → negative → boundary. IDs below are prefixed a
 | Happy path | 11 | ER-H01–H11 |
 | Negative | 20 | ER-N01–N20, plus the 2 supporting cases named at the end of §4.3 |
 | Boundary | 23 | ER-B01–B23 — heaviest by design; every rule in the validation contract has a threshold |
-| Cross-cutting | **0** | Auth/permissions land with the merge — see §6 |
-| Deferred (US-13, not yet in Jira) | 8 | ER-D01–D08 — `validateDraft` is tested but **called by nothing**, see §6 |
-| **Total** | **64** | 62 with an ER id + the 2 supporting cases. `node --test` reports 70; the other 6 are the lifecycle tests noted above |
+| Cross-cutting | **0** | Auth/permissions land with the merge — see §7 |
+| Deferred (US-13, not yet in Jira) | 8 | ER-D01–D08 — `validateDraft` is tested but **called by nothing**, see §7 |
+| **Total** | **64** | 62 with an ER id + the 2 supporting cases. This is the backend suite only; the 16 frontend cases are counted separately in §6 |
 
 **A test case may cover several data points.** Fourteen of the tests below are
 parametrised loops (e.g. `each required field missing on its own` walks all six
@@ -84,14 +96,23 @@ carries only what is specific to that case.
 | Layer | File | Pre-conditions for every case in that file |
 | --- | --- | --- |
 | Validation (unit) | `tests/unit/events/events.validation.test.js` | None. Pure functions, no I/O, no Supabase client. |
-| Service (unit) | `tests/unit/events/events.service.test.js` | `stubSupabase()` seeds the require cache; `repository.createSubmitted` replaced with a `mock.method` spy, reset in `beforeEach`. |
+| Service (unit) | `tests/unit/events/events.service.test.js` | `stubSupabase()` seeds the require cache; `repository.createSubmitted` replaced with a `vi.spyOn` spy, reset in `beforeEach`. |
 | Repository (unit) | `tests/unit/events/events.repository.test.js` | `stubSupabase()` installs a fake `from().insert().select().single()` chain that records the row. |
 | HTTP (integration) | `tests/integration/events.submit.test.js` | Express app on an ephemeral port (`listen(0)`); `express.json()` mounted as `server.js` does; only the repository is faked. |
+| Browser service (unit) | `frontend/src/features/events/eventsService.test.js` | `fetch` replaced with `vi.stubGlobal`, cleared in `afterEach`; no DOM and no server. Time zone pinned to UTC+8 — see §6. |
 
 **No test touches the shared Supabase database.** `tests/helpers/stubSupabase.js`
 seeds Node's require cache so the real `src/supabase.js` never executes — it
 throws at import time without credentials, and every module above the validator
 imports it. This is why the suite runs in CI with no `.env` and writes no rows.
+
+**Why the backend tests use `createRequire` rather than `import`.** The modules
+under test are CommonJS. Under Vitest an ESM `import` of a CommonJS module is
+served from a different module graph than the `require` the source itself uses,
+so the test and the code under test would hold two separate copies — a spy set on
+one would never be seen by the other, and the require-cache stub above would not
+take effect at all. Loading them with `createRequire` keeps one graph, which is
+also why `require` still appears inside files that are otherwise ES modules.
 
 ---
 
@@ -222,7 +243,61 @@ inconsistency is a decision on the record rather than a latent surprise.
 
 ---
 
-## 6. Gaps, and why they are gaps
+## 6. Frontend test cases — the submit path in the browser
+
+`frontend/src/features/events/eventsService.test.js` — 16 cases covering
+`submitEventRequest`, the one piece of the frontend that holds logic rather than
+markup. It is the layer between the form and `POST /api/events`: it rewrites the
+two timestamps, then maps the response onto the `{ event, errors, message }`
+shape `EventRequestForm` renders from. `fetch` is the only thing faked.
+
+These prove the *browser's* half of SCRUM-25. The server's half is §3–§5; neither
+suite covers the other, and the field errors in FE-N01 are the same shape the
+validator produces, which is what lets the form show them against each input.
+
+**The time zone is pinned to UTC+8 (`Asia/Singapore`) in `vite.config.js`.**
+`withZonedTimes` converts using whatever zone the browser is in, so an assertion
+on the ISO it produces is only meaningful against a known offset — unpinned, these
+cases would pass on a Singapore laptop and fail in CI, which runs UTC. It is set
+in the config rather than as a `TZ=` prefix on the npm script so it holds
+identically on Windows. **FE-G01 fails first if that pinning ever stops working**,
+so a broken fixture does not read as a bug in the service.
+
+| ID | What it proves | Test data | Automated test |
+| --- | --- | --- | --- |
+| **FE-G01** | Fixture guard: the suite is really running at UTC+8 | `"2026-09-20T10:00"` | `fixture guard: the suite runs in the pinned UTC+8 time zone` |
+| **FE-H01** | A 201 hands back the created event and no errors | `{ event: { id, name, status } }` | `SCRUM-51: a 201 returns the created event with no errors` |
+| **FE-H02** | The request is a JSON `POST` to `/api/events` | complete form fields | `SCRUM-25: the request is a JSON POST to /api/events` |
+| **FE-N01** | A 400 passes the validator's field errors through untouched | `errors: [name, end_time]` | `SCRUM-23: a 400 passes the validator's field errors straight through` |
+| **FE-N02** | A 500 surfaces the server's message against no field | `{ error: "Could not submit…" }` | `SCRUM-25 design: a 500 surfaces the server's message against no field` |
+| **FE-N03** | A body `json()` cannot parse still yields a message, not a crash | 502, `json()` throws | `SCRUM-25 design: a response that is not JSON falls back to a generic message` |
+| **FE-N04** | A network failure reads as a connection problem | `fetch` rejects | `SCRUM-25 design: a network failure is reported as a connection problem` |
+| **FE-N05** | A 201 with no event in the body is a failure, not a success | 201, `{}` | `SCRUM-25 design: a 201 without an event in the body is treated as a failure` |
+| **FE-N06** | A 400 with no `errors` array falls through to the message branch | 400, `{ error }` | `SCRUM-23 design: a 400 without an errors array falls through to the message` |
+| **FE-B01** | `datetime-local` is converted to ISO in the organiser's zone | `10:00`/`13:00` → `02:00Z`/`05:00Z` | `SCRUM-45: datetime-local values are converted to ISO in the browser's zone` |
+| **FE-B02** | An unreadable value is sent as typed, so the server names the field | `"next tuesday"` | `SCRUM-45 design: an unreadable date/time is sent untouched so the server names the field` |
+| **FE-B03** | An empty time field stays empty rather than becoming an epoch date | `""` | `SCRUM-45 boundary: an empty time field is sent empty, not as an epoch date` |
+| **FE-B04** | A value already in ISO survives the round trip unchanged | `"2026-09-20T02:00:00.000Z"` | `SCRUM-45 boundary: a value already in ISO survives the round trip unchanged` |
+| **FE-X01** | Only the two time fields are rewritten | name, purpose, description, attendance | `SCRUM-45 design: only the two time fields are rewritten` |
+| **FE-X02** | The caller's fields object is not mutated | complete form fields | `SCRUM-45 design: the caller's fields object is not mutated` |
+| **FE-X03** | `EVENT_LIMITS` mirrors the backend caps and is frozen | `{ name: 200, text: 2000 }` | `SCRUM-44: EVENT_LIMITS mirrors the backend caps and is frozen` |
+
+**Why FE-B01 is the case that earns this file.** When the conversion breaks, nothing
+errors: the request still returns 201 and the organiser still sees "Request
+submitted". The event is simply stored eight hours out. FE-B01 and FE-B04 together
+pin both directions — a value that needs converting and one that must not be
+converted twice — which is what distinguishes a correct fix from appending `Z` to
+the string and calling it UTC.
+
+**FE-X02 guards a rendering bug, not a data one.** The form re-renders from the
+same state object after a failed submit. If `withZonedTimes` mutated its argument,
+`start_time` would come back as an ISO string, which `<input type="datetime-local">`
+cannot display — the organiser's entry would silently vanish from the field while
+they were fixing a different one.
+
+---
+
+## 7. Gaps, and why they are gaps
 
 Stated plainly so each reads as a decision rather than an omission.
 
@@ -274,21 +349,27 @@ The draft cap matches submission deliberately: a request captured early must not
 become unsavable later because a free-text field was allowed to grow past the limit
 the submit path enforces.
 
-**There are no frontend component tests yet.** Vitest, React Testing Library and
-jsdom are not installed on this branch. Planned: `eventsService.test.js` (happy 201;
-negative 400/500/network; boundary — `withZonedTimes` converts a valid
-`datetime-local` and passes an unreadable one through untouched) and
-`EventRequestForm.test.jsx` (required fields block submission; server errors render
-against the right inputs; double-submit guarded). `EventRequestForm` currently
-imports `submitEventRequest` directly, so it must take that function as a prop
-before it can be tested.
+**The frontend service is tested; the components are not.** `eventsService.test.js`
+landed with this change (§6). `EventRequestForm.test.jsx` did not: it needs jsdom
+and React Testing Library, neither of which is installed, and the component must
+first take `submitEventRequest` as a prop instead of importing it directly, since
+that import cannot be faked from a test. Planned cases: required fields block
+submission, server errors render against the right inputs, and the double-submit
+guard (`submitting` ref) holds. **Until then nothing proves the form renders the
+errors `eventsService` returns** — FE-N01 proves only that it hands them over in
+the right shape.
+
+`StatusBadge` and `EventRequestPage` have no tests and are not planned to get any
+while they stay presentational; `formatWhen` in `EventRequestPage` is the one piece
+of logic there, and it becomes worth testing if it grows a rule beyond delegating
+to `toLocaleString`.
 
 **There is no end-to-end test.** Playwright needs the merged app — all four lanes on
 `main` together — which is Week 4's work, not this branch's.
 
 ---
 
-## 7. Manual verification
+## 8. Manual verification
 
 Automated coverage stops at the faked repository. These steps were run against the
 real Supabase instance to close that gap.
@@ -318,7 +399,7 @@ real Supabase instance to close that gap.
 
 ---
 
-## 8. Requirements sources
+## 9. Requirements sources
 
 - **Week 4 Project Instructions**, *Event Request Creation* — organisers "can create
   and submit event requests". The basis for D1: one action, no separate submit step.
@@ -343,7 +424,7 @@ real Supabase instance to close that gap.
 - **SCRUM-49/50/51 are still `To Do` while the code that satisfies them is written
   and green.** SCRUM-25 shows 0% of subtasks done. Move them when the branch merges,
   or the board understates the lane.
-- **US-13 has no Jira issue** — see §6.
+- **US-13 has no Jira issue** — see §7.
 - The exact `CHECK` constraint on `events.status`, which was widened or dropped by
   another lane without a migration — `APPROVED` is now in use and the constraint's
   current definition is unverified.
