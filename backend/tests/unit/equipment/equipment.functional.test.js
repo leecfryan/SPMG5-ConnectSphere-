@@ -58,7 +58,7 @@ function fakeRoleClient(roleAssignments) {
   };
 }
 
-function fakeEquipmentService({ equipmentById = {}, requestsByEvent = {}, requestById = {}, overlapping = false } = {}) {
+function fakeEquipmentService({ equipmentById = {}, requestsByEvent = {}, requestById = {}, allRequests = [], overlapping = false } = {}) {
   const calls = { createRequest: [], updateStatus: [], hasOverlappingRequest: [] };
   return {
     calls,
@@ -74,6 +74,9 @@ function fakeEquipmentService({ equipmentById = {}, requestsByEvent = {}, reques
     async findRequestById(id) {
       return requestById[id] || null;
     },
+    async listAllRequests() {
+      return allRequests;
+    },
     async hasOverlappingRequest(equipmentId, borrowStart, borrowEnd) {
       calls.hasOverlappingRequest.push({ equipmentId, borrowStart, borrowEnd });
       return overlapping;
@@ -82,10 +85,12 @@ function fakeEquipmentService({ equipmentById = {}, requestsByEvent = {}, reques
       calls.createRequest.push({ fields, requestedBy });
       return { id: "new-request-id", status: "PENDING", requested_by: requestedBy, ...fields };
     },
+    // Scrum-28-Scrum64 (AC2): unconditional, matching the real service - no
+    // PENDING-only precondition (see equipment.service.js's updateStatus).
     async updateStatus(id, status) {
       calls.updateStatus.push({ id, status });
       const existing = requestById[id];
-      if (!existing || existing.status !== "PENDING") return null;
+      if (!existing) return null;
       return { ...existing, status };
     },
   };
@@ -95,7 +100,13 @@ function fakeEquipmentService({ equipmentById = {}, requestsByEvent = {}, reques
 // but with a stub auth middleware (identity comes from a test-only header -
 // requireAuth itself is covered by auth.test.js, not re-tested here) and
 // injected fakes in place of the real Supabase-backed client/service.
-async function setup(t, { roleAssignments = {}, equipmentService, findEventById = async () => ({ id: VALID_EVENT_ID }) }) {
+async function setup(t, {
+  roleAssignments = {},
+  equipmentService,
+  findEventById = async () => ({ id: VALID_EVENT_ID }),
+  findEventsByIds = async (ids) => ids.map((id) => ({ id, name: "Event " + id })),
+  getUserDisplayName = async (id) => "User " + id,
+}) {
   const app = express();
   app.use(express.json());
   app.use((req, res, next) => {
@@ -105,10 +116,20 @@ async function setup(t, { roleAssignments = {}, equipmentService, findEventById 
   });
 
   const dbClient = fakeRoleClient(roleAssignments);
-  const controller = createEquipmentController({ equipmentService, findEventById });
+  const controller = createEquipmentController({
+    equipmentService,
+    findEventById,
+    findEventsByIds,
+    getUserDisplayName,
+  });
 
   app.get("/api/equipment", controller.getEquipmentCatalogue);
   app.get("/api/events/:eventId/equipment-requests", controller.getEquipmentRequests);
+  app.get(
+    "/api/technical-support/equipment-requests",
+    requireDbRole("tech_support", dbClient),
+    controller.getTechSupportDashboard,
+  );
   app.post(
     "/api/events/:eventId/equipment-requests",
     requireDbRole("event_coordinator", dbClient),
@@ -342,17 +363,88 @@ test("unauthenticated requests are rejected before any role or data check", asyn
   assert.equal(equipmentService.calls.createRequest.length, 0);
 });
 
-// --- status transition guard ---
+// --- Scrum-28-Scrum64 (AC2): status updates as arrangements progress ---
+// Deliberate behavior change from Scrum-27's one-way PENDING-only review
+// gate (see equipment.controller.js/equipment.service.js): status can now
+// move between APPROVED and REJECTED repeatedly, not just once.
 
-test("only a PENDING request can be reviewed; an already-reviewed request is rejected", async (t) => {
-  const requestById = { "44444444-4444-4444-4444-444444444444": { id: "44444444-4444-4444-4444-444444444444", status: "APPROVED" } };
+test("Scrum-28-Scrum64: an already-reviewed request can be reviewed again (no one-way gate)", async (t) => {
+  const requestId = "44444444-4444-4444-4444-444444444444";
+  const requestById = { [requestId]: { id: requestId, status: "APPROVED" } };
   const equipmentService = fakeEquipmentService({ requestById });
+  const base = await setup(t, { roleAssignments: { "tech-1": ["tech_support"] }, equipmentService });
+
+  const toRejected = await fetch(base + `/api/equipment-requests/${requestId}/status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "x-test-user-id": "tech-1" },
+    body: JSON.stringify({ status: "REJECTED" }),
+  });
+  assert.equal(toRejected.status, 200);
+  assert.equal((await toRejected.json()).data.status, "REJECTED");
+
+  const backToApproved = await fetch(base + `/api/equipment-requests/${requestId}/status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "x-test-user-id": "tech-1" },
+    body: JSON.stringify({ status: "APPROVED" }),
+  });
+  assert.equal(backToApproved.status, 200);
+  assert.equal((await backToApproved.json()).data.status, "APPROVED");
+});
+
+test("Scrum-28-Scrum64: a status update for a request that does not exist is a 404", async (t) => {
+  const equipmentService = fakeEquipmentService({ requestById: {} });
   const base = await setup(t, { roleAssignments: { "tech-1": ["tech_support"] }, equipmentService });
 
   const response = await fetch(base + "/api/equipment-requests/44444444-4444-4444-4444-444444444444/status", {
     method: "PATCH",
     headers: { "Content-Type": "application/json", "x-test-user-id": "tech-1" },
-    body: JSON.stringify({ status: "REJECTED" }),
+    body: JSON.stringify({ status: "APPROVED" }),
   });
-  assert.equal(response.status, 409);
+  assert.equal(response.status, 404);
+});
+
+// --- Scrum-28-Scrum63 (AC1): the cross-event Technical Support dashboard ---
+
+test("Scrum-28-Scrum63: Technical Support Staff sees every event's requests, enriched", async (t) => {
+  const request = {
+    id: "55555555-5555-5555-5555-555555555555",
+    event_id: VALID_EVENT_ID,
+    equipment_id: VALID_EQUIPMENT_ID,
+    requested_by: "coord-1",
+    quantity_requested: 2,
+    status: "PENDING",
+  };
+  const equipmentService = fakeEquipmentService({
+    allRequests: [request],
+    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID, type: "PROJECTOR" } },
+  });
+  const base = await setup(t, {
+    roleAssignments: { "tech-1": ["tech_support"] },
+    equipmentService,
+    findEventsByIds: async (ids) => ids.map((id) => ({ id, name: "Tech Connect 2026" })),
+    getUserDisplayName: async (id) => (id === "coord-1" ? "Demo Coordinator" : null),
+  });
+
+  const response = await fetch(base + "/api/technical-support/equipment-requests", {
+    headers: { "x-test-user-id": "tech-1" },
+  });
+  assert.equal(response.status, 200);
+  const { data } = await response.json();
+  assert.equal(data.length, 1);
+  assert.equal(data[0].event_name, "Tech Connect 2026");
+  assert.equal(data[0].equipment_type, "PROJECTOR");
+  assert.equal(data[0].requested_by_name, "Demo Coordinator");
+});
+
+test("Scrum-28-Scrum63: an Event Coordinator cannot see the Technical Support dashboard (403)", async (t) => {
+  const equipmentService = fakeEquipmentService({ allRequests: [] });
+  const base = await setup(t, {
+    roleAssignments: { "coord-1": ["event_coordinator"] },
+    equipmentService,
+  });
+
+  const response = await fetch(base + "/api/technical-support/equipment-requests", {
+    headers: { "x-test-user-id": "coord-1" },
+  });
+  assert.equal(response.status, 403);
 });

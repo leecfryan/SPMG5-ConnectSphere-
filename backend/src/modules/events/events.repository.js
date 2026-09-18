@@ -47,6 +47,19 @@ async function findById(id) {
   );
 }
 
+// Scrum-28-Scrum63 (AC1): batch lookup so the Technical Support dashboard
+// doesn't issue one events query per request row. Selects the same "*"
+// shape findById already uses; callers only read id/name/start_time/end_time
+// off the result (events' shape is provisional - see docs/technical-support-
+// equipment-requests.md).
+async function findByIds(ids) {
+  if (ids.length === 0) return [];
+  return unwrap(
+    await supabase.from(TABLE).select("*").in("id", ids),
+    "findByIds",
+  );
+}
+
 async function update(id, patch) {
   const row = pickCol(patch);
   if (Object.keys(row).length === 0) return findById(id);
@@ -97,6 +110,7 @@ module.exports = {
   WRITABLE_COLS,
   create,
   findById,
+  findByIds,
   update,
   markSubmitted,
   assignCoordinator,

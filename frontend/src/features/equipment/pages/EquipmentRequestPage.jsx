@@ -3,8 +3,10 @@ import {
   fetchEquipmentCatalogue,
   fetchEquipmentRequests,
   createEquipmentRequest,
+  fetchCurrentUser,
 } from "../../../lib/api";
 import EquipmentRequestForm from "../components/EquipmentRequestForm";
+import ClarificationThread from "../components/ClarificationThread";
 import ErrorModal from "../../../components/ui/ErrorModal";
 import "../equipment.css";
 
@@ -23,12 +25,23 @@ function EquipmentRequestPage({ token }) {
   const [saveError, setSaveError] = useState(null);
   const [forbiddenMessage, setForbiddenMessage] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [currentUserId, setCurrentUserId] = useState(null);
 
   useEffect(() => {
     if (!token) return;
     fetchEquipmentCatalogue(token)
       .then((data) => setEquipmentOptions(data))
       .catch((err) => setLoadError(err.message));
+  }, [token]);
+
+  // Scrum-28-Scrum66 (AC4): the Event Coordinator sees the same
+  // clarification thread Technical Support Staff does - the thread's
+  // "is this my message" edit check needs the signed-in user's id.
+  useEffect(() => {
+    if (!token) return;
+    fetchCurrentUser(token)
+      .then((user) => setCurrentUserId(user.id))
+      .catch(() => {});
   }, [token]);
 
   useEffect(() => {
@@ -38,10 +51,17 @@ function EquipmentRequestPage({ token }) {
     setIsLoadingRequests(true);
     setLoadError(null);
 
+    // Guards against a stale response clobbering a newer one if eventId
+    // changes again before this fetch resolves (no built-in request
+    // cancellation here) - surfaced by Scrum-28's ClarificationThread
+    // adding more concurrent fetches to this same page, though the race
+    // itself predates that addition.
+    let cancelled = false;
     fetchEquipmentRequests(eventId, token)
-      .then((data) => setRequests(data))
-      .catch((err) => setLoadError(err.message))
-      .finally(() => setIsLoadingRequests(false));
+      .then((data) => { if (!cancelled) setRequests(data); })
+      .catch((err) => { if (!cancelled) setLoadError(err.message); })
+      .finally(() => { if (!cancelled) setIsLoadingRequests(false); });
+    return () => { cancelled = true; };
   }, [eventId, token, refreshKey]);
 
   function handleSubmit(fields) {
@@ -144,6 +164,13 @@ function EquipmentRequestPage({ token }) {
               </li>
             ))}
           </ul>
+
+          <ClarificationThread
+            eventId={eventId}
+            lines={requests.map((r) => ({ id: r.id, label: equipmentLabel(r.equipment_id) }))}
+            token={token}
+            currentUserId={currentUserId}
+          />
         </div>
       )}
 

@@ -63,6 +63,19 @@ function createEquipmentService(client) {
     );
   }
 
+  // Scrum-28-Scrum63 (AC1): the Technical Support dashboard reviews requests
+  // across every event, not one at a time - unlike listRequestsByEvent, this
+  // is intentionally unscoped.
+  async function listAllRequests() {
+    return unwrap(
+      await client
+        .from(REQUESTS_TABLE)
+        .select("*")
+        .order("created_at", { ascending: true }),
+      "listAllRequests",
+    );
+  }
+
   // Overlap guard: true when the same equipment already has a non-REJECTED
   // request whose borrow window intersects [borrowStart, borrowEnd).
   // Standard interval-overlap test: existing.start < new.end AND
@@ -96,18 +109,22 @@ function createEquipmentService(client) {
     );
   }
 
-  // Atomically guards the PENDING -> APPROVED/REJECTED transition in the
-  // query itself (the `.eq("status", "PENDING")` filter), the same pattern
-  // markSubmitted() uses in events.repository.js: it avoids a race between a
-  // separate check and the update, and returns null instead of throwing when
-  // the row was not PENDING (or did not exist).
+  // Scrum-28-Scrum64 (AC2): Technical Support Staff update this request's
+  // status as equipment arrangements progress, not just once. Originally
+  // (Scrum-27) this only allowed a single PENDING -> APPROVED/REJECTED
+  // transition, guarded by an `.eq("status", "PENDING")` filter in the query
+  // itself. That one-way gate is deliberately removed here: the same
+  // APPROVED/REJECTED values are reused as this story's arrangement
+  // tracking (see equipment.controller.js's top-of-file comment for the
+  // full mapping), and arrangements can be revised repeatedly as planning
+  // progresses, so the update is now unconditional on the current status.
+  // Returns null only when the row does not exist.
   async function updateStatus(id, status) {
     return unwrap(
       await client
         .from(REQUESTS_TABLE)
         .update({ status })
         .eq("id", id)
-        .eq("status", "PENDING")
         .select()
         .maybeSingle(),
       "updateStatus",
@@ -119,6 +136,7 @@ function createEquipmentService(client) {
     findEquipmentById,
     listRequestsByEvent,
     findRequestById,
+    listAllRequests,
     hasOverlappingRequest,
     createRequest,
     updateStatus,
