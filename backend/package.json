@@ -4,11 +4,14 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --test \"tests/**/*.test.js\"",
-    "test:cov": "node --test --experimental-test-coverage \"tests/**/*.test.js\"",
+    "test": "vitest run",
+    "test:cov": "vitest run --coverage",
     "dev": "nodemon src/server.js",
     "start": " node src/server.js",
-    "check": "eslint ."
+    "check": "eslint .",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:report": "vitest run --reporter=html"
   },
   "keywords": [],
   "author": "",
@@ -22,8 +25,11 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@vitest/coverage-v8": "^5.0.1",
+    "@vitest/ui": "^5.0.1",
     "eslint": "^10.10.0",
     "globals": "^17.12.0",
-    "nodemon": "^3.1.14"
+    "nodemon": "^3.1.14",
+    "vitest": "^5.0.1"
   }
 }

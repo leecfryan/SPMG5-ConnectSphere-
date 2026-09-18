@@ -12,11 +12,14 @@ export default [
     },
   },
   {
-    // Tests import { test, before, beforeEach, mock } from "node:test"
+    // Tests are ES modules: they import { test, expect, vi } from "vitest"
     // explicitly, so no test-runner globals are needed here — only node's.
+    // The modules under test stay CommonJS and are pulled in with
+    // createRequire, which is why `require` still appears inside these files.
     files: ["tests/**/*.js"],
     languageOptions: {
-      sourceType: "commonjs",
+      sourceType: "module",
+      ecmaVersion: "latest",
       globals: globals.node,
     },
     rules: {
