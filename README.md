@@ -74,7 +74,7 @@ local storage, and keep Supabase's authentication rate limits enabled.
 The backend verifies staff roles before serving /api/internal routes. A central
 permission matrix grants Venue Staff venue/booking reads, Technical Support Staff
 equipment/technical reads, and Event Coordinators coordination reads. External
-roles grant no internal access. The account screen displays responsibilities
+roles grant no internal access. The staff responsibilities page displays responsibilities
 returned by GET /api/internal/access.
 
 Feature owners must attach requirePermission to their data endpoints. Sensitive
@@ -82,6 +82,23 @@ record permissions also require a server-side relationship resolver. Production
 business endpoints and their database policies do not exist yet; full story
 acceptance requires this integration. See [staff access](docs/staff-access.md) for
 the agreed matrix, integration examples, tests and remaining work.
+
+## Frontend navigation
+
+The application uses React Router: `/sign-in`, `/account`,
+`/staff/responsibilities`, and `/forbidden`. The root redirects after session
+checking. Protected routes wait for backend verification; navigation and feature
+guards use permission identifiers returned by `/api/auth/me`. Express remains
+responsible for enforcing every API permission and record-access check.
+
+See [frontend routing](docs/frontend-routing.md) for the teammate integration
+contract, behavior, Docker dependency refresh and production SPA fallback.
+
+## Test dashboard and saved reports
+
+The existing frontend tests have a live browser dashboard and automatically save
+a self-contained HTML report after each completed run. See
+[test reporting](docs/test-reporting.md) for local and Docker commands.
 
 ## Checks and story traceability
 

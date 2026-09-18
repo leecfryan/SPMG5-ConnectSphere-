@@ -70,4 +70,9 @@ function getResponsibilities(roles) {
     }));
 }
 
-module.exports = { getPolicy, hasPermission, getResponsibilities };
+// Capabilities only: record checks and the /api/internal gate still apply independently.
+function getPermissions(roles) {
+  return Object.keys(policies).filter((permission) => hasPermission(roles, permission));
+}
+
+module.exports = { getPolicy, hasPermission, getResponsibilities, getPermissions };

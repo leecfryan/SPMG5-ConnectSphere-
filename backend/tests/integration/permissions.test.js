@@ -39,7 +39,7 @@ async function setup(t, getUser) {
     "event_planning.read",
     "attendees.read",
     "clients.read",
-    "event_ops_manager.read",
+    "event_organisers.read",
   ];
   for (const permission of recordPermissions) {
     app.get(
@@ -108,6 +108,7 @@ const matrix = [
       "event_planning.read",
       "attendees.read",
       "clients.read",
+      "event_organisers.read",
     ],
   },
   { role: "event_organiser", permitted: [] },
@@ -123,6 +124,7 @@ const paths = {
       "event_planning.read",
       "attendees.read",
       "clients.read",
+      "event_organisers.read",
     ].map((p) => [p, "/api/internal/test-record/" + p + "/managed-event"]),
   ),
 };

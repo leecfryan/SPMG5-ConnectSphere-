@@ -5,7 +5,10 @@
 The backend has a staff permission policy and reusable guards. GET
 /api/internal/access returns the verified staff member's responsibilities.
 External users receive 403 and users without valid authentication receive 401.
-The account screen loads these responsibilities from that protected endpoint.
+The `/staff/responsibilities` page loads these responsibilities from that protected endpoint.
+Frontend routing and navigation use server-derived permission identifiers from
+`GET /api/auth/me`; the API guards remain the security boundary. See
+[frontend routing](frontend-routing.md) for the teammate integration contract.
 
 There are no production venue, booking, equipment, technical-request, attendee,
 client or internal-planning data endpoints yet. The tests use fixture handlers;
@@ -28,8 +31,13 @@ specification.
 | event_planning.read | No | No | Yes | No | Yes |
 | attendees.read | No | No | Yes | No | Yes |
 | clients.read | No | No | Yes | No | Yes |
+| event_organisers.read | No | No | Yes | No | Yes |
 
-All internal roles have internal.access. Unknown or missing roles grant nothing.
+The original three staff roles have internal.access. The current policy also
+defines `event_organisers.read` for Event Coordinators and Event Operations
+Managers, but does not grant `internal.access` to `event_ops_manager`. Manager-only
+accounts therefore cannot enter internal pages/APIs until the team changes that
+policy; this routing refactor preserves it. Unknown or missing roles grant nothing.
 Multiple trusted roles combine responsibilities. External roles grant no internal
 permissions, but can have separate event-specific access through external APIs.
 
@@ -99,7 +107,8 @@ must still be guarded and scoped, because that client can bypass RLS.
 ## Acceptance evidence
 
 Run npm --prefix backend test. permissions.test.js covers:
-- The seven read permissions against all five roles.
+- The eight read permissions against the original five roles, plus the current
+  manager-only internal-access restriction in the authentication tests.
 - Venue/equipment access across locations and types.
 - Multi-role accounts, role removal, and missing or malformed roles.
 - Anonymous/invalid sessions and forged role claims.
@@ -109,10 +118,11 @@ Run npm --prefix backend test. permissions.test.js covers:
 Existing authentication tests continue to run in the same CI job.
 
 Manual checks:
-1. Sign in as Venue Staff: see only venue and booking responsibilities.
+1. Sign in as Venue Staff and open `/staff/responsibilities`: see only venue and booking responsibilities.
 2. Sign in as Technical Support Staff: see only equipment and technical responsibilities.
 3. Sign in as Event Coordinator: see the coordination responsibilities.
-4. Sign in as Organiser or Attendee: no staff section; an authenticated request
+4. Sign in as Organiser or Attendee: no staff navigation link; entering
+   `/staff/responsibilities` directly opens `/forbidden`. An authenticated request
    to /api/internal/access returns 403.
 5. Without a token, /api/internal/access returns 401. Direct browser navigation
    does not attach the bearer token even if another tab is signed in.

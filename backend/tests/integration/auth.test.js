@@ -86,6 +86,7 @@ test("AC1/AC3: verified identity is returned; roles come only from admin metadat
       roles: ["attendee"],
       accountTypes: ["external"],
     },
+    permissions: [],
   });
 });
 
@@ -171,4 +172,50 @@ test("public configuration contains only the URL and publishable key; health sta
     publishableKey: "sb_publishable_test",
   });
   assert.equal((await fetch(base + "/api/health")).status, 200);
+});
+
+test("RBAC: identity response derives permissions from verified roles, never claimed permissions", async (t) => {
+  const base = await setup(t, async () => ({
+    data: { user: {
+      id: "staff-id", app_metadata: { roles: ["venue_staff", "attendee"], permissions: ["clients.read"] },
+      user_metadata: { roles: ["event_coordinator"], permissions: ["clients.read"] },
+    } }, error: null,
+  }));
+  const response = await fetch(base + "/api/auth/me?permissions=clients.read", {
+    headers: { Authorization: "Bearer valid", "X-Permissions": "clients.read" },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const { permissions } = await response.json();
+  assert.deepEqual(permissions, ["internal.access", "venues.read", "bookings.read"]);
+});
+
+test("RBAC: combined roles return unique permissions and role removal updates the next identity request", async (t) => {
+  let roles = ["venue_staff", "technical_support_staff", "attendee", "venue_staff"];
+  const base = await setup(t, async () => ({ data: { user: { id: "user", app_metadata: { roles } } }, error: null }));
+  const headers = { Authorization: "Bearer same-token" };
+  assert.deepEqual((await (await fetch(base + "/api/auth/me", { headers })).json()).permissions,
+    ["internal.access", "venues.read", "bookings.read", "equipment.read", "technical_requests.read"]);
+  roles = ["attendee"];
+  assert.deepEqual((await (await fetch(base + "/api/auth/me", { headers })).json()).permissions, []);
+  assert.equal((await fetch(base + "/api/internal/access", { headers })).status, 403);
+});
+
+test("RBAC: missing and malformed roles return no permissions", async (t) => {
+  for (const roles of [undefined, null, [], "venue_staff", ["__proto__", "superadmin"]]) {
+    const base = await setup(t, async () => ({ data: { user: { id: "user", app_metadata: { roles } } }, error: null }));
+    const response = await fetch(base + "/api/auth/me", { headers: { Authorization: "Bearer valid" } });
+    assert.deepEqual((await response.json()).permissions, []);
+  }
+});
+
+test("RBAC: exposing capabilities does not broaden the existing operations manager internal gate", async (t) => {
+  const base = await setup(t, async () => ({ data: { user: {
+    id: "manager", app_metadata: { roles: ["event_ops_manager"] },
+  } }, error: null }));
+  const headers = { Authorization: "Bearer valid" };
+  const { user, permissions } = await (await fetch(base + "/api/auth/me", { headers })).json();
+  assert.deepEqual(user.accountTypes, ["internal"]);
+  assert.deepEqual(permissions, ["event_organisers.read"]);
+  assert.equal((await fetch(base + "/api/internal/access", { headers })).status, 403);
 });

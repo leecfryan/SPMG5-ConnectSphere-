@@ -45,3 +45,9 @@ footer { text-align: center; color: #7d8a83; font-size: 11px; }
 .responsibilities ul { padding-left: 20px; margin: 0; color: #426e60; font-size: 14px; line-height: 1.7; }
 .responsibilities li + li { margin-top: 6px; }
 .responsibilities > p { font-size: 14px; line-height: 1.6; }
+
+.workspace { min-width: 0; }
+.workspace-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.workspace-nav a { color: #185c4b; padding: 10px 14px; border-radius: 7px; text-decoration: none; }
+.workspace-nav a.active { background: #e3eee7; font-weight: 600; }
+.workspace-nav a:focus-visible { outline: 2px solid #185c4b; outline-offset: 2px; }
