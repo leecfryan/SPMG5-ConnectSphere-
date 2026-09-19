@@ -1,4 +1,5 @@
-const supabase = require("../../supabase");
+// Lazy construction keeps sign-in available when venue storage is not configured.
+const getSupabase = () => require("../../supabase");
 
 // SCRUM-82, 83, 84: everything a Coordinator needs to assess a venue
 const VENUE_FIELDS = [
@@ -9,7 +10,7 @@ const VENUE_FIELDS = [
 ].join(", ");
 
 async function listVenues({ city, minCapacity } = {}) {
-  let query = supabase
+  let query = getSupabase()
     .from("venues")
     .select(VENUE_FIELDS)
     .eq("is_active", true)
@@ -24,7 +25,7 @@ async function listVenues({ city, minCapacity } = {}) {
 }
 
 async function getVenueById(id) {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("venues")
     .select(VENUE_FIELDS)
     .eq("id", id)
@@ -35,7 +36,7 @@ async function getVenueById(id) {
 }
 
 async function updateVenue(id, changes) {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("venues")
     .update(changes)
     .eq("id", id)
@@ -50,7 +51,7 @@ async function updateVenue(id, changes) {
 // bookings never reach the calendar, so they are filtered out here rather than
 // in the view.
 async function listBookingsInRange(venueId, from, to) {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("venue_bookings")
     .select("booking_date, slot, status, event_name")
     .eq("venue_id", venueId)
@@ -64,7 +65,7 @@ async function listBookingsInRange(venueId, from, to) {
 
 // SCRUM-93: periods Venue Staff recorded as unavailable
 async function listUnavailabilityInRange(venueId, from, to) {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("venue_unavailability")
     .select("unavailable_date, slot, reason")
     .eq("venue_id", venueId)
@@ -104,14 +105,15 @@ const BOOKING_REQUEST_FIELDS = [
   "additional_requirements",
   "submitted_at",
   "venue:venues!venue_id(id, name, city, country, capacity)",
-  "event:events!event_id(id, name, status, start_time, end_time)",
+  "event:events!event_id!inner(id, name, status, start_time, end_time)",
   "slots:venue_bookings!request_id(slot, status)",
 ].join(", ");
 
-async function getEventById(id) {
-  const { data, error } = await supabase
+async function getEventById(id, coordinatorId) {
+  const { data, error } = await getSupabase()
     .from("events")
     .select(EVENT_FIELDS)
+    .eq("coordinator_id", coordinatorId)
     .eq("id", id)
     .maybeSingle();
 
@@ -122,10 +124,11 @@ async function getEventById(id) {
 // SCRUM-85: the events a coordinator can pick from. Drafts are left out
 // because their timing is not final (see validateAgainstEvent), and events
 // that have already ended have nothing left to book.
-async function listBookableEvents() {
-  const { data, error } = await supabase
+async function listBookableEvents(coordinatorId) {
+  const { data, error } = await getSupabase()
     .from("events")
     .select(EVENT_FIELDS)
+    .eq("coordinator_id", coordinatorId)
     .neq("status", "DRAFT")
     .not("start_time", "is", null)
     .gte("end_time", new Date().toISOString())
@@ -138,7 +141,7 @@ async function listBookableEvents() {
 // Live slot rows for one venue on one day, with the event behind each request.
 // Seed bookings have no request, so `request` comes back null for those.
 async function listSlotRowsForDate(venueId, bookingDate) {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("venue_bookings")
     .select(
       "booking_date, slot, status, event_name, request:venue_booking_requests!request_id(event_id)"
@@ -151,10 +154,11 @@ async function listSlotRowsForDate(venueId, bookingDate) {
   return data;
 }
 
-// Calls the Postgres function from 005_yc_create_venue_booking_requests.sql,
+// Calls the authenticated Postgres wrapper from migration 006,
 // which writes the request and its slot rows in a single transaction.
-async function submitBookingRequest(venueId, eventName, value) {
-  const { data, error } = await supabase.rpc("submit_venue_booking_request", {
+async function submitBookingRequest(venueId, eventName, value, requesterId) {
+  const { data, error } = await getSupabase().rpc("submit_authenticated_venue_booking_request", {
+    p_requested_by: requesterId,
     p_venue_id: venueId,
     p_event_id: value.event_id,
     p_event_name: eventName,
@@ -171,12 +175,13 @@ async function submitBookingRequest(venueId, eventName, value) {
   return data;
 }
 
-async function getBookingRequestById(id) {
-  const { data, error } = await supabase
+async function getBookingRequestById(id, scope) {
+  let query = getSupabase()
     .from("venue_booking_requests")
     .select(BOOKING_REQUEST_FIELDS)
-    .eq("id", id)
-    .maybeSingle();
+    .eq("id", id);
+  query = applyBookingScope(query, scope);
+  const { data, error } = await query.maybeSingle();
 
   if (error) throw new Error(`Failed to fetch booking request: ${error.message}`);
   return data;
@@ -186,15 +191,24 @@ async function getBookingRequestById(id) {
 // Paging can come later if a real venue ever has more than this outstanding.
 const BOOKING_REQUEST_LIST_LIMIT = 200;
 
-async function listBookingRequests() {
-  const { data, error } = await supabase
+async function listBookingRequests(scope) {
+  let query = getSupabase()
     .from("venue_booking_requests")
     .select(BOOKING_REQUEST_FIELDS)
     .order("submitted_at", { ascending: false })
     .limit(BOOKING_REQUEST_LIST_LIMIT);
+  query = applyBookingScope(query, scope);
+  const { data, error } = await query;
 
   if (error) throw new Error(`Failed to list booking requests: ${error.message}`);
   return data;
+}
+
+// This scope is built by the authenticated router, never from query/body input.
+function applyBookingScope(query, scope) {
+  if (scope?.allVenues === true) return query;
+  if (scope?.coordinatorId) return query.eq("event.coordinator_id", scope.coordinatorId);
+  throw new Error("Missing booking access scope");
 }
 
 module.exports = {

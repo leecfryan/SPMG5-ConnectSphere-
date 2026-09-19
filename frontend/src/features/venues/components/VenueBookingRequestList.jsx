@@ -1,3 +1,4 @@
+import { useAuth } from "../../auth/useAuth";
 import { useState, useEffect } from "react";
 import { fetchBookingRequests } from "../../../lib/api";
 import {
@@ -147,20 +148,22 @@ function RequestCard({ request }) {
 }
 
 function VenueBookingRequestList({ onBack }) {
+  const { token } = useAuth();
   const [status, setStatus] = useState("pending");
-  const [requests, setRequests] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null);
+  const queryKey = JSON.stringify([status, token]);
+  const current = result?.key === queryKey;
+  const requests = current ? result.requests : [];
+  const isLoading = !current;
+  const error = current ? result.error : null;
 
   useEffect(() => {
-    setIsLoading(true);
-    setError(null);
-
-    fetchBookingRequests({ status })
-      .then((data) => setRequests(data))
-      .catch((err) => setError(err.message))
-      .finally(() => setIsLoading(false));
-  }, [status]);
+    let active = true;
+    fetchBookingRequests({ status }, token)
+      .then((requests) => { if (active) setResult({ key: queryKey, requests }); })
+      .catch((err) => { if (active) setResult({ key: queryKey, requests: [], error: err.message }); });
+    return () => { active = false; };
+  }, [status, token, queryKey]);
 
   return (
     <div className="venue-booking-requests">

@@ -1,53 +1,28 @@
 const express = require("express");
-const {
-  getVenues,
-  getVenue,
-  patchVenue,
-  getVenueAvailability,
-  getBookableEvents,
-  postBookingRequest,
-  getBookingRequests,
-  getBookingRequest,
-} = require("../modules/venues/venues.controller");
-const requireRole = require("../middleware/requireRole");
+const createVenuesController = require("../modules/venues/venues.controller");
+const requirePermission = require("../middleware/requirePermission");
 
-const router = express.Router();
-
-// SCRUM-16: which role owns venue updates is unconfirmed.
-// Sprint goal defines Organizer, Coordinator, Attendee. The story says
-// "Venue Staff". Update this list once the team confirms.
-const VENUE_EDITOR_ROLES = ["Organizer", "Coordinator"];
-
-// SCRUM-21: role names match the RBAC on the develop branch
-// (backend/src/auth/permissions.js), so moving from the x-user-role placeholder
-// to requirePermission is a swap of middleware, not a rename.
-//   event_coordinator submits requests, same split as equipment requests
-//   venue_staff reviews them, matching the "bookings.read" policy
-const BOOKING_REQUESTERS = ["event_coordinator"];
-const BOOKING_REVIEWERS = ["venue_staff", "event_coordinator"];
-
-// Fixed paths first. Registered after "/:id", Express would treat
-// "booking-requests" as a venue id and reject it as an invalid uuid.
-router.get("/booking-events", requireRole(...BOOKING_REQUESTERS), getBookableEvents);
-router.get("/booking-requests", requireRole(...BOOKING_REVIEWERS), getBookingRequests);
-router.get(
-  "/booking-requests/:requestId",
-  requireRole(...BOOKING_REVIEWERS),
-  getBookingRequest
-);
-
-router.get("/", getVenues);
-router.get("/:id", getVenue);
-
-// SCRUM-17: read only, anyone who can view a venue can view its calendar
-router.get("/:id/availability", getVenueAvailability);
-router.patch("/:id", requireRole(...VENUE_EDITOR_ROLES), patchVenue);
-
-// SCRUM-21: submit a booking request for this venue
-router.post(
-  "/:id/booking-requests",
-  requireRole(...BOOKING_REQUESTERS),
-  postBookingRequest
-);
-
-module.exports = router;
+module.exports = function createVenuesRoutes(service) {
+  const router = express.Router();
+  // Role checks run before storage checks, including when storage is unavailable.
+  const available = (req, res, next) => service ? next() : res.status(503).json({
+    message: "Venue storage is not configured. Please try again later.",
+  });
+  const controller = createVenuesController(service || {});
+  // Venue Staff review venue responsibilities across all locations. Coordinators
+  // see only bookings attached to their assigned events. Queries apply this scope.
+  const bookingScope = (req) => {
+    req.bookingScope = req.user.roles.includes("venue_staff")
+      ? { allVenues: true } : { coordinatorId: req.user.id };
+    return true;
+  };
+  router.get("/booking-events", requirePermission("bookings.request"), available, controller.getBookableEvents);
+  router.get("/booking-requests", requirePermission("bookings.read", bookingScope), available, controller.getBookingRequests);
+  router.get("/booking-requests/:requestId", requirePermission("bookings.read", bookingScope), available, controller.getBookingRequest);
+  router.get("/", requirePermission("venues.read"), available, controller.getVenues);
+  router.get("/:id", requirePermission("venues.read"), available, controller.getVenue);
+  router.get("/:id/availability", requirePermission("venues.read"), available, controller.getVenueAvailability);
+  router.patch("/:id", requirePermission("venues.update"), available, controller.patchVenue);
+  router.post("/:id/booking-requests", requirePermission("bookings.request"), available, controller.postBookingRequest);
+  return router;
+};

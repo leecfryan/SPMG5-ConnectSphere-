@@ -1,3 +1,4 @@
+import { useAuth } from "../../auth/useAuth";
 import { useState, useEffect } from "react";
 import {
   fetchBookableEvents,
@@ -102,6 +103,7 @@ function ChipToggleGroup({ legend, options, selected, onToggle }) {
 }
 
 function VenueBookingRequestForm({ venue, onDone, onCancel }) {
+  const { token } = useAuth();
   // Plain values read once, never venue.something inside a handler. The React
   // Compiler hoists property reads out of closures into its memo checks, which
   // is what crashed the catalogue page in SCRUM-16.
@@ -119,8 +121,10 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
   const [eventId, setEventId] = useState("");
   const [bookingDate, setBookingDate] = useState(() => localDate(new Date()));
   const [slots, setSlots] = useState([]);
-  const [day, setDay] = useState(null);
-  const [dayError, setDayError] = useState(null);
+  const [dayResult, setDayResult] = useState(null);
+  const dayKey = JSON.stringify([venueId, bookingDate, token]);
+  const day = dayResult?.key === dayKey ? dayResult.day : null;
+  const dayError = dayResult?.key === dayKey ? dayResult.error : null;
 
   // SCRUM-87
   const [expectedAttendees, setExpectedAttendees] = useState("");
@@ -134,23 +138,22 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
   const [created, setCreated] = useState(null);
 
   useEffect(() => {
-    fetchBookableEvents()
+    fetchBookableEvents(token)
       .then((data) => setEvents(data))
       .catch((err) => setEventsError(err.message))
       .finally(() => setIsLoadingEvents(false));
-  }, []);
+  }, [token]);
 
   // Slot availability for the chosen day, from the same endpoint as the
   // SCRUM-17 calendar so the form and the calendar always agree.
   useEffect(() => {
     if (!bookingDate) return;
-    setDay(null);
-    setDayError(null);
-
-    fetchVenueAvailability(venueId, { from: bookingDate, to: bookingDate })
-      .then((data) => setDay(data.days[0]))
-      .catch((err) => setDayError(err.message));
-  }, [venueId, bookingDate]);
+    let active = true;
+    fetchVenueAvailability(venueId, { from: bookingDate, to: bookingDate }, token)
+      .then((data) => { if (active) setDayResult({ key: dayKey, day: data.days[0] }); })
+      .catch((err) => { if (active) setDayResult({ key: dayKey, error: err.message }); });
+    return () => { active = false; };
+  }, [venueId, bookingDate, token, dayKey]);
 
   const selectedEvent = events.find((event) => event.id === eventId) || null;
 
@@ -199,7 +202,7 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
       required_facilities: facilities,
       accessibility_requirements: accessibility,
       additional_requirements: additional.trim() === "" ? null : additional.trim(),
-    })
+    }, token)
       .then((request) => setCreated(request))
       .catch((err) => setSubmitError(err.message))
       .finally(() => setIsSubmitting(false));

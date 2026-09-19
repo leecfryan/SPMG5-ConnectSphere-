@@ -107,10 +107,10 @@ function VenueDetail({ venue, onBack, onEdit, onViewAvailability }) {
         </div>
 
         <div className="v-actions">
-          <button type="button" className="v-btn v-btn-secondary" onClick={onEdit}>
+          {onEdit && <button type="button" className="v-btn v-btn-secondary" onClick={onEdit}>
             <IconPencil />
             Edit operating information
-          </button>
+          </button>}
 
           {/* SCRUM-17: view venue availability calendar */}
           <button

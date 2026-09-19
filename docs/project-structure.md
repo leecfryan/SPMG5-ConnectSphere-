@@ -1,6 +1,6 @@
 ﻿# ConnectSphere folder guide
 
-Use this guide to find files and decide where new code belongs. The feature folders are currently empty and reserved for future work.
+Use this guide to find files and decide where new code belongs. Authentication is implemented; the other feature folders are reserved for future work.
 
 ## Project overview
 
@@ -63,7 +63,7 @@ Other files inside `frontend/`:
 | `src/assets/hero.png`                         | Starter image.                          |
 | `src/assets/react.svg`, `src/assets/vite.svg` | Starter logos.                          |
 
-Currently, `App.jsx` calls the backend health endpoint and displays its message.
+`App.jsx` manages session state and displays the sign-in form or protected account screen. `features/auth/SignIn.jsx` holds the form; `lib/supabase.js` creates the browser Auth client using public configuration from Express.
 
 ## Backend
 
@@ -71,9 +71,11 @@ The main code lives in `backend/src/`:
 
 ```text
 src/
-|-- server.js            Starts Express and defines /api/health
-|-- supabase.js          Creates the Supabase Cloud client
+|-- server.js            Loads configuration and starts Express
+|-- app.js               Defines public and protected API endpoints
+|-- supabase.js          Creates the administrative Supabase client
 |-- checkSupabase.js     Separate script to check the cloud connection
+|-- auth/                Staff permission policy
 |-- config/              Server settings
 |-- middleware/          Shared request checks and error handling
 |-- modules/             Backend code grouped by feature
@@ -88,6 +90,10 @@ src/
 ```
 
 Put business logic in its matching module. For example, booking logic belongs in `modules/bookings/`.
+
+`middleware/requireAuth.js` verifies bearer tokens with Supabase and attaches trusted identity to `req.user`. `GET /api/auth/me` uses it to return the signed-in user. `GET /api/auth/config` exposes only the public project URL and publishable key.
+
+Staff permissions live in `auth/permissions.js`. `middleware/requirePermission.js` enforces them after authentication. `GET /api/internal/access` supplies the account screen's `StaffResponsibilities.jsx`. See [staff access](staff-access.md) before adding internal feature routes or record queries.
 
 The `/api/health` endpoint checks that Express is running. It does not check Supabase. The separate `checkSupabase.js` script checks access through the Supabase Auth admin API.
 
@@ -113,7 +119,7 @@ These files appear inside both `frontend/` and `backend/`:
 | `.env`                      | Private settings passed to the backend, including Supabase credentials. Ignored by Git.      |
 | `.env.example`              | Template listing the required settings.                                                      |
 | `.gitignore`                | Tells Git which files to ignore. The frontend also has its own `.gitignore`.                 |
-| `.github/workflows/ci.yml`  | Automatic frontend, backend syntax, and Docker checks on pushes and pull requests to `main`. |
+| `.github/workflows/ci.yml`  | Automatic frontend, backend syntax/tests, and Docker checks on pushes and pull requests to `main`. |
 | `architecture.md`           | Overview of how the project fits together.                                                   |
 | `docs/project-structure.md` | This folder guide.                                                                           |
 
@@ -128,7 +134,7 @@ These files appear inside both `frontend/` and `backend/`:
 | `tests/e2e/`                 | Tests for a complete user journey through the app. |
 | `supabase/migrations/`       | Future SQL files for changes to Supabase Cloud.    |
 
-These folders are reserved space. Test runners and automatic migrations are not configured by creating them. No local Supabase setup is needed.
+`backend/tests/integration/auth.test.js` and `permissions.test.js` run with Node's built-in test runner through `npm --prefix backend test` and CI. The other test folders and migrations folder remain reserved space. No automatic migrations or local Supabase setup are configured.
 
 Keep the Supabase secret key on the backend, never in frontend code.
 

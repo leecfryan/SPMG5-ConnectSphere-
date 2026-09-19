@@ -1,3 +1,4 @@
+import { useAuth } from "../../auth/useAuth";
 import { useState, useEffect } from "react";
 import { fetchVenueAvailability } from "../../../lib/api";
 import {
@@ -61,28 +62,30 @@ function shiftDate(dateString, days) {
 }
 
 function VenueAvailabilityCalendar({ venue, onBack, onRequestBooking }) {
+  const { token } = useAuth();
   // Read the id once here rather than inside the effect or a handler. The
   // React Compiler hoists a closure's property reads into its memo check, and
   // that is what crashed the catalogue page in SCRUM-16.
   const venueId = venue.id;
 
   const [from, setFrom] = useState(todayString);
-  const [days, setDays] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null);
 
   const to = shiftDate(from, RANGE_DAYS - 1);
   const today = todayString();
 
+  const queryKey = JSON.stringify([venueId, from, to, token]);
+  const current = result?.key === queryKey;
+  const days = current ? result.days : [];
+  const isLoading = !current;
+  const error = current ? result.error : null;
   useEffect(() => {
-    setIsLoading(true);
-    setError(null);
-
-    fetchVenueAvailability(venueId, { from, to })
-      .then((data) => setDays(data.days))
-      .catch((err) => setError(err.message))
-      .finally(() => setIsLoading(false));
-  }, [venueId, from, to]);
+    let active = true;
+    fetchVenueAvailability(venueId, { from, to }, token)
+      .then((data) => { if (active) setResult({ key: queryKey, days: data.days }); })
+      .catch((err) => { if (active) setResult({ key: queryKey, days: [], error: err.message }); });
+    return () => { active = false; };
+  }, [venueId, from, to, token, queryKey]);
 
   function handleStartDateChange(value) {
     // Clearing a date input gives "", and shiftDate("") throws, which would
@@ -108,7 +111,7 @@ function VenueAvailabilityCalendar({ venue, onBack, onRequestBooking }) {
         </div>
 
         {/* SCRUM-21: request slots straight from the calendar that shows them */}
-        <div className="v-actions">
+        {onRequestBooking && <div className="v-actions">
           <button
             type="button"
             className="v-btn v-btn-primary"
@@ -117,7 +120,7 @@ function VenueAvailabilityCalendar({ venue, onBack, onRequestBooking }) {
             <IconCalendar />
             Request a booking
           </button>
-        </div>
+        </div>}
       </header>
 
       <div className="v-card v-cal-toolbar">
