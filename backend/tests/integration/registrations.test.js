@@ -279,6 +279,23 @@ test("POST /api/registrations: rejects registration for a non-APPROVED event", a
   assert.match((await res.json()).message, /not open/);
 });
 
+test("POST /api/registrations: returns 400 when a required field is blank in registrationData", async (t) => {
+  const eventWithRequired = {
+    ...APPROVED_EVENT,
+    registration_fields: [{ id: "full_name", label: "Full name", type: "text", required: true }],
+  };
+  const base = await setup(t, {
+    tables: { events: () => ({ data: eventWithRequired, error: null }) },
+  });
+  const res = await fetch(base + "/api/registrations", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ eventId: "event-approved", registrationData: { full_name: "  " } }),
+  });
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).message, /Full name/);
+});
+
 test("POST /api/registrations: rejects a duplicate registration for the same event", async (t) => {
   const base = await setup(t, {
     tables: {
@@ -525,4 +542,45 @@ test("PATCH /withdraw: returns 500 on DB error during update", async (t) => {
     },
   });
   assert.equal((await fetch(base + "/api/registrations/reg-1/withdraw", { method: "PATCH", headers: AUTH })).status, 500);
+});
+
+test("PATCH /withdraw: returns 403 for a confirmed registration", async (t) => {
+  const confirmed = { ...REGISTRATION, status: "confirmed", events: { start_time: "2027-01-01T10:00:00Z" } };
+  const base = await setup(t, {
+    tables: { registrations: () => ({ data: confirmed, error: null }) },
+  });
+  const res = await fetch(base + "/api/registrations/reg-1/withdraw", {
+    method: "PATCH",
+    headers: AUTH,
+  });
+  assert.equal(res.status, 403);
+  assert.match((await res.json()).message, /confirmed/);
+});
+
+test("PATCH /withdraw: returns 409 when the event has already started", async (t) => {
+  const pastStart = new Date(Date.now() - 60_000).toISOString();
+  const started = { ...REGISTRATION, events: { start_time: pastStart } };
+  const base = await setup(t, {
+    tables: { registrations: () => ({ data: started, error: null }) },
+  });
+  const res = await fetch(base + "/api/registrations/reg-1/withdraw", {
+    method: "PATCH",
+    headers: AUTH,
+  });
+  assert.equal(res.status, 409);
+  assert.match((await res.json()).message, /already started/);
+});
+
+test("PATCH /withdraw: returns 409 within 24 hours of event start", async (t) => {
+  const soonStart = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour from now
+  const soon = { ...REGISTRATION, events: { start_time: soonStart } };
+  const base = await setup(t, {
+    tables: { registrations: () => ({ data: soon, error: null }) },
+  });
+  const res = await fetch(base + "/api/registrations/reg-1/withdraw", {
+    method: "PATCH",
+    headers: AUTH,
+  });
+  assert.equal(res.status, 409);
+  assert.match((await res.json()).message, /24 hours/);
 });
