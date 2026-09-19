@@ -1,31 +1,29 @@
 const path = require("node:path");
+require("dotenv").config({ path: path.resolve(__dirname, "../../.env"), quiet: true });
+const { createClient } = require("@supabase/supabase-js");
+const createApp = require("./app");
 
-// Resolved against this file, not the working directory: the .env lives at the
-// repo root, so a bare dotenv.config() finds nothing when the server is started
-// from backend/ (`npm run dev`). Must also run before anything that reaches
-// src/supabase.js - that module throws at import time when SUPABASE_URL /
-// SUPABASE_SECRET_KEY are missing.
-require("dotenv").config({
-  path: path.resolve(__dirname, "../../.env"),
-  quiet: true,
+const supabaseUrl = process.env.SUPABASE_URL;
+const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
+if (!supabaseUrl || !publishableKey) {
+  throw new Error("Set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in the root .env.");
+}
+// User verification uses the public key, separate from the seed script's admin client.
+const authClient = createClient(supabaseUrl, publishableKey, {
+  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
 });
-
-const express = require("express");
-const cors = require("cors");
-const eventsRoutes = require("./routes/events.routes");
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-const PORT = process.env.PORT || 3000;
-
-app.get("/api/health", (req, res) => {
-  res.status(200).json({ message: "Server is healthy" });
+const app = createApp({
+  authClient, supabaseUrl, publishableKey,
+  // Missing data configuration disables submission without breaking sign-in.
+  eventsRepository: process.env.SUPABASE_SECRET_KEY ? require("./modules/events/events.repository") : undefined,
+  frontendOrigin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
 });
-
-app.use("/api/events", eventsRoutes);
-
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+const port = process.env.PORT || 3000;
+app.listen(port, (error) => {
+  if (error) {
+    console.error("Unable to start server on port " + port + ": " + error.code);
+    process.exitCode = 1;
+    return;
+  }
+  console.log("Server is running on port " + port);
 });

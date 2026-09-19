@@ -63,7 +63,7 @@ function normalise(input) {
 //
 // Returns { ok: true, event } or { ok: false, errors } - the same errors shape
 // events.validation.js produces, so the controller has one branch to write.
-async function submitRequest(input, organiserId) {
+async function submitRequest(input, organiserId, eventRepository = repository) {
   const { fields, errors } = normalise(input);
 
   // A value normalise could not read is left undefined, which the validator
@@ -77,7 +77,7 @@ async function submitRequest(input, organiserId) {
   const problems = [...errors, ...validation];
   if (problems.length > 0) return { ok: false, errors: problems };
 
-  const event = await repository.createSubmitted(fields, organiserId);
+  const event = await eventRepository.createSubmitted(fields, organiserId);
   return { ok: true, event };
 }
 

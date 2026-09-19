@@ -4,14 +4,17 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "vitest run",
+    "test": "npm run test:auth && npm run test:events",
     "test:cov": "vitest run --coverage",
     "dev": "nodemon src/server.js",
     "start": " node src/server.js",
     "check": "eslint .",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
-    "test:report": "vitest run --reporter=html"
+    "test:report": "vitest run --reporter=html",
+    "test:auth": "node --test tests/integration/auth.test.js tests/integration/permissions.test.js",
+    "test:events": "vitest run",
+    "seed:users": "node scripts/seedUsers.js"
   },
   "keywords": [],
   "author": "",

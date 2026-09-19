@@ -10,19 +10,25 @@ import { createRequire } from "node:module";
 // the source closes over; a plain ESM import would hand back a second copy and
 // a spy set on it would never be seen by the code under test.
 const require = createRequire(import.meta.url);
-const express = require("express");
+const createApp = require("../../src/app");
 const { stubSupabase } = require("../helpers/stubSupabase");
 
 stubSupabase();
 const repository = require("../../src/modules/events/events.repository");
-const eventsRoutes = require("../../src/routes/events.routes");
-const { DEV_ORGANISER_ID } = require("../../src/modules/events/events.controller");
 
-// Mirrors the middleware server.js applies; built here so no port is fixed and
-// no .env is needed.
-const app = express();
-app.use(express.json());
-app.use("/api/events", eventsRoutes);
+
+// Exercise the production app, including verified identity and permission checks.
+const ORGANISER_ID = "verified-organiser-id";
+const app = createApp({
+  authClient: { auth: { getUser: async (token) => ({
+    data: { user: token === "invalid" ? null : {
+      id: ORGANISER_ID, app_metadata: { roles: [token] },
+      user_metadata: { roles: ["event_organiser"] },
+    } }, error: null,
+  }) } },
+  eventsRepository: repository,
+  supabaseUrl: "https://example.supabase.co", publishableKey: "test-public-key",
+});
 
 let server;
 let baseUrl;
@@ -59,10 +65,10 @@ function completeBody() {
   };
 }
 
-async function post(body) {
+async function post(body, token = "event_organiser") {
   const response = await fetch(`${baseUrl}/api/events`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) },
     body: JSON.stringify(body),
   });
   return { status: response.status, body: await response.json() };
@@ -70,12 +76,58 @@ async function post(body) {
 
 const fieldsOf = (body) => body.errors.map((e) => e.field).sort();
 
+test.each([
+  ["EVENT-AUTH-001", "", 401],
+  ["EVENT-AUTH-002", "invalid", 401],
+  ["EVENT-AUTH-003", "attendee", 403],
+  ["EVENT-AUTH-004", "venue_staff", 403],
+  ["EVENT-AUTH-005", "technical_support_staff", 403],
+  ["EVENT-AUTH-006", "event_coordinator", 403],
+  ["EVENT-AUTH-007", "event_ops_manager", 403],
+])("[%s] Token role '%s' cannot submit an organiser request (HTTP %s)", async (_id, token, expected) => {
+  const response = await post({ ...completeBody(), roles: ["event_organiser"] }, token);
+  expect(response.status).toBe(expected);
+  expect(response.body.event).toBeUndefined();
+  expect(createSubmitted).not.toHaveBeenCalled();
+});
+
+test("[EVENT-AUTH-008] Caller cannot override verified owner or submission status", async () => {
+  const response = await post({ ...completeBody(), organiser_id: "someone-else", status: "APPROVED", coordinator_id: "fake" });
+  expect(response.status).toBe(201);
+  expect(response.body.event.organiser_id).toBe(ORGANISER_ID);
+  const [fields, owner] = createSubmitted.mock.calls[0];
+  expect(owner).toBe(ORGANISER_ID);
+  expect(fields).not.toHaveProperty("organiser_id");
+  expect(fields).not.toHaveProperty("status");
+  expect(fields).not.toHaveProperty("coordinator_id");
+});
+
+test("[EVENT-CONFIG-001] Missing data configuration preserves sign-in and fails closed for submissions", async () => {
+  const app = createApp({
+    authClient: { auth: { getUser: async () => ({ data: { user: {
+      id: ORGANISER_ID, app_metadata: { roles: ["event_organiser"] },
+    } }, error: null }) } },
+    supabaseUrl: "https://example.supabase.co", publishableKey: "test-public-key",
+  });
+  const listener = app.listen(0, "127.0.0.1");
+  await new Promise((resolve) => listener.once("listening", resolve));
+  const base = "http://127.0.0.1:" + listener.address().port;
+  const headers = { Authorization: "Bearer organiser", "Content-Type": "application/json" };
+  try {
+    expect((await fetch(base + "/api/auth/me", { headers })).status).toBe(200);
+    expect((await fetch(base + "/api/events", { method: "POST", headers, body: JSON.stringify(completeBody()) })).status).toBe(503);
+    expect((await fetch(base + "/api/events", { method: "POST" })).status).toBe(401);
+  } finally {
+    await new Promise((resolve) => { listener.close(resolve); listener.closeAllConnections(); });
+  }
+});
+
 test("SCRUM-51: 201 - a complete request comes back SUBMITTED", async () => {
   const { status, body } = await post(completeBody());
 
   expect(status).toBe(201);
   expect(body.event.status).toBe("SUBMITTED");
-  expect(body.event.organiser_id).toBe(DEV_ORGANISER_ID);
+  expect(body.event.organiser_id).toBe(ORGANISER_ID);
 });
 
 // The HTTP half of SCRUM-46 / SCRUM-47: an organiser who fills the optional

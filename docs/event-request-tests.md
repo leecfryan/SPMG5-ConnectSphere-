@@ -1,5 +1,9 @@
 # Event Request — Test Documentation
 
+> Historical catalog of the original 80 feature tests. These cases are retained.
+> PR #2 adds authenticated submission tests and runs both Node and Vitest backend
+> suites. Current commands and integration scope: [integration guide](event-request-integration.md).
+
 **Deliverable 3 evidence for SCRUM-23 (Create event request) and SCRUM-25 (Submit event request), both under epic SCRUM-7 (Event Request).**
 Branch: `feature/eventRequest` · Written 18 Sep · **80 documented cases, all passing**
 — 64 backend (§3–§5) and 16 frontend (§6).

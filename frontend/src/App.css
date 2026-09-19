@@ -46,8 +46,13 @@ footer { text-align: center; color: #7d8a83; font-size: 11px; }
 .responsibilities li + li { margin-top: 6px; }
 .responsibilities > p { font-size: 14px; line-height: 1.6; }
 
-/* Event request form. Appended rather than woven in so the shared design system
-   above stays byte-identical to `feature/SignIn` and the merge is a no-op. */
+.workspace { min-width: 0; }
+.workspace-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.workspace-nav a { color: #185c4b; padding: 10px 14px; border-radius: 7px; text-decoration: none; }
+.workspace-nav a.active { background: #e3eee7; font-weight: 600; }
+.workspace-nav a:focus-visible { outline: 2px solid #185c4b; outline-offset: 2px; }
+
+/* Event request form alongside the shared sign-in and workspace styles. */
 main.wide { grid-template-columns: 1fr 560px; }
 textarea { width: 100%; min-height: 84px; padding: 12px 14px; border: 1px solid #cbd7d0; border-radius: 7px; color: #152c37; background: #fff; font: inherit; font-size: 15px; resize: vertical; }
 textarea::placeholder { color: #8b9892; }

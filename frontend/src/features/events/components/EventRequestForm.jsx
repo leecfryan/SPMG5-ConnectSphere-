@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { EVENT_LIMITS, submitEventRequest } from "../eventsService";
+import { useAuth } from "../../auth/useAuth";
 
 // Mirrors WRITABLE_COLS in backend/src/modules/events/events.repository.js. The
 // backend ignores anything outside that list, so an extra key here is inert -
@@ -106,6 +107,7 @@ function TextAreaField({
 }
 
 export default function EventRequestForm({ onSubmitted }) {
+  const { token } = useAuth();
   const [fields, setFields] = useState(EMPTY);
   const [errors, setErrors] = useState([]);
   const [message, setMessage] = useState("");
@@ -131,7 +133,7 @@ export default function EventRequestForm({ onSubmitted }) {
     setErrors([]);
     setMessage("");
     try {
-      const result = await submitEventRequest(fields);
+      const result = await submitEventRequest(fields, token);
       if (result.event) {
         setFields(EMPTY);
         onSubmitted(result.event);

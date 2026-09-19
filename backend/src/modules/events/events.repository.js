@@ -1,4 +1,5 @@
-const supabase = require("../../supabase");
+// Importing the application/validation must not require administrative credentials.
+const getSupabase = () => require("../../supabase");
 
 const TABLE = "events";
 
@@ -47,14 +48,14 @@ async function createSubmitted(
     submitted_at: submittedAt,
   };
   return unwrap(
-    await supabase.from(TABLE).insert(row).select().single(),
+    await getSupabase().from(TABLE).insert(row).select().single(),
     "createSubmitted",
   );
 }
 
 async function findById(id) {
   return unwrap(
-    await supabase.from(TABLE).select("*").eq("id", id).maybeSingle(),
+    await getSupabase().from(TABLE).select("*").eq("id", id).maybeSingle(),
     "findById",
   );
 }
@@ -63,14 +64,14 @@ async function update(id, patch) {
   const row = pickCol(patch);
   if (Object.keys(row).length === 0) return findById(id);
   return unwrap(
-    await supabase.from(TABLE).update(row).eq("id", id).select().maybeSingle(),
+    await getSupabase().from(TABLE).update(row).eq("id", id).select().maybeSingle(),
     "update",
   );
 }
 
 async function markSubmitted(id, submittedAt = new Date().toISOString()) {
   return unwrap(
-    await supabase
+    await getSupabase()
       .from(TABLE)
       .update({ status: "SUBMITTED", submitted_at: submittedAt })
       .eq("id", id)
@@ -83,7 +84,7 @@ async function markSubmitted(id, submittedAt = new Date().toISOString()) {
 
 async function assignCoordinator(id, coordinatorId) {
   return unwrap(
-    await supabase
+    await getSupabase()
       .from(TABLE)
       .update({ coordinator_id: coordinatorId })
       .eq("id", id)
@@ -95,7 +96,7 @@ async function assignCoordinator(id, coordinatorId) {
 
 async function findSubmittedUnassigned() {
   return unwrap(
-    await supabase
+    await getSupabase()
       .from(TABLE)
       .select("*")
       .eq("status", "SUBMITTED")

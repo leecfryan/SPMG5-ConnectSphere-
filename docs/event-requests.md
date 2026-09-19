@@ -1,5 +1,8 @@
 # Event Requests
 
+> Updated for PR #2: see [the integration guide](event-request-integration.md) for
+> shared authentication, `/events/new`, runtime configuration and test commands.
+
 **The events module: what it builds, what it does not, and what the other lanes
 need from it.**
 Epic SCRUM-7 · Branch `feature/eventRequest` · Written 17 Sep
@@ -27,8 +30,8 @@ asking. Everything below reflects the code on this branch, not a plan for it.
 | `events.validation.js` | `validateForSubmission` — the submission gate |
 | `events.service.js` | Normalisation: trim, blank → `null`, date parse to ISO, integer attendance |
 | `events.repository.js` | `createSubmitted` — writes through an explicit column list |
-| Frontend | `EventRequestForm` + `eventsService.js`, mounted directly in `App.jsx` |
-| Tests | 64 automated cases at unit, service and HTTP layers — see §5 |
+| Frontend | `EventRequestForm` + `eventsService.js`, mounted at protected `/events/new` in the shared router |
+| Tests | Original 64 cases plus authorization integration cases — see §5 and the integration guide |
 
 This covers **SCRUM-23** (Create event request, criteria SCRUM-44/45/46/47) and
 **SCRUM-25** (Submit event request, criteria SCRUM-49/50/51).
@@ -43,32 +46,22 @@ This covers **SCRUM-23** (Create event request, criteria SCRUM-44/45/46/47) and
 | Coordinator assignment | SCRUM-26, next sprint. `assignCoordinator` and `findSubmittedUnassigned` exist in the repository but have **no callers and no tests** — treat them as a sketch |
 | `GET /api/events` | Absorbed from the Registration lane's stub, not yet written here. See §3 |
 | `GET /api/events/:id` | Dropped for good — Registration built it |
-| Frontend component tests | Vitest + RTL not installed on this branch |
-| End-to-end tests | Playwright needs the merged app |
+| Event-form component-only tests | The shared Vitest/RTL suite is available; integrated event UI behavior is covered by Playwright |
+| Live Supabase end-to-end tests | Local Playwright covers the merged application with simulated Auth and storage; live data verification remains |
 
 ### What this implementation does **not** make safe
 
 Read this before mounting the module anywhere real.
 
-1. **The routes are unguarded.** `POST /api/events` has no `requireAuth` and no
-   `requirePermission`. Anyone who can reach the server can create a request. The
-   guards belong to the Access lane and were deliberately not reimplemented here.
-2. **`organiser_id` is a hardcoded constant.** `events.controller.js` sets
-   `DEV_ORGANISER_ID = "00000000-0000-0000-0000-000000000001"` behind a `TODO`.
-   The column is `NOT NULL`, which is the only reason a placeholder exists. Once
-   `requireAuth` is mounted, delete it and read `req.user.id` — **never from the
-   request body.**
-3. **The frontend sends no token.** The moment the route is authenticated, every
-   submission 401s until the session token is attached.
-4. **Nothing enforces ownership.** There is no read endpoint here yet, so there
-   is nothing to leak — but the first `GET` added without a role scope exposes
-   every organiser's unapproved requests. See the `visibleStatuses` note in §3.
-5. **The `CHECK` constraint on `events.status` is unverified.** It was widened or
-   dropped by another lane without a migration; `APPROVED` is in use. If it was
-   dropped, nothing stops a typo becoming a status. See §4.
-6. **The character caps are input safeguards, not security.** `express.json()`
-   here has no explicit limit; the merged `createApp` sets `16kb`. Six textareas
-   at 2000 characters is roughly 12KB — under, but not comfortably.
+1. **Submission is now authenticated and authorized.** The shared app verifies
+   the bearer token and requires `events.submit` for Event Organisers. The form
+   attaches the current token and the controller uses `req.user.id` as owner.
+2. **Read scope remains future work.** New event list/detail endpoints need
+   permission and event-relationship checks before returning protected data.
+3. **Database constraints and RLS still need live verification.** This merge
+   does not change the shared database or certify its current status constraint.
+4. **Input caps are not security controls.** The merged application preserves
+   its 16kb JSON request limit; encoded payload size still matters.
 
 ---
 
@@ -213,7 +206,7 @@ table:
     "other_comments": "Catering handled externally.",
     "registration_fields": null,
     "status": "SUBMITTED",
-    "organiser_id": "00000000-0000-0000-0000-000000000001",
+    "organiser_id": "<verified-auth-user-uuid>",
     "coordinator_id": null,
     "submitted_at": "2026-09-17T04:12:55.318+00:00",
     "created_at": "2026-09-17T04:12:55.318+00:00"
@@ -501,7 +494,7 @@ all four lanes: prefix your rows and delete them afterwards.
 2. **Submit a complete, valid request.** Expect the success view and the returned
    uuid as the reference.
 3. **Confirm the row in Supabase.** `status = 'SUBMITTED'`, `submitted_at` set,
-   `coordinator_id` null, `organiser_id` the `DEV_ORGANISER_ID` placeholder.
+   `coordinator_id` null, `organiser_id` matching the signed-in Event Organiser.
 4. **Confirm the new column does not break inserts.** Registration added
    `registration_fields` without notice. Writes go through `WRITABLE_COLS`, so an
    unknown column cannot break them — verify rather than assume.

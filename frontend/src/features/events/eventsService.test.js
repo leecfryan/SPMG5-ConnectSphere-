@@ -33,6 +33,18 @@ function formFields() {
 // The body the service actually sent, parsed back out of the fetch call.
 const sentBody = () => JSON.parse(fetch.mock.calls[0][1].body);
 
+test("[EVENT-SERVICE-001] Missing session never sends an event submission", async () => {
+  const result = await submitEventRequest(formFields());
+  expect(result.message).toBe("Please sign in to submit an event request.");
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test.each([401, 403, 503])("[EVENT-SERVICE-%s] Auth and availability errors display the API message", async (status) => {
+  fetch.mockResolvedValue(jsonResponse(status, { message: "Access is unavailable." }));
+  const result = await submitEventRequest(formFields(), "verified-test-token");
+  expect(result).toEqual({ event: null, errors: [], message: "Access is unavailable." });
+});
+
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
 });
@@ -44,7 +56,7 @@ afterEach(() => {
 // --- fixture guard -----------------------------------------------------------
 
 // Every timestamp assertion below is written against UTC+8. If the pinned zone
-// in vite.config.js ever stops taking effect, this fails first and names the
+// in vitest.config.js ever stops taking effect, this fails first and names the
 // reason, instead of the conversion tests failing for a reason that looks like
 // a bug in the service.
 test("fixture guard: the suite runs in the pinned UTC+8 time zone", () => {
@@ -57,7 +69,7 @@ test("SCRUM-51: a 201 returns the created event with no errors", async () => {
   const event = { id: "evt-1", name: "Annual Alumni Gala", status: "SUBMITTED" };
   fetch.mockResolvedValue(jsonResponse(201, { event }));
 
-  const result = await submitEventRequest(formFields());
+  const result = await submitEventRequest(formFields(), "verified-test-token");
 
   expect(result).toEqual({ event, errors: [], message: "" });
 });
@@ -65,13 +77,13 @@ test("SCRUM-51: a 201 returns the created event with no errors", async () => {
 test("SCRUM-25: the request is a JSON POST to /api/events", async () => {
   fetch.mockResolvedValue(jsonResponse(201, { event: { id: "evt-1" } }));
 
-  await submitEventRequest(formFields());
+  await submitEventRequest(formFields(), "verified-test-token");
 
   expect(fetch.mock.calls.length).toBe(1);
   const [url, options] = fetch.mock.calls[0];
   expect(url).toBe("/api/events");
   expect(options.method).toBe("POST");
-  expect(options.headers).toEqual({ "Content-Type": "application/json" });
+  expect(options.headers).toEqual({ "Content-Type": "application/json", Authorization: "Bearer verified-test-token" });
   expect(sentBody().name).toBe("Annual Alumni Gala");
 });
 
@@ -84,7 +96,7 @@ test("SCRUM-23: a 400 passes the validator's field errors straight through", asy
   ];
   fetch.mockResolvedValue(jsonResponse(400, { errors }));
 
-  const result = await submitEventRequest(formFields());
+  const result = await submitEventRequest(formFields(), "verified-test-token");
 
   expect(result).toEqual({ event: null, errors, message: "" });
 });
@@ -94,7 +106,7 @@ test("SCRUM-25 design: a 500 surfaces the server's message against no field", as
     jsonResponse(500, { error: "Could not submit the event request. Please try again." }),
   );
 
-  const result = await submitEventRequest(formFields());
+  const result = await submitEventRequest(formFields(), "verified-test-token");
 
   expect(result.event).toBe(null);
   expect(result.errors).toEqual([]);
@@ -106,7 +118,7 @@ test("SCRUM-25 design: a 500 surfaces the server's message against no field", as
 test("SCRUM-25 design: a response that is not JSON falls back to a generic message", async () => {
   fetch.mockResolvedValue(brokenResponse(502));
 
-  const result = await submitEventRequest(formFields());
+  const result = await submitEventRequest(formFields(), "verified-test-token");
 
   expect(result.event).toBe(null);
   expect(result.message).toBe("Could not submit the event request. Please try again.");
@@ -115,7 +127,7 @@ test("SCRUM-25 design: a response that is not JSON falls back to a generic messa
 test("SCRUM-25 design: a network failure is reported as a connection problem", async () => {
   fetch.mockRejectedValue(new TypeError("Failed to fetch"));
 
-  const result = await submitEventRequest(formFields());
+  const result = await submitEventRequest(formFields(), "verified-test-token");
 
   expect(result).toEqual({
     event: null,
@@ -129,7 +141,7 @@ test("SCRUM-25 design: a network failure is reported as a connection problem", a
 test("SCRUM-25 design: a 201 without an event in the body is treated as a failure", async () => {
   fetch.mockResolvedValue(jsonResponse(201, {}));
 
-  const result = await submitEventRequest(formFields());
+  const result = await submitEventRequest(formFields(), "verified-test-token");
 
   expect(result.event).toBe(null);
   expect(result.message).toBe("Could not submit the event request. Please try again.");
@@ -138,7 +150,7 @@ test("SCRUM-25 design: a 201 without an event in the body is treated as a failur
 test("SCRUM-23 design: a 400 without an errors array falls through to the message", async () => {
   fetch.mockResolvedValue(jsonResponse(400, { error: "Malformed request" }));
 
-  const result = await submitEventRequest(formFields());
+  const result = await submitEventRequest(formFields(), "verified-test-token");
 
   expect(result.errors).toEqual([]);
   expect(result.message).toBe("Malformed request");
@@ -153,7 +165,7 @@ test("SCRUM-23 design: a 400 without an errors array falls through to the messag
 test("SCRUM-45: datetime-local values are converted to ISO in the browser's zone", async () => {
   fetch.mockResolvedValue(jsonResponse(201, { event: { id: "evt-1" } }));
 
-  await submitEventRequest(formFields());
+  await submitEventRequest(formFields(), "verified-test-token");
 
   expect(sentBody().start_time).toBe("2026-09-20T02:00:00.000Z");
   expect(sentBody().end_time).toBe("2026-09-20T05:00:00.000Z");
@@ -163,7 +175,7 @@ test("SCRUM-45 design: an unreadable date/time is sent untouched so the server n
   fetch.mockResolvedValue(jsonResponse(400, { errors: [] }));
   const fields = { ...formFields(), start_time: "next tuesday" };
 
-  await submitEventRequest(fields);
+  await submitEventRequest(fields, "verified-test-token");
 
   expect(sentBody().start_time).toBe("next tuesday");
   // The readable field beside it is still converted.
@@ -174,7 +186,7 @@ test("SCRUM-45 boundary: an empty time field is sent empty, not as an epoch date
   fetch.mockResolvedValue(jsonResponse(400, { errors: [] }));
   const fields = { ...formFields(), start_time: "", end_time: "" };
 
-  await submitEventRequest(fields);
+  await submitEventRequest(fields, "verified-test-token");
 
   expect(sentBody().start_time).toBe("");
   expect(sentBody().end_time).toBe("");
@@ -184,7 +196,7 @@ test("SCRUM-45 boundary: a value already in ISO survives the round trip unchange
   fetch.mockResolvedValue(jsonResponse(201, { event: { id: "evt-1" } }));
   const fields = { ...formFields(), start_time: "2026-09-20T02:00:00.000Z" };
 
-  await submitEventRequest(fields);
+  await submitEventRequest(fields, "verified-test-token");
 
   expect(sentBody().start_time).toBe("2026-09-20T02:00:00.000Z");
 });
@@ -193,7 +205,7 @@ test("SCRUM-45 design: only the two time fields are rewritten", async () => {
   fetch.mockResolvedValue(jsonResponse(201, { event: { id: "evt-1" } }));
   const fields = formFields();
 
-  await submitEventRequest(fields);
+  await submitEventRequest(fields, "verified-test-token");
 
   const body = sentBody();
   expect(body.name).toBe(fields.name);
@@ -209,7 +221,7 @@ test("SCRUM-45 design: the caller's fields object is not mutated", async () => {
   fetch.mockResolvedValue(jsonResponse(201, { event: { id: "evt-1" } }));
   const fields = formFields();
 
-  await submitEventRequest(fields);
+  await submitEventRequest(fields, "verified-test-token");
 
   expect(fields.start_time).toBe("2026-09-20T10:00");
 });

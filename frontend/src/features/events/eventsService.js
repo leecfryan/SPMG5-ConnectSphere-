@@ -32,11 +32,12 @@ function withZonedTimes(fields) {
 //   event   - the submitted row on success, otherwise null
 //   errors  - [{ field, message }] from the validator, for the fields themselves
 //   message - a single message for anything not attributable to a field
-export async function submitEventRequest(fields) {
+export async function submitEventRequest(fields, token) {
+  if (!token) return { event: null, errors: [], message: "Please sign in to submit an event request." };
   try {
     const response = await fetch("/api/events", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
       body: JSON.stringify(withZonedTimes(fields)),
     });
     const payload = await readJson(response);
@@ -51,7 +52,7 @@ export async function submitEventRequest(fields) {
       event: null,
       errors: [],
       message:
-        payload?.error ||
+        payload?.error || payload?.message ||
         "Could not submit the event request. Please try again.",
     };
   } catch {
