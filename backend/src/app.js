@@ -3,8 +3,9 @@ const cors = require("cors");
 const requireAuth = require("./middleware/requireAuth");
 const requirePermission = require("./middleware/requirePermission");
 const { getResponsibilities, getPermissions } = require("./auth/permissions");
+const createEventsRoutes = require("./routes/events.routes");
 
-function createApp({ authClient, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
+function createApp({ authClient, eventsRepository, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
   const app = express();
   const authenticate = requireAuth(authClient);
   app.disable("x-powered-by");
@@ -19,6 +20,7 @@ function createApp({ authClient, supabaseUrl, publishableKey, frontendOrigin = "
   app.get("/api/auth/me", authenticate, (req, res) => {
     res.json({ user: req.user, permissions: getPermissions(req.user.roles) });
   });
+  app.use("/api/events", authenticate, requirePermission("events.submit"), createEventsRoutes(eventsRepository));
   // All internal routes must be registered after this gate, with their own permission guard.
   app.use("/api/internal", authenticate, requirePermission("internal.access"));
   app.get("/api/internal/access", (req, res) => {

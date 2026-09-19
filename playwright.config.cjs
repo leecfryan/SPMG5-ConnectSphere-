@@ -15,8 +15,8 @@ module.exports = defineConfig({
   reporter: [['list'], ['html', { open: 'never' }], ['json', { outputFile: 'test-results/results.json' }]],
   use: { trace: 'retain-on-failure', screenshot: 'only-on-failure' },
   projects: [
-    { name: 'api', testMatch: '**/api.spec.cjs', use: { baseURL: backendURL } },
-    { name: 'chromium', testMatch: '**/browser.spec.cjs', use: { ...devices['Desktop Chrome'], baseURL: frontendURL } },
+    { name: 'api', testMatch: '**/*api.spec.cjs', use: { baseURL: backendURL } },
+    { name: 'chromium', testMatch: '**/*browser.spec.cjs', use: { ...devices['Desktop Chrome'], baseURL: frontendURL } },
   ],
   webServer: [
     {

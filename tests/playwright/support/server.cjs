@@ -27,6 +27,7 @@ auth.post('/__test/accounts', (req, res) => {
     id, email: id + '@example.test', password: 'Local-fixture-only-42!',
     roles: req.body.roles ?? ['venue_staff'], metadata: req.body.metadata ?? {},
     revoked: false, providerStatus: 200, loginStatus: 200,
+    events: [], submissionFailure: false,
     counts: { login: 0, verification: 0, refresh: 0, logout: 0, record: 0, handler: 0 },
   };
   accounts.set(id, account);
@@ -35,7 +36,7 @@ auth.post('/__test/accounts', (req, res) => {
 auth.patch('/__test/accounts/:id', (req, res) => {
   const account = accounts.get(req.params.id);
   if (!account) return res.sendStatus(404);
-  for (const key of ['roles', 'revoked', 'providerStatus', 'loginStatus']) {
+  for (const key of ['roles', 'revoked', 'providerStatus', 'loginStatus', 'submissionFailure']) {
     if (Object.hasOwn(req.body, key)) account[key] = req.body[key];
   }
   res.sendStatus(204);
@@ -43,7 +44,7 @@ auth.patch('/__test/accounts/:id', (req, res) => {
 auth.get('/__test/accounts/:id', (req, res) => {
   const account = accounts.get(req.params.id);
   if (!account) return res.sendStatus(404);
-  res.json({ counts: account.counts });
+  res.json({ counts: account.counts, events: account.events });
 });
 function user(account) {
   return {
@@ -97,7 +98,18 @@ auth.post('/auth/v1/logout', (req, res) => {
 });
 
 const client = createClient(authURL, publicKey, { auth: { persistSession: false, autoRefreshToken: false } });
-const app = createApp({ authClient: client, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
+// Only storage is substituted; event routing, validation, normalization and
+// verified ownership are the production implementations.
+const eventsRepository = {
+  async createSubmitted(fields, organiserId) {
+    const account = accounts.get(organiserId);
+    if (!account || account.submissionFailure) throw new Error('Fixture event storage unavailable');
+    const event = { ...fields, id: randomUUID(), organiser_id: organiserId, status: 'SUBMITTED', submitted_at: new Date().toISOString() };
+    account.events.push(event);
+    return event;
+  },
+};
+const app = createApp({ authClient: client, eventsRepository, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
 // Fixture endpoints exercise real middleware; these are NOT production business endpoints.
 const permissions = ['venues.read', 'equipment.read', 'bookings.read', 'technical_requests.read', 'event_planning.read', 'attendees.read', 'clients.read', 'event_organisers.read'];
 for (const permission of permissions) {

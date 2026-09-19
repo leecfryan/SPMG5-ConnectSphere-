@@ -6,7 +6,7 @@ Event Planning and Venue Booking System for IS212.
 
 Use Node.js 22. Copy .env.example to .env in the repository root and fill in
 SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY from the team's Supabase Cloud project.
-SUPABASE_SECRET_KEY is needed only for administrative scripts such as seeding.
+SUPABASE_SECRET_KEY is needed for server-side event submission and administrative scripts such as seeding.
 Keep .env private.
 
 From the repository root:
@@ -82,6 +82,13 @@ record permissions also require a server-side relationship resolver. Production
 business endpoints and their database policies do not exist yet; full story
 acceptance requires this integration. See [staff access](docs/staff-access.md) for
 the agreed matrix, integration examples, tests and remaining work.
+
+## Event request submission
+
+Event Organisers can open `/events/new` through the workspace navigation. The
+frontend and backend both enforce `events.submit`; the API obtains ownership
+from the verified user. See [event-request integration](docs/event-request-integration.md)
+for setup, preserved functionality and combined test commands.
 
 ## Frontend navigation
 

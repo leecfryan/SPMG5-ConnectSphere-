@@ -1,4 +1,4 @@
-import { Link, Navigate, Route, Routes } from "react-router";
+import { Link, Navigate, Route, Routes, useLocation } from "react-router";
 import AuthProvider from "./features/auth/AuthProvider";
 import AuthStatus from "./features/auth/AuthStatus";
 import { useAuth } from "./features/auth/useAuth";
@@ -8,6 +8,7 @@ import SignInPage from "./routes/SignInPage";
 import AccountPage from "./routes/AccountPage";
 import ResponsibilitiesPage from "./routes/ResponsibilitiesPage";
 import WorkspaceLayout from "./routes/WorkspaceLayout";
+import EventRequestPage from "./features/events/pages/EventRequestPage";
 import "./App.css";
 
 function Home() {
@@ -18,11 +19,12 @@ function Home() {
 }
 
 export default function App() {
+  const location = useLocation();
   return (
     <AuthProvider>
       <div className="app-shell">
         <header className="brand"><span className="brand-mark" aria-hidden="true">C</span>ConnectSphere</header>
-        <main>
+        <main className={location.pathname === "/events/new" ? "wide" : undefined}>
           <aside className="intro">
             <p className="eyebrow">EVENT PLANNING & VENUE BOOKING</p>
             <h2>Great events.<br />Connected people.</h2>
@@ -36,6 +38,9 @@ export default function App() {
             <Route element={<RequireAuth />}>
               <Route element={<WorkspaceLayout />}>
                 <Route path="/account" element={<AccountPage />} />
+                <Route element={<RequirePermission permission="events.submit" />}>
+                  <Route path="/events/new" element={<EventRequestPage />} />
+                </Route>
                 <Route element={<RequirePermission permission="internal.access" />}>
                   <Route path="/staff/responsibilities" element={<ResponsibilitiesPage />} />
                 </Route>

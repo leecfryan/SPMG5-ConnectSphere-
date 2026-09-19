@@ -8,6 +8,7 @@ export default function WorkspaceLayout() {
     <div className="workspace">
       <nav className="workspace-nav" aria-label="Workspace">
         <NavLink to="/account">Account</NavLink>
+        {hasPermission("events.submit") && <NavLink to="/events/new">New event request</NavLink>}
         {hasPermission("internal.access") && <NavLink to="/staff/responsibilities">Responsibilities</NavLink>}
       </nav>
       <Outlet />

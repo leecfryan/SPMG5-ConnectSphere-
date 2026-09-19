@@ -1,5 +1,9 @@
 # Playwright browser and backend API acceptance tests
 
+> The original sign-in/RBAC cases below are retained. PR #2 adds 7 event browser
+> cases and 9 event API cases (104 total). See [event-request integration](../event-request-integration.md).
+> Feature files now use `*browser.spec.cjs` or `*api.spec.cjs` for discovery.
+
 The root Playwright runner complements the frontend Vitest/React Testing Library
 suite and the existing backend Node integration tests. Every test has a unique
 ID and a descriptive title. There are 17 Chromium browser tests and 71 HTTP API

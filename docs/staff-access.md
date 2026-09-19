@@ -16,6 +16,10 @@ they are not shipped as business APIs. Full story acceptance on real records
 requires the feature owners to attach these guards and implement scoped database
 queries. This implementation does not make unguarded future endpoints safe.
 
+The integrated event feature separately grants `events.submit` to Event Organisers
+for `POST /api/events` and `/events/new`. This does not grant internal access.
+See [event-request integration](event-request-integration.md).
+
 ## Initial agreed matrix
 
 The user approved this conservative starting point in this task. It is an

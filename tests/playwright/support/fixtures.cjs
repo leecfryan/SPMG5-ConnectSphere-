@@ -19,6 +19,11 @@ const test = base.extend({
         expect(response.ok()).toBeTruthy();
         return (await response.json()).counts;
       },
+      async events(account) {
+        const response = await request.get(authURL + '/__test/accounts/' + account.id, { headers });
+        expect(response.ok()).toBeTruthy();
+        return (await response.json()).events;
+      },
       async session(account) {
         const response = await request.post(authURL + '/auth/v1/token?grant_type=password', {
           data: { email: account.email, password: account.password },
