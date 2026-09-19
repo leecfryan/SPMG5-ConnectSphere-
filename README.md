@@ -6,7 +6,7 @@ Event Planning and Venue Booking System for IS212.
 
 Use Node.js 22. Copy .env.example to .env in the repository root and fill in
 SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY from the team's Supabase Cloud project.
-SUPABASE_SECRET_KEY is needed for server-side event submission and administrative scripts such as seeding.
+SUPABASE_SECRET_KEY is needed for server-side event submission, venue storage and administrative scripts such as seeding.
 Keep .env private.
 
 From the repository root:
@@ -78,9 +78,8 @@ roles grant no internal access. The staff responsibilities page displays respons
 returned by GET /api/internal/access.
 
 Feature owners must attach requirePermission to their data endpoints. Sensitive
-record permissions also require a server-side relationship resolver. Production
-business endpoints and their database policies do not exist yet; full story
-acceptance requires this integration. See [staff access](docs/staff-access.md) for
+record permissions also require a server-side relationship resolver. The Venue feature now applies these guards to its real endpoints; other feature
+PRs must do the same. See [staff access](docs/staff-access.md) for
 the agreed matrix, integration examples, tests and remaining work.
 
 ## Event request submission
@@ -90,10 +89,19 @@ frontend and backend both enforce `events.submit`; the API obtains ownership
 from the verified user. See [event-request integration](docs/event-request-integration.md)
 for setup, preserved functionality and combined test commands.
 
+## Venue catalogue and booking requests
+
+Venue Staff and Event Coordinators can open `/venues` from the workspace.
+The catalogue, operating-information editor, availability calendar and booking
+request review are integrated with shared sign-in and RBAC. Coordinators request
+bookings for their assigned events. See [Venue integration](docs/venue-integration.md)
+for routes, role permissions and the required database migrations, including 006.
+Merging or restarting Docker does not apply Supabase migrations automatically.
+
 ## Frontend navigation
 
 The application uses React Router: `/sign-in`, `/account`,
-`/staff/responsibilities`, and `/forbidden`. The root redirects after session
+`/staff/responsibilities`, `/events/new`, `/venues/*`, and `/forbidden`. The root redirects after session
 checking. Protected routes wait for backend verification; navigation and feature
 guards use permission identifiers returned by `/api/auth/me`. Express remains
 responsible for enforcing every API permission and record-access check.

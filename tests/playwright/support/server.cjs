@@ -41,6 +41,13 @@ auth.patch('/__test/accounts/:id', (req, res) => {
   }
   res.sendStatus(204);
 });
+// Assignment is fixture setup only; no assignment API is added to production.
+auth.post('/__test/events/:id/assignment', (req, res) => {
+  const event = [...accounts.values()].flatMap(account => account.events).find(event => event.id === req.params.id);
+  if (!event || !accounts.has(req.body.coordinatorId)) return res.sendStatus(404);
+  event.coordinator_id = req.body.coordinatorId;
+  res.sendStatus(204);
+});
 auth.get('/__test/accounts/:id', (req, res) => {
   const account = accounts.get(req.params.id);
   if (!account) return res.sendStatus(404);
@@ -109,7 +116,8 @@ const eventsRepository = {
     return event;
   },
 };
-const app = createApp({ authClient: client, eventsRepository, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
+const venuesService = require('./venue-storage.cjs')(accounts);
+const app = createApp({ authClient: client, eventsRepository, venuesService, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
 // Fixture endpoints exercise real middleware; these are NOT production business endpoints.
 const permissions = ['venues.read', 'equipment.read', 'bookings.read', 'technical_requests.read', 'event_planning.read', 'attendees.read', 'clients.read', 'event_organisers.read'];
 for (const permission of permissions) {

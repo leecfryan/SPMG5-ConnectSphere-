@@ -1,9 +1,15 @@
 // Initial staff matrix agreed for the "Restrict internal staff access by responsibility" story.
-// Read access only. Mutation permissions belong to their feature stories.
+// Feature writes have separate permissions; read grants never authorise mutations.
 const policies = Object.freeze({
   // External organisers submit their own requests; this grants no internal access.
   "events.submit": {
     roles: ["event_organiser"],
+  },
+  "venues.update": {
+    roles: ["venue_staff", "event_coordinator"],
+  },
+  "bookings.request": {
+    roles: ["event_coordinator"],
   },
   "internal.access": {
     roles: ["event_coordinator", "venue_staff", "technical_support_staff"],

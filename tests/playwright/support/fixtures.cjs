@@ -24,6 +24,10 @@ const test = base.extend({
         expect(response.ok()).toBeTruthy();
         return (await response.json()).events;
       },
+      async assignEvent(eventId, coordinatorId) {
+        const response = await request.post(authURL + '/__test/events/' + eventId + '/assignment', { headers, data: { coordinatorId } });
+        expect(response.status()).toBe(204);
+      },
       async session(account) {
         const response = await request.post(authURL + '/auth/v1/token?grant_type=password', {
           data: { email: account.email, password: account.password },

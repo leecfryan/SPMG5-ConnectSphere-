@@ -8,6 +8,7 @@ import SignInPage from "./routes/SignInPage";
 import AccountPage from "./routes/AccountPage";
 import ResponsibilitiesPage from "./routes/ResponsibilitiesPage";
 import WorkspaceLayout from "./routes/WorkspaceLayout";
+import VenueRoutes from "./features/venues/VenueRoutes";
 import EventRequestPage from "./features/events/pages/EventRequestPage";
 import "./App.css";
 
@@ -24,7 +25,7 @@ export default function App() {
     <AuthProvider>
       <div className="app-shell">
         <header className="brand"><span className="brand-mark" aria-hidden="true">C</span>ConnectSphere</header>
-        <main className={location.pathname === "/events/new" ? "wide" : undefined}>
+        <main className={location.pathname === "/venues" || location.pathname.startsWith("/venues/") ? "venue-workspace" : location.pathname === "/events/new" ? "wide" : undefined}>
           <aside className="intro">
             <p className="eyebrow">EVENT PLANNING & VENUE BOOKING</p>
             <h2>Great events.<br />Connected people.</h2>
@@ -42,6 +43,9 @@ export default function App() {
                   <Route path="/events/new" element={<EventRequestPage />} />
                 </Route>
                 <Route element={<RequirePermission permission="internal.access" />}>
+                  <Route element={<RequirePermission permission="venues.read" />}>
+                    <Route path="/venues/*" element={<VenueRoutes />} />
+                  </Route>
                   <Route path="/staff/responsibilities" element={<ResponsibilitiesPage />} />
                 </Route>
                 <Route path="/forbidden" element={

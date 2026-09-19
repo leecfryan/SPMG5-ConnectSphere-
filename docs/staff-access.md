@@ -10,15 +10,21 @@ Frontend routing and navigation use server-derived permission identifiers from
 `GET /api/auth/me`; the API guards remain the security boundary. See
 [frontend routing](frontend-routing.md) for the teammate integration contract.
 
-There are no production venue, booking, equipment, technical-request, attendee,
-client or internal-planning data endpoints yet. The tests use fixture handlers;
-they are not shipped as business APIs. Full story acceptance on real records
+The integrated Venue feature has authenticated catalogue, calendar, editing and
+booking-request APIs. Its coordinator queries use the existing events.coordinator_id
+relationship; Venue Staff review venue requests across locations. See
+[Venue integration](venue-integration.md). Equipment, technical-request, attendee,
+client and internal-planning test endpoints remain fixtures, not business APIs. Full story acceptance on real records
 requires the feature owners to attach these guards and implement scoped database
 queries. This implementation does not make unguarded future endpoints safe.
 
 The integrated event feature separately grants `events.submit` to Event Organisers
 for `POST /api/events` and `/events/new`. This does not grant internal access.
 See [event-request integration](event-request-integration.md).
+
+Venue writes use separate capabilities: `venues.update` for Venue Staff and
+Event Coordinators, and `bookings.request` for Event Coordinators. They do not
+change the read responsibilities listed below or grant external roles access.
 
 ## Initial agreed matrix
 

@@ -3,9 +3,11 @@ const cors = require("cors");
 const requireAuth = require("./middleware/requireAuth");
 const requirePermission = require("./middleware/requirePermission");
 const { getResponsibilities, getPermissions } = require("./auth/permissions");
+const createVenuesRoutes = require("./routes/venues.routes");
+const errorHandler = require("./middleware/errorHandler");
 const createEventsRoutes = require("./routes/events.routes");
 
-function createApp({ authClient, eventsRepository, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
+function createApp({ authClient, eventsRepository, venuesService, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
   const app = express();
   const authenticate = requireAuth(authClient);
   app.disable("x-powered-by");
@@ -26,6 +28,8 @@ function createApp({ authClient, eventsRepository, supabaseUrl, publishableKey, 
   app.get("/api/internal/access", (req, res) => {
     res.json({ responsibilities: getResponsibilities(req.user.roles) });
   });
+  app.use("/api/venues", authenticate, requirePermission("internal.access"), createVenuesRoutes(venuesService));
+  app.use(errorHandler);
   return app;
 }
 
