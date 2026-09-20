@@ -45,7 +45,7 @@ auth.patch('/__test/accounts/:id', (req, res) => {
 auth.patch('/__test/events/:id', (req, res) => {
   const event = [...accounts.values()].flatMap(account => account.events).find(event => event.id === req.params.id);
   if (!event) return res.sendStatus(404);
-  for (const key of ['end_time', 'coordinator_id']) if (Object.hasOwn(req.body, key)) event[key] = req.body[key];
+  for (const key of ['start_time', 'end_time', 'coordinator_id', 'status', 'registration_fields']) if (Object.hasOwn(req.body, key)) event[key] = req.body[key];
   res.sendStatus(204);
 });
 auth.post('/__test/events/:id/assignment', (req, res) => {
@@ -124,7 +124,14 @@ const eventsRepository = {
 };
 const venuesService = require('./venue-storage.cjs')(accounts);
 const equipmentDependencies = require('./equipment-storage.cjs')(accounts);
-const app = createApp({ authClient: client, eventsRepository, venuesService, equipmentDependencies, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
+const dataClient = require('./registration-storage.cjs')(accounts);
+auth.patch('/__test/registrations/:id', (req, res) => {
+  const registration = dataClient.registrations.find(row => row.id === req.params.id);
+  if (!registration) return res.sendStatus(404);
+  if (Object.hasOwn(req.body, 'status')) registration.status = req.body.status;
+  res.sendStatus(204);
+});
+const app = createApp({ dataClient, authClient: client, eventsRepository, venuesService, equipmentDependencies, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
 // Fixture endpoints exercise real middleware; these are NOT production business endpoints.
 const permissions = ['venues.read', 'equipment.read', 'bookings.read', 'technical_requests.read', 'event_planning.read', 'attendees.read', 'clients.read', 'event_organisers.read'];
 for (const permission of permissions) {

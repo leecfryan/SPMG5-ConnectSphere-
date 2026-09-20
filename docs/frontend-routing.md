@@ -8,6 +8,8 @@ same frontend port (Docker: 5173); routing does not start another Vite process.
 | --- | --- |
 | `/` | Wait for session verification, then redirect to sign-in or account. |
 | `/sign-in` | Shared email/password form; verified users return to the requested local URL or `/account`. |
+| `/events` and `/events/:eventId` | Authenticated browsing and registration for approved events. |
+| `/registrations/me` and `/registrations/me/:registrationId` | Own registration status, details and eligible withdrawal. |
 | `/events/new` | Requires `events.submit`; organiser event form. |
 | `/venues/*` | Internal venue pages; see [Venue integration](venue-integration.md) for child routes. |
 | `/equipment/requests?event=<uuid>` | Assigned coordinator Equipment request page; requires `equipment.request`. |
@@ -103,3 +105,5 @@ roles, revocation, server permission checks and required record relationships.
 Before recording live UAT as passed, run through sign-in, page refresh, staff
 navigation and sign-out with real internal and external Supabase accounts.
 Automated tests use fake providers and do not certify cloud configuration.
+
+Registration uses the same session and routing contract. See [Registration integration](registration-integration.md) for ownership checks and the separate attendee-facing event projection.

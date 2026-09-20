@@ -12,6 +12,11 @@ import EquipmentRequestPage from "./features/equipment/pages/EquipmentRequestPag
 import TechnicalSupportDashboardPage from "./features/equipment/pages/TechnicalSupportDashboardPage";
 import VenueRoutes from "./features/venues/VenueRoutes";
 import EventRequestPage from "./features/events/pages/EventRequestPage";
+import EventListPage from "./features/registrations/pages/EventListPage";
+import EventDetailPage from "./features/registrations/pages/EventDetailPage";
+import MyRegistrationsPage from "./features/registrations/pages/MyRegistrationsPage";
+import RegistrationDetailPage from "./features/registrations/pages/RegistrationDetailPage";
+import "./features/registrations/registrations.css";
 import "./App.css";
 
 function Home() {
@@ -41,6 +46,10 @@ export default function App() {
             <Route path="/sign-in" element={<SignInPage />} />
             <Route element={<RequireAuth />}>
               <Route element={<WorkspaceLayout />}>
+                <Route path="/events" element={<EventListPage />} />
+                <Route path="/events/:eventId" element={<EventDetailPage />} />
+                <Route path="/registrations/me" element={<MyRegistrationsPage />} />
+                <Route path="/registrations/me/:registrationId" element={<RegistrationDetailPage />} />
                 <Route path="/account" element={<AccountPage />} />
                 <Route element={<RequirePermission permission="events.submit" />}>
                   <Route path="/events/new" element={<EventRequestPage />} />

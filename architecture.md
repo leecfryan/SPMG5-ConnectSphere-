@@ -61,3 +61,7 @@ route integration and the production index.html fallback required for page URLs.
 ## Equipment integration
 
 Equipment pages run under the shared AuthProvider and permission routes. The backend constructs data dependencies separately from token verification and enforces action permissions plus event/author relationships. See [Equipment integration](docs/equipment-integration.md).
+
+## Registration integration
+
+Approved event reads and attendee-owned registrations are composed alongside organiser submission and staff routes. Registration pages use the shared AuthProvider and API helper; test control endpoints remain outside production. See [Registration integration](docs/registration-integration.md).

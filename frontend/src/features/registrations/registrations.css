@@ -1,0 +1,49 @@
+/* Event list */
+.event-list { list-style: none; padding: 0; margin: 24px 0 0; display: flex; flex-direction: column; gap: 10px; }
+.event-list__item { display: block; padding: 18px 20px; border: 1px solid #e0e7e2; border-radius: 10px; text-decoration: none; color: inherit; background: white; transition: border-color 0.15s, box-shadow 0.15s; }
+.event-list__item:hover { border-color: #a2bbb0; box-shadow: 0 2px 10px #153e2b0d; }
+.event-list__name { display: block; font-weight: 600; font-size: 15px; color: #152c37; margin-bottom: 5px; }
+.event-list__date { display: inline-block; font-size: 12px; font-weight: 600; color: #426e60; letter-spacing: 0.2px; margin-bottom: 6px; }
+.event-list__desc { font-size: 13px; color: #61716f; line-height: 1.55; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* Registration list */
+.registration-list { list-style: none; padding: 0; margin: 24px 0 0; display: flex; flex-direction: column; gap: 8px; }
+.registration-card__link { display: flex; align-items: center; gap: 14px; padding: 15px 18px; border: 1px solid #e0e7e2; border-radius: 10px; text-decoration: none; color: inherit; background: white; transition: border-color 0.15s, background 0.15s; }
+.registration-card__link:hover { border-color: #a2bbb0; background: #f9fbfa; }
+.registration-card__body { flex: 1; min-width: 0; }
+.registration-card__event { display: block; font-weight: 600; font-size: 14px; color: #152c37; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 3px; }
+.registration-card__date { font-size: 12px; color: #61716f; }
+
+/* Status badges */
+.registration-status { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase; white-space: nowrap; flex-shrink: 0; }
+.registration-status--pending { background: #fef3cd; color: #7a5800; }
+.registration-status--confirmed { background: #d3f5e4; color: #0a5c36; }
+.registration-status--withdrawn { background: #f0f0f0; color: #5e6d65; }
+
+/* Event detail */
+.event-meta { display: flex; flex-direction: column; gap: 6px; margin: 16px 0 20px; padding: 16px 18px; background: #f4f7f5; border-radius: 9px; }
+.event-meta__item { font-size: 13px; color: #3a4f47; line-height: 1.5; }
+.event-meta__label { font-weight: 600; color: #152c37; margin-right: 6px; }
+.event-description { font-size: 14px; color: #425249; line-height: 1.7; margin: 16px 0 0; }
+.event-register-section { margin-top: 28px; padding-top: 24px; border-top: 1px solid #e7ece8; }
+.event-register-section h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.3px; margin-bottom: 4px; }
+.event-register-section > p { font-size: 13px; color: #61716f; margin-bottom: 0; }
+/* Back navigation link */
+.back-link { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; color: #426e60; text-decoration: none; margin-bottom: 24px; }
+.back-link::before { content: "←"; font-size: 15px; }
+.back-link:hover { color: #185c4b; }
+
+/* Inline action button (auto width, not form-width) */
+.btn { display: inline-block; padding: 10px 22px; border-radius: 7px; font-size: 14px; font-weight: 600; text-decoration: none; margin-top: 16px; cursor: pointer; border: 1px solid transparent; }
+.btn-primary { color: white; background: #185c4b; border-color: #185c4b; }
+.btn-primary:hover { background: #104a3b; }
+.btn-secondary { color: #185c4b; background: white; border-color: #cbd7d0; }
+.btn-secondary:hover { background: #f4f7f5; }
+/* Section heading inside a card (not h1) */
+.section-heading { font-size: 17px; font-weight: 600; letter-spacing: -0.3px; margin: 28px 0 0; }
+
+/* Withdrawal confirm block */
+.withdraw-confirm { margin-top: 24px; padding: 16px 18px; background: #fff8f7; border: 1px solid #ecd5d0; border-radius: 9px; }
+.withdraw-confirm p { font-size: 14px; color: #425249; margin: 0; line-height: 1.6; }
+.withdraw-confirm__actions { display: flex; gap: 10px; margin-top: 16px; }
+.withdraw-confirm__actions button { flex: 1; margin-top: 0; }

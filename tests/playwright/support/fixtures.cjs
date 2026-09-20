@@ -28,6 +28,10 @@ const test = base.extend({
         const response = await request.patch(authURL + '/__test/events/' + eventId, { headers, data });
         expect(response.status()).toBe(204);
       },
+      async updateRegistration(id, data) {
+        const response = await request.patch(authURL + '/__test/registrations/' + id, { headers, data });
+        expect(response.status()).toBe(204);
+      },
       async assignEvent(eventId, coordinatorId) {
         const response = await request.post(authURL + '/__test/events/' + eventId + '/assignment', { headers, data: { coordinatorId } });
         expect(response.status()).toBe(204);

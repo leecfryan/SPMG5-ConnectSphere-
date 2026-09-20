@@ -11,3 +11,5 @@ coverage/
 .vitest/
 
 .claude
+
+/tests/playwright/results/

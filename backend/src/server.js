@@ -14,6 +14,7 @@ const authClient = createClient(supabaseUrl, publishableKey, {
 });
 const app = createApp({
   authClient, supabaseUrl, publishableKey,
+  dataClient: process.env.SUPABASE_SECRET_KEY ? require("./supabase") : undefined,
   // Missing data configuration disables submission without breaking sign-in.
   eventsRepository: process.env.SUPABASE_SECRET_KEY ? require("./modules/events/events.repository") : undefined,
   venuesService: process.env.SUPABASE_SECRET_KEY ? require("./modules/venues/venues.service") : undefined,

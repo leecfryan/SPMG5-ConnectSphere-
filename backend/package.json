@@ -15,7 +15,8 @@
     "test:auth": "node --test tests/integration/auth.test.js tests/integration/permissions.test.js",
     "test:events": "vitest run",
     "seed:users": "node scripts/seedUsers.js",
-    "test:equipment": "node --test \"tests/unit/equipment/*.test.js\""
+    "test:equipment": "node --test \"tests/unit/equipment/*.test.js\"",
+    "seed:data": "node scripts/seedData.js"
   },
   "keywords": [],
   "author": "",

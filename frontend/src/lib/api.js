@@ -1,4 +1,4 @@
-async function request(path, token, options = {}) {
+async function requestBody(path, token, options = {}) {
   if (!token) throw new Error("Please sign in to continue.");
   const response = await fetch(path, {
     ...options,
@@ -14,7 +14,20 @@ async function request(path, token, options = {}) {
     error.status = response.status;
     throw error;
   }
-  return body.data;
+  return body;
+}
+
+async function request(path, token, options) {
+  return (await requestBody(path, token, options)).data;
+}
+
+export function apiFetch(path, token, options = {}) {
+  const { body, ...rest } = options;
+  return requestBody(path, token, {
+    ...rest,
+    headers: { ...(body !== undefined ? { "Content-Type": "application/json" } : {}), ...options.headers },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
 }
 
 export function fetchVenues({ city, minCapacity } = {}, token) {

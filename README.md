@@ -178,3 +178,7 @@ References:
 ## Equipment requests and technical support
 
 Coordinators use `/equipment/requests`; technical support uses `/technical-support`. Both pages share sign-in, role permissions and the existing frontend port. See [Equipment integration](docs/equipment-integration.md) for preserved workflows, database prerequisites and test commands.
+
+## Attendee registration
+
+Signed-in users can browse approved events at `/events` and manage their own registrations at `/registrations/me`. Staff permissions and existing feature routes are unchanged. See [Registration integration](docs/registration-integration.md) for integration details, tests and database requirements.
