@@ -1,6 +1,15 @@
 .env
 node_modules/
 dist/
-tests/playwright/results/
-playwright-report/
-test-results/
+
+# Playwright reports and failure artifacts
+/playwright-report/
+/test-results/
+/blob-report/
+.DS_Store
+coverage/
+.vitest/
+
+.claude
+
+/tests/playwright/results/

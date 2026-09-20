@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useAuth } from "../../../lib/auth";
+import { useAuth } from "../../auth/useAuth";
 import { apiFetch } from "../../../lib/api";
 
 export function useEventRegistration() {

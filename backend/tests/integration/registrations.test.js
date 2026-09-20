@@ -1,3 +1,4 @@
+import { test } from "vitest";
 const assert = require("node:assert/strict");
 const { once } = require("node:events");
 const createApp = require("../../src/app");
@@ -52,10 +53,10 @@ function validAuth(user = ATTENDEE) {
   return async () => ({ data: { user }, error: null });
 }
 
-async function setup(t, { getUser, tables } = {}) {
+async function setup(t, { getUser, tables, configured = true } = {}) {
   const app = createApp({
     authClient: { auth: { getUser: getUser ?? validAuth() } },
-    dataClient: makeDataClient(tables ?? {}),
+    dataClient: configured ? makeDataClient(tables ?? {}) : undefined,
     supabaseUrl: "https://example.supabase.co",
     publishableKey: "sb_test",
   });
@@ -583,4 +584,45 @@ test("PATCH /withdraw: returns 409 within 24 hours of event start", async (t) =>
   });
   assert.equal(res.status, 409);
   assert.match((await res.json()).message, /24 hours/);
+});
+
+
+test("REG-BACKEND-043: duplicate-check storage failure cannot insert a registration", async (t) => {
+  let inserted = false;
+  const base = await setup(t, { tables: {
+    events: () => ({ data: APPROVED_EVENT, error: null }),
+    registrations: (q) => { inserted ||= Boolean(q.insert); return { data: null, error: { message: "Private database error" } }; },
+  } });
+  const res = await fetch(base + "/api/registrations", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ eventId: "event-approved" }) });
+  assert.equal(res.status, 500);
+  assert.equal(inserted, false);
+  assert.doesNotMatch(await res.text(), /Private database error/);
+});
+
+test("REG-BACKEND-044: database uniqueness conflicts return a safe duplicate response", async (t) => {
+  const base = await setup(t, { tables: {
+    events: () => ({ data: APPROVED_EVENT, error: null }),
+    registrations: (q) => ({ data: null, error: q.insert ? { code: "23505", message: "constraint detail" } : null }),
+  } });
+  const res = await fetch(base + "/api/registrations", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ eventId: "event-approved" }) });
+  assert.equal(res.status, 409);
+  assert.match(await res.text(), /already registered/);
+});
+
+test("REG-BACKEND-045: missing data setup keeps sign-in working and authenticates before configuration errors", async (t) => {
+  const base = await setup(t, { configured: false });
+  assert.equal((await fetch(base + "/api/auth/me", { headers: AUTH })).status, 200);
+  for (const path of ["/api/events", "/api/events/missing", "/api/registrations/me"]) {
+    assert.equal((await fetch(base + path)).status, 401);
+    assert.equal((await fetch(base + path, { headers: AUTH })).status, 503);
+  }
+});
+
+test("REG-BACKEND-046: production app never exposes test deletion controls", async (t) => {
+  const previous = process.env.PW_CONTROL_KEY;
+  process.env.PW_CONTROL_KEY = "test-only-key";
+  t.onTestFinished(() => { if (previous === undefined) delete process.env.PW_CONTROL_KEY; else process.env.PW_CONTROL_KEY = previous; });
+  const base = await setup(t);
+  const res = await fetch(base + "/api/test/control", { method: "POST", headers: { ...JSON_HEADERS, "x-control-key": "test-only-key" }, body: JSON.stringify({ command: "deleteRegistration" }) });
+  assert.equal(res.status, 404);
 });

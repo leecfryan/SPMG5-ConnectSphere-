@@ -16,7 +16,10 @@ hosted externally.
 6. /api/internal routes require a verified internal role. Each data endpoint must
    also use requirePermission with its specific permission. Sensitive record
    permissions require a feature-owned relationship resolver.
-7. The account screen loads allowed responsibilities from /api/internal/access.
+7. AuthProvider obtains identity and permission identifiers from /api/auth/me.
+   React Router guards use these verified permissions for pages and navigation.
+8. The /staff/responsibilities page loads allowed responsibilities from
+   /api/internal/access; server middleware still authorises each API request.
 
 The permission layer is implemented; production business APIs and relationship
 queries remain feature work. See docs/staff-access.md for the integration contract.
@@ -33,7 +36,10 @@ selector or browser-supplied claim grants access.
 
 - frontend/src/features/auth/SignIn.jsx: sign-in form.
 - frontend/src/lib/supabase.js: browser Auth client, public configuration and sessions.
-- frontend/src/App.jsx: session state and protected account screen.
+- frontend/src/App.jsx: shared shell and route definitions.
+- frontend/src/features/auth/AuthProvider.jsx: shared session, verified identity,
+  permissions, retries and sign-out; useAuth.js exposes its context.
+- frontend/src/routes/: authentication/permission guards, workspace layout and pages.
 - backend/src/server.js: environment loading, stateless verification client and startup.
 - backend/src/app.js: Express app and public/protected endpoints.
 - backend/src/middleware/requireAuth.js: verified identity and trusted role metadata.
@@ -49,4 +55,13 @@ selector or browser-supplied claim grants access.
 Vite proxies /api to the backend: localhost:3000 for local npm development and
 backend:3000 inside Docker. Production hosting must route /api to Express behind
 the same HTTPS origin. See README.md for commands, configuration, acceptance
-criteria and session security considerations.
+criteria and session security considerations. See docs/frontend-routing.md for
+route integration and the production index.html fallback required for page URLs.
+
+## Equipment integration
+
+Equipment pages run under the shared AuthProvider and permission routes. The backend constructs data dependencies separately from token verification and enforces action permissions plus event/author relationships. See [Equipment integration](docs/equipment-integration.md).
+
+## Registration integration
+
+Approved event reads and attendee-owned registrations are composed alongside organiser submission and staff routes. Registration pages use the shared AuthProvider and API helper; test control endpoints remain outside production. See [Registration integration](docs/registration-integration.md).

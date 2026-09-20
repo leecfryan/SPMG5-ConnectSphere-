@@ -125,7 +125,7 @@ RLS policies required before exposing via API:
 - An attendee can update status to `withdrawn` on their own rows only.
 - No attendee can read another attendee's row.
 
-Migration files in `supabase/migrations/`.
+Registration schema changes were made in the shared database; this branch contains no Registration migration files. See [Registration integration](registration-integration.md) for deployment prerequisites and verification limits.
 
 ---
 
@@ -193,7 +193,7 @@ New feature folder at `frontend/src/features/registrations/`.
 
 ---
 
-## Current status (as of 2026-09-12, Day 5)
+## Original branch status (2026-09-12, Day 5; historical)
 
 ### Done
 
@@ -212,3 +212,7 @@ New feature folder at `frontend/src/features/registrations/`.
 ### Current blockers
 
 - E2E testing requires events seeded in Supabase. Run `node backend/scripts/seedData.js` if not done. Need a valid attendee bearer token (sign in via the app).
+
+## Integration update — 2026-09-20
+
+The Registration feature now shares main's router, session provider and API transport. Original registration/withdrawal scenarios are included in the isolated combined browser suite; production deletion controls were removed. See [Registration integration](registration-integration.md) for current behavior, validation and database prerequisites. Live Supabase verification remains outstanding.

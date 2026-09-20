@@ -14,9 +14,4 @@ export default defineConfig({
   plugins: [react(), babel({ presets: [reactCompilerPreset()] })],
   server: { proxy },
   preview: { proxy },
-  test: {
-    environment: 'jsdom',
-    setupFiles: ['./src/test/setup.js'],
-    globals: true,
-  },
 })

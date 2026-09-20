@@ -1,7 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { useAuth } from "../../../lib/auth";
-import { apiFetch } from "../../../lib/api";
+import { Link } from "react-router";
+import { useRegistrationResource } from "../hooks/useRegistrationResource";
 
 function formatDate(iso) {
   if (!iso) return null;
@@ -9,17 +7,8 @@ function formatDate(iso) {
 }
 
 export default function EventListPage() {
-  const { token } = useAuth();
-  const [events, setEvents] = useState(null);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    const controller = new AbortController();
-    apiFetch("/api/events", token, { signal: controller.signal })
-      .then((data) => setEvents(data.events))
-      .catch((err) => { if (err.name !== "AbortError") setError(err.message); });
-    return () => controller.abort();
-  }, [token]);
+  const { data, error } = useRegistrationResource("/api/events");
+  const events = data?.events;
 
   return (
     <section className="card" aria-labelledby="events-title">

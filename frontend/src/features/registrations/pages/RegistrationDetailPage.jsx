@@ -1,7 +1,5 @@
-import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
-import { useAuth } from "../../../lib/auth";
-import { apiFetch } from "../../../lib/api";
+import { useParams, Link } from "react-router";
+import { useRegistrationResource } from "../hooks/useRegistrationResource";
 import RegistrationStatusBadge from "../components/RegistrationStatusBadge";
 import WithdrawButton from "../components/WithdrawButton";
 import { useEventRegistration } from "../hooks/useEventRegistration";
@@ -24,24 +22,15 @@ function formatFieldKey(key) {
   return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-export default function RegistrationDetailPage() {
+function RegistrationDetailPage() {
   const { registrationId } = useParams();
-  const { token } = useAuth();
-  const [registration, setRegistration] = useState(null);
-  const [fetchError, setFetchError] = useState("");
+  const { data, error: fetchError, setData } = useRegistrationResource(`/api/registrations/me/${registrationId}`);
+  const registration = data?.registration;
   const { withdraw, busy, error: withdrawError } = useEventRegistration();
-
-  useEffect(() => {
-    const controller = new AbortController();
-    apiFetch(`/api/registrations/me/${registrationId}`, token, { signal: controller.signal })
-      .then((data) => setRegistration(data.registration))
-      .catch((err) => { if (err.name !== "AbortError") setFetchError(err.message); });
-    return () => controller.abort();
-  }, [registrationId, token]);
 
   async function handleWithdraw() {
     const updated = await withdraw(registrationId);
-    if (updated) setRegistration(updated);
+    if (updated) setData({ registration: { ...registration, ...updated } });
   }
 
   if (fetchError) {
@@ -93,4 +82,9 @@ export default function RegistrationDetailPage() {
       )}
     </section>
   );
+}
+
+export default function RegistrationDetailPageRoute() {
+  const { registrationId } = useParams();
+  return <RegistrationDetailPage key={registrationId} />;
 }

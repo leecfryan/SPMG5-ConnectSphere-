@@ -8,25 +8,30 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest"
+    "test": "vitest",
+    "test:ui": "vitest --ui --watch --no-open --api.port 51204 --api.strictPort --api.allowExec --api.allowWrite=false",
+    "test:report": "vitest run",
+    "test:report:preview": "vite preview --outDir .vitest --port 4174 --strictPort",
+    "test:watch": "vitest",
+    "test:cov": "vitest run --coverage"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.115.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router-dom": "^7.18.3"
+    "react-router": "^7.18.4"
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",
     "@eslint/js": "^10.0.1",
     "@rolldown/plugin-babel": "^0.2.3",
-    "@testing-library/dom": "^10.4.2",
-    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.7",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.1.0",
+    "@vitest/ui": "5.0.1",
     "babel-plugin-react-compiler": "^1.0.0",
     "eslint": "^10.9.0",
     "eslint-plugin-react-hooks": "^7.1.1",
@@ -34,6 +39,8 @@
     "globals": "^17.11.0",
     "jsdom": "^29.1.1",
     "vite": "^8.2.2",
-    "vitest": "^5.0.1"
+    "vitest": "5.0.1",
+    "@vitest/coverage-v8": "5.0.1",
+    "@testing-library/jest-dom": "^7.0.1"
   }
 }

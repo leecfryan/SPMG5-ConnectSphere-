@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
-import { useAuth } from "../../../lib/auth";
-import { apiFetch } from "../../../lib/api";
+import { useParams, useNavigate, Link } from "react-router";
+import { useRegistrationResource } from "../hooks/useRegistrationResource";
 import RegistrationForm from "../components/RegistrationForm";
 import { useEventRegistration } from "../hooks/useEventRegistration";
 
@@ -10,28 +9,25 @@ function formatDate(iso) {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-export default function EventDetailPage() {
+function EventDetailPage() {
   const { eventId } = useParams();
-  const { token } = useAuth();
   const navigate = useNavigate();
-  const [event, setEvent] = useState(null);
-  const [eventError, setEventError] = useState("");
-  const [registered, setRegistered] = useState(false);
+  const { data, error: eventError } = useRegistrationResource(`/api/events/${eventId}`);
+  const event = data?.event;
+  const [registeredEventId, setRegisteredEventId] = useState(null);
+  const registered = registeredEventId === eventId;
   const { register, busy, error: regError } = useEventRegistration();
 
   useEffect(() => {
-    const controller = new AbortController();
-    apiFetch(`/api/events/${eventId}`, token, { signal: controller.signal })
-      .then((data) => setEvent(data.event))
-      .catch((err) => { if (err.name !== "AbortError") setEventError(err.message); });
-    return () => controller.abort();
-  }, [eventId, token]);
+    if (!registered) return;
+    const timer = setTimeout(() => navigate("/registrations/me"), 1500);
+    return () => clearTimeout(timer);
+  }, [registered, navigate]);
 
   async function handleSubmit(registrationData) {
     const result = await register(eventId, registrationData);
     if (result) {
-      setRegistered(true);
-      setTimeout(() => navigate("/registrations/me"), 1500);
+      setRegisteredEventId(eventId);
     }
   }
 
@@ -77,7 +73,6 @@ export default function EventDetailPage() {
       </div>
 
       {event.description && <p className="event-description">{event.description}</p>}
-      {event.other_comments && <p className="card-note">{event.other_comments}</p>}
 
       <div className="event-register-section">
         {registered ? (
@@ -87,7 +82,7 @@ export default function EventDetailPage() {
             <h2>Register for this event</h2>
             <p>Fill in your details below to secure your spot.</p>
             {regError && <p className="error" role="alert">{regError}</p>}
-            <RegistrationForm fields={event.registration_fields ?? []} onSubmit={handleSubmit} busy={busy} disabled={false} />
+            <RegistrationForm key={eventId} fields={event.registration_fields ?? []} onSubmit={handleSubmit} busy={busy} disabled={false} />
           </>
         ) : (
           <p>Registration is not currently open for this event.</p>
@@ -95,4 +90,9 @@ export default function EventDetailPage() {
       </div>
     </section>
   );
+}
+
+export default function EventDetailPageRoute() {
+  const { eventId } = useParams();
+  return <EventDetailPage key={eventId} />;
 }

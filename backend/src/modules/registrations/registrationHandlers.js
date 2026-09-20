@@ -10,6 +10,11 @@ module.exports = function registrationRoutes(dataClient) {
       return res.status(400).json({ message: "eventId is required." });
     }
 
+    if (registrationData != null && (typeof registrationData !== "object" || Array.isArray(registrationData) ||
+      Object.values(registrationData).some((value) => value != null && typeof value !== "string"))) {
+      return res.status(400).json({ message: "Registration details must contain text field values." });
+    }
+
     const { data: event, error: eventError } = await dataClient
       .from("events")
       .select("id, status, registration_fields")
@@ -33,13 +38,14 @@ module.exports = function registrationRoutes(dataClient) {
       }
     }
 
-    const { data: existing } = await dataClient
+    const { data: existing, error: duplicateError } = await dataClient
       .from("registrations")
       .select("id")
       .eq("attendee_id", req.user.id)
       .eq("event_id", eventId)
       .maybeSingle();
 
+    if (duplicateError) return res.status(500).json({ message: "Unable to submit your registration. Please try again." });
     if (existing) {
       return res.status(409).json({ message: "You are already registered for this event." });
     }
@@ -56,6 +62,7 @@ module.exports = function registrationRoutes(dataClient) {
       .single();
 
     if (error) {
+      if (error.code === "23505") return res.status(409).json({ message: "You are already registered for this event." });
       console.error("Registration insert error:", error.message);
       return res.status(500).json({ message: "Unable to submit your registration. Please try again." });
     }

@@ -12,16 +12,13 @@ if (!supabaseUrl || !publishableKey) {
 const authClient = createClient(supabaseUrl, publishableKey, {
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
 });
-
-const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
-const dataClient = supabaseSecretKey
-  ? createClient(supabaseUrl, supabaseSecretKey, {
-      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-    })
-  : null;
-
 const app = createApp({
-  authClient, dataClient, supabaseUrl, publishableKey,
+  authClient, supabaseUrl, publishableKey,
+  dataClient: process.env.SUPABASE_SECRET_KEY ? require("./supabase") : undefined,
+  // Missing data configuration disables submission without breaking sign-in.
+  eventsRepository: process.env.SUPABASE_SECRET_KEY ? require("./modules/events/events.repository") : undefined,
+  venuesService: process.env.SUPABASE_SECRET_KEY ? require("./modules/venues/venues.service") : undefined,
+  equipmentDependencies: process.env.SUPABASE_SECRET_KEY ? require("./modules/equipment/equipment.dependencies")() : undefined,
   frontendOrigin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
 });
 const port = process.env.PORT || 3000;

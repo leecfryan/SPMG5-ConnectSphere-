@@ -1,0 +1,246 @@
+import { useAuth } from "../../auth/useAuth";
+import { useState, useEffect } from "react";
+import { fetchBookingRequests } from "../../../lib/api";
+import {
+  IconAlert,
+  IconArrowLeft,
+  IconCalendar,
+  IconClock,
+  IconInbox,
+  IconMapPin,
+  IconUsers,
+} from "./VenueIcons";
+import { formatDate, formatDateTime } from "../venueFormat";
+
+// SCRUM-88: submitted requests available to Venue Staff for review.
+// Approving and rejecting are a later story. This view only makes every request
+// and its details visible.
+
+const SLOT_LABELS = { am: "AM", pm: "PM", night: "Night" };
+const SLOT_ORDER = ["am", "pm", "night"];
+
+const STATUS_FILTERS = [
+  { value: "", label: "All" },
+  { value: "pending", label: "Pending review" },
+  { value: "confirmed", label: "Confirmed" },
+  { value: "rejected", label: "Rejected" },
+  { value: "cancelled", label: "Cancelled" },
+  { value: "mixed", label: "Partly decided" },
+];
+
+const STATUS_LABELS = {
+  pending: "Pending review",
+  confirmed: "Confirmed",
+  rejected: "Rejected",
+  cancelled: "Cancelled",
+  mixed: "Partly decided",
+  unknown: "Unknown",
+};
+
+function slotSummary(slotRows) {
+  const slots = slotRows.map((row) => row.slot);
+  if (slots.length === SLOT_ORDER.length) return "Full day (AM, PM, Night)";
+  return SLOT_ORDER.filter((slot) => slots.includes(slot))
+    .map((slot) => SLOT_LABELS[slot])
+    .join(", ");
+}
+
+function ChipsOrNone({ items }) {
+  if (items.length === 0) return <p className="v-none">None</p>;
+  return (
+    <ul className="v-chips">
+      {items.map((item) => (
+        <li key={item} className="v-chip">
+          {item}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function RequestCard({ request }) {
+  const hasTiming = Boolean(request.event.start_time && request.event.end_time);
+
+  return (
+    <article className="v-card v-request">
+      <header className="v-request-header">
+        <div>
+          <h2 className="v-request-title">{request.event.name}</h2>
+          {/* SCRUM-85 */}
+          <p className="v-meta">
+            <span>
+              <IconMapPin size={14} />
+              {request.venue.name}, {request.venue.city}
+            </span>
+          </p>
+        </div>
+        <span className={`v-status v-status-${request.status}`}>
+          {STATUS_LABELS[request.status] || request.status}
+        </span>
+      </header>
+
+      <div className="v-request-body">
+        {/* SCRUM-86: what was asked for, next to when the event actually runs */}
+        <div className="v-facts">
+          <div className="v-fact">
+            <p className="v-fact-label">
+              <IconCalendar size={13} />
+              Requested
+            </p>
+            <p className="v-fact-value">{formatDate(request.booking_date, { weekday: true, year: true })}</p>
+            <p className="v-fact-sub">{slotSummary(request.slots)}</p>
+          </div>
+
+          <div className="v-fact">
+            <p className="v-fact-label">
+              <IconClock size={13} />
+              Event timing
+            </p>
+            {hasTiming ? (
+              <>
+                <p className="v-fact-value">{formatDateTime(request.event.start_time)}</p>
+                <p className="v-fact-sub">to {formatDateTime(request.event.end_time)}</p>
+              </>
+            ) : (
+              <p className="v-fact-value">No timing recorded</p>
+            )}
+          </div>
+
+          {/* SCRUM-87 */}
+          <div className="v-fact">
+            <p className="v-fact-label">
+              <IconUsers size={13} />
+              Attendees
+            </p>
+            <p className="v-fact-value">
+              {request.expected_attendees} of {request.venue.capacity} capacity
+            </p>
+            <p className="v-fact-sub">{request.room_layout} layout</p>
+          </div>
+        </div>
+
+        <div className="v-request-requirements">
+          <div>
+            <p className="v-subheading">Facilities</p>
+            <ChipsOrNone items={request.required_facilities} />
+          </div>
+          <div>
+            <p className="v-subheading">Accessibility</p>
+            <ChipsOrNone items={request.accessibility_requirements} />
+          </div>
+          <div>
+            <p className="v-subheading">Other requirements</p>
+            <p className={request.additional_requirements ? "v-notes" : "v-none"}>
+              {request.additional_requirements || "None"}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <footer className="v-request-footer">
+        <span>Submitted {formatDateTime(request.submitted_at)}</span>
+        <span>
+          Reference <span className="v-mono">{request.id}</span>
+        </span>
+      </footer>
+    </article>
+  );
+}
+
+function VenueBookingRequestList({ onBack }) {
+  const { token } = useAuth();
+  const [status, setStatus] = useState("pending");
+  const [result, setResult] = useState(null);
+  const queryKey = JSON.stringify([status, token]);
+  const current = result?.key === queryKey;
+  const requests = current ? result.requests : [];
+  const isLoading = !current;
+  const error = current ? result.error : null;
+
+  useEffect(() => {
+    let active = true;
+    fetchBookingRequests({ status }, token)
+      .then((requests) => { if (active) setResult({ key: queryKey, requests }); })
+      .catch((err) => { if (active) setResult({ key: queryKey, requests: [], error: err.message }); });
+    return () => { active = false; };
+  }, [status, token, queryKey]);
+
+  return (
+    <div className="venue-booking-requests">
+      <button type="button" className="v-back" onClick={onBack}>
+        <IconArrowLeft />
+        Back to catalogue
+      </button>
+
+      <header className="v-page-header">
+        <div>
+          <p className="v-eyebrow">For Venue Staff to review</p>
+          <h1 className="v-title">Venue booking requests</h1>
+          <p className="v-subtitle">
+            Requests submitted by event coordinators, with the event timing and
+            venue requirements needed to assess them.
+          </p>
+        </div>
+
+        <label className="v-filter-field">
+          Show
+          <select
+            className="v-input"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+          >
+            {STATUS_FILTERS.map((filter) => (
+              <option key={filter.value} value={filter.value}>
+                {filter.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </header>
+
+      {error && (
+        <p className="v-alert v-alert-error" role="alert">
+          <IconAlert />
+          <span>Could not load requests: {error}</span>
+        </p>
+      )}
+
+      {isLoading && (
+        <div className="v-request-list" aria-label="Loading requests...">
+          {[0, 1].map((key) => (
+            <div key={key} className="v-card v-skeleton-card">
+              <div className="v-skeleton" style={{ width: "40%", height: 20 }} />
+              <div className="v-skeleton" style={{ width: "25%", height: 14 }} />
+              <div className="v-skeleton" style={{ height: 76 }} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!isLoading && !error && requests.length === 0 && (
+        <div className="v-card v-empty">
+          <div className="v-empty-icon">
+            <IconInbox size={22} />
+          </div>
+          <p className="v-empty-title">No requests to show.</p>
+          <p>New requests appear here as soon as a coordinator submits them.</p>
+        </div>
+      )}
+
+      {!isLoading && !error && requests.length > 0 && (
+        <>
+          <p className="v-results-count">
+            {requests.length} {requests.length === 1 ? "request" : "requests"}
+          </p>
+          <div className="v-request-list">
+            {requests.map((request) => (
+              <RequestCard key={request.id} request={request} />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export default VenueBookingRequestList;

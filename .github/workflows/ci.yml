@@ -33,7 +33,7 @@ jobs:
         working-directory: frontend
         run: npm run lint
 
-      - name: Test frontend
+      - name: Test sign-in and session access
         working-directory: frontend
         run: npm test -- --run
 
@@ -84,3 +84,38 @@ jobs:
 
       - name: Build Docker images
         run: docker compose build
+
+  playwright:
+    name: Browser and API Acceptance Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+            backend/package-lock.json
+      - name: Install test and application dependencies
+        run: |
+          npm ci
+          npm --prefix frontend ci
+          npm --prefix backend ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run browser and direct API acceptance tests
+        run: npm run test:playwright
+      - name: Save Playwright report and failure traces
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
