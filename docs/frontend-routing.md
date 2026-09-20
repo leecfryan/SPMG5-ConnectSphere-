@@ -10,6 +10,8 @@ same frontend port (Docker: 5173); routing does not start another Vite process.
 | `/sign-in` | Shared email/password form; verified users return to the requested local URL or `/account`. |
 | `/events/new` | Requires `events.submit`; organiser event form. |
 | `/venues/*` | Internal venue pages; see [Venue integration](venue-integration.md) for child routes. |
+| `/equipment/requests?event=<uuid>` | Assigned coordinator Equipment request page; requires `equipment.request`. |
+| `/technical-support` | Technical dashboard; requires `equipment.review`. |
 | `/account` | Backend-verified identity for every signed-in role. |
 | `/staff/responsibilities` | Requires `internal.access`; lists responsibilities from the protected staff API. |
 | `/forbidden` | Signed-in access-denied page. |
@@ -69,7 +71,8 @@ role is removed even before the UI receives another auth event.
 6. Add direct-link, allowed-role, denied-role and backend-denial tests. Keep changes
    to shared route/navigation files small to simplify merges.
 
-Venue now implements this integration pattern; other features should follow it.
+Venue and Equipment implement this integration pattern; other features should follow it.
+See [Equipment integration](equipment-integration.md) for action permissions and event scope.
 Multi-role users share feature URLs; they are not redirected to a single role's
 dashboard. Existing read permissions are retained; Venue adds explicit write capabilities. In particular,
 `event_ops_manager` has `event_organisers.read` but lacks `internal.access` in the

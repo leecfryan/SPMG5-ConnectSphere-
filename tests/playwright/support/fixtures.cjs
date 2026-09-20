@@ -24,6 +24,10 @@ const test = base.extend({
         expect(response.ok()).toBeTruthy();
         return (await response.json()).events;
       },
+      async updateEvent(eventId, data) {
+        const response = await request.patch(authURL + '/__test/events/' + eventId, { headers, data });
+        expect(response.status()).toBe(204);
+      },
       async assignEvent(eventId, coordinatorId) {
         const response = await request.post(authURL + '/__test/events/' + eventId + '/assignment', { headers, data: { coordinatorId } });
         expect(response.status()).toBe(204);

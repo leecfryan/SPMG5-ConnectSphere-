@@ -195,7 +195,7 @@ test("RBAC: combined roles return unique permissions and role removal updates th
   const base = await setup(t, async () => ({ data: { user: { id: "user", app_metadata: { roles } } }, error: null }));
   const headers = { Authorization: "Bearer same-token" };
   assert.deepEqual((await (await fetch(base + "/api/auth/me", { headers })).json()).permissions,
-    ["venues.update", "internal.access", "venues.read", "bookings.read", "equipment.read", "technical_requests.read"]);
+    ["venues.update", "equipment.review", "equipment.messages", "internal.access", "venues.read", "bookings.read", "equipment.read", "technical_requests.read"]);
   roles = ["attendee"];
   assert.deepEqual((await (await fetch(base + "/api/auth/me", { headers })).json()).permissions, []);
   assert.equal((await fetch(base + "/api/internal/access", { headers })).status, 403);
@@ -218,4 +218,20 @@ test("RBAC: exposing capabilities does not broaden the existing operations manag
   assert.deepEqual(user.accountTypes, ["internal"]);
   assert.deepEqual(permissions, ["event_organisers.read"]);
   assert.equal((await fetch(base + "/api/internal/access", { headers })).status, 403);
+});
+
+
+test("EQUIPMENT-CONFIG-001: missing data configuration keeps identity available and Equipment fails closed", async (t) => {
+  const base = await setup(t, async () => ({ data: { user: { id: "verified-user-id",
+    app_metadata: { roles: ["event_coordinator", "technical_support_staff"] } } }, error: null }));
+  const headers = { Authorization: "Bearer verified-token" };
+  assert.equal((await fetch(base + "/api/auth/me", { headers })).status, 200);
+  assert.equal((await fetch(base + "/api/health")).status, 200);
+  for (const endpoint of ["/equipment", "/equipment/events", "/technical-support/equipment-requests",
+    "/events/11111111-1111-4111-8111-111111111111/messages"]) {
+    const response = await fetch(base + "/api" + endpoint, { headers });
+    assert.equal(response.status, 503, endpoint);
+    assert.deepEqual(await response.json(), { message: "Equipment storage is not configured. Please try again later." });
+  }
+  assert.equal((await fetch(base + "/api/equipment")).status, 401);
 });

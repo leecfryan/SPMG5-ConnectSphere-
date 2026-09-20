@@ -91,7 +91,7 @@ test('[API-RBAC-049] Combined roles return unique capabilities and removal immed
   const account = await accounts.create(['venue_staff', 'technical_support_staff', 'attendee', 'venue_staff']);
   const headers = bearer(await accounts.session(account));
   const identity = await request.get('/api/auth/me', { headers });
-  expect((await identity.json()).permissions).toEqual(['venues.update', 'internal.access', 'venues.read', 'bookings.read', 'equipment.read', 'technical_requests.read']);
+  expect((await identity.json()).permissions).toEqual(['venues.update', 'equipment.review', 'equipment.messages', 'internal.access', 'venues.read', 'bookings.read', 'equipment.read', 'technical_requests.read']);
   const access = await request.get('/api/internal/access', { headers });
   expect(access.status()).toBe(200);
   expect((await access.json()).responsibilities.map((item) => item.permission)).toEqual(permissions.slice(0, 4));

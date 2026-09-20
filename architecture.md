@@ -57,3 +57,7 @@ backend:3000 inside Docker. Production hosting must route /api to Express behind
 the same HTTPS origin. See README.md for commands, configuration, acceptance
 criteria and session security considerations. See docs/frontend-routing.md for
 route integration and the production index.html fallback required for page URLs.
+
+## Equipment integration
+
+Equipment pages run under the shared AuthProvider and permission routes. The backend constructs data dependencies separately from token verification and enforces action permissions plus event/author relationships. See [Equipment integration](docs/equipment-integration.md).

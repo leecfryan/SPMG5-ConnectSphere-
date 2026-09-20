@@ -1,10 +1,12 @@
 const express = require("express");
 const createEventsController = require("../modules/events/events.controller");
 
-// createApp applies verified authentication and events.submit before this router.
-function createEventsRoutes(repository) {
+const requirePermission = require("../middleware/requirePermission");
+
+// Guard only submission, allowing independently guarded event subresources.
+function createEventsRoutes(repository, authenticate) {
   const router = express.Router();
-  router.post("/", createEventsController(repository));
+  router.post("/", authenticate, requirePermission("events.submit"), createEventsController(repository));
   return router;
 }
 

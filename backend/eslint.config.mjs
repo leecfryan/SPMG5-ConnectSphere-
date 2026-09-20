@@ -27,4 +27,5 @@ export default [
       "no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     },
   },
+  { files: ["tests/unit/equipment/**/*.js"], languageOptions: { sourceType: "commonjs" } },
 ];

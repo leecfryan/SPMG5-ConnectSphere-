@@ -17,6 +17,7 @@ const app = createApp({
   // Missing data configuration disables submission without breaking sign-in.
   eventsRepository: process.env.SUPABASE_SECRET_KEY ? require("./modules/events/events.repository") : undefined,
   venuesService: process.env.SUPABASE_SECRET_KEY ? require("./modules/venues/venues.service") : undefined,
+  equipmentDependencies: process.env.SUPABASE_SECRET_KEY ? require("./modules/equipment/equipment.dependencies")() : undefined,
   frontendOrigin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
 });
 const port = process.env.PORT || 3000;

@@ -8,6 +8,8 @@ import SignInPage from "./routes/SignInPage";
 import AccountPage from "./routes/AccountPage";
 import ResponsibilitiesPage from "./routes/ResponsibilitiesPage";
 import WorkspaceLayout from "./routes/WorkspaceLayout";
+import EquipmentRequestPage from "./features/equipment/pages/EquipmentRequestPage";
+import TechnicalSupportDashboardPage from "./features/equipment/pages/TechnicalSupportDashboardPage";
 import VenueRoutes from "./features/venues/VenueRoutes";
 import EventRequestPage from "./features/events/pages/EventRequestPage";
 import "./App.css";
@@ -21,11 +23,12 @@ function Home() {
 
 export default function App() {
   const location = useLocation();
+  const fullWorkspace = location.pathname === "/venues" || location.pathname.startsWith("/venues/") || location.pathname.startsWith("/equipment/") || location.pathname === "/technical-support";
   return (
     <AuthProvider>
       <div className="app-shell">
         <header className="brand"><span className="brand-mark" aria-hidden="true">C</span>ConnectSphere</header>
-        <main className={location.pathname === "/venues" || location.pathname.startsWith("/venues/") ? "venue-workspace" : location.pathname === "/events/new" ? "wide" : undefined}>
+        <main className={fullWorkspace ? "venue-workspace" : location.pathname === "/events/new" ? "wide" : undefined}>
           <aside className="intro">
             <p className="eyebrow">EVENT PLANNING & VENUE BOOKING</p>
             <h2>Great events.<br />Connected people.</h2>
@@ -45,6 +48,12 @@ export default function App() {
                 <Route element={<RequirePermission permission="internal.access" />}>
                   <Route element={<RequirePermission permission="venues.read" />}>
                     <Route path="/venues/*" element={<VenueRoutes />} />
+                  </Route>
+                  <Route element={<RequirePermission permission="equipment.request" />}>
+                    <Route path="/equipment/requests" element={<EquipmentRequestPage />} />
+                  </Route>
+                  <Route element={<RequirePermission permission="equipment.review" />}>
+                    <Route path="/technical-support" element={<TechnicalSupportDashboardPage />} />
                   </Route>
                   <Route path="/staff/responsibilities" element={<ResponsibilitiesPage />} />
                 </Route>

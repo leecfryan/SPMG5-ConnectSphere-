@@ -174,3 +174,7 @@ References:
 - https://supabase.com/docs/reference/javascript/auth-signinwithpassword
 - https://supabase.com/docs/reference/javascript/auth-getuser
 - https://supabase.com/docs/guides/auth/signout
+
+## Equipment requests and technical support
+
+Coordinators use `/equipment/requests`; technical support uses `/technical-support`. Both pages share sign-in, role permissions and the existing frontend port. See [Equipment integration](docs/equipment-integration.md) for preserved workflows, database prerequisites and test commands.

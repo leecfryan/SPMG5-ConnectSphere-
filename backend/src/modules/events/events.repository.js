@@ -60,6 +60,15 @@ async function findById(id) {
   );
 }
 
+// Batch event lookup retained for callers that need several event records.
+async function findByIds(ids) {
+  if (ids.length === 0) return [];
+  return unwrap(
+    await getSupabase().from(TABLE).select("*").in("id", ids),
+    "findByIds",
+  );
+}
+
 async function update(id, patch) {
   const row = pickCol(patch);
   if (Object.keys(row).length === 0) return findById(id);
@@ -110,6 +119,7 @@ module.exports = {
   WRITABLE_COLS,
   createSubmitted,
   findById,
+  findByIds,
   update,
   markSubmitted,
   assignCoordinator,

@@ -149,3 +149,7 @@ https://github.com/SinYang13/IS212-2026/discussions/91
 These were read from the supplied export. Section applicability remains to be
 confirmed; the supplied story and user's approved starting matrix drive this
 implementation. No extra role was inferred from other discussions.
+
+## Equipment integration
+
+Equipment uses this same trusted role matrix. Coordinators submit requests for assigned events; technical support reviews arrangements across events. Both use scoped clarification threads. See [Equipment integration](equipment-integration.md) for routes, action permissions and database prerequisites.

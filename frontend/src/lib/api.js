@@ -8,8 +8,11 @@ async function request(path, token, options = {}) {
   const body = await response.json();
 
   if (!response.ok) {
-    const detail = body.details ? `: ${body.details.join(", ")}` : "";
-    throw new Error((body.error || body.message || "Request failed") + detail);
+    const detail = Array.isArray(body.details) && body.details.length
+      ? ": " + body.details.map((d) => typeof d === "string" ? d : `${d.field} ${d.message}`).join(", ") : "";
+    const error = new Error((body.error || body.message || "Request failed") + detail);
+    error.status = response.status;
+    throw error;
   }
   return body.data;
 }
@@ -67,4 +70,71 @@ export function submitBookingRequest(venueId, payload, token) {
 export function fetchBookingRequests({ status } = {}, token) {
   const query = status ? `?status=${encodeURIComponent(status)}` : "";
   return request(`/api/venues/booking-requests${query}`, token);
+}
+
+export function fetchEquipmentCatalogue(token) {
+  return request("/api/equipment", token);
+}
+
+export function fetchEquipmentRequests(eventId, token) {
+  return request(`/api/events/${eventId}/equipment-requests`, token);
+}
+
+export function createEquipmentRequest(eventId, fields, token) {
+  return request(`/api/events/${eventId}/equipment-requests`, token, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(fields),
+  });
+}
+
+// Scrum-28-Scrum63 (AC1): the Technical Support dashboard feed.
+export function fetchTechSupportDashboard(token) {
+  return request("/api/technical-support/equipment-requests", token);
+}
+
+// Scrum-28-Scrum64 (AC2): update an equipment request's status as
+// arrangements are made. Same endpoint Scrum-27 used to approve/reject -
+// see equipment.controller.js for why no new endpoint was added.
+export function updateEquipmentRequestStatus(id, status, token) {
+  return request(`/api/equipment-requests/${id}/status`, token, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ status }),
+  });
+}
+
+// Scrum-28-Scrum65/66 (AC3/AC4): the clarification thread for one event,
+// aggregated server-side across all of its equipment lines.
+export function fetchEventMessages(eventId, token) {
+  return request(`/api/events/${eventId}/messages`, token);
+}
+
+// equipmentRequestId is required - every message ties to one equipment
+// line (the real messages table has it NOT NULL).
+export function postEventMessage(eventId, equipmentRequestId, body, token) {
+  return request(`/api/events/${eventId}/messages`, token, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ equipment_request_id: equipmentRequestId, body }),
+  });
+}
+
+export function updateMessage(id, body, token) {
+  return request(`/api/messages/${id}`, token, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ body }),
+  });
+}
+export function fetchEquipmentEvents(token) {
+  return request("/api/equipment/events", token);
 }

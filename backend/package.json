@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "npm run test:auth && npm run test:events",
+    "test": "npm run test:auth && npm run test:equipment && npm run test:events",
     "test:cov": "vitest run --coverage",
     "dev": "nodemon src/server.js",
     "start": " node src/server.js",
@@ -14,7 +14,8 @@
     "test:report": "vitest run --reporter=html",
     "test:auth": "node --test tests/integration/auth.test.js tests/integration/permissions.test.js",
     "test:events": "vitest run",
-    "seed:users": "node scripts/seedUsers.js"
+    "seed:users": "node scripts/seedUsers.js",
+    "test:equipment": "node --test \"tests/unit/equipment/*.test.js\""
   },
   "keywords": [],
   "author": "",

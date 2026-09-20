@@ -27,7 +27,8 @@ function requirePermission(permission, authorizeRecord) {
         // Require an explicit boolean true. Missing records and unresolved checks deny access.
         if ((await authorizeRecord(req)) !== true) {
           return res.status(403).json({
-            message: "You do not have permission to access this information.",
+            message: policy.recordDeniedMessage || "You do not have permission to access this information.",
+            ...(policy.recordDeniedCode ? { code: policy.recordDeniedCode } : {}),
           });
         }
       } catch {
