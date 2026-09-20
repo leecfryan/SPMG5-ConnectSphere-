@@ -1,68 +1,54 @@
+import { useSearchParams } from "react-router";
+import { useAuth } from "../../auth/useAuth";
 import { useState, useEffect } from "react";
 import {
   fetchEquipmentCatalogue,
   fetchEquipmentRequests,
   createEquipmentRequest,
-  fetchCurrentUser,
+  fetchEquipmentEvents,
 } from "../../../lib/api";
 import EquipmentRequestForm from "../components/EquipmentRequestForm";
 import ClarificationThread from "../components/ClarificationThread";
 import ErrorModal from "../../../components/ui/ErrorModal";
 import "../equipment.css";
 
-// No event-picker UI exists yet in the app (App.jsx has no event navigation),
-// so this page takes a plain event id input rather than inventing that flow -
-// it's out of scope for this page, which is only the coordinator's equipment
-// request form. Wiring this into a real event page is future work.
-function EquipmentRequestPage({ token }) {
-  const [eventId, setEventId] = useState("");
-  const [equipmentOptions, setEquipmentOptions] = useState([]);
-  const [requests, setRequests] = useState([]);
-  const [isLoadingRequests, setIsLoadingRequests] = useState(false);
-  const [loadError, setLoadError] = useState(null);
+// Event URLs can be bookmarked; the picker uses backend-scoped assignments.
+function EquipmentRequestPage() {
+  const { token, user } = useAuth();
+  const currentUserId = user.id;
+  const [params, setParams] = useSearchParams();
+  const eventId = params.get("event") || "";
+  const setEventId = (id) => setParams(id ? { event: id } : {}, { replace: true });
+  const [catalogue, setCatalogue] = useState(null);
+  const equipmentOptions = catalogue?.token === token ? catalogue.equipment : [];
+  const eventOptions = catalogue?.token === token ? catalogue.events : [];
+  const catalogueError = catalogue?.token === token ? catalogue.error : null;
+  const [requestResult, setRequestResult] = useState(null);
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [forbiddenMessage, setForbiddenMessage] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [currentUserId, setCurrentUserId] = useState(null);
-
+  const requestKey = JSON.stringify([eventId, token, refreshKey]);
+  const current = requestResult?.key === requestKey;
+  const requests = current ? requestResult.requests : [];
+  const isLoadingRequests = Boolean(eventId) && !current;
+  const loadError = current ? requestResult.error : null;
   useEffect(() => {
-    if (!token) return;
-    fetchEquipmentCatalogue(token)
-      .then((data) => setEquipmentOptions(data))
-      .catch((err) => setLoadError(err.message));
+    let active = true;
+    Promise.all([fetchEquipmentCatalogue(token), fetchEquipmentEvents(token)])
+      .then(([equipment, events]) => { if (active) setCatalogue({ token, equipment, events }); })
+      .catch((error) => { if (active) setCatalogue({ token, equipment: [], events: [], error: error.message }); });
+    return () => { active = false; };
   }, [token]);
-
-  // Scrum-28-Scrum66 (AC4): the Event Coordinator sees the same
-  // clarification thread Technical Support Staff does - the thread's
-  // "is this my message" edit check needs the signed-in user's id.
   useEffect(() => {
-    if (!token) return;
-    fetchCurrentUser(token)
-      .then((user) => setCurrentUserId(user.id))
-      .catch(() => {});
-  }, [token]);
-
-  useEffect(() => {
-    // The request list is only rendered while eventId is set (see JSX below),
-    // so there is nothing to clear when it isn't - no setState needed here.
-    if (!token || !eventId) return;
-    setIsLoadingRequests(true);
-    setLoadError(null);
-
-    // Guards against a stale response clobbering a newer one if eventId
-    // changes again before this fetch resolves (no built-in request
-    // cancellation here) - surfaced by Scrum-28's ClarificationThread
-    // adding more concurrent fetches to this same page, though the race
-    // itself predates that addition.
-    let cancelled = false;
+    if (!eventId) return;
+    let active = true;
     fetchEquipmentRequests(eventId, token)
-      .then((data) => { if (!cancelled) setRequests(data); })
-      .catch((err) => { if (!cancelled) setLoadError(err.message); })
-      .finally(() => { if (!cancelled) setIsLoadingRequests(false); });
-    return () => { cancelled = true; };
-  }, [eventId, token, refreshKey]);
+      .then((requests) => { if (active) setRequestResult({ key: requestKey, requests }); })
+      .catch((error) => { if (active) setRequestResult({ key: requestKey, requests: [], error: error.message }); });
+    return () => { active = false; };
+  }, [eventId, token, requestKey]);
 
   function handleSubmit(fields) {
     setIsSaving(true);
@@ -110,6 +96,14 @@ function EquipmentRequestPage({ token }) {
           <h2>New request</h2>
         </div>
 
+        {catalogueError && <p className="eq-error" role="alert">Could not load equipment or events: {catalogueError}</p>}
+        <label className="eq-field">
+          Assigned event
+          <select value={eventOptions.some((event) => event.id === eventId) ? eventId : ""} onChange={(e) => setEventId(e.target.value)}>
+            <option value="">Select an assigned event...</option>
+            {eventOptions.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
+          </select>
+        </label>
         <label className="eq-field eq-event-picker">
           Event id
           <input
@@ -124,7 +118,7 @@ function EquipmentRequestPage({ token }) {
           <p className="eq-hint">Enter an event id to submit or view its equipment requests.</p>
         ) : (
           <EquipmentRequestForm
-            key={refreshKey}
+            key={eventId + ":" + refreshKey}
             equipmentOptions={equipmentOptions}
             onSubmit={handleSubmit}
             isSaving={isSaving}
@@ -166,6 +160,7 @@ function EquipmentRequestPage({ token }) {
           </ul>
 
           <ClarificationThread
+            key={eventId}
             eventId={eventId}
             lines={requests.map((r) => ({ id: r.id, label: equipmentLabel(r.equipment_id) }))}
             token={token}

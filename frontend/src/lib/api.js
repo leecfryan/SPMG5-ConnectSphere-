@@ -1,21 +1,15 @@
-const API_BASE_URL = "http://localhost:3000";
-
-async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE_URL}${path}`, options);
+async function request(path, token, options = {}) {
+  if (!token) throw new Error("Please sign in to continue.");
+  const response = await fetch(path, {
+    ...options,
+    cache: "no-store",
+    headers: { ...options.headers, Authorization: "Bearer " + token },
+  });
   const body = await response.json();
 
   if (!response.ok) {
-    // Validation details come as plain strings (venues) or { field, message }
-    // objects (events/equipment) depending on the feature - handle both.
-    const detail =
-      Array.isArray(body.details) && body.details.length > 0
-        ? ": " +
-          body.details
-            .map((d) => (typeof d === "string" ? d : `${d.field} ${d.message}`))
-            .join(", ")
-        : "";
-    // Auth/role middleware replies with { message }; feature controllers
-    // reply with { error }. Read either so the caller always gets real text.
+    const detail = Array.isArray(body.details) && body.details.length
+      ? ": " + body.details.map((d) => typeof d === "string" ? d : `${d.field} ${d.message}`).join(", ") : "";
     const error = new Error((body.error || body.message || "Request failed") + detail);
     error.status = response.status;
     throw error;
@@ -23,66 +17,74 @@ async function request(path, options = {}) {
   return body.data;
 }
 
-export function fetchVenues({ city, minCapacity } = {}) {
+export function fetchVenues({ city, minCapacity } = {}, token) {
   const params = new URLSearchParams();
   if (city) params.set("city", city);
   if (minCapacity) params.set("minCapacity", minCapacity);
 
   const query = params.toString();
-  return request(`/api/venues${query ? `?${query}` : ""}`);
+  return request(`/api/venues${query ? `?${query}` : ""}`, token);
 }
 
-export function fetchVenueById(id) {
-  return request(`/api/venues/${id}`);
+export function fetchVenueById(id, token) {
+  return request(`/api/venues/${id}`, token);
 }
 
-const DEV_ROLE = "Coordinator";
-
-export function updateVenue(id, changes) {
-  return request(`/api/venues/${id}`, {
+export function updateVenue(id, changes, token) {
+  return request(`/api/venues/${id}`, token, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
-      "x-user-role": DEV_ROLE,
     },
     body: JSON.stringify(changes),
   });
 }
 
-// Unlike every other function here, /api/auth/me replies with { user }, not
-// { data } (see App.jsx's Account component, which reads response.json().user
-// the same way) - so this bypasses the shared request() helper rather than
-// getting back undefined from body.data.
-export async function fetchCurrentUser(token) {
-  const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
-    headers: { Authorization: "Bearer " + token },
-  });
-  if (!response.ok) {
-    const error = new Error("Unable to verify your session.");
-    error.status = response.status;
-    throw error;
-  }
-  return (await response.json()).user;
+// SCRUM-17: availability calendar for one venue.
+// Leaving from/to out lets the backend default to a fortnight starting today.
+export function fetchVenueAvailability(id, { from, to } = {}, token) {
+  const params = new URLSearchParams();
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+
+  const query = params.toString();
+  return request(`/api/venues/${id}/availability${query ? `?${query}` : ""}`, token);
 }
 
-export function fetchEquipmentCatalogue(token) {
-  return request("/api/equipment", {
-    headers: { Authorization: "Bearer " + token },
-  });
+// SCRUM-85: events a coordinator can attach a venue request to
+export function fetchBookableEvents(token) {
+  return request("/api/venues/booking-events", token);
 }
 
-export function fetchEquipmentRequests(eventId, token) {
-  return request(`/api/events/${eventId}/equipment-requests`, {
-    headers: { Authorization: "Bearer " + token },
-  });
-}
-
-export function createEquipmentRequest(eventId, fields, token) {
-  return request(`/api/events/${eventId}/equipment-requests`, {
+export function submitBookingRequest(venueId, payload, token) {
+  return request(`/api/venues/${venueId}/booking-requests`, token, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: "Bearer " + token,
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+// SCRUM-88: what Venue Staff review
+export function fetchBookingRequests({ status } = {}, token) {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  return request(`/api/venues/booking-requests${query}`, token);
+}
+
+export function fetchEquipmentCatalogue(token) {
+  return request("/api/equipment", token);
+}
+
+export function fetchEquipmentRequests(eventId, token) {
+  return request(`/api/events/${eventId}/equipment-requests`, token);
+}
+
+export function createEquipmentRequest(eventId, fields, token) {
+  return request(`/api/events/${eventId}/equipment-requests`, token, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
     },
     body: JSON.stringify(fields),
   });
@@ -90,20 +92,17 @@ export function createEquipmentRequest(eventId, fields, token) {
 
 // Scrum-28-Scrum63 (AC1): the Technical Support dashboard feed.
 export function fetchTechSupportDashboard(token) {
-  return request("/api/technical-support/equipment-requests", {
-    headers: { Authorization: "Bearer " + token },
-  });
+  return request("/api/technical-support/equipment-requests", token);
 }
 
 // Scrum-28-Scrum64 (AC2): update an equipment request's status as
 // arrangements are made. Same endpoint Scrum-27 used to approve/reject -
 // see equipment.controller.js for why no new endpoint was added.
 export function updateEquipmentRequestStatus(id, status, token) {
-  return request(`/api/equipment-requests/${id}/status`, {
+  return request(`/api/equipment-requests/${id}/status`, token, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
-      Authorization: "Bearer " + token,
     },
     body: JSON.stringify({ status }),
   });
@@ -112,31 +111,30 @@ export function updateEquipmentRequestStatus(id, status, token) {
 // Scrum-28-Scrum65/66 (AC3/AC4): the clarification thread for one event,
 // aggregated server-side across all of its equipment lines.
 export function fetchEventMessages(eventId, token) {
-  return request(`/api/events/${eventId}/messages`, {
-    headers: { Authorization: "Bearer " + token },
-  });
+  return request(`/api/events/${eventId}/messages`, token);
 }
 
 // equipmentRequestId is required - every message ties to one equipment
 // line (the real messages table has it NOT NULL).
 export function postEventMessage(eventId, equipmentRequestId, body, token) {
-  return request(`/api/events/${eventId}/messages`, {
+  return request(`/api/events/${eventId}/messages`, token, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: "Bearer " + token,
     },
     body: JSON.stringify({ equipment_request_id: equipmentRequestId, body }),
   });
 }
 
 export function updateMessage(id, body, token) {
-  return request(`/api/messages/${id}`, {
+  return request(`/api/messages/${id}`, token, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
-      Authorization: "Bearer " + token,
     },
     body: JSON.stringify({ body }),
   });
+}
+export function fetchEquipmentEvents(token) {
+  return request("/api/equipment/events", token);
 }

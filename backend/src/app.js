@@ -2,12 +2,13 @@ const express = require("express");
 const cors = require("cors");
 const requireAuth = require("./middleware/requireAuth");
 const requirePermission = require("./middleware/requirePermission");
-const { getResponsibilities } = require("./auth/permissions");
-const venueRoutes = require("./routes/venues.routes");
-const equipmentRoutes = require("./routes/equipment.routes");
+const { getResponsibilities, getPermissions } = require("./auth/permissions");
+const createVenuesRoutes = require("./routes/venues.routes");
 const errorHandler = require("./middleware/errorHandler");
+const equipmentRoutes = require("./routes/equipment.routes");
+const createEventsRoutes = require("./routes/events.routes");
 
-function createApp({ authClient, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
+function createApp({ authClient, eventsRepository, venuesService, equipmentDependencies, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
   const app = express();
   const authenticate = requireAuth(authClient);
   app.disable("x-powered-by");
@@ -20,16 +21,16 @@ function createApp({ authClient, supabaseUrl, publishableKey, frontendOrigin = "
     res.json({ supabaseUrl, publishableKey });
   });
   app.get("/api/auth/me", authenticate, (req, res) => {
-    res.json({ user: req.user });
+    res.json({ user: req.user, permissions: getPermissions(req.user.roles) });
   });
+  app.use("/api/events", createEventsRoutes(eventsRepository, authenticate));
+  app.use("/api", equipmentRoutes({ authenticate, ...equipmentDependencies }));
   // All internal routes must be registered after this gate, with their own permission guard.
   app.use("/api/internal", authenticate, requirePermission("internal.access"));
   app.get("/api/internal/access", (req, res) => {
     res.json({ responsibilities: getResponsibilities(req.user.roles) });
   });
-  app.use("/api/venues", venueRoutes);
-  app.use("/api", equipmentRoutes({ authenticate }));
-  // Error-handling middleware must be registered last, after all routes.
+  app.use("/api/venues", authenticate, requirePermission("internal.access"), createVenuesRoutes(venuesService));
   app.use(errorHandler);
   return app;
 }

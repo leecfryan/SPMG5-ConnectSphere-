@@ -5,13 +5,26 @@
 The backend has a staff permission policy and reusable guards. GET
 /api/internal/access returns the verified staff member's responsibilities.
 External users receive 403 and users without valid authentication receive 401.
-The account screen loads these responsibilities from that protected endpoint.
+The `/staff/responsibilities` page loads these responsibilities from that protected endpoint.
+Frontend routing and navigation use server-derived permission identifiers from
+`GET /api/auth/me`; the API guards remain the security boundary. See
+[frontend routing](frontend-routing.md) for the teammate integration contract.
 
-There are no production venue, booking, equipment, technical-request, attendee,
-client or internal-planning data endpoints yet. The tests use fixture handlers;
-they are not shipped as business APIs. Full story acceptance on real records
+The integrated Venue feature has authenticated catalogue, calendar, editing and
+booking-request APIs. Its coordinator queries use the existing events.coordinator_id
+relationship; Venue Staff review venue requests across locations. See
+[Venue integration](venue-integration.md). Equipment, technical-request, attendee,
+client and internal-planning test endpoints remain fixtures, not business APIs. Full story acceptance on real records
 requires the feature owners to attach these guards and implement scoped database
 queries. This implementation does not make unguarded future endpoints safe.
+
+The integrated event feature separately grants `events.submit` to Event Organisers
+for `POST /api/events` and `/events/new`. This does not grant internal access.
+See [event-request integration](event-request-integration.md).
+
+Venue writes use separate capabilities: `venues.update` for Venue Staff and
+Event Coordinators, and `bookings.request` for Event Coordinators. They do not
+change the read responsibilities listed below or grant external roles access.
 
 ## Initial agreed matrix
 
@@ -28,8 +41,13 @@ specification.
 | event_planning.read | No | No | Yes | No | Yes |
 | attendees.read | No | No | Yes | No | Yes |
 | clients.read | No | No | Yes | No | Yes |
+| event_organisers.read | No | No | Yes | No | Yes |
 
-All internal roles have internal.access. Unknown or missing roles grant nothing.
+The original three staff roles have internal.access. The current policy also
+defines `event_organisers.read` for Event Coordinators and Event Operations
+Managers, but does not grant `internal.access` to `event_ops_manager`. Manager-only
+accounts therefore cannot enter internal pages/APIs until the team changes that
+policy; this routing refactor preserves it. Unknown or missing roles grant nothing.
 Multiple trusted roles combine responsibilities. External roles grant no internal
 permissions, but can have separate event-specific access through external APIs.
 
@@ -99,7 +117,8 @@ must still be guarded and scoped, because that client can bypass RLS.
 ## Acceptance evidence
 
 Run npm --prefix backend test. permissions.test.js covers:
-- The seven read permissions against all five roles.
+- The eight read permissions against the original five roles, plus the current
+  manager-only internal-access restriction in the authentication tests.
 - Venue/equipment access across locations and types.
 - Multi-role accounts, role removal, and missing or malformed roles.
 - Anonymous/invalid sessions and forged role claims.
@@ -109,10 +128,11 @@ Run npm --prefix backend test. permissions.test.js covers:
 Existing authentication tests continue to run in the same CI job.
 
 Manual checks:
-1. Sign in as Venue Staff: see only venue and booking responsibilities.
+1. Sign in as Venue Staff and open `/staff/responsibilities`: see only venue and booking responsibilities.
 2. Sign in as Technical Support Staff: see only equipment and technical responsibilities.
 3. Sign in as Event Coordinator: see the coordination responsibilities.
-4. Sign in as Organiser or Attendee: no staff section; an authenticated request
+4. Sign in as Organiser or Attendee: no staff navigation link; entering
+   `/staff/responsibilities` directly opens `/forbidden`. An authenticated request
    to /api/internal/access returns 403.
 5. Without a token, /api/internal/access returns 401. Direct browser navigation
    does not attach the bearer token even if another tab is signed in.
@@ -129,3 +149,7 @@ https://github.com/SinYang13/IS212-2026/discussions/91
 These were read from the supplied export. Section applicability remains to be
 confirmed; the supplied story and user's approved starting matrix drive this
 implementation. No extra role was inferred from other discussions.
+
+## Equipment integration
+
+Equipment uses this same trusted role matrix. Coordinators submit requests for assigned events; technical support reviews arrangements across events. Both use scoped clarification threads. See [Equipment integration](equipment-integration.md) for routes, action permissions and database prerequisites.

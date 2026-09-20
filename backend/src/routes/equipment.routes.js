@@ -1,89 +1,50 @@
 const express = require("express");
-const supabase = require("../supabase");
-const requireDbRole = require("../middleware/requireDbRole");
-const requireAnyDbRole = require("../middleware/requireAnyDbRole");
-const { createEquipmentService } = require("../modules/equipment/equipment.service");
+const requirePermission = require("../middleware/requirePermission");
 const { createEquipmentController } = require("../modules/equipment/equipment.controller");
-const { createMessagesService } = require("../modules/equipment/messages.service");
 const { createMessagesController } = require("../modules/equipment/messages.controller");
 const retention = require("../modules/equipment/retention");
-const { findById: findEventById, findByIds: findEventsByIds } = require("../modules/events/events.repository");
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Scrum-28-Scrum63 (AC1): resolves an auth.users id to a display name for
-// the Technical Support dashboard. Wrapped as its own function (rather than
-// inlined in the controller) so equipment.functional.test.js can inject a
-// fake instead of calling the real Supabase auth admin API.
-async function getUserDisplayName(id) {
-  const { data, error } = await supabase.auth.admin.getUserById(id);
-  if (error || !data?.user) return null;
-  return data.user.user_metadata?.full_name || data.user.email || null;
-}
-
-// Mounted at "/api" in app.js so the paths below become the full API routes.
-// Takes the already-built `authenticate` middleware from app.js instead of
-// constructing its own requireAuth(authClient) - see docs/staff-access.md
-// "Teammate integration": apply requireAuth before any authorization check
-// on any route outside /api/internal.
-//
-// Role split: Event Coordinators submit requests for an event; Technical
-// Support Staff review and update them (status: PENDING/APPROVED/REJECTED,
-// displayed on the dashboard as Unattended/Assigned/Issues - see
-// equipment.controller.js). Neither role does both. Any authenticated user
-// can list one event's requests; only Technical Support Staff sees the
-// cross-event dashboard.
-function equipmentRoutes({ authenticate }) {
+// Storage stays optional at startup and injectable in integration tests.
+module.exports = function equipmentRoutes({ authenticate, equipmentService, messagesService,
+  findEventById, findEventsByIds, getUserDisplayName, listAssignedEvents }) {
   const router = express.Router();
-  const equipmentService = createEquipmentService(supabase);
-  const controller = createEquipmentController({
-    equipmentService,
-    findEventById,
-    findEventsByIds,
-    getUserDisplayName,
+  const controller = createEquipmentController({ equipmentService: equipmentService || {},
+    findEventById, findEventsByIds, getUserDisplayName });
+  const messages = createMessagesController({ messagesService: messagesService || {},
+    equipmentService: equipmentService || {}, findEventById, retention });
+  const guards = (permission, configured = equipmentService) => [authenticate,
+    requirePermission("internal.access"), requirePermission(permission),
+    (req, res, next) => configured ? next() : res.status(503).json({ message: "Equipment storage is not configured. Please try again later." })];
+
+  async function loadEvent(req, res, next) {
+    if (!UUID_PATTERN.test(req.params.eventId)) return res.status(400).json({ error: "Invalid event id" });
+    try {
+      req.equipmentEvent = await findEventById(req.params.eventId);
+      if (!req.equipmentEvent) return res.status(404).json({ error: "Event not found" });
+      next();
+    } catch (error) { next(error); }
+  }
+  const canReadEvent = (req) => Boolean(req.equipmentEvent && (
+    req.user.roles.includes("technical_support_staff") || req.equipmentEvent.coordinator_id === req.user.id));
+  function assignedCoordinator(req, res, next) {
+    if (req.equipmentEvent.coordinator_id !== req.user.id) return res.status(403).json({ message: "You can only request equipment for events assigned to you." });
+    next();
+  }
+
+  router.get("/equipment", ...guards("equipment.read"), controller.getEquipmentCatalogue);
+  router.get("/equipment/events", ...guards("equipment.request"), async (req, res, next) => {
+    try { res.json({ data: await listAssignedEvents(req.user.id) }); } catch (error) { next(error); }
   });
-  const messagesService = createMessagesService(supabase);
-  const messagesController = createMessagesController({
-    messagesService,
-    equipmentService,
-    findEventById,
-    retention,
-  });
-
-  router.get("/equipment", authenticate, controller.getEquipmentCatalogue);
-  router.get(
-    "/events/:eventId/equipment-requests",
-    authenticate,
-    controller.getEquipmentRequests,
-  );
-  router.get(
-    "/technical-support/equipment-requests",
-    authenticate,
-    requireDbRole("tech_support", supabase),
-    controller.getTechSupportDashboard,
-  );
-  router.post(
-    "/events/:eventId/equipment-requests",
-    authenticate,
-    requireDbRole("event_coordinator", supabase),
-    controller.postEquipmentRequest,
-  );
-  router.patch(
-    "/equipment-requests/:id/status",
-    authenticate,
-    requireDbRole("tech_support", supabase),
-    controller.patchRequestStatus,
-  );
-
-  // Scrum-28-Scrum65/66 (AC3/AC4): the clarification thread. Unlike the
-  // equipment-requests-by-event route above (open to any authenticated
-  // user), these are role-gated - AC4 requires the Event Organiser to have
-  // no access at all, and the coordinator's access is further scoped to
-  // events they coordinate inside messagesController itself.
-  const threadRoles = requireAnyDbRole(["tech_support", "event_coordinator"], supabase);
-  router.get("/events/:eventId/messages", authenticate, threadRoles, messagesController.getEventMessages);
-  router.post("/events/:eventId/messages", authenticate, threadRoles, messagesController.postEventMessage);
-  router.patch("/messages/:id", authenticate, threadRoles, messagesController.patchMessage);
-
+  router.get("/events/:eventId/equipment-requests", ...guards("equipment.read"), loadEvent,
+    requirePermission("technical_requests.read", canReadEvent), controller.getEquipmentRequests);
+  router.post("/events/:eventId/equipment-requests", ...guards("equipment.request"), loadEvent,
+    assignedCoordinator, controller.postEquipmentRequest);
+  router.get("/technical-support/equipment-requests", ...guards("equipment.review"), controller.getTechSupportDashboard);
+  router.patch("/equipment-requests/:id/status", ...guards("equipment.review"), controller.patchRequestStatus);
+  // Controllers scope threads and require authorship before editing a message.
+  router.get("/events/:eventId/messages", ...guards("equipment.messages", (messagesService && equipmentService) || null), messages.getEventMessages);
+  router.post("/events/:eventId/messages", ...guards("equipment.messages", (messagesService && equipmentService) || null), messages.postEventMessage);
+  router.patch("/messages/:id", ...guards("equipment.messages", (messagesService && equipmentService) || null), messages.patchMessage);
   return router;
-}
-
-module.exports = equipmentRoutes;
+};

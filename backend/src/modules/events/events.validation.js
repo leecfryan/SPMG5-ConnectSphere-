@@ -1,5 +1,6 @@
 // Field rules for an event request. Two gates:
 //   validateDraft          - a draft may be almost empty; only `name` is required.
+//                            Not called yet: drafts arrive with US-13.
 //   validateForSubmission  - a strict superset; everything US-14 needs to submit.
 //
 // Both return { ok: boolean, errors: [{ field, message }] }. `errors` lists EVERY
@@ -38,6 +39,18 @@ function checkName(input, errors) {
     errors.push(err("name", "required"));
   } else if (input.name.trim().length > NAME_MAX) {
     errors.push(err("name", `must be ${NAME_MAX} characters or fewer`));
+  }
+}
+
+// Required at submission. Capped like the optional fields: the customer set no
+// length rule (clarification #82), so the cap is ours - it stops a scripted
+// megabyte description rather than limiting what an organiser would write.
+function checkRequiredText(input, field, errors) {
+  const value = input[field];
+  if (!isNonEmptyString(value)) {
+    errors.push(err(field, "required"));
+  } else if (value.length > TEXT_MAX) {
+    errors.push(err(field, `must be ${TEXT_MAX} characters or fewer`));
   }
 }
 
@@ -88,10 +101,8 @@ function validateForSubmission(input) {
 
   checkName(data, errors);
 
-  if (!isNonEmptyString(data.purpose)) errors.push(err("purpose", "required"));
-  if (!isNonEmptyString(data.description)) {
-    errors.push(err("description", "required"));
-  }
+  checkRequiredText(data, "purpose", errors);
+  checkRequiredText(data, "description", errors);
 
   // start_time must be in the future. end_time only has to beat start_time - an
   // end after a future start is necessarily future itself, and checking it twice

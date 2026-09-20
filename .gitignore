@@ -1,4 +1,13 @@
 .env
 node_modules/
 dist/
+
+# Playwright reports and failure artifacts
+/playwright-report/
+/test-results/
+/blob-report/
+.DS_Store
+coverage/
+.vitest/
+
 .claude

@@ -1,42 +1,16 @@
-// Functional tests for the clarification thread routes (Scrum-28-Scrum65/66):
-// role gating, the Event Coordinator's per-event ownership scoping, the
-// equipment-line-belongs-to-event check, author-only edits, and retention
-// filtering. Same fake-everything approach as equipment.functional.test.js
-// and for the same reason - see that file's header.
+// Production equipment router and permission policy with fake identity and storage.
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { once } = require("node:events");
 const express = require("express");
 
-const requireAnyDbRole = require("../../../src/middleware/requireAnyDbRole");
-const { createMessagesController } = require("../../../src/modules/equipment/messages.controller");
-const retention = require("../../../src/modules/equipment/retention");
+const equipmentRoutes = require("../../../src/routes/equipment.routes");
 
 const EVENT_ID = "11111111-1111-1111-1111-111111111111";
 const OTHER_EVENT_ID = "99999999-9999-9999-9999-999999999999";
 const REQUEST_ID = "22222222-2222-2222-2222-222222222222";
 const OTHER_REQUEST_ID = "33333333-3333-3333-3333-333333333333";
 
-function fakeRoleClient(roleAssignments) {
-  return {
-    from(table) {
-      assert.equal(table, "user_roles");
-      const filters = {};
-      let inValues;
-      const builder = {
-        select() { return builder; },
-        eq(field, value) { filters[field] = value; return builder; },
-        in(field, values) { inValues = values; return builder; },
-        then(resolve) {
-          const roles = roleAssignments[filters.user_id] || [];
-          const matched = roles.filter((r) => inValues.includes(r)).map((r) => ({ role: r }));
-          resolve({ data: matched, error: null });
-        },
-      };
-      return builder;
-    },
-  };
-}
 
 function fakeMessagesService({ messages = [] } = {}) {
   const calls = { create: [], updateBody: [] };
@@ -93,22 +67,11 @@ async function setup(t, {
   app.use(express.json());
   app.use((req, res, next) => {
     const header = req.get("x-test-user-id");
-    if (header) req.user = { id: header };
+    if (header) req.user = { id: header, roles: roleAssignments[header] || [] };
     next();
   });
 
-  const dbClient = fakeRoleClient(roleAssignments);
-  const controller = createMessagesController({
-    messagesService,
-    equipmentService,
-    findEventById,
-    retention,
-  });
-  const threadRoles = requireAnyDbRole(["tech_support", "event_coordinator"], dbClient);
-
-  app.get("/api/events/:eventId/messages", threadRoles, controller.getEventMessages);
-  app.post("/api/events/:eventId/messages", threadRoles, controller.postEventMessage);
-  app.patch("/api/messages/:id", threadRoles, controller.patchMessage);
+  app.use("/api", equipmentRoutes({ authenticate: (req, res, next) => next(), equipmentService, messagesService, findEventById }));
 
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -130,7 +93,7 @@ test("Scrum-28-Scrum65: Technical Support Staff can post and read a message on a
   });
   const messagesService = fakeMessagesService();
   const base = await setup(t, {
-    roleAssignments: { "tech-1": ["tech_support"] },
+    roleAssignments: { "tech-1": ["technical_support_staff"] },
     messagesService,
     equipmentService,
     findEventById: async () => futureEvent(),
@@ -159,7 +122,7 @@ test("Scrum-28-Scrum65: a message for an equipment line from a different event i
     requestById: { [OTHER_REQUEST_ID]: { id: OTHER_REQUEST_ID, event_id: OTHER_EVENT_ID } },
   });
   const base = await setup(t, {
-    roleAssignments: { "tech-1": ["tech_support"] },
+    roleAssignments: { "tech-1": ["technical_support_staff"] },
     messagesService: fakeMessagesService(),
     equipmentService,
     findEventById: async () => futureEvent(),
@@ -237,7 +200,7 @@ test("Scrum-28-Scrum65: only the author can edit their own message", async (t) =
     requestById: { [REQUEST_ID]: { id: REQUEST_ID, event_id: EVENT_ID } },
   });
   const base = await setup(t, {
-    roleAssignments: { "tech-1": ["tech_support"], "tech-2": ["tech_support"] },
+    roleAssignments: { "tech-1": ["technical_support_staff"], "tech-2": ["technical_support_staff"] },
     messagesService: fakeMessagesService({ messages: [existing] }),
     equipmentService,
     findEventById: async () => futureEvent(),
@@ -274,7 +237,7 @@ test("Scrum-28-Scrum65: a thread past 30 days after the event is over reads as e
     messages: [{ id: "old-msg", equipment_request_id: REQUEST_ID, body: "old" }],
   });
   const base = await setup(t, {
-    roleAssignments: { "tech-1": ["tech_support"] },
+    roleAssignments: { "tech-1": ["technical_support_staff"] },
     messagesService,
     equipmentService,
     findEventById: async () => oldEvent,

@@ -19,9 +19,12 @@ function formatTimestamp(iso) {
 // every message links to one specific line (the real messages table has
 // equipment_request_id as NOT NULL, not an optional link).
 function ClarificationThread({ eventId, lines, token, currentUserId }) {
-  const [messages, setMessages] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [loadError, setLoadError] = useState(null);
+  const [result, setResult] = useState(null);
+  const key = JSON.stringify([eventId, token]);
+  const current = result?.key === key;
+  const messages = current ? result.messages : [];
+  const isLoading = !current;
+  const loadError = current ? result.error : null;
 
   const [lineId, setLineId] = useState("");
   const [draft, setDraft] = useState("");
@@ -34,18 +37,12 @@ function ClarificationThread({ eventId, lines, token, currentUserId }) {
 
   useEffect(() => {
     if (!token || !eventId) return;
-    setIsLoading(true);
-    setLoadError(null);
-    // Guards against a stale response clobbering a newer one if eventId
-    // changes again before this fetch resolves - same reasoning as
-    // EquipmentRequestPage's request-list effect.
-    let cancelled = false;
+    let active = true;
     fetchEventMessages(eventId, token)
-      .then((data) => { if (!cancelled) setMessages(data); })
-      .catch((err) => { if (!cancelled) setLoadError(err.message); })
-      .finally(() => { if (!cancelled) setIsLoading(false); });
-    return () => { cancelled = true; };
-  }, [eventId, token]);
+      .then((messages) => { if (active) setResult({ key, messages }); })
+      .catch((error) => { if (active) setResult({ key, messages: [], error: error.message }); });
+    return () => { active = false; };
+  }, [eventId, token, key]);
 
   function lineLabel(equipmentRequestId) {
     return lines.find((l) => l.id === equipmentRequestId)?.label || equipmentRequestId;
@@ -57,7 +54,7 @@ function ClarificationThread({ eventId, lines, token, currentUserId }) {
     setPostError(null);
     postEventMessage(eventId, lineId, draft, token)
       .then((message) => {
-        setMessages((prev) => [...prev, message]);
+        setResult((prev) => ({ key, messages: [...(prev?.key === key ? prev.messages : []), message] }));
         setDraft("");
       })
       .catch((err) => setPostError(err.message))
@@ -73,7 +70,7 @@ function ClarificationThread({ eventId, lines, token, currentUserId }) {
     setIsSavingEdit(true);
     updateMessage(id, editDraft, token)
       .then((updated) => {
-        setMessages((prev) => prev.map((m) => (m.id === id ? updated : m)));
+        setResult((prev) => ({ ...prev, messages: prev.messages.map((m) => (m.id === id ? updated : m)) }));
         setEditingId(null);
       })
       .catch((err) => setPostError(err.message))
@@ -106,6 +103,7 @@ function ClarificationThread({ eventId, lines, token, currentUserId }) {
               <div className="eq-thread-edit">
                 <textarea
                   rows="2"
+                  aria-label="Edit message"
                   value={editDraft}
                   onChange={(e) => setEditDraft(e.target.value)}
                 />

@@ -26,8 +26,8 @@ function createMessagesController({
   // no access at all (there is no third branch for them). Enforced here,
   // not left to the UI to hide.
   function canAccessEvent(req, event) {
-    if (req.dbRole === "tech_support") return true;
-    return req.dbRole === "event_coordinator" && event.coordinator_id === req.user.id;
+    if (req.user.roles.includes("technical_support_staff")) return true;
+    return req.user.roles.includes("event_coordinator") && event.coordinator_id === req.user.id;
   }
 
   // Scrum-28-Scrum65 (AC3): one event's clarification thread, aggregated
@@ -73,6 +73,8 @@ function createMessagesController({
         return res.status(403).json({ error: "You do not have permission to post to this thread" });
       }
 
+      if (isMessageExpired(event)) return res.status(410).json({ error: "This clarification thread has expired" });
+
       const { ok, errors, value } = validateCreateMessage(req.body);
       if (!ok) {
         return res.status(400).json({ error: "Validation failed", details: errors });
@@ -86,7 +88,7 @@ function createMessagesController({
         return res.status(404).json({ error: "Equipment request not found for this event" });
       }
 
-      const message = await create(value, req.user.id, req.dbRole);
+      const message = await create(value, req.user.id, req.user.roles.includes("technical_support_staff") ? "tech_support" : "event_coordinator");
       res.status(201).json({ data: message });
     } catch (err) {
       next(err);
@@ -112,6 +114,7 @@ function createMessagesController({
       if (!event || !canAccessEvent(req, event)) {
         return res.status(403).json({ error: "You do not have permission to edit this message" });
       }
+      if (isMessageExpired(event)) return res.status(410).json({ error: "This clarification thread has expired" });
       if (existing.author_id !== req.user.id) {
         return res.status(403).json({ error: "You can only edit your own message" });
       }

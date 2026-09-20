@@ -35,7 +35,7 @@ function EventEquipmentCard({
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <li className="eq-card eq-event-card">
+    <li className="eq-card eq-event-card" data-event-id={eventId}>
       <button
         type="button"
         className="eq-event-summary"
@@ -69,6 +69,7 @@ function EventEquipmentCard({
                 </span>
                 <span className="eq-select-wrap">
                   <select
+                    aria-label={`Status for ${line.equipment_type || line.equipment_id}`}
                     value={line.status}
                     disabled={savingId === line.id}
                     onChange={(e) => onStatusChange(line.id, e.target.value)}

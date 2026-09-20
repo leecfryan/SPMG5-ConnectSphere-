@@ -1,4 +1,5 @@
-const supabase = require("../../supabase");
+// Importing the application/validation must not require administrative credentials.
+const getSupabase = () => require("../../supabase");
 
 const TABLE = "events";
 
@@ -32,30 +33,38 @@ function unwrap({ data, error }, action) {
   return data;
 }
 
-async function create(fields, organiserId) {
-  const row = { ...pickCol(fields), organiser_id: organiserId };
+// Every request is inserted already SUBMITTED - phase one has no drafts (US-13
+// brings them). status and submitted_at are set here, never picked from the
+// caller's fields, so a client cannot choose them.
+async function createSubmitted(
+  fields,
+  organiserId,
+  submittedAt = new Date().toISOString(),
+) {
+  const row = {
+    ...pickCol(fields),
+    organiser_id: organiserId,
+    status: "SUBMITTED",
+    submitted_at: submittedAt,
+  };
   return unwrap(
-    await supabase.from(TABLE).insert(row).select().single(),
-    "create",
+    await getSupabase().from(TABLE).insert(row).select().single(),
+    "createSubmitted",
   );
 }
 
 async function findById(id) {
   return unwrap(
-    await supabase.from(TABLE).select("*").eq("id", id).maybeSingle(),
+    await getSupabase().from(TABLE).select("*").eq("id", id).maybeSingle(),
     "findById",
   );
 }
 
-// Scrum-28-Scrum63 (AC1): batch lookup so the Technical Support dashboard
-// doesn't issue one events query per request row. Selects the same "*"
-// shape findById already uses; callers only read id/name/start_time/end_time
-// off the result (events' shape is provisional - see docs/technical-support-
-// equipment-requests.md).
+// Batch event lookup retained for callers that need several event records.
 async function findByIds(ids) {
   if (ids.length === 0) return [];
   return unwrap(
-    await supabase.from(TABLE).select("*").in("id", ids),
+    await getSupabase().from(TABLE).select("*").in("id", ids),
     "findByIds",
   );
 }
@@ -64,14 +73,14 @@ async function update(id, patch) {
   const row = pickCol(patch);
   if (Object.keys(row).length === 0) return findById(id);
   return unwrap(
-    await supabase.from(TABLE).update(row).eq("id", id).select().maybeSingle(),
+    await getSupabase().from(TABLE).update(row).eq("id", id).select().maybeSingle(),
     "update",
   );
 }
 
 async function markSubmitted(id, submittedAt = new Date().toISOString()) {
   return unwrap(
-    await supabase
+    await getSupabase()
       .from(TABLE)
       .update({ status: "SUBMITTED", submitted_at: submittedAt })
       .eq("id", id)
@@ -84,7 +93,7 @@ async function markSubmitted(id, submittedAt = new Date().toISOString()) {
 
 async function assignCoordinator(id, coordinatorId) {
   return unwrap(
-    await supabase
+    await getSupabase()
       .from(TABLE)
       .update({ coordinator_id: coordinatorId })
       .eq("id", id)
@@ -96,7 +105,7 @@ async function assignCoordinator(id, coordinatorId) {
 
 async function findSubmittedUnassigned() {
   return unwrap(
-    await supabase
+    await getSupabase()
       .from(TABLE)
       .select("*")
       .eq("status", "SUBMITTED")
@@ -108,7 +117,7 @@ async function findSubmittedUnassigned() {
 
 module.exports = {
   WRITABLE_COLS,
-  create,
+  createSubmitted,
   findById,
   findByIds,
   update,

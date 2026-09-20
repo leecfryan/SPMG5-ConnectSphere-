@@ -2,35 +2,25 @@ const path = require("node:path");
 require("dotenv").config({ path: path.resolve(__dirname, "../../.env"), quiet: true });
 const { test, expect } = require("@playwright/test");
 
-// True end-to-end: a real browser signs in against the real Supabase project
-// and exercises the real backend - no fakes (contrast
-// backend/tests/unit/equipment/equipment.functional.test.js, which
-// deliberately fakes the data layer; see that file's header for why). That
-// means this spec depends on state already existing in the shared dev
-// Supabase project, none of which this repo seeds automatically:
-//   1. A public.user_roles row giving the seeded coordinator account the
-//      "event_coordinator" role (see backend/src/middleware/requireDbRole.js)
-//      - without it every submission gets a 403, which this test reports as
-//        a clear failure message rather than a confusing timeout.
-//   2. At least one row in public.events to attach the request to.
-// EVENT_ID below is a known-seeded event ("Tech Connect 2026"); override with
-// EQUIPMENT_TEST_EVENT_ID if that row is ever removed.
+// Manual live-Supabase suite: writes requests to the configured development database.
+// Requires admin-managed app_metadata.roles=["event_coordinator"], a catalogue,
+// and EQUIPMENT_TEST_EVENT_ID assigned to that coordinator. No automatic seeding.
 const COORDINATOR_EMAIL = "coordinator.demo@example.com";
-const EVENT_ID = process.env.EQUIPMENT_TEST_EVENT_ID || "aaaaaaaa-0001-0000-0000-000000000000";
+const EVENT_ID = process.env.EQUIPMENT_TEST_EVENT_ID;
 
 test.beforeEach(async ({ page }) => {
   const password = process.env.SEED_USER_PASSWORD;
-  if (!password) {
+  if (!password || !EVENT_ID) {
     throw new Error(
-      "Set SEED_USER_PASSWORD in the root .env (see backend/scripts/seedUsers.js) before running the e2e suite.",
+      "Set SEED_USER_PASSWORD and EQUIPMENT_TEST_EVENT_ID in the root .env before running this live suite.",
     );
   }
-  await page.goto("/");
+  await page.goto("/equipment/requests?event=" + EVENT_ID);
   await page.locator("#email").fill(COORDINATOR_EMAIL);
   await page.locator("#password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByText("You’re signed in")).toBeVisible({ timeout: 15000 });
-  await expect(page.getByText("Request equipment")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Request equipment", exact: true })).toBeVisible();
   await page.locator('input[placeholder="Paste the event\'s UUID"]').fill(EVENT_ID);
 });
 
@@ -62,12 +52,12 @@ test("Scrum-27 AC1-3: a coordinator records equipment type, quantity and technic
 test("Scrum-27 AC4: the request list is scoped to its event, not global", async ({ page }) => {
   await expect(page.getByText("Requests for this event")).toBeVisible();
 
-  // An unrelated event id must show none of the first event's requests -
-  // proves the list is actually filtered by event_id, not just unfiltered.
+  // A missing event is reported as 404 and must not reveal prior event requests.
   await page
     .locator('input[placeholder="Paste the event\'s UUID"]')
     .fill("00000000-0000-0000-0000-000000000000");
   await expect(
-    page.getByText("No equipment requests yet for this event."),
+    page.getByText("Could not load: Event not found"),
   ).toBeVisible({ timeout: 10000 });
+  await expect(page.locator(".eq-request-row")).toHaveCount(0);
 });

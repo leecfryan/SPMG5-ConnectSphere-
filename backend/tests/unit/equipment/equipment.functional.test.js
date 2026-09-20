@@ -1,24 +1,10 @@
-// Functional tests for the equipment request routes: role gating, the
-// overlap guard, and event association (AC1-AC4). These build a small
-// Express app directly from the real requireDbRole middleware and the real
-// controller/validation logic, but inject fakes for the two things that
-// would otherwise touch the live Supabase project:
-//   - the user_roles lookup requireDbRole makes (see requireDbRole.js)
-//   - the equipment/event data equipment.service.js and events.repository.js
-//     would otherwise fetch
-// The live public.user_roles table is currently empty for every seeded
-// account (verified directly against the dev project), so a test relying on
-// real rows would only ever see 403 - these fakes are what make "a
-// coordinator CAN create" provable at all right now, not just "everyone is
-// denied". Validation itself is covered separately in
-// equipment.validation.test.js.
+// Production equipment router and permission policy with fake identity and storage.
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { once } = require("node:events");
 const express = require("express");
 
-const requireDbRole = require("../../../src/middleware/requireDbRole");
-const { createEquipmentController } = require("../../../src/modules/equipment/equipment.controller");
+const equipmentRoutes = require("../../../src/routes/equipment.routes");
 
 const VALID_EVENT_ID = "11111111-1111-1111-1111-111111111111";
 const VALID_EQUIPMENT_ID = "22222222-2222-2222-2222-222222222222";
@@ -34,27 +20,6 @@ function validCreatePayload(overrides = {}) {
     borrow_start: start.toISOString(),
     borrow_end: end.toISOString(),
     ...overrides,
-  };
-}
-
-// A minimal fake for the one query shape requireDbRole issues:
-// .from("user_roles").select(...).eq("user_id", id).eq("role", role).maybeSingle()
-function fakeRoleClient(roleAssignments) {
-  return {
-    from(table) {
-      assert.equal(table, "user_roles");
-      const filters = {};
-      const builder = {
-        select() { return builder; },
-        eq(field, value) { filters[field] = value; return builder; },
-        async maybeSingle() {
-          const roles = roleAssignments[filters.user_id] || [];
-          const match = roles.includes(filters.role);
-          return { data: match ? { role: filters.role } : null, error: null };
-        },
-      };
-      return builder;
-    },
   };
 }
 
@@ -101,9 +66,9 @@ function fakeEquipmentService({ equipmentById = {}, requestsByEvent = {}, reques
 // requireAuth itself is covered by auth.test.js, not re-tested here) and
 // injected fakes in place of the real Supabase-backed client/service.
 async function setup(t, {
-  roleAssignments = {},
+  roleAssignments = { "anyone-authenticated": ["technical_support_staff"] },
   equipmentService,
-  findEventById = async () => ({ id: VALID_EVENT_ID }),
+  findEventById = async () => ({ id: VALID_EVENT_ID, coordinator_id: "coord-1" }),
   findEventsByIds = async (ids) => ids.map((id) => ({ id, name: "Event " + id })),
   getUserDisplayName = async (id) => "User " + id,
 }) {
@@ -111,35 +76,11 @@ async function setup(t, {
   app.use(express.json());
   app.use((req, res, next) => {
     const header = req.get("x-test-user-id");
-    if (header) req.user = { id: header };
+    if (header) req.user = { id: header, roles: roleAssignments[header] || [] };
     next();
   });
 
-  const dbClient = fakeRoleClient(roleAssignments);
-  const controller = createEquipmentController({
-    equipmentService,
-    findEventById,
-    findEventsByIds,
-    getUserDisplayName,
-  });
-
-  app.get("/api/equipment", controller.getEquipmentCatalogue);
-  app.get("/api/events/:eventId/equipment-requests", controller.getEquipmentRequests);
-  app.get(
-    "/api/technical-support/equipment-requests",
-    requireDbRole("tech_support", dbClient),
-    controller.getTechSupportDashboard,
-  );
-  app.post(
-    "/api/events/:eventId/equipment-requests",
-    requireDbRole("event_coordinator", dbClient),
-    controller.postEquipmentRequest,
-  );
-  app.patch(
-    "/api/equipment-requests/:id/status",
-    requireDbRole("tech_support", dbClient),
-    controller.patchRequestStatus,
-  );
+  app.use("/api", equipmentRoutes({ authenticate: (req, res, next) => next(), equipmentService, findEventById, findEventsByIds, getUserDisplayName }));
 
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -179,7 +120,7 @@ test("Scrum-27 AC1: an equipment_id that does not exist is rejected", async (t) 
   assert.equal(equipmentService.calls.createRequest.length, 0);
 });
 
-test("the equipment catalogue is listed for any authenticated user", async (t) => {
+test("the equipment catalogue is listed for authenticated technical staff", async (t) => {
   const equipmentService = fakeEquipmentService({
     equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID, type: "PROJECTOR" } },
   });
@@ -266,7 +207,7 @@ test("a Coordinator can create a request; a Technical Support Staff member canno
     equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID } },
   });
   const base = await setup(t, {
-    roleAssignments: { "coord-1": ["event_coordinator"], "tech-1": ["tech_support"] },
+    roleAssignments: { "coord-1": ["event_coordinator"], "tech-1": ["technical_support_staff"] },
     equipmentService,
   });
 
@@ -292,7 +233,7 @@ test("Technical Support Staff can update status; a Coordinator cannot (403)", as
   const requestById = { "44444444-4444-4444-4444-444444444444": { id: "44444444-4444-4444-4444-444444444444", status: "PENDING" } };
   const equipmentService = fakeEquipmentService({ requestById });
   const base = await setup(t, {
-    roleAssignments: { "coord-1": ["event_coordinator"], "tech-1": ["tech_support"] },
+    roleAssignments: { "coord-1": ["event_coordinator"], "tech-1": ["technical_support_staff"] },
     equipmentService,
   });
 
@@ -372,7 +313,7 @@ test("Scrum-28-Scrum64: an already-reviewed request can be reviewed again (no on
   const requestId = "44444444-4444-4444-4444-444444444444";
   const requestById = { [requestId]: { id: requestId, status: "APPROVED" } };
   const equipmentService = fakeEquipmentService({ requestById });
-  const base = await setup(t, { roleAssignments: { "tech-1": ["tech_support"] }, equipmentService });
+  const base = await setup(t, { roleAssignments: { "tech-1": ["technical_support_staff"] }, equipmentService });
 
   const toRejected = await fetch(base + `/api/equipment-requests/${requestId}/status`, {
     method: "PATCH",
@@ -393,7 +334,7 @@ test("Scrum-28-Scrum64: an already-reviewed request can be reviewed again (no on
 
 test("Scrum-28-Scrum64: a status update for a request that does not exist is a 404", async (t) => {
   const equipmentService = fakeEquipmentService({ requestById: {} });
-  const base = await setup(t, { roleAssignments: { "tech-1": ["tech_support"] }, equipmentService });
+  const base = await setup(t, { roleAssignments: { "tech-1": ["technical_support_staff"] }, equipmentService });
 
   const response = await fetch(base + "/api/equipment-requests/44444444-4444-4444-4444-444444444444/status", {
     method: "PATCH",
@@ -419,7 +360,7 @@ test("Scrum-28-Scrum63: Technical Support Staff sees every event's requests, enr
     equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID, type: "PROJECTOR" } },
   });
   const base = await setup(t, {
-    roleAssignments: { "tech-1": ["tech_support"] },
+    roleAssignments: { "tech-1": ["technical_support_staff"] },
     equipmentService,
     findEventsByIds: async (ids) => ids.map((id) => ({ id, name: "Tech Connect 2026" })),
     getUserDisplayName: async (id) => (id === "coord-1" ? "Demo Coordinator" : null),

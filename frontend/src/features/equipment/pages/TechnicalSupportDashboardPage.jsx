@@ -1,8 +1,8 @@
+import { useAuth } from "../../auth/useAuth";
 import { useEffect, useMemo, useState } from "react";
 import {
   fetchTechSupportDashboard,
   updateEquipmentRequestStatus,
-  fetchCurrentUser,
 } from "../../../lib/api";
 import EventEquipmentCard from "../components/EventEquipmentCard";
 import ErrorModal from "../../../components/ui/ErrorModal";
@@ -11,43 +11,25 @@ import "../equipment.css";
 // Scrum-28-Scrum63 (AC1): Technical Support Staff review every event's
 // equipment requests from one dashboard. Scrum-28-Scrum64 (AC2): update
 // each line's status as arrangements are made.
-function TechnicalSupportDashboardPage({ token }) {
-  const [requests, setRequests] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [loadError, setLoadError] = useState(null);
+const EMPTY_REQUESTS = [];
+
+function TechnicalSupportDashboardPage() {
+  const { token, user } = useAuth();
+  const currentUserId = user.id;
+  const [result, setResult] = useState(null);
+  const [actionError, setActionError] = useState(null);
   const [forbiddenMessage, setForbiddenMessage] = useState(null);
-  // This page mounts for every signed-in user (App.jsx has no client-side
-  // role check), so a plain Event Coordinator loading it is expected to
-  // 403 here - that's not an action they took being denied, just a section
-  // that isn't theirs. Tracked separately from forbiddenMessage/ErrorModal
-  // (reserved for the status-change action below, a real user action) so
-  // it renders nothing instead of popping a blocking <dialog> that makes
-  // the rest of the page inert for a user who never asked to see this.
-  const [isForbidden, setIsForbidden] = useState(false);
   const [savingId, setSavingId] = useState(null);
-  const [currentUserId, setCurrentUserId] = useState(null);
-
+  const current = result?.token === token;
+  const requests = current ? result.requests : EMPTY_REQUESTS;
+  const isLoading = !current;
+  const loadError = current ? result.error || actionError : null;
   useEffect(() => {
-    if (!token) return;
-    setIsLoading(true);
-    setLoadError(null);
-
+    let active = true;
     fetchTechSupportDashboard(token)
-      .then((data) => setRequests(data))
-      .catch((err) => {
-        if (err.status === 403) setIsForbidden(true);
-        else setLoadError(err.message);
-      })
-      .finally(() => setIsLoading(false));
-  }, [token]);
-
-  // Scrum-28-Scrum65 (AC3): the thread's "is this my message" edit check
-  // needs the signed-in user's id, which this page doesn't otherwise fetch.
-  useEffect(() => {
-    if (!token) return;
-    fetchCurrentUser(token)
-      .then((user) => setCurrentUserId(user.id))
-      .catch(() => {});
+      .then((requests) => { if (active) setResult({ token, requests }); })
+      .catch((error) => { if (active) setResult({ token, requests: [], error: error.message }); });
+    return () => { active = false; };
   }, [token]);
 
   const cards = useMemo(() => {
@@ -72,11 +54,14 @@ function TechnicalSupportDashboardPage({ token }) {
     setSavingId(requestId);
     updateEquipmentRequestStatus(requestId, status, token)
       .then((updated) => {
-        setRequests((prev) => prev.map((r) => (r.id === requestId ? { ...r, status: updated.status } : r)));
+        setResult((prev) => ({ ...prev, requests: prev.requests.map((r) => (r.id === requestId ? { ...r, status: updated.status } : r)) }));
       })
       .catch((err) => {
-        if (err.status === 403) setForbiddenMessage(err.message);
-        else setLoadError(err.message);
+        if (err.status === 403 || err.status === 401) {
+          setForbiddenMessage(err.message);
+          setResult({ token, requests: [], error: err.message });
+        }
+        else setActionError(err.message);
       })
       .finally(() => setSavingId(null));
   }
@@ -93,7 +78,6 @@ function TechnicalSupportDashboardPage({ token }) {
     );
   }
 
-  if (isForbidden) return null;
 
   return (
     <div className="eq-page">

@@ -58,3 +58,39 @@ dialog.modal .primary { margin-top: 0; width: auto; min-width: 96px; padding: 10
 .responsibilities ul { padding-left: 20px; margin: 0; color: #426e60; font-size: 14px; line-height: 1.7; }
 .responsibilities li + li { margin-top: 6px; }
 .responsibilities > p { font-size: 14px; line-height: 1.6; }
+
+.workspace { min-width: 0; }
+.workspace-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.workspace-nav a { color: #185c4b; padding: 10px 14px; border-radius: 7px; text-decoration: none; }
+.workspace-nav a.active { background: #e3eee7; font-weight: 600; }
+.workspace-nav a:focus-visible { outline: 2px solid #185c4b; outline-offset: 2px; }
+
+/* Event request form alongside the shared sign-in and workspace styles. */
+main.wide { grid-template-columns: 1fr 560px; }
+textarea { width: 100%; min-height: 84px; padding: 12px 14px; border: 1px solid #cbd7d0; border-radius: 7px; color: #152c37; background: #fff; font: inherit; font-size: 15px; resize: vertical; }
+textarea::placeholder { color: #8b9892; }
+.field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.field-pair label { margin-top: 20px; }
+.field-hint { display: block; color: #748179; font-size: 12px; font-weight: 400; margin-top: 4px; }
+.field-error { color: #97372c; font-size: 12px; line-height: 1.5; margin: 6px 0 0; }
+[aria-invalid="true"] { border-color: #c08279; }
+.form-section { margin-top: 32px; padding-top: 8px; border-top: 1px solid #e7ece8; }
+.form-section:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
+.form-section h2 { font-size: 15px; font-weight: 600; margin: 20px 0 0; }
+.form-section > p { color: #748179; font-size: 12px; line-height: 1.6; margin: 4px 0 0; }
+.status-line { color: #66756f; font-size: 13px; margin: 16px 0 0; }
+.event-summary { margin: 24px 0 0; border-top: 1px solid #e7ece8; }
+.event-summary div { padding: 14px 0; border-bottom: 1px solid #e7ece8; }
+.field-required { color: #748179; font-size: 12px; font-weight: 400; }
+.status-badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.7; color: #426e60; background: #e6f0ea; }
+.status-badge.status-draft { color: #66756f; background: #eef1ef; }
+@media (max-width: 760px) {
+  .field-pair { grid-template-columns: 1fr; gap: 0; }
+  /* Outranks the shared `main` rule above on specificity, so it has to restate
+     the single-column stack itself. */
+  main.wide { grid-template-columns: 1fr; }
+}
+
+/* Catalogue, calendar and booking screens need the full workspace width. */
+main.venue-workspace { display: block; max-width: 1160px; padding: 32px 0; }
+main.venue-workspace > .intro { display: none; }
