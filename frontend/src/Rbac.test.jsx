@@ -148,8 +148,7 @@ const roleMatrix = [
   { role: "event_coordinator", allowed: ["venues.read", "bookings.read", "equipment.read", "technical_requests.read", "event_planning.read", "attendees.read", "clients.read", "event_organisers.read"] },
   { role: "event_organiser", allowed: [] },
   { role: "attendee", allowed: [] },
-  // Preserve the existing internal.access restriction; do not silently broaden policy.
-  { role: "event_ops_manager", allowed: [] },
+  { role: "event_ops_manager", allowed: ["event_organisers.read"] },
 ];
 const guardCases = roleMatrix.flatMap(({ role, allowed }, roleIndex) =>
   Object.keys(labels).map((permission, permissionIndex) => ({

@@ -109,9 +109,11 @@ Control endpoints require a random per-run key and all services bind to loopback
 No test auth code is imported by production startup or added to Docker images.
 Do not deploy the test launcher. Test credentials are synthetic and disposable.
 
-The existing `event_ops_manager` policy lacks `internal.access`, so the tests
-expect denial at that gate despite its `event_organisers.read` capability. This
-records current behavior; it does not establish business approval of that policy.
+The `event_ops_manager` policy grants `internal.access` alongside
+`event_organisers.read`, so that role passes the shared gate and is refused by
+each endpoint's own capability instead. Tests expect denial per route rather
+than a blanket 403. This records current behavior; it does not establish
+business approval of that policy.
 
 ## Ports and CI
 
@@ -140,6 +142,12 @@ HTTPS/SPA rewrites, or Firefox/WebKit behavior. Live acceptance should use a
 dedicated test Supabase project and actual feature endpoints once they exist.
 The record resolver here uses test-owned fixtures, not a database. Complete story
 acceptance still requires those integrations.
+
+This suite is scoped to sign-in and RBAC. Feature pages built on top of it have
+no browser case here: `/events/assignments` (SCRUM-26) is covered in jsdom by
+`AssignmentQueuePage.test.jsx` and at the route guard by `Rbac.test.jsx`, and its
+case catalog is [coordinator assignment tests](../event-assignment-tests.md).
+Adding a browser case for it is deliberate future work, not an oversight.
 
 References: [Playwright web servers](https://playwright.dev/docs/test-webserver)
 and [Playwright API testing](https://playwright.dev/docs/api-testing).
