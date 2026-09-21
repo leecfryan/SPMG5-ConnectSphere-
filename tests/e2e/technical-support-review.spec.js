@@ -20,7 +20,12 @@ async function signIn(page, email) {
   await page.locator("#email").fill(email);
   await page.locator("#password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByText("You’re signed in")).toBeVisible({ timeout: 15000 });
+  // Not "You're signed in" (that only ever renders on /account) -
+  // SignInPage now redirects straight back to whichever protected page you
+  // originally requested, so "Sign out" (rendered by WorkspaceLayout on
+  // every protected page, /forbidden included) is the destination-agnostic
+  // signal that sign-in actually completed.
+  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible({ timeout: 15000 });
 }
 
 async function signOut(page) {

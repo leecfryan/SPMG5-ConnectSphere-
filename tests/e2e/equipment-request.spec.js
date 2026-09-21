@@ -19,8 +19,11 @@ test.beforeEach(async ({ page }) => {
   await page.locator("#email").fill(COORDINATOR_EMAIL);
   await page.locator("#password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByText("You’re signed in")).toBeVisible({ timeout: 15000 });
-  await expect(page.getByRole("heading", { name: "Request equipment", exact: true })).toBeVisible();
+  // Not "You're signed in" (only ever renders on /account) - SignInPage now
+  // redirects straight back to the originally-requested page, so this
+  // heading (not a generic account-page marker) is what actually confirms
+  // sign-in completed and landed on the right destination.
+  await expect(page.getByRole("heading", { name: "Request equipment", exact: true })).toBeVisible({ timeout: 15000 });
   await page.locator('input[placeholder="Paste the event\'s UUID"]').fill(EVENT_ID);
 });
 
