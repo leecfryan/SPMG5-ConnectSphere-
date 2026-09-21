@@ -17,6 +17,10 @@ const app = createApp({
   dataClient: process.env.SUPABASE_SECRET_KEY ? require("./supabase") : undefined,
   // Missing data configuration disables submission without breaking sign-in.
   eventsRepository: process.env.SUPABASE_SECRET_KEY ? require("./modules/events/events.repository") : undefined,
+  assignmentDependencies: process.env.SUPABASE_SECRET_KEY ? {
+    repository: require("./modules/events/events.repository"),
+    directory: require("./modules/events/coordinators.directory")(),
+  } : undefined,
   venuesService: process.env.SUPABASE_SECRET_KEY ? require("./modules/venues/venues.service") : undefined,
   equipmentDependencies: process.env.SUPABASE_SECRET_KEY ? require("./modules/equipment/equipment.dependencies")() : undefined,
   frontendOrigin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
