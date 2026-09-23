@@ -322,9 +322,10 @@ It is evidence the validation contract holds.
 subsequent review" is satisfied by the shape of the stored row: `status = SUBMITTED`,
 `coordinator_id` never set (ER-N19 asserts its absence), and `submitted_at` always
 populated (ER-H03, ER-H04) because that column is the queue's sort key. What is
-*not* tested is `repository.findSubmittedUnassigned()`, which exists but has no
-endpoint in front of it — that arrives with **SCRUM-26 (Assign Event Coordinator)**,
-and its tests belong to that story, under SCRUM-52–55.
+*not* tested here is `repository.findSubmittedUnassigned()`, which on this
+branch had no endpoint in front of it. **That endpoint has since arrived with
+SCRUM-26 (Assign Event Coordinator)**, and its 77 cases are catalogued in
+[coordinator assignment tests](event-assignment-tests.md).
 
 **Eight tests cover deferred work, under the one label that is not a Jira key.**
 `validateDraft` is implemented and tested but **called by nothing** — the submit
@@ -406,10 +407,11 @@ real Supabase instance to close that gap.
 ## 9. Requirements sources
 
 - **Week 4 Project Instructions**, *Event Request Creation* — organisers "can create
-  and submit event requests". The basis for D1: one action, no separate submit step.
+  and submit event requests", in one action with no separate submit step.
 - **Epic SCRUM-7 — Event Request**, holding SCRUM-23 (Create event request, 2 SP,
   Done), SCRUM-25 (Submit event request, 1 SP, In Progress) and SCRUM-26 (Assign
-  Event Coordinator, 2 SP, To Do). This document covers the first two.
+  Event Coordinator, 2 SP, To Do). This document covers the first two; SCRUM-26
+  is in [coordinator assignment tests](event-assignment-tests.md).
 - **SCRUM-44 / 45 / 46 / 47** — SCRUM-23's four acceptance criteria.
 - **SCRUM-49 / 50 / 51** — SCRUM-25's three acceptance criteria.
 - **Clarification #82** — mandatory fields "have not been firmed out… do propose
@@ -417,9 +419,9 @@ real Supabase instance to close that gap.
   are therefore our proposal, not a customer requirement.** They are an
   implementation decision for team review.
 - **Clarification #42** — assignment follows submission, and the Event Operations
-  Manager assigns. Relevant to SCRUM-26 (and its SCRUM-55, which defers the choice
-  of coordinator to the Manager's external SOP), and currently contradicted by the
-  Sprint 1 mockup (roadmap D6).
+  Manager assigns. This is SCRUM-26's source, and is why SCRUM-50 is proven only
+  indirectly here (§7); the assignment lane's own sources are listed in
+  [coordinator assignment tests](event-assignment-tests.md) §9.
 - **SCRUM-47** — equipment and registration needs captured "where relevant", hence
   optional. This is the criterion `events.validation.js:20` names in a comment.
 

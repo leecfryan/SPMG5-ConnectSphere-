@@ -97,6 +97,8 @@ async function assignCoordinator(id, coordinatorId) {
       .from(TABLE)
       .update({ coordinator_id: coordinatorId })
       .eq("id", id)
+      .eq("status", "SUBMITTED")
+      .is("coordinator_id", null)
       .select()
       .maybeSingle(),
     "assignCoordinator",
@@ -110,13 +112,28 @@ async function findSubmittedUnassigned() {
       .select("*")
       .eq("status", "SUBMITTED")
       .is("coordinator_id", null)
-      .order("submitted_at", { ascending: true }),
+      .order("submitted_at", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: true }),
     "findSubmittedUnassigned",
+  );
+}
+
+const ACTIVE_STATUSES = ["SUBMITTED", "APPROVED"];
+
+async function findActiveAssignments() {
+  return unwrap(
+    await getSupabase()
+      .from(TABLE)
+      .select("coordinator_id, start_time")
+      .in("status", ACTIVE_STATUSES)
+      .not("coordinator_id", "is", null),
+    "findActiveAssignments",
   );
 }
 
 module.exports = {
   WRITABLE_COLS,
+  ACTIVE_STATUSES,
   createSubmitted,
   findById,
   findByIds,
@@ -124,4 +141,5 @@ module.exports = {
   markSubmitted,
   assignCoordinator,
   findSubmittedUnassigned,
+  findActiveAssignments,
 };
