@@ -12,6 +12,7 @@ import EquipmentRequestPage from "./features/equipment/pages/EquipmentRequestPag
 import TechnicalSupportDashboardPage from "./features/equipment/pages/TechnicalSupportDashboardPage";
 import VenueRoutes from "./features/venues/VenueRoutes";
 import EventRequestPage from "./features/events/pages/EventRequestPage";
+import AssignmentQueuePage from "./features/events/pages/AssignmentQueuePage";
 import EventListPage from "./features/registrations/pages/EventListPage";
 import EventDetailPage from "./features/registrations/pages/EventDetailPage";
 import MyRegistrationsPage from "./features/registrations/pages/MyRegistrationsPage";
@@ -28,7 +29,7 @@ function Home() {
 
 export default function App() {
   const location = useLocation();
-  const fullWorkspace = location.pathname === "/venues" || location.pathname.startsWith("/venues/") || location.pathname.startsWith("/equipment/") || location.pathname === "/technical-support";
+  const fullWorkspace = location.pathname === "/venues" || location.pathname.startsWith("/venues/") || location.pathname.startsWith("/equipment/") || location.pathname === "/technical-support" || location.pathname === "/events/assignments";
   return (
     <AuthProvider>
       <div className="app-shell">
@@ -63,6 +64,10 @@ export default function App() {
                   </Route>
                   <Route element={<RequirePermission permission="equipment.review" />}>
                     <Route path="/technical-support" element={<TechnicalSupportDashboardPage />} />
+                  </Route>
+                  {/* SCRUM-26: the Event Operations Manager's assignment queue. */}
+                  <Route element={<RequirePermission permission="events.assign_coordinator" />}>
+                    <Route path="/events/assignments" element={<AssignmentQueuePage />} />
                   </Route>
                   <Route path="/staff/responsibilities" element={<ResponsibilitiesPage />} />
                 </Route>

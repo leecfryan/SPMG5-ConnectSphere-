@@ -14,8 +14,9 @@ const policies = Object.freeze({
   "equipment.request": { roles: ["event_coordinator"] },
   "equipment.review": { roles: ["technical_support_staff"] },
   "equipment.messages": { roles: ["technical_support_staff", "event_coordinator"] },
+  "events.assign_coordinator": { roles: ["event_ops_manager"] },
   "internal.access": {
-    roles: ["event_coordinator", "venue_staff", "technical_support_staff"],
+    roles: ["event_coordinator", "venue_staff", "technical_support_staff", "event_ops_manager"],
   },
   "venues.read": {
     roles: ["venue_staff", "event_coordinator"],
@@ -85,7 +86,14 @@ function getResponsibilities(roles) {
 
 // Capabilities only: record checks and the /api/internal gate still apply independently.
 function getPermissions(roles) {
-  return Object.keys(policies).filter((permission) => hasPermission(roles, permission));
+  return Object.keys(policies).filter((permission) =>
+    hasPermission(roles, permission),
+  );
 }
 
-module.exports = { getPolicy, hasPermission, getResponsibilities, getPermissions };
+module.exports = {
+  getPolicy,
+  hasPermission,
+  getResponsibilities,
+  getPermissions,
+};

@@ -3,11 +3,11 @@ name: CI
 on:
   pull_request:
     branches:
-      - main
+      - Staging
 
   push:
     branches:
-      - main
+      - Staging
 
 jobs:
   frontend:

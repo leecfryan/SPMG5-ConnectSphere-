@@ -209,15 +209,31 @@ test("RBAC: missing and malformed roles return no permissions", async (t) => {
   }
 });
 
-test("RBAC: exposing capabilities does not broaden the existing operations manager internal gate", async (t) => {
+// SCRUM-26 settled the policy question this test was written to pin. The Event
+// Operations Manager now holds internal.access, because /api/internal is gated
+// on it before any route-specific guard runs and the customer clarification
+// (#42) puts assignment in the manager's hands.
+//
+// The test is kept, and inverted, to measure the blast radius of that grant:
+// entering the internal area must not hand the manager anyone else's feature.
+// Every venue and equipment route carries its own specific permission, so the
+// outer gate opening changes nothing for them - and this is what proves it.
+test("RBAC/SCRUM-26: the operations manager's internal gate grants assignment and nothing else", async (t) => {
   const base = await setup(t, async () => ({ data: { user: {
     id: "manager", app_metadata: { roles: ["event_ops_manager"] },
   } }, error: null }));
   const headers = { Authorization: "Bearer valid" };
   const { user, permissions } = await (await fetch(base + "/api/auth/me", { headers })).json();
   assert.deepEqual(user.accountTypes, ["internal"]);
-  assert.deepEqual(permissions, ["event_organisers.read"]);
-  assert.equal((await fetch(base + "/api/internal/access", { headers })).status, 403);
+  assert.deepEqual(permissions.sort(), ["event_organisers.read", "events.assign_coordinator", "internal.access"]);
+  assert.equal((await fetch(base + "/api/internal/access", { headers })).status, 200);
+
+  // Not a coordinator, not venue staff, not technical support. The manager
+  // routes requests; they do not plan the events they route.
+  for (const path of ["/api/venues", "/api/venues/booking-events", "/api/venues/booking-requests",
+    "/api/equipment", "/api/equipment/events", "/api/technical-support/equipment-requests"]) {
+    assert.equal((await fetch(base + path, { headers })).status, 403, path);
+  }
 });
 
 
