@@ -13,10 +13,17 @@ const policies = Object.freeze({
   },
   "equipment.request": { roles: ["event_coordinator"] },
   "equipment.review": { roles: ["technical_support_staff"] },
-  "equipment.messages": { roles: ["technical_support_staff", "event_coordinator"] },
+  "equipment.messages": {
+    roles: ["technical_support_staff", "event_coordinator"],
+  },
   "events.assign_coordinator": { roles: ["event_ops_manager"] },
   "internal.access": {
-    roles: ["event_coordinator", "venue_staff", "technical_support_staff", "event_ops_manager"],
+    roles: [
+      "event_coordinator",
+      "venue_staff",
+      "technical_support_staff",
+      "event_ops_manager",
+    ],
   },
   "venues.read": {
     roles: ["venue_staff", "event_coordinator"],
