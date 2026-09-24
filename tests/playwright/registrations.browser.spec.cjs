@@ -92,3 +92,35 @@ test('[REG-E2E-005] Confirmed registrations show the withdrawal restriction', as
   await expect(page.getByText('Your registration has been confirmed. Contact the organiser to withdraw.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Withdraw registration', exact: true })).toHaveCount(0);
 });
+
+for (const [id, status] of [['006', 'SUBMITTED'], ['007', 'REJECTED']]) {
+  test(`[REG-E2E-${id}] AC1/AC2/AC5: ${status} events are hidden from browsing and direct page links`, async ({ page, accounts, request }) => {
+    const available = await setupRegistration(accounts, request);
+    const hidden = await setupRegistration(accounts, request);
+    await accounts.updateEvent(hidden.event.id, { status });
+
+    await page.goto('/events');
+    await signIn(page, available.attendee);
+    const events = page.getByRole('list', { name: 'Available events' });
+    await expect(events).toBeVisible();
+    await expect(events.getByText(hidden.event.name, { exact: true })).toHaveCount(0);
+    await events.getByRole('link', { name: new RegExp(available.event.name) }).click();
+    await expect(page.getByRole('heading', { name: available.event.name, exact: true })).toBeVisible();
+    await expect(page.getByLabel('Full name', { exact: true })).toBeVisible();
+    await expect(page.getByText('PRIVATE', { exact: false })).toHaveCount(0);
+
+    // Knowing the ID must not bypass the same restriction enforced by the listing.
+    await page.goto('/events/' + hidden.event.id);
+    await expect(page.getByRole('alert')).toHaveText('Event not found.');
+    await expect(page.getByText(hidden.event.name, { exact: true })).toHaveCount(0);
+    await expect(page.getByLabel('Full name', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Register for this event', exact: true })).toHaveCount(0);
+    await expect(page.getByText('PRIVATE', { exact: false })).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByRole('alert')).toHaveText('Event not found.');
+    await page.getByRole('link', { name: /Back to events$/ }).click();
+    await expect(events).toBeVisible();
+    await expect(events.getByRole('link', { name: new RegExp(available.event.name) })).toBeVisible();
+    await expect(events.getByText(hidden.event.name, { exact: true })).toHaveCount(0);
+  });
+}
