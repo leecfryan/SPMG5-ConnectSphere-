@@ -7,6 +7,7 @@ const {
   validateAgainstEvent,
   findSlotProblems,
   deriveRequestStatus,
+  validateDecision,
 } = require("./venues.bookingRequests.validation");
 const {
   SLOTS,
@@ -33,6 +34,7 @@ function createVenuesController(service) {
     submitBookingRequest,
     getBookingRequestById,
     listBookingRequests,
+    decideBookingRequest,
   } = service;
 
   async function getVenues(req, res, next) {
@@ -321,6 +323,55 @@ function createVenuesController(service) {
     }
   }
 
+  // SCRUM-22: Venue Staff approve or reject a pending booking request.
+  // The router gates this with bookings.decide, so only Venue Staff get here.
+  async function patchBookingRequestDecision(req, res, next) {
+    try {
+      const { requestId } = req.params;
+
+      if (!UUID_PATTERN.test(requestId)) {
+        return res.status(400).json({ error: "Invalid booking request id" });
+      }
+
+      const { errors, value } = validateDecision(req.body);
+      if (errors.length > 0) {
+        return res.status(400).json({ error: "Validation failed", details: errors });
+      }
+
+      let decided;
+      try {
+        decided = await decideBookingRequest(
+          requestId,
+          value.decision,
+          value.note,
+          req.user.id
+        );
+      } catch (err) {
+        // 23P01 is the confirmed-slot exclusion constraint from migration 003:
+        // another request already holds one of these slots. That is an answer
+        // for the reviewer, not a server fault, so it is a 409 (SCRUM-20).
+        if (err.code !== "23P01") throw err;
+        return res.status(409).json({
+          error: "Slot already confirmed for another booking",
+          details: [
+            "One of these slots is already confirmed for a different request. Refresh the list to see current availability.",
+          ],
+        });
+      }
+
+      if (!decided) {
+        return res.status(404).json({ error: "Booking request not found" });
+      }
+
+      // Read back through the same scope rule the review list uses, so the
+      // response is exactly what this reviewer is allowed to see.
+      const request = await getBookingRequestById(requestId, req.bookingScope);
+      res.status(200).json({ data: withStatus(request) });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   return {
     getVenues,
     getVenue,
@@ -330,6 +381,7 @@ function createVenuesController(service) {
     postBookingRequest,
     getBookingRequests,
     getBookingRequest,
+    patchBookingRequestDecision,
   };
 
 }

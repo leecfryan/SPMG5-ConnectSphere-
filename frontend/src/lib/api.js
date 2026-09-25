@@ -79,6 +79,18 @@ export function submitBookingRequest(venueId, payload, token) {
   });
 }
 
+// SCRUM-22: Venue Staff approve or reject a request. The note is optional and
+// only meaningful on a rejection.
+export function decideBookingRequest(requestId, decision, note, token) {
+  return request(`/api/venues/booking-requests/${requestId}/decision`, token, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ decision, note }),
+  });
+}
+
 // SCRUM-88: what Venue Staff review
 export function fetchBookingRequests({ status } = {}, token) {
   const query = status ? `?status=${encodeURIComponent(status)}` : "";

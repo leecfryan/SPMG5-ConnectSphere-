@@ -1,6 +1,6 @@
 import { useAuth } from "../../auth/useAuth";
 import { useState, useEffect } from "react";
-import { fetchBookingRequests } from "../../../lib/api";
+import { decideBookingRequest, fetchBookingRequests } from "../../../lib/api";
 import {
   IconAlert,
   IconArrowLeft,
@@ -9,12 +9,14 @@ import {
   IconInbox,
   IconMapPin,
   IconUsers,
+  IconCheck,
 } from "./VenueIcons";
 import { formatDate, formatDateTime } from "../venueFormat";
 
 // SCRUM-88: submitted requests available to Venue Staff for review.
-// Approving and rejecting are a later story. This view only makes every request
-// and its details visible.
+// SCRUM-22: Venue Staff decide them here. Approving confirms every slot on the
+// request; rejecting records the decision and changes no booking, because any
+// resulting change is the Event Coordinator's to make.
 
 const SLOT_LABELS = { am: "AM", pm: "PM", night: "Night" };
 const SLOT_ORDER = ["am", "pm", "night"];
@@ -58,7 +60,100 @@ function ChipsOrNone({ items }) {
   );
 }
 
-function RequestCard({ request }) {
+// SCRUM-22. Shown only to reviewers who hold bookings.decide, and only while
+// the request is still awaiting a decision.
+function DecisionPanel({ request, onDecided }) {
+  const { token } = useAuth();
+  const [isRejecting, setIsRejecting] = useState(false);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(null);
+  const [error, setError] = useState(null);
+
+  const requestId = request.id;
+
+  function decide(decision) {
+    setBusy(decision);
+    setError(null);
+
+    decideBookingRequest(requestId, decision, note.trim() === "" ? null : note.trim(), token)
+      .then(onDecided)
+      .catch((err) => setError(err.message))
+      .finally(() => setBusy(null));
+  }
+
+  return (
+    <div className="v-decision">
+      {isRejecting && (
+        <label className="v-field">
+          <span className="v-label">Reason or suggested alternative (optional)</span>
+          <textarea
+            className="v-input"
+            rows="2"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="e.g. already held for another event, try Orchard Seminar Room 3"
+          />
+          <span className="v-hint">
+            Shared with the coordinator, who makes any resulting booking change.
+          </span>
+        </label>
+      )}
+
+      {error && (
+        <p className="v-alert v-alert-error" role="alert">
+          <IconAlert />
+          <span>{error}</span>
+        </p>
+      )}
+
+      <div className="v-decision-actions">
+        {isRejecting ? (
+          <>
+            <button
+              type="button"
+              className="v-btn v-btn-secondary"
+              onClick={() => { setIsRejecting(false); setNote(""); setError(null); }}
+              disabled={busy !== null}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="v-btn v-btn-danger"
+              onClick={() => decide("rejected")}
+              disabled={busy !== null}
+            >
+              {busy === "rejected" ? "Rejecting..." : "Confirm rejection"}
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="v-btn v-btn-secondary"
+              onClick={() => setIsRejecting(true)}
+              disabled={busy !== null}
+            >
+              <IconAlert />
+              Reject
+            </button>
+            <button
+              type="button"
+              className="v-btn v-btn-primary"
+              onClick={() => decide("confirmed")}
+              disabled={busy !== null}
+            >
+              <IconCheck />
+              {busy === "confirmed" ? "Approving..." : "Approve"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RequestCard({ request, canDecide, onDecided }) {
   const hasTiming = Boolean(request.event.start_time && request.event.end_time);
 
   return (
@@ -137,6 +232,24 @@ function RequestCard({ request }) {
         </div>
       </div>
 
+      {/* SCRUM-22: only pending requests are still open to a decision */}
+      {canDecide && request.status === "pending" && (
+        <div className="v-request-body">
+          <DecisionPanel request={request} onDecided={onDecided} />
+        </div>
+      )}
+
+      {request.decided_at && (
+        <div className="v-request-body">
+          <p className="v-subheading">Decision</p>
+          <p className="v-fact-value">
+            {STATUS_LABELS[request.status] || request.status} on{" "}
+            {formatDateTime(request.decided_at)}
+          </p>
+          {request.decision_note && <p className="v-notes">{request.decision_note}</p>}
+        </div>
+      )}
+
       <footer className="v-request-footer">
         <span>Submitted {formatDateTime(request.submitted_at)}</span>
         <span>
@@ -148,10 +261,12 @@ function RequestCard({ request }) {
 }
 
 function VenueBookingRequestList({ onBack }) {
-  const { token } = useAuth();
+  const { token, hasPermission } = useAuth();
+  const canDecide = hasPermission("bookings.decide");
   const [status, setStatus] = useState("pending");
   const [result, setResult] = useState(null);
-  const queryKey = JSON.stringify([status, token]);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const queryKey = JSON.stringify([status, token, refreshKey]);
   const current = result?.key === queryKey;
   const requests = current ? result.requests : [];
   const isLoading = !current;
@@ -234,7 +349,12 @@ function VenueBookingRequestList({ onBack }) {
           </p>
           <div className="v-request-list">
             {requests.map((request) => (
-              <RequestCard key={request.id} request={request} />
+              <RequestCard
+                key={request.id}
+                request={request}
+                canDecide={canDecide}
+                onDecided={() => setRefreshKey((key) => key + 1)}
+              />
             ))}
           </div>
         </>

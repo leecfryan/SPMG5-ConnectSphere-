@@ -20,6 +20,7 @@ middleware and hardcoded development roles have been removed.
 | `/venues/:id/edit` | `venues.update` | Venue Staff, Event Coordinator |
 | `/venues/:id/booking-request` | `bookings.request` | Event Coordinator |
 | `/venues/booking-requests` | `bookings.read` | Venue Staff, Event Coordinator |
+| `/venues/booking-requests` decide controls | `bookings.decide` | Venue Staff |
 
 These are React Router pages with direct links and browser Back/refresh support.
 Shared navigation and sign-out stay available. All calls use relative `/api/venues`
@@ -46,6 +47,33 @@ Responses select venue requirements and event name/timing/status, not whole
 client, attendee or internal planning records. No event-assignment UI is added.
 An unassigned event will not appear in a coordinator's picker.
 
+## Deciding a request (SCRUM-22)
+
+`PATCH /api/venues/booking-requests/:requestId/decision` takes
+`{ decision: "confirmed" | "rejected", note?: string }` and requires the new
+`bookings.decide` permission, held by Venue Staff only. Coordinators keep
+`bookings.read`, so they see the outcome on their own requests but cannot
+decide them. The reviewer identity comes from the verified session; a
+`decided_by` sent in the body is rejected with the other unknown fields.
+
+The decision is applied by `decide_venue_booking_request` (migration 007),
+which records `decided_by`, `decided_at` and `decision_note` on the request and
+writes the decision to every one of its slot rows in one transaction, so a
+request is never half decided. Cancelled slots are left alone: a coordinator
+withdrawing a request is not something a later staff decision should undo.
+
+Approving writes `confirmed`, which is where the exclusion constraint from
+003 applies. If another request already holds one of those slots, Postgres
+rejects the whole statement (SQLSTATE 23P01), nothing changes, and the API
+returns 409 rather than 500. Surfacing that clash properly in the UI is
+SCRUM-20.
+
+The note is optional here. SCRUM-22 says Venue Staff *may* give a reason,
+information or a suggested alternative; SCRUM-102 will make a reason mandatory
+for rejections, which is a change to `validateDecision` alone, not a new column.
+A rejection records the decision and nothing else: any resulting booking change
+is made by the Event Coordinator, so no counter-offer is applied automatically.
+
 ## Database deployment
 
 The root `.env` must contain the existing `SUPABASE_URL`,
@@ -60,6 +88,8 @@ On the team's Supabase database, apply the schema migrations in dependency order
    existing `public.events` table)
 4. `006_yc_authenticated_venue_booking_requests.sql` (requires the existing
    `events.coordinator_id` column)
+5. `007_yc_decide_venue_booking_request.sql` (SCRUM-22 decision columns and
+   the service-role-only decision function)
 
 Files 002 and 004 contain optional demonstration data; they are not required
 schema migrations. If 001, 003 and 005 are already deployed, only 006 is new.
