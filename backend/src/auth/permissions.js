@@ -11,6 +11,11 @@ const policies = Object.freeze({
   "bookings.request": {
     roles: ["event_coordinator"],
   },
+  // SCRUM-22: deciding a request is Venue Staff work. Coordinators keep
+  // bookings.read so they can see the outcome, but cannot decide their own.
+  "bookings.decide": {
+    roles: ["venue_staff"],
+  },
   "equipment.request": { roles: ["event_coordinator"] },
   "equipment.review": { roles: ["technical_support_staff"] },
   "equipment.messages": { roles: ["technical_support_staff", "event_coordinator"] },

@@ -269,13 +269,63 @@ function deriveRequestStatus(slotRows) {
   return "mixed";
 }
 
+// ---------------------------------------------------------------------------
+// SCRUM-22: decide venue booking request
+// ---------------------------------------------------------------------------
+
+const DECISIONS = ["confirmed", "rejected"];
+const DECISION_FIELDS = ["decision", "note"];
+const DECISION_NOTE_MAX = 2000;
+
+// SCRUM-22 lets Venue Staff add information, a reason or a suggested
+// alternative when rejecting, but does not require one. SCRUM-102 will make a
+// reason mandatory for rejections; this is the single place that changes.
+function validateDecision(payload) {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    return { errors: ["Request body must be an object"], value: null };
+  }
+
+  const errors = [];
+
+  const unknown = Object.keys(payload).filter(
+    (key) => !DECISION_FIELDS.includes(key)
+  );
+  if (unknown.length > 0) {
+    errors.push(`Unknown fields: ${unknown.join(", ")}`);
+  }
+
+  if (!DECISIONS.includes(payload.decision)) {
+    errors.push(`decision must be one of: ${DECISIONS.join(", ")}`);
+  }
+
+  const note = payload.note;
+  if (note !== undefined && note !== null) {
+    if (typeof note !== "string") {
+      errors.push("note must be text or null");
+    } else if (note.length > DECISION_NOTE_MAX) {
+      errors.push(`note must be ${DECISION_NOTE_MAX} characters or fewer`);
+    }
+  }
+
+  if (errors.length > 0) return { errors, value: null };
+
+  const trimmed = typeof note === "string" ? note.trim() : "";
+  return {
+    errors: [],
+    value: { decision: payload.decision, note: trimmed === "" ? null : trimmed },
+  };
+}
+
 module.exports = {
   VENUE_TIME_ZONE,
   ALLOWED_FIELDS,
+  DECISIONS,
+  DECISION_NOTE_MAX,
   localDateInTimeZone,
   validateBookingRequestShape,
   validateAgainstVenue,
   validateAgainstEvent,
   findSlotProblems,
   deriveRequestStatus,
+  validateDecision,
 };
