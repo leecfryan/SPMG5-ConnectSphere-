@@ -1,0 +1,9 @@
+.event-workspace { width: 100%; }
+.event-workspace-list { list-style: none; padding: 0; }
+.event-workspace-list li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid #d6dedb; }
+.event-workspace dl > div { margin-block: 1rem; }
+.event-workspace dt { font-weight: 600; }
+.event-workspace dd { margin: .3rem 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.event-workspace form { display: grid; gap: .7rem; max-width: 40rem; }
+.event-workspace select { padding: .7rem; font: inherit; }
+.event-actions { display: flex; flex-wrap: wrap; gap: 1rem; margin-block: 1rem; }

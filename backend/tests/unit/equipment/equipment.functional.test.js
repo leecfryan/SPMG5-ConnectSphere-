@@ -68,7 +68,7 @@ function fakeEquipmentService({ equipmentById = {}, requestsByEvent = {}, reques
 async function setup(t, {
   roleAssignments = { "anyone-authenticated": ["technical_support_staff"] },
   equipmentService,
-  findEventById = async () => ({ id: VALID_EVENT_ID, coordinator_id: "coord-1" }),
+  findEventById = async () => ({ id: VALID_EVENT_ID, coordinator_id: "coord-1", status: "ACCEPTED" }),
   findEventsByIds = async (ids) => ids.map((id) => ({ id, name: "Event " + id })),
   getUserDisplayName = async (id) => "User " + id,
 }) {

@@ -86,7 +86,7 @@ test("AC1/AC3: verified identity is returned; roles come only from admin metadat
       roles: ["attendee"],
       accountTypes: ["external"],
     },
-    permissions: [],
+    permissions: ["events.browse", "registrations.manage"],
   });
 });
 
@@ -187,7 +187,7 @@ test("RBAC: identity response derives permissions from verified roles, never cla
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "no-store");
   const { permissions } = await response.json();
-  assert.deepEqual(permissions, ["venues.update", "internal.access", "venues.read", "bookings.read"]);
+  assert.deepEqual(permissions, ["events.browse", "registrations.manage", "venues.update", "internal.access", "venues.read", "bookings.read"]);
 });
 
 test("RBAC: combined roles return unique permissions and role removal updates the next identity request", async (t) => {
@@ -195,9 +195,9 @@ test("RBAC: combined roles return unique permissions and role removal updates th
   const base = await setup(t, async () => ({ data: { user: { id: "user", app_metadata: { roles } } }, error: null }));
   const headers = { Authorization: "Bearer same-token" };
   assert.deepEqual((await (await fetch(base + "/api/auth/me", { headers })).json()).permissions,
-    ["venues.update", "equipment.review", "equipment.messages", "internal.access", "venues.read", "bookings.read", "equipment.read", "technical_requests.read"]);
+    ["events.browse", "registrations.manage", "venues.update", "equipment.review", "equipment.messages", "internal.access", "venues.read", "bookings.read", "equipment.read", "technical_requests.read"]);
   roles = ["attendee"];
-  assert.deepEqual((await (await fetch(base + "/api/auth/me", { headers })).json()).permissions, []);
+  assert.deepEqual((await (await fetch(base + "/api/auth/me", { headers })).json()).permissions, ["events.browse", "registrations.manage"]);
   assert.equal((await fetch(base + "/api/internal/access", { headers })).status, 403);
 });
 
@@ -209,23 +209,14 @@ test("RBAC: missing and malformed roles return no permissions", async (t) => {
   }
 });
 
-// SCRUM-26 settled the policy question this test was written to pin. The Event
-// Operations Manager now holds internal.access, because /api/internal is gated
-// on it before any route-specific guard runs and the customer clarification
-// (#42) puts assignment in the manager's hands.
-//
-// The test is kept, and inverted, to measure the blast radius of that grant:
-// entering the internal area must not hand the manager anyone else's feature.
-// Every venue and equipment route carries its own specific permission, so the
-// outer gate opening changes nothing for them - and this is what proves it.
-test("RBAC/SCRUM-26: the operations manager's internal gate grants assignment and nothing else", async (t) => {
+test("[RBAC-MANAGER-001] Managers can review events without gaining venue or equipment responsibilities", async (t) => {
   const base = await setup(t, async () => ({ data: { user: {
     id: "manager", app_metadata: { roles: ["event_ops_manager"] },
   } }, error: null }));
   const headers = { Authorization: "Bearer valid" };
   const { user, permissions } = await (await fetch(base + "/api/auth/me", { headers })).json();
   assert.deepEqual(user.accountTypes, ["internal"]);
-  assert.deepEqual(permissions.sort(), ["event_organisers.read", "events.assign_coordinator", "internal.access"]);
+  assert.deepEqual(permissions.sort(), ["event_organisers.read", "events.assign", "events.assign_coordinator", "events.review", "internal.access"]);
   assert.equal((await fetch(base + "/api/internal/access", { headers })).status, 200);
 
   // Not a coordinator, not venue staff, not technical support. The manager

@@ -130,6 +130,7 @@ const staffCases = [
   ['E2E-RBAC-001', 'venue_staff', ['Venue information and availability', 'Venue booking information']],
   ['E2E-RBAC-002', 'technical_support_staff', ['Equipment information and availability', 'Technical requirements and arrangements']],
   ['E2E-RBAC-003', 'event_coordinator', ['Venue information and availability', 'Venue booking information', 'Equipment information and availability', 'Technical requirements and arrangements', 'Internal event planning', 'Event registration information', 'Client information for managed events', 'Event organiser information for managed events']],
+  ['E2E-RBAC-006', 'event_ops_manager', ['Event request review and coordinator assignment', 'Event organiser information for managed events']],
 ];
 for (const [id, role, labels] of staffCases) {
   test(`[${id}] ${role} follows a protected deep link and sees only permitted responsibilities`, async ({ page, accounts }) => {
@@ -165,11 +166,11 @@ test('[E2E-RBAC-006] Operations managers can enter their workspace but not other
   await page.goto('/staff/responsibilities');
   await signIn(page, account);
   await expect(page).toHaveURL(/\/staff\/responsibilities$/);
-  await expect(page.getByRole('listitem')).toHaveText(['Event organiser information for managed events']);
+  await expect(page.getByRole('listitem')).toHaveText(['Event request review and coordinator assignment', 'Event organiser information for managed events']);
   await expect(page.getByRole('link', { name: 'Assign coordinators', exact: true })).toHaveAttribute('href', '/events/assignments');
   await expect(page.getByRole('link', { name: 'Responsibilities', exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.getByRole('listitem')).toHaveText(['Event organiser information for managed events']);
+  await expect(page.getByRole('listitem')).toHaveText(['Event request review and coordinator assignment', 'Event organiser information for managed events']);
 
   for (const name of ['Venues', 'Request equipment', 'Technical support']) {
     await expect(page.getByRole('link', { name, exact: true })).toHaveCount(0);

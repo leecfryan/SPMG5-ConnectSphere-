@@ -46,6 +46,7 @@ test('[VENUE-E2E-002] Submitted event flows into an assigned coordinator booking
   expect(response.status()).toBe(201);
   const { event } = await response.json();
   await accounts.assignEvent(event.id, coordinator.id);
+  await accounts.updateEvent(event.id, { status: 'ACCEPTED' });
   await page.goto(`/venues/${venueId}/booking-request`);
   await signIn(page, coordinator);
   await page.getByRole('combobox', { name: 'Event', exact: true }).selectOption(event.id);

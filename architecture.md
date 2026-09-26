@@ -21,8 +21,9 @@ hosted externally.
 8. The /staff/responsibilities page loads allowed responsibilities from
    /api/internal/access; server middleware still authorises each API request.
 
-The permission layer is implemented; production business APIs and relationship
-queries remain feature work. See docs/staff-access.md for the integration contract.
+The permission layer and integrated feature APIs enforce role capabilities and
+event relationships. The event workspace filters organiser/coordinator records
+by verified user ID and exposes separate manager actions. See docs/staff-access.md for the integration contract.
 
 The browser never receives the Supabase secret key. Normal identity verification
 uses the publishable key. Administrative scripts such as seeding use the separate
@@ -50,7 +51,7 @@ selector or browser-supplied claim grants access.
 - backend/scripts/seedUsers.js: repeatable creation of dummy Auth accounts.
 - backend/tests/integration/auth.test.js: authentication boundary tests.
 - backend/tests/integration/permissions.test.js: staff matrix and record-access tests.
-- supabase/migrations/: reserved for future SQL schema and policy changes.
+- supabase/migrations/: venue schema, booking RPCs and event workflow migration 007.
 
 Vite proxies /api to the backend: localhost:3000 for local npm development and
 backend:3000 inside Docker. Production hosting must route /api to Express behind
@@ -65,3 +66,13 @@ Equipment pages run under the shared AuthProvider and permission routes. The bac
 ## Registration integration
 
 Approved event reads and attendee-owned registrations are composed alongside organiser submission and staff routes. Registration pages use the shared AuthProvider and API helper; test control endpoints remain outside production. See [Registration integration](docs/registration-integration.md).
+
+## Role-specific event workspaces
+
+See [event access](docs/event-access.md). Multiple coordinators are distinct
+accounts sharing `event_coordinator`; assignment uses `events.coordinator_id`.
+The event lifecycle is SUBMITTED → ACCEPTED → APPROVED (registration open), or
+SUBMITTED → REJECTED. Managers assign coordinators after acceptance. Attendees
+use registration routes; venue and technical staff use their booking workspaces.
+The reusable `frontend/src/hooks/useApiResource.js` hides stale data when the
+session, route or refresh revision changes.

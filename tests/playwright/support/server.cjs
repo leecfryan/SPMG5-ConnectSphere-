@@ -41,7 +41,7 @@ auth.patch('/__test/accounts/:id', (req, res) => {
   }
   res.sendStatus(204);
 });
-// Assignment is fixture setup only; no assignment API is added to production.
+// Fixture setup for older feature tests; event-workspace tests exercise the real manager API.
 auth.patch('/__test/events/:id', (req, res) => {
   const event = [...accounts.values()].flatMap(account => account.events).find(event => event.id === req.params.id);
   if (!event) return res.sendStatus(404);
@@ -64,7 +64,7 @@ function user(account) {
     id: account.id, email: account.email, aud: 'authenticated', role: 'authenticated',
     app_metadata: { provider: 'email', providers: ['email'], roles: account.roles },
     user_metadata: { full_name: 'Playwright Staff', ...account.metadata },
-    created_at: '2026-01-01T00:00:00.000Z',
+    email_confirmed_at: '2026-01-01T00:00:00.000Z', created_at: '2026-01-01T00:00:00.000Z',
   };
 }
 function issueSession(account) {
@@ -125,6 +125,10 @@ const eventsRepository = {
 const venuesService = require('./venue-storage.cjs')(accounts);
 const equipmentDependencies = require('./equipment-storage.cjs')(accounts);
 const dataClient = require('./registration-storage.cjs')(accounts);
+dataClient.auth = { admin: {
+  async listUsers({ page, perPage }) { return { data: { users: [...accounts.values()].slice((page - 1) * perPage, page * perPage).map(user) }, error: null }; },
+  async getUserById(id) { return { data: { user: accounts.has(id) ? user(accounts.get(id)) : null }, error: null }; },
+} };
 auth.patch('/__test/registrations/:id', (req, res) => {
   const registration = dataClient.registrations.find(row => row.id === req.params.id);
   if (!registration) return res.sendStatus(404);

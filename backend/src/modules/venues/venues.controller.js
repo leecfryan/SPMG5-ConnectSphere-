@@ -152,7 +152,8 @@ function createVenuesController(service) {
       // SCRUM-92, 93, 94, 95 are all decided inside this pure function
       const days = buildAvailabilityCalendar({
         operatingHours: venue.operating_hours,
-        bookings,
+        // Planning needs occupied slots, not another coordinator's event name.
+        bookings: req.user.roles.includes("venue_staff") ? bookings : bookings.map(row => ({ ...row, event_name: "Reserved event" })),
         unavailability,
         from,
         to,
@@ -242,7 +243,7 @@ function createVenuesController(service) {
       ]);
       const [calendarDay] = buildAvailabilityCalendar({
         operatingHours: venue.operating_hours,
-        bookings: slotRows,
+        bookings: req.user.roles.includes("venue_staff") ? slotRows : slotRows.map(row => ({ ...row, event_name: "Reserved event" })),
         unavailability,
         from: value.booking_date,
         to: value.booking_date,

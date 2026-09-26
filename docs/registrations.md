@@ -1,3 +1,9 @@
+# Current access update
+
+Attendee responsibility is required for browsing and registration. The role and
+publication contract in [event access](event-access.md) supersedes older
+references below to access for any signed-in user.
+
 # Attendee Registration — Sprint 1 scope
 
 ## Scrum tickets
@@ -137,8 +143,8 @@ New module at `backend/src/modules/registrations/`.
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
-| GET | /api/events | requireAuth | List events open for registration (`status = APPROVED`) |
-| GET | /api/events/:eventId | requireAuth | Single event detail (APPROVED only) |
+| GET | /api/events | requireAuth + events.browse | List events open for registration (`status = APPROVED`) |
+| GET | /api/events/:eventId | requireAuth + events.browse | Single event detail (APPROVED only) |
 | POST | /api/registrations | requireAuth | Submit a registration for an event |
 | GET | /api/registrations/me | requireAuth | All of the signed-in attendee's registrations |
 | GET | /api/registrations/me/:registrationId | requireAuth | Single registration status |

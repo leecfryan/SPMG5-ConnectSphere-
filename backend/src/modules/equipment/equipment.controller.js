@@ -104,6 +104,7 @@ function createEquipmentController({
       const event = await findEventById(value.event_id);
       if (!event) return res.status(404).json({ error: "Event not found" });
       if (event.coordinator_id !== req.user.id) return res.status(403).json({ error: "You can only request equipment for events assigned to you." });
+      if (!["ACCEPTED", "APPROVED"].includes(event.status)) return res.status(409).json({ error: "The event must be accepted before requesting equipment." });
 
       const equipment = await findEquipmentById(value.equipment_id);
       if (!equipment) return res.status(404).json({ error: "Equipment not found" });

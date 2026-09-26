@@ -18,7 +18,7 @@ module.exports = function registrationStorage(accounts) {
       let selection = '*', insertion, update, ordering;
       function execute(single) {
         const rows = table === 'events' ? events() : registrations;
-        let result = rows.filter(row => filters.every(([key, value]) => row[key] === value));
+        let result = rows.filter(row => filters.every(test => test(row)));
         if (insertion) {
           if (rows.some(row => row.attendee_id === insertion.attendee_id && row.event_id === insertion.event_id)) {
             return { data: null, error: { code: '23505', message: 'Duplicate registration' } };
@@ -34,7 +34,10 @@ module.exports = function registrationStorage(accounts) {
       }
       const query = {
         select(fields = '*') { selection = fields; return query; },
-        eq(key, value) { filters.push([key, value]); return query; },
+        is(key, value) { filters.push(row => (row[key] ?? null) === value); return query; },
+        in(key, values) { filters.push(row => values.includes(row[key])); return query; },
+        not(key, operator, value) { if (operator !== 'is' || value !== null) throw new Error('Unsupported filter'); filters.push(row => row[key] != null); return query; },
+        eq(key, value) { filters.push(row => row[key] === value); return query; },
         order(key, { ascending = true } = {}) { ordering = { key, ascending }; return query; },
         insert(value) { insertion = value; return query; },
         update(value) { update = value; return query; },

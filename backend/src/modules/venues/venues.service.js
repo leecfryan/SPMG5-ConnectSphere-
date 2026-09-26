@@ -129,7 +129,7 @@ async function listBookableEvents(coordinatorId) {
     .from("events")
     .select(EVENT_FIELDS)
     .eq("coordinator_id", coordinatorId)
-    .neq("status", "DRAFT")
+      .in("status", ["ACCEPTED", "APPROVED"])
     .not("start_time", "is", null)
     .gte("end_time", new Date().toISOString())
     .order("start_time", { ascending: true });

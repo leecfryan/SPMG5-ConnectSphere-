@@ -197,10 +197,8 @@ function validateAgainstVenue(value, venue) {
 function validateAgainstEvent(value, event, today) {
   const errors = [];
 
-  // A draft is still being written by the organiser. Its timing is not final,
-  // so there is nothing stable for Venue Staff to assess yet.
-  if (event.status === "DRAFT") {
-    errors.push("The event is still a draft. Submit the event before requesting a venue");
+  if (!["ACCEPTED", "APPROVED"].includes(event.status)) {
+    errors.push("The event must be accepted before requesting a venue");
     return errors;
   }
 

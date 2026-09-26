@@ -31,7 +31,7 @@ test('[API-AUTH-006] Verified identity ignores caller-supplied roles and permiss
   const response = await request.get('/api/auth/me?role=event_coordinator&permissions=clients.read', { headers });
   expect(response.status()).toBe(200);
   expect(await response.json()).toEqual({
-    user: { id: account.id, email: account.email, fullName: 'Playwright Staff', roles: ['attendee'], accountTypes: ['external'] }, permissions: [],
+    user: { id: account.id, email: account.email, fullName: 'Playwright Staff', roles: ['attendee'], accountTypes: ['external'] }, permissions: ['events.browse', 'registrations.manage'],
   });
   expect((await request.get('/api/internal/access?role=venue_staff', { headers })).status()).toBe(403);
 });
@@ -92,13 +92,13 @@ test('[API-RBAC-049] Combined roles return unique capabilities and removal immed
   const account = await accounts.create(['venue_staff', 'technical_support_staff', 'attendee', 'venue_staff']);
   const headers = bearer(await accounts.session(account));
   const identity = await request.get('/api/auth/me', { headers });
-  expect((await identity.json()).permissions).toEqual(['venues.update', 'equipment.review', 'equipment.messages', 'internal.access', 'venues.read', 'bookings.read', 'equipment.read', 'technical_requests.read']);
+  expect((await identity.json()).permissions).toEqual(['events.browse', 'registrations.manage', 'venues.update', 'equipment.review', 'equipment.messages', 'internal.access', 'venues.read', 'bookings.read', 'equipment.read', 'technical_requests.read']);
   const access = await request.get('/api/internal/access', { headers });
   expect(access.status()).toBe(200);
   expect((await access.json()).responsibilities.map((item) => item.permission)).toEqual(permissions.slice(0, 4));
   await accounts.update(account, { roles: ['attendee'] });
   expect((await request.get('/api/internal/access', { headers })).status()).toBe(403);
-  expect((await (await request.get('/api/auth/me', { headers })).json()).permissions).toEqual([]);
+  expect((await (await request.get('/api/auth/me', { headers })).json()).permissions).toEqual(['events.browse', 'registrations.manage']);
 });
 
 test('[API-RBAC-050] Operations manager access remains limited to its permissions and authorised records', async ({ request, accounts }) => {
@@ -107,7 +107,7 @@ test('[API-RBAC-050] Operations manager access remains limited to its permission
   const identity = await request.get('/api/auth/me', { headers });
   expect(identity.status()).toBe(200);
   expect((await identity.json()).permissions.sort()).toEqual([
-    'event_organisers.read', 'events.assign_coordinator', 'internal.access',
+    'event_organisers.read', 'events.assign', 'events.assign_coordinator', 'events.review', 'internal.access',
   ]);
 
   for (const path of ['/api/venues', '/api/equipment', '/api/equipment/events', '/api/technical-support/equipment-requests']) {

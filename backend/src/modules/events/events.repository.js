@@ -118,7 +118,7 @@ async function findSubmittedUnassigned() {
   );
 }
 
-const ACTIVE_STATUSES = ["SUBMITTED", "APPROVED"];
+const ACTIVE_STATUSES = ["SUBMITTED", "ACCEPTED", "APPROVED"];
 
 async function findActiveAssignments() {
   return unwrap(

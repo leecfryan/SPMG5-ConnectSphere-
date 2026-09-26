@@ -32,6 +32,16 @@ row is ever written here.
 
 ---
 
+## Role-scoped review and planning
+
+Organisers see their own requests; coordinators see only assigned accepted or
+open events. Managers can accept or reject submissions, assign coordinators,
+and explicitly open registration. Acceptance uses `ACCEPTED`, rejection uses
+`REJECTED`, and opening registration uses `APPROVED`. Only attendees can browse
+the registration catalogue. Apply migration 007 before deploying these changes.
+See [event access](event-access.md) for the complete workflow and API contract.
+The existing manager assignment queue remains available for compatibility.
+
 ## Database
 
 The `events` table. There is no migration file for this table; it is maintained
@@ -64,11 +74,13 @@ create table events (
 
 | Status | Set by | Meaning |
 | --- | --- | --- |
-| `SUBMITTED` | this module, at insert | Submitted; awaiting coordinator assignment |
-| `APPROVED` | not by this module | In use in the table and read by the registration feature |
+| `SUBMITTED` | this module, at insert | Awaiting manager review; also visible in the existing assignment queue |
+| `ACCEPTED` | manager review workspace | Accepted for coordinator planning; not open for registration |
+| `REJECTED` | manager review workspace | Rejected; unavailable for planning and registration |
+| `APPROVED` | manager opens registration | Open for attendee registration |
 | `DRAFT` | nothing | The column default. Never written here; reserved for US-13. |
 
-`UNDER_REVIEW`, `REJECTED`, `CONFIRMED` and `CANCELLED` are named in the Week 4
+`UNDER_REVIEW`, `CONFIRMED` and `CANCELLED` are named in the Week 4
 instructions but are not implemented. Do not branch on them, and do not assume
 the set is closed. Display labels belong in each feature's own UI; stored values
 are not labels.
@@ -379,13 +391,12 @@ the Week 12 release and is not part of this sprint.
 
 ## Current limitations
 
-- Event list and detail endpoints are not implemented here. New read endpoints
-  need permission and event-relationship checks before returning protected data.
+- Role-scoped list and detail endpoints are implemented in the event workspace;
+  each route enforces permissions and event ownership or assignment.
 - The `CHECK` constraint on `events.status` has not been verified against the
   live database since `APPROVED` came into use.
-- There is no migration file for `events`. Schema changes are made in the
-  Supabase dashboard and need to be reflected in this document in the same
-  sitting.
-- The full status lifecycle — `UNDER_REVIEW`, `REJECTED`, `CONFIRMED`,
+- Migration 007 extends the existing `events` status constraints for review.
+  It must be applied to the target database before deployment.
+- The remaining status lifecycle — `UNDER_REVIEW`, `CONFIRMED`,
   `CANCELLED` — is named in the Week 4 instructions and is not yet designed.
 - US-13 has no Jira issue, so `US-13` remains the label in code and tests.

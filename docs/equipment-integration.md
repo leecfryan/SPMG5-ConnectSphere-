@@ -83,3 +83,11 @@ changes statuses in a real development database. It now follows the routed pages
 and requires `SEED_USER_PASSWORD`, `EQUIPMENT_TEST_EVENT_ID` and
 `THREAD_TEST_EVENT_ID` explicitly, with correctly assigned events and trusted
 account roles. Those tests are not run as part of conflict resolution.
+
+## Assignment and access update
+
+Coordinator request pickers and new equipment requests require an assigned event
+in `ACCEPTED` or `APPROVED` state. Technical staff retain all equipment bookings,
+as agreed; a venue + technical account combines both booking workspaces.
+They do not gain general event planning or attendee browsing. See
+[event access](event-access.md) for manager assignment and deployment requirements.

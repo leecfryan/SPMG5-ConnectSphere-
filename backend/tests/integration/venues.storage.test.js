@@ -6,7 +6,7 @@ const service = require("../../src/modules/venues/venues.service");
 let db, query;
 beforeEach(() => {
   query = { then: (resolve) => Promise.resolve({ data: [], error: null }).then(resolve) };
-  for (const key of ["select", "eq", "order", "limit", "neq", "not", "gte", "maybeSingle"]) query[key] = vi.fn(() => query);
+  for (const key of ["select", "in", "eq", "order", "limit", "neq", "not", "gte", "maybeSingle"]) query[key] = vi.fn(() => query);
   db = stubSupabase({ from: vi.fn(() => query), rpc: vi.fn().mockResolvedValue({ data: "created-id", error: null }) });
 });
 test("[VENUE-DB-001] Both event lookup and picker constrain the real database query to the coordinator", async () => {
@@ -14,6 +14,7 @@ test("[VENUE-DB-001] Both event lookup and picker constrain the real database qu
   expect(query.eq).toHaveBeenCalledWith("coordinator_id", "verified-coordinator");
   query.eq.mockClear();
   await service.listBookableEvents("verified-coordinator");
+  expect(query.in).toHaveBeenCalledWith("status", ["ACCEPTED", "APPROVED"]);
   expect(query.eq).toHaveBeenCalledWith("coordinator_id", "verified-coordinator");
 });
 test("[VENUE-DB-002] Booking list and direct lookup filter parents using the assigned event join", async () => {

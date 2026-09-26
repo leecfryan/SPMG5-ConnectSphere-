@@ -30,9 +30,10 @@ Frontend visibility is only a convenience; the API enforces each operation.
 `PATCH /api/venues/:id` retains the branch's field validation and update behavior.
 `GET /api/venues/:id/availability` retains confirmed, requested, unavailable and
 closed slots, date windows and AM/PM/Night handling. Catalogue and calendar access
-are not restricted to an assigned venue or location.
+are not restricted to an assigned venue or location. Coordinators see generic
+occupied-slot labels instead of other events' names; venue staff keep event labels.
 
-`GET /api/venues/booking-events` returns upcoming, non-draft events assigned to
+`GET /api/venues/booking-events` returns upcoming, accepted (`ACCEPTED` or `APPROVED`) events assigned to
 the verified coordinator through the existing `events.coordinator_id` column.
 `POST /api/venues/:id/booking-requests` checks that same relationship, validates
 requirements and slot conflicts, and supplies the verified requester ID to the
@@ -43,7 +44,7 @@ Venue Staff can review venue requests across locations. For coordinators, both
 filter by their assigned events. The router establishes this scope from the
 verified identity; the database service applies it using an inner event join.
 Responses select venue requirements and event name/timing/status, not whole
-client, attendee or internal planning records. No event-assignment UI is added.
+client, attendee or internal planning records. Managers assign events through `/event-management`.
 An unassigned event will not appear in a coordinator's picker.
 
 ## Database deployment

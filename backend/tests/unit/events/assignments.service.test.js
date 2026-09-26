@@ -190,6 +190,6 @@ test("SCRUM-26: workload counts read only assigned events in an active status", 
   await repository.findActiveAssignments();
 
   expect(calls).toContainEqual(["select", "coordinator_id, start_time"]);
-  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "APPROVED"]]);
+  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "ACCEPTED", "APPROVED"]]);
   expect(calls).toContainEqual(["not", "coordinator_id", "is", null]);
 });
