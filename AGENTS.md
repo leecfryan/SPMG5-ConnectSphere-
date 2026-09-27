@@ -66,7 +66,7 @@ These come first. Clean code that is out of scope is still wrong.
 - **Task notes go in [.agent/tasks/](.agent/tasks/); durable reference goes in [.agent/docs/](.agent/docs/).**
   Check both before starting work.
 - **Keep the docs current as part of the work, not after it.** A change that alters anything described in
-  `.agent/docs/`, `docs/`, `architecture.md`, `README.md` or this file isn't finished until those files match the
+  `.agent/docs/`, `docs/`, `README.md` or this file isn't finished until those files match the
   code, in the same task and the same commit. That covers endpoints, permissions, route paths, schema, status
   values, UI tokens, test commands and security invariants. A stale doc is worse than no doc, because people
   believe it.

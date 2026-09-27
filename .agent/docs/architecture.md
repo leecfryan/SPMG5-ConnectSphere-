@@ -1,7 +1,7 @@
 # Architecture
 
 The stack, how a request travels, where each kind of code goes, the database, and outside services.
-Team-facing versions: [../../architecture.md](../../architecture.md), [../../docs/project-structure.md](../../docs/project-structure.md),
+Team-facing versions: [../../docs/project-structure.md](../../docs/project-structure.md),
 [../../docs/staff-access.md](../../docs/staff-access.md), [../../docs/frontend-routing.md](../../docs/frontend-routing.md).
 
 ## Stack
