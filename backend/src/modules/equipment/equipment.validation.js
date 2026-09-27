@@ -157,9 +157,149 @@ function validateStatusUpdate(input) {
   return { ok: true, errors: [], value: { status: data.status } };
 }
 
+// Scrum-29: equipment availability check.
+//
+// AC2 + AC4 (team decision): overlap is Rule B - day-granularity, touching
+// endpoints blocked ("Return Day + 1") - and it now applies everywhere an
+// overlap is checked, not just in the availability check below.
+// equipment.service.js's hasOverlappingRequest (used by
+// POST /events/:eventId/equipment-requests) was previously Rule A
+// (timestamp-precision, touching allowed); the team decided that divergence
+// was unacceptable - an item must never show as unavailable in this check
+// while still being bookable through that endpoint - so hasOverlappingRequest
+// now calls isBlockingOverlap too. See that file for the superseded Rule A
+// query.
+
+const BLOCKING_REQUEST_STATUSES = ["PENDING", "APPROVED"];
+
+// borrow_start/borrow_end are timestamptz columns stored in UTC. Truncating
+// to a UTC calendar day (rather than comparing full timestamps) is what
+// makes AC4 hold: a request ending at any time on day D and a request
+// starting at any time on day D are treated as the same day, so the
+// equipment isn't free again until day D+1.
+function startOfUtcDay(isoString) {
+  const date = new Date(isoString);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+}
+
+// AC2 (Rule B) + AC4 (day granularity, Return Day + 1): true when the
+// existing request's borrow window and the requested window fall on
+// overlapping or touching days.
+function isBlockingOverlap(existingRequest, requestedStart, requestedEnd) {
+  const existingStartDay = startOfUtcDay(existingRequest.borrow_start);
+  const existingEndDay = startOfUtcDay(existingRequest.borrow_end);
+  const requestedStartDay = startOfUtcDay(requestedStart);
+  const requestedEndDay = startOfUtcDay(requestedEnd);
+  return existingStartDay <= requestedEndDay && existingEndDay >= requestedStartDay;
+}
+
+// AC3: anything not AVAILABLE is excluded. Written as an allowlist (not a
+// denylist of known-bad values) so it excludes correctly both before and
+// after the team's planned status-constraint update - a status value this
+// code has never seen is excluded by default, not opted into.
+function isStatusAvailable(equipmentUnit) {
+  return equipmentUnit.status === "AVAILABLE";
+}
+
+// AC1-AC4: `equipmentUnits` and `requestsByEquipmentId` are pre-scoped by the
+// caller (the service queries by equipment type and by blocking status). A
+// unit is available for the requested period when its status passes AC3 and
+// none of its own PENDING/APPROVED requests block the period under AC2/AC4.
+function findAvailableUnits({ equipmentUnits, requestsByEquipmentId, requestedStart, requestedEnd }) {
+  return equipmentUnits.filter((unit) => {
+    if (!isStatusAvailable(unit)) return false;
+    const requests = requestsByEquipmentId.get(unit.id) || [];
+    return !requests.some((request) => isBlockingOverlap(request, requestedStart, requestedEnd));
+  });
+}
+
+// AC1 + quantity handling (team decision): returns the available count and
+// whether it meets the requested quantity, so a caller can use either
+// without recomputing.
+function checkAvailability({ equipmentUnits, requestsByEquipmentId, requestedStart, requestedEnd, requestedQuantity }) {
+  const availableUnits = findAvailableUnits({ equipmentUnits, requestsByEquipmentId, requestedStart, requestedEnd });
+  return {
+    available_quantity: availableUnits.length,
+    requested_quantity: requestedQuantity,
+    fulfillable: availableUnits.length >= requestedQuantity,
+    available_equipment_ids: availableUnits.map((unit) => unit.id),
+  };
+}
+
+// AC1: accepts event start/end date-time, equipment type, requested
+// quantity, and event location. Location is accepted and echoed back but not
+// used for filtering yet - deferred to a later sprint per the story's scope.
+function validateAvailabilityQuery(input) {
+  const data = asObject(input);
+  const errors = [];
+
+  if (typeof data.type !== "string" || data.type.trim() === "") {
+    errors.push(err("type", "required"));
+  }
+  if (typeof data.location !== "string" || data.location.trim() === "") {
+    errors.push(err("location", "required"));
+  }
+
+  const startMillis = checkRequiredTime(data, "start", errors);
+  const endMillis = checkRequiredTime(data, "end", errors);
+  if (startMillis !== null && endMillis !== null && endMillis <= startMillis) {
+    errors.push(err("end", "must be after start"));
+  }
+
+  const quantity = Number(data.quantity);
+  if (!Number.isInteger(quantity) || quantity <= 0) {
+    errors.push(err("quantity", "must be a whole number greater than zero"));
+  }
+
+  if (errors.length > 0) return { ok: false, errors, value: null };
+
+  return {
+    ok: true,
+    errors: [],
+    value: {
+      type: data.type.trim(),
+      location: data.location.trim(),
+      start: new Date(data.start).toISOString(),
+      end: new Date(data.end).toISOString(),
+      quantity,
+    },
+  };
+}
+
+// Scrum-29 follow-up: the equipment-request form's dropdown needs only a
+// start/end window (no type/quantity/location) to ask "which units are
+// bookable for this period at all" - shared with validateAvailabilityQuery's
+// time parsing, but without the fields that check has no use for here.
+function validateAvailabilityWindow(input) {
+  const data = asObject(input);
+  const errors = [];
+
+  const startMillis = checkRequiredTime(data, "start", errors);
+  const endMillis = checkRequiredTime(data, "end", errors);
+  if (startMillis !== null && endMillis !== null && endMillis <= startMillis) {
+    errors.push(err("end", "must be after start"));
+  }
+
+  if (errors.length > 0) return { ok: false, errors, value: null };
+
+  return {
+    ok: true,
+    errors: [],
+    value: { start: new Date(data.start).toISOString(), end: new Date(data.end).toISOString() },
+  };
+}
+
 module.exports = {
   validateCreateRequest,
   validateStatusUpdate,
   WRITABLE_COLS,
   REVIEW_STATUSES,
+  BLOCKING_REQUEST_STATUSES,
+  startOfUtcDay,
+  isBlockingOverlap,
+  isStatusAvailable,
+  findAvailableUnits,
+  checkAvailability,
+  validateAvailabilityQuery,
+  validateAvailabilityWindow,
 };

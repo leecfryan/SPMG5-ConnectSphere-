@@ -85,8 +85,16 @@ export function fetchBookingRequests({ status } = {}, token) {
   return request(`/api/venues/booking-requests${query}`, token);
 }
 
-export function fetchEquipmentCatalogue(token) {
-  return request("/api/equipment", token);
+// Scrum-29 follow-up: with no window, the full catalogue (used for the
+// catalogue page and for labelling existing requests). With both start and
+// end, only equipment bookable for that period - used to filter the request
+// form's dropdown so it stops offering equipment that would just be rejected.
+export function fetchEquipmentCatalogue(token, { start, end } = {}) {
+  const params = new URLSearchParams();
+  if (start) params.set("start", start);
+  if (end) params.set("end", end);
+  const query = params.toString();
+  return request(`/api/equipment${query ? `?${query}` : ""}`, token);
 }
 
 export function fetchEquipmentRequests(eventId, token) {

@@ -33,6 +33,10 @@ module.exports = function equipmentRoutes({ authenticate, equipmentService, mess
   }
 
   router.get("/equipment", ...guards("equipment.read"), controller.getEquipmentCatalogue);
+  // Scrum-29: catalogue-wide check, not scoped to one event or record - same
+  // reasoning as GET /equipment above (see staff-access.md: equipment
+  // catalogue access is not limited by assigned venue/equipment/location).
+  router.get("/equipment/availability", ...guards("equipment.read"), controller.getEquipmentAvailability);
   router.get("/equipment/events", ...guards("equipment.request"), async (req, res, next) => {
     try { res.json({ data: await listAssignedEvents(req.user.id) }); } catch (error) { next(error); }
   });

@@ -4,7 +4,7 @@
 // production, and equipment.functional.test.js binds it to an in-memory fake
 // so role gating, overlap rejection, and event scoping can be exercised
 // without touching the live database (see that test file's header for why).
-const { WRITABLE_COLS } = require("./equipment.validation");
+const { WRITABLE_COLS, BLOCKING_REQUEST_STATUSES, isBlockingOverlap } = require("./equipment.validation");
 
 const REQUESTS_TABLE = "equipment_requests";
 const EQUIPMENT_TABLE = "equipment";
@@ -76,23 +76,62 @@ function createEquipmentService(client) {
     );
   }
 
-  // Overlap guard: true when the same equipment already has a non-REJECTED
-  // request whose borrow window intersects [borrowStart, borrowEnd).
-  // Standard interval-overlap test: existing.start < new.end AND
-  // existing.end > new.start.
+  // Superseded by the Scrum-29 team decision (day-granularity, touching
+  // endpoints blocked - see equipment.validation.js's isBlockingOverlap).
+  // Kept only for reference in case the team revisits this.
+  // async function hasOverlappingRequest(equipmentId, borrowStart, borrowEnd) {
+  //   const rows = await unwrap(
+  //     await client
+  //       .from(REQUESTS_TABLE)
+  //       .select("id")
+  //       .eq("equipment_id", equipmentId)
+  //       .neq("status", "REJECTED")
+  //       .lt("borrow_start", borrowEnd)
+  //       .gt("borrow_end", borrowStart)
+  //       .limit(1),
+  //     "hasOverlappingRequest",
+  //   );
+  //   return rows.length > 0;
+  // }
+
+  // Overlap guard, Scrum-29 AC2/AC4: true when the same equipment already
+  // has a PENDING/APPROVED request whose borrow window blocks the requested
+  // period under isBlockingOverlap (day-granularity, touching endpoints
+  // blocked). Shared with the availability check so this endpoint and that
+  // check can never disagree about whether an item is bookable.
   async function hasOverlappingRequest(equipmentId, borrowStart, borrowEnd) {
-    const rows = await unwrap(
+    const existing = await unwrap(
       await client
         .from(REQUESTS_TABLE)
-        .select("id")
+        .select("borrow_start, borrow_end")
         .eq("equipment_id", equipmentId)
-        .neq("status", "REJECTED")
-        .lt("borrow_start", borrowEnd)
-        .gt("borrow_end", borrowStart)
-        .limit(1),
+        .in("status", BLOCKING_REQUEST_STATUSES),
       "hasOverlappingRequest",
     );
-    return rows.length > 0;
+    return existing.some((request) => isBlockingOverlap(request, borrowStart, borrowEnd));
+  }
+
+  // Scrum-29 AC1/AC2: the requestable catalogue for one equipment type, used
+  // by the availability check to know which physical units to consider.
+  async function listEquipmentByType(type) {
+    return unwrap(
+      await client.from(EQUIPMENT_TABLE).select("*").eq("type", type),
+      "listEquipmentByType",
+    );
+  }
+
+  // Scrum-29 AC2/AC4: the PENDING/APPROVED requests for a set of equipment
+  // units, so the availability check can apply isBlockingOverlap per unit.
+  async function listActiveRequestsForEquipment(equipmentIds) {
+    if (equipmentIds.length === 0) return [];
+    return unwrap(
+      await client
+        .from(REQUESTS_TABLE)
+        .select("equipment_id, borrow_start, borrow_end")
+        .in("equipment_id", equipmentIds)
+        .in("status", BLOCKING_REQUEST_STATUSES),
+      "listActiveRequestsForEquipment",
+    );
   }
 
   // requestedBy is passed as its own argument, never taken from `fields` -
@@ -138,6 +177,8 @@ function createEquipmentService(client) {
     findRequestById,
     listAllRequests,
     hasOverlappingRequest,
+    listEquipmentByType,
+    listActiveRequestsForEquipment,
     createRequest,
     updateStatus,
   };
