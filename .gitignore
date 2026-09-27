@@ -13,3 +13,5 @@ coverage/
 .claude
 
 /tests/playwright/results/
+
+other/

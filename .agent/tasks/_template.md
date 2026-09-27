@@ -1,7 +1,7 @@
 # SCRUM-<n> — <story title>
 
 **Backlog ID:** US-<n> · **Epic:** <epic> · **Lane:** <lane> · **Points:** <sp> · **Assignee:** <name>
-**Branch:** `feature/<slug>` · **Mode:** build | teach
+**Branch:** `feature/<threeWordSummary>` or `fix/<threeWordSummary>` · **Mode:** build | teach
 **State:** 📋 planned
 
 ## Contract (word for word, as given by the user on <YYYY-MM-DD>)
@@ -52,7 +52,7 @@ Interpretations of the AC and design choices, with the reason and who agreed.
 ## Touches
 
 - **Shared files:** <app.js / permissions.js / App.jsx / WorkspaceLayout.jsx / Playwright support, or none>
-- **Migration:** <none, or `NNN_<initials>_<what>.sql`. Applied by user on <date>?>
+- **Schema change (manual, no migration file):** <none, or the SQL. Added by user on <date>?>
 - **New permission:** <none, or name + roles>
 - **New routes:** <frontend paths and API endpoints>
 

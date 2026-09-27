@@ -26,11 +26,14 @@ Comments say **why**, never what. Good reasons for a comment:
 
 - a security invariant: `// Verify with Supabase on every protected request. Never trust a decoded JWT or browser profile.`
 - a non-obvious constraint: `// Keep this synchronous: invoking async SDK methods here can deadlock refresh.`
-- a customer clarification or story boundary, with its ID: `// SCRUM-22: … a rejection records the decision and nothing else.`
-- a *Deliberately absent* block at the top of a page or module listing neighbouring stories that are not built here
+- a customer clarification or story boundary, with its Jira work ID: `// SCRUM-22: … a rejection records the decision and nothing else.`
+- a *Deliberately absent* block at the top of a page or module listing neighbouring stories (by Jira work ID) that
+  are not built here
+
+Comments and test names cite the **Jira work ID** (`SCRUM-<n>`) only, never the backlog user story ID (`US-<n>`).
 
 If code needs a comment to say what it does, rename things instead. Don't leave commented-out code, TODOs without a
-story ID, or changelog comments ("updated for sprint 2").
+Jira work ID, or changelog comments ("updated for sprint 2").
 
 ### Backend (CommonJS, Express 5)
 
@@ -83,7 +86,8 @@ The order is always **AC → test cases → automated tests → code**:
 1. **Acceptance criteria** say what the story must do (word for word, as the user gave them).
 2. **Test cases** are the concrete evidence that will show each behaviour. They're written and agreed with the user
    **before** implementation (Week 4: "agree the important behavioural examples before implementation begins").
-3. **Automated tests** encode those cases. They're written first and fail first (TDD: red → green → refactor).
+3. **Automated tests** encode those cases. They're written alongside the code and pass before the PR. Writing them first (TDD: red → green → refactor) is
+   recommended but not required.
 4. **Code** is written to make them pass, and no more.
 
 ### 1. Derive test cases from the AC: the five steps

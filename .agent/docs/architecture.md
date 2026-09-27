@@ -15,7 +15,7 @@ installs it, not the agent.
 | Routing | React Router 7 (`react-router`), declarative `<Routes>` in `App.jsx` | `BrowserRouter` is mounted once in `main.jsx` |
 | Backend | Node 22 + Express 5, CommonJS (`require` / `module.exports`) | `cors`, `dotenv`; `nodemon` for dev |
 | Auth | Supabase Auth, email + password (`@supabase/supabase-js`) | Browser SDK signs in; Express verifies each token with `auth.getUser` |
-| Database | Supabase Postgres (cloud) | Accessed only from the backend. Schema in `supabase/migrations/*.sql`, applied by hand |
+| Database | Supabase Postgres (cloud) | Accessed only from the backend. Schema changed by hand in the dashboard; no migration files |
 | Unit / integration tests | Vitest 5 (backend and frontend), React Testing Library + user-event + jsdom on the frontend | A few older backend suites (`auth`, `permissions`, `equipment`) still run on `node:test`. Leave them; new tests use Vitest |
 | End-to-end tests | Playwright (root `package.json`), Chromium + direct HTTP API projects | Runs against a local Auth simulator; no cloud, no `.env` needed |
 | Lint | ESLint (`backend/eslint.config.mjs`, `frontend/eslint.config.js`) | No Prettier. Match surrounding formatting by hand |
@@ -178,68 +178,36 @@ Supabase Postgres in the cloud, shared by the whole team. There is no local data
 through the service-role client in `backend/src/supabase.js` (secret key). The browser uses Supabase for sign-in
 only.
 
-### Migrations
+### Schema changes
 
-Schema lives in `supabase/migrations/NNN_<initials>_<what>.sql`, numbered in order:
-
-| File | Owner lane |
-|---|---|
-| `001_yc_create_venues.sql` – `006_yc_authenticated_venue_booking_requests.sql` | Venue |
-| `007_yc_decide_venue_booking_request.sql` | Venue |
-
-**Before numbering a new file, list the folder on the latest `origin/Staging`.** Another lane may have taken the
-next number since you branched. If two open branches collide, the one merged second renumbers.
-
-Nothing applies migrations automatically: not merging, not Docker, not CI. The agent never applies them.
-
-#### Writing one
-
-- Header comment: the file name, the story key and title, and the AC it serves, in plain words (see `007`).
-- Idempotent where Postgres allows it: `create table if not exists`, `add column if not exists`,
-  `create index if not exists`, `drop constraint if exists` before re-adding.
-- State "Apply after NNN" when order matters.
-- Rules the database can enforce (a status `check`, a unique pair, an exclusion constraint against double booking,
-  `not null`) go in the migration as well as in the service. The constraint is the guarantee; the service check
-  gives the friendly message.
-- Multi-row changes that must succeed or fail together go in a SQL function called through `rpc`, one
-  transaction (see `007`'s decision function).
-- New tables: enable RLS and grant nothing to `anon` / `authenticated` unless an AC needs direct access. The
-  backend's secret key bypasses RLS, so the Express guards are what protect data.
-- Seed data for demos goes in `backend/scripts/seedData.js` or a separate `NNN_…_seed_….sql`, never mixed into a
-  schema migration.
-
-#### Walking the user through applying it
-
-Stop after writing the file and tell the user, step by step:
-
-1. Open the team's Supabase project → **SQL Editor** → **New query**.
-2. Paste the whole file and **Run**. Expected result: "Success. No rows returned".
-3. Check it in **Table Editor**: the new columns or table are there.
-4. Tell teammates in the team chat that migration `NNN` is applied, because everyone shares the database.
-
-If it errors, have them paste the error back, then fix the file, not the database.
+The project has no migration files. Don't create one or suggest writing one. Tell the user every SQL change the
+story needs, with the exact SQL, and record it in the task note; the user makes it by hand in the Supabase dashboard.
+The agent never runs it. The user tells teammates before the change and again once it's made, because everyone
+shares the database.
 
 ### Known state
 
-- **Only the venue tables have migrations.** `events`, `registrations`, `equipment`, `equipment_requests` and
-  `messages` were created in the dashboard. The live `events.status` check was edited by hand, and `seedData.js`
-  writes `APPROVED` rows directly. Before a story changes one of these tables, have the user run this in the SQL
-  Editor and paste the result back, then write the migration against what is actually live:
+- The live `events.status` check was edited by hand, and `seedData.js`
+  writes `APPROVED` rows directly. Before a story changes a table, have the user run this in the SQL
+  Editor and paste the result back, then write the SQL against what is actually live:
 
   ```sql
   select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid = 'public.events'::regclass;
   select column_name, data_type, is_nullable, column_default
     from information_schema.columns where table_schema = 'public' and table_name = 'events';
   ```
-- Event statuses in use: `SUBMITTED` (created by organisers), `APPROVED` (read by Registration's event list and
-  Venue's bookable events), and `DRAFT` (referenced but never written). Status is written only by the lifecycle
-  code, never through `WRITABLE_COLS`.
+- Event statuses (confirmed by the team; don't add, rename or drop one without the team agreeing):
+  `DRAFT` · `SUBMITTED` · `UNDER_REVIEW` · `APPROVED` · `CONFIRMED` · `COMPLETED` · `CANCELLED` · `REJECTED`.
+  `APPROVED` is the stored value for "approved / planning". Registration's event list and Venue's bookable events
+  already read it. The code currently writes only `SUBMITTED` (organisers) and `APPROVED` (seed data); the lifecycle
+  code that moves events through the rest is not built yet. Status is written only by the lifecycle code, never
+  through `WRITABLE_COLS`.
 - Roles are not in a table. They're in Supabase Auth `app_metadata.roles`, set by `backend/scripts/seedUsers.js`.
 - Relationships used for record checks: `events.organiser_id`, `events.coordinator_id`,
   `registrations.attendee_id` / `registrations.event_id`, `venue_booking_requests.event_id`,
   `equipment_requests.event_id`.
 
-Keep this section current: when a migration lands, update the table above and remove whatever it resolved.
+Keep this section current: when a manual schema change is made, update this section and remove whatever it resolved.
 
 ## External integrations
 

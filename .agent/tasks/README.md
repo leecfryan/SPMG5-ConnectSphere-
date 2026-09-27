@@ -1,6 +1,8 @@
 # Tasks
 
-One note per story being worked on: `SCRUM-<n>-<short-slug>.md`, copied from [_template.md](_template.md).
+One note per story being worked on: `SCRUM-<n>-<short-slug>.md`, copied from [_template.md](_template.md) and saved
+in [../docs/other/](../docs/other/), **not in this folder**. This folder holds only this workflow and the template.
+Roadmaps, plans and any other working Markdown also go in `../docs/other/`.
 The note is where the agent keeps the story's contract (the story text word for word), the plan against each acceptance
 criterion, decisions, status and a log. It lets the next session, or the next person, pick up the story without
 re-deriving anything.
@@ -38,7 +40,7 @@ States: `📋 planned` · `🔧 in progress (<date>)` · `🧪 in review (PR #n)
 
 ### 3. Plan against the AC
 
-Fill in the note's AC table: for each criterion, **how it's built** (files, endpoint, permission, migration) and
+Fill in the note's AC table: for each criterion, **how it's built** (files, endpoint, permission, manual schema change) and
 **how it's proven** (the test IDs you'll write, at which layer; see [../docs/conventions.md](../docs/conventions.md)).
 
 Then write the **test cases** before any code: run the five steps (workflow, happy path, cross-cutting, negative,
@@ -52,7 +54,7 @@ Then write down:
   where there is one. Ask the user when a decision isn't obvious. If a decision is expensive to change later, it also
   gets an ADR.
 - **Shared files touched**: `app.js`, `permissions.js`, `App.jsx`, `WorkspaceLayout.jsx`, Playwright support.
-- **Migration**: yes/no, the next free number on `origin/Staging`.
+- **Schema change**: none, or the exact SQL the user will run by hand in the dashboard. Never a migration file.
 - **Slices**: the order you'll build in, riskiest AC first.
 
 Show the plan **and the test cases** to the user in plain language. Agreeing the test cases is agreeing what
@@ -60,13 +62,14 @@ Show the plan **and the test cases** to the user in plain language. Agreeing the
 
 ### 4. Build
 
-- Branch `feature/SCRUM-<n>-<slug>` off the latest `origin/Staging`.
-- One vertical slice at a time, **test first**: write the slice's tests from the agreed cases and watch them fail
-  (red), write just enough code to pass (green), then tidy with the tests still green (refactor). A slice runs
-  migration → repository → service → controller + route + guard → frontend service → page → docs, and ends green
+- Branch off the latest `origin/Staging`: `feature/` or `fix/` plus a three-word camelCase summary of the 1–3 related user stories (e.g. `feature/eventLifecycleStatus`, `fix/coordinatorWorkloadCount`); no Jira or story IDs in branch names.
+- One vertical slice at a time, with its tests written alongside the code. Test-first (red → green → refactor) is
+  recommended but not required; the dev chooses. A slice runs
+  manual schema change → repository → service → controller + route + guard → frontend service → page → docs, and ends green
   before the next starts.
 - A new case discovered while coding goes into the *Test cases* table first, then into a test.
-- Stop at every stop point (AGENTS.md §3). Write a migration, then hand it to the user.
+- Stop at every stop point (AGENTS.md §3). Write any schema SQL in the task note, then hand it to the user to add
+  manually.
 - Update *Status* and the *Log* as you go, not at the end.
 
 ### 5. Prove it

@@ -1,8 +1,9 @@
 # AGENTS.md
 
 Guidance for any coding agent (Claude Code, Codex, Cursor, …) working in this repository. `CLAUDE.md` only imports
-this file. Durable reference lives in [.agent/docs/](.agent/docs/), per-story working notes in
-[.agent/tasks/](.agent/tasks/).
+this file. Durable reference lives in [.agent/docs/](.agent/docs/); per-story task notes, roadmaps and any other
+Markdown working notes live in [.agent/docs/other/](.agent/docs/other/). [.agent/tasks/](.agent/tasks/) holds only the
+workflow README and the task note template.
 
 ConnectSphere is the IS212 Event Planning and Venue Booking System, built by a six-person Scrum team in five lanes
 (Access, Event Lifecycle, Venue, Equipment, Registration). **The user story and its acceptance criteria decide what
@@ -15,26 +16,14 @@ SQL or testing, and never leave them stuck on a step they can't do alone. See *W
 
 ## 1. Scope rules
 
-These come first. Clean code that is out of scope is still wrong.
+These come first.
 
-- **The story is the contract.** Build what its acceptance criteria (AC) require, and nothing more. Before writing
-  code, list each AC and how it will be met and tested (see the task template). If an AC isn't covered, the story
-  isn't done. If something isn't in an AC, it doesn't get built.
-- **The user supplies the story.** Work from the story text and AC the user gives you, copied word for word into
-  the task note. Don't invent AC, and don't fill gaps from memory or old plans. When an AC can be read two ways,
-  ask, and write the answer in the task note.
+- **Build to the story's acceptance criteria (AC).** Each dev decides how they give the agent their stories. If
+  anything goes beyond the AC, say so to the user, who must be able to justify why it fits the story.
 - **Customer clarifications are binding.** Answers in the course's GitHub Discussions for **our section** count as
   requirements. Other sections' answers don't apply. When an AC relies on one, cite the discussion number in the task
   note's *Decisions* and in a code comment where the rule lives. If an AC and a clarification conflict, stop and ask.
   Our section tag: **`[T?]`**. Ask the user to fill this in if it's still `?`.
-- **Neighbouring stories stay out.** A feature often suggests the next one: approve suggests reject, a list suggests
-  search, a status change suggests a notification. Each of those is its own story. Name them in a *Deliberately
-  absent* comment at the top of the page or module, citing their story IDs, the way
-  [AssignmentQueuePage.jsx](frontend/src/features/events/pages/AssignmentQueuePage.jsx) does. Don't build them,
-  don't stub them, and don't add columns or hooks "for later".
-- **Discovered work becomes a backlog suggestion, not code.** A bug, gap or missing story you notice goes under
-  *Found, not built* in the task note, and you tell the user so they can raise it with the team. Fix it only if the
-  current story's AC depend on it.
 - **Stay in the lane.** Each lane owns its `features/<feature>/` and `modules/<feature>/` folders. The shared files
   (`backend/src/app.js`, `backend/src/auth/permissions.js`, `frontend/src/App.jsx`,
   `frontend/src/routes/WorkspaceLayout.jsx`, `tests/playwright/support/*`) get the smallest possible addition, and
@@ -58,13 +47,19 @@ These come first. Clean code that is out of scope is still wrong.
   something is missing, stop and give the user the exact command (e.g. `npm --prefix frontend install <pkg>`) and
   explain why it's needed. Even then, a new dependency needs a reason tied to an AC. The stack is fixed:
   [.agent/docs/architecture.md](.agent/docs/architecture.md).
-- **Never apply database changes.** Write the migration file in `supabase/migrations/`, then stop and walk the user
-  through applying it (see *Database* in [.agent/docs/architecture.md](.agent/docs/architecture.md)). Never run SQL against the Supabase
-  project, never use the secret key from the agent, and never edit tables through the dashboard for them.
+- **No migration files.** Never create a migration file, and never suggest writing one. Instead, tell the user
+  every SQL change the story needs (new columns, tables, constraints), with the exact SQL, so they can make it by
+  hand in the Supabase dashboard. Record the same SQL in the task note. Remind the user to tell teammates **before**
+  the change (what will change) and **after** it (that it's done), because the database is shared and their tests
+  may depend on it. Never run SQL against the Supabase project
+  or use the secret key from the agent.
+- **Code comments cite the Jira work ID only.** Write `SCRUM-<n>`, never the backlog user story ID (`US-<n>`), in any
+  code or test comment, test name or *Deliberately absent* block.
 - **Never touch secrets.** Don't read `.env` aloud, print keys, commit `.env`, or put the secret key anywhere in
   `frontend/`.
-- **Task notes go in [.agent/tasks/](.agent/tasks/); durable reference goes in [.agent/docs/](.agent/docs/).**
-  Check both before starting work.
+- **Task notes, roadmaps and other working Markdown go in [.agent/docs/other/](.agent/docs/other/), never in
+  [.agent/tasks/](.agent/tasks/).** Durable reference goes in [.agent/docs/](.agent/docs/). Check both before
+  starting work.
 - **Keep the docs current as part of the work, not after it.** A change that alters anything described in
   `.agent/docs/`, `docs/`, `README.md` or this file isn't finished until those files match the
   code, in the same task and the same commit. That covers endpoints, permissions, route paths, schema, status
@@ -102,10 +97,13 @@ contributions. "The AI wrote it" scores badly. So in either mode:
 
 Stop, explain, and wait for the user before:
 
-- applying a migration or any database change (they do it; you give the steps)
+- any database change: new columns, tables or constraints (they add them by hand in the dashboard; you give the SQL
+  and the steps)
 - installing anything (they run the command you give)
 - `git commit`, `git push`, opening a PR, merging, deleting a branch, `reset --hard`, force-push
 - changing a shared file another lane depends on in a way beyond a one-line addition
+- creating a new top-level folder, file type or config the repo doesn't already use (the user checks with the team
+  first)
 - interpreting an ambiguous AC, or anything that would widen scope
 
 ### Talking to a non-technical user
@@ -146,7 +144,7 @@ be green locally before you call a story done.
 The full checklist with templates is in [.agent/tasks/README.md](.agent/tasks/README.md). In short:
 
 1. **Load the story.** Ask the user for the story: its key, title, user story sentence and AC. Copy it word for
-   word into a new task note `.agent/tasks/SCRUM-<n>-<slug>.md` from [the template](.agent/tasks/_template.md).
+   word into a new task note `.agent/docs/other/SCRUM-<n>-<slug>.md` from [the template](.agent/tasks/_template.md).
 2. **Read before planning.** Read `.agent/docs/`, the lane's `docs/<feature>*.md`, and the code the story touches.
    Check `git log` on Staging for related work.
 3. **Plan against the AC.** Fill in the task note's AC table: each criterion gets a *how it's built* and a *how
@@ -154,10 +152,11 @@ The full checklist with templates is in [.agent/tasks/README.md](.agent/tasks/RE
    failure; see *Testing* in [.agent/docs/conventions.md](.agent/docs/conventions.md)). List *Deliberately
    absent* items and open questions. Show the plan and the test cases to the user, agree them, and ask for a go-ahead
    and the mode.
-4. **Branch.** `feature/<short-name>` off the latest `origin/Staging`. Never work on `main` or `Staging`.
-5. **Build in vertical slices, test first.** For each slice, write the failing tests from the agreed test cases
-   (red), write just enough code to pass them (green), then tidy up with the tests still green (refactor). A slice
-   covers migration → repository/service → controller/route + permission → frontend service → page/component →
+4. **Branch.** `feature/<threeWordSummary>` (or `fix/…`) off the latest `origin/Staging`, summarising the 1–3
+   related user stories in three words. Never work on `main` or `Staging`.
+5. **Build in vertical slices, with tests.** Each slice's tests are written alongside its code and pass before the
+   PR. Test-first (red → green → refactor) is recommended but not required; the dev chooses. A slice
+   covers manual schema change → repository/service → controller/route + permission → frontend service → page/component →
    docs, and is proven before the next one starts. Order slices so the riskiest AC is proven first.
 6. **Test at every layer the story touches, then review the tests.** Every AC maps to test cases and automated
    tests. Security-relevant AC (who can see or change what) need a denied-role test at the API level, not just a
@@ -178,7 +177,7 @@ The full checklist with templates is in [.agent/tasks/README.md](.agent/tasks/RE
       linked to its automated test IDs, with the latest execution date and result
 - [ ] Every new test passes the five review questions; expected values come from the AC, not the code
 - [ ] Coverage run: 100% of the story's own lines and branches, or each gap listed with its reason
-- [ ] No behaviour beyond the AC; *Deliberately absent* comment in place where a neighbour story is tempting
+- [ ] Anything beyond the AC has been pointed out to the user with its justification
 - [ ] Backend: permission guard + record check on every new endpoint; 401 / 403 / 400 / 404 / 409 paths tested
 - [ ] Frontend: route behind `RequireAuth` + `RequirePermission`, nav link behind the same permission, loading /
       empty / error states handled
@@ -186,7 +185,10 @@ The full checklist with templates is in [.agent/tasks/README.md](.agent/tasks/RE
       locally (the regression run), then green in CI on the PR
 - [ ] Cross-cutting bar: works at 375px wide, keyboard-usable, errors are safe sentences, access checked on the server
 - [ ] Lint and build green; no `console.log` left behind; no skipped or deleted tests
-- [ ] Migration file written and applied **by the user**; seed updated if demos need new data
+- [ ] Any new test script or npm test command is added to [.github/workflows/ci.yml](.github/workflows/ci.yml) so CI
+      runs it (a shared file: tell the team)
+- [ ] Schema changes (if any) written as SQL in the task note and added **manually by the user**; no migration
+      file; seed updated if demos need new data
 - [ ] Docs updated (lane guide, test guide, routing/permissions, C4 / ADR if architectural, `.agent/docs/` if
       affected)
 - [ ] Explain-back written in the task note; the user can walk AC → test → code unaided
@@ -209,7 +211,7 @@ Details: [.agent/docs/architecture.md](.agent/docs/architecture.md) (stack, laye
   request; roles come only from `app_metadata.roles`. `requirePermission(name, authorizeRecord?)` checks the
   policy in `auth/permissions.js`; `record: true` permissions must have a server-side relationship check.
   Frontend guards are UX, not security.
-- **Database**: Supabase Postgres, schema changes as numbered SQL files in `supabase/migrations/`, applied by hand.
+- **Database**: Supabase Postgres. Schema changes are made by hand in the dashboard; no migration files.
 - **Tests**: Vitest (unit + integration, backend and frontend), Playwright (browser + API against a local Auth
   simulator; no cloud needed).
 - **External APIs**: none yet.
@@ -217,12 +219,14 @@ Details: [.agent/docs/architecture.md](.agent/docs/architecture.md) (stack, laye
 
 ## 7. Git
 
-- Branch: `feature/<short-name>` (or `fix/…`, `docs/…`, `chore/…`) off `origin/Staging`. PRs target `Staging`.
+- Branch: `feature/` or `fix/` plus a three-word camelCase summary of the 1–3 related user stories (e.g. `feature/eventLifecycleStatus`, `fix/coordinatorWorkloadCount`); no Jira or story IDs in branch names. Branch off `origin/Staging`; PRs target `Staging`.
 - Commit: `feat: SCRUM-<n> <what changed, at feature level>`. Types are `feat`, `fix`, `test`, `docs`,
   `refactor`, `chore`. Short subject, detail in the body.
 - **Never commit, push, open or merge a PR without explicit approval.** Show the summary and file list, then wait.
 - Never add `Co-Authored-By` trailers or any AI attribution to commits or PRs.
 - Keep PRs small and merge often. Every lane touches `app.js`, `permissions.js`, `App.jsx` and
   `WorkspaceLayout.jsx`.
+- Reviews: every PR needs at least **one** reviewer (two for a bigger feature), preferably a dev, picked at random
+  from the team. A failing CI run blocks the merge. Once approved, the **author** merges, not the reviewer.
 - PR description: the story key and title, what the PR delivers per AC, the test commands run and their results,
-  migrations to apply, and manual demo steps.
+  schema changes to make by hand, and manual demo steps.
