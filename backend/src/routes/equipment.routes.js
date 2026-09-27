@@ -37,6 +37,9 @@ module.exports = function equipmentRoutes({ authenticate, equipmentService, mess
   // reasoning as GET /equipment above (see staff-access.md: equipment
   // catalogue access is not limited by assigned venue/equipment/location).
   router.get("/equipment/availability", ...guards("equipment.read"), controller.getEquipmentAvailability);
+  // Manual status changes are a technical-arrangement
+  // action, same permission as reviewing/updating a request's status.
+  router.patch("/equipment/:id/status", ...guards("equipment.review"), controller.patchEquipmentStatus);
   router.get("/equipment/events", ...guards("equipment.request"), async (req, res, next) => {
     try { res.json({ data: await listAssignedEvents(req.user.id) }); } catch (error) { next(error); }
   });

@@ -47,7 +47,7 @@ function isUuid(value) {
   return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
-// AC1 + AC4: which equipment and which event this request belongs to. Both
+// scrum-27 AC1 + AC4: which equipment and which event this request belongs to. Both
 // are foreign keys - a well-formed UUID is all this layer can check; whether
 // the row actually exists is the service's job.
 function checkForeignKey(data, field, errors) {
@@ -59,7 +59,7 @@ function checkForeignKey(data, field, errors) {
   }
 }
 
-// AC2: required quantity, must be a positive whole number.
+// scrum-27 AC2: required quantity, must be a positive whole number.
 function checkQuantity(data, errors) {
   const value = data.quantity_requested;
   if (value === undefined || value === null) {
@@ -71,7 +71,7 @@ function checkQuantity(data, errors) {
   }
 }
 
-// AC3: optional technical requirement, free text within a sane length.
+// scrum-27 AC3: optional technical requirement, free text within a sane length.
 function checkTechnicalRequirement(data, errors) {
   const value = data.technical_requirement;
   if (value === undefined || value === null) return;
@@ -157,9 +157,32 @@ function validateStatusUpdate(input) {
   return { ok: true, errors: [], value: { status: data.status } };
 }
 
+// Technical Support Staff manually record equipment
+// status changes (e.g. AVAILABLE -> MAINTENANCE) - there is no automatic
+// status write anywhere else in the app (see equipment-integration.md), so
+// this is currently the only way equipment.status ever changes.
+const EQUIPMENT_STATUSES = ["AVAILABLE", "IN_USE", "MAINTENANCE", "UNAVAILABLE", "DAMAGED", "UNDER_MAINTENANCE"];
+
+function validateEquipmentStatusUpdate(input) {
+  const data = asObject(input);
+  const errors = [];
+
+  const unknown = Object.keys(data).filter((key) => key !== "status");
+  for (const field of unknown) {
+    errors.push(err(field, "cannot be changed through this endpoint"));
+  }
+
+  if (!EQUIPMENT_STATUSES.includes(data.status)) {
+    errors.push(err("status", `must be one of ${EQUIPMENT_STATUSES.join(", ")}`));
+  }
+
+  if (errors.length > 0) return { ok: false, errors, value: null };
+  return { ok: true, errors: [], value: { status: data.status } };
+}
+
 // Scrum-29: equipment availability check.
 //
-// AC2 + AC4 (team decision): overlap is Rule B - day-granularity, touching
+// AC2 + AC4 : overlap is Rule B - day-granularity, touching
 // endpoints blocked ("Return Day + 1") - and it now applies everywhere an
 // overlap is checked, not just in the availability check below.
 // equipment.service.js's hasOverlappingRequest (used by
@@ -182,7 +205,7 @@ function startOfUtcDay(isoString) {
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
 }
 
-// AC2 (Rule B) + AC4 (day granularity, Return Day + 1): true when the
+// scrum-29 AC2 (Rule B) + AC4 (day granularity, Return Day + 1): true when the
 // existing request's borrow window and the requested window fall on
 // overlapping or touching days.
 function isBlockingOverlap(existingRequest, requestedStart, requestedEnd) {
@@ -193,7 +216,7 @@ function isBlockingOverlap(existingRequest, requestedStart, requestedEnd) {
   return existingStartDay <= requestedEndDay && existingEndDay >= requestedStartDay;
 }
 
-// AC3: anything not AVAILABLE is excluded. Written as an allowlist (not a
+// scrum 29 AC3: anything not AVAILABLE is excluded. Written as an allowlist (not a
 // denylist of known-bad values) so it excludes correctly both before and
 // after the team's planned status-constraint update - a status value this
 // code has never seen is excluded by default, not opted into.
@@ -201,7 +224,7 @@ function isStatusAvailable(equipmentUnit) {
   return equipmentUnit.status === "AVAILABLE";
 }
 
-// AC1-AC4: `equipmentUnits` and `requestsByEquipmentId` are pre-scoped by the
+//  AC1-AC4: `equipmentUnits` and `requestsByEquipmentId` are pre-scoped by the
 // caller (the service queries by equipment type and by blocking status). A
 // unit is available for the requested period when its status passes AC3 and
 // none of its own PENDING/APPROVED requests block the period under AC2/AC4.
@@ -213,7 +236,7 @@ function findAvailableUnits({ equipmentUnits, requestsByEquipmentId, requestedSt
   });
 }
 
-// AC1 + quantity handling (team decision): returns the available count and
+// AC1 + quantity handling: returns the available count and
 // whether it meets the requested quantity, so a caller can use either
 // without recomputing.
 function checkAvailability({ equipmentUnits, requestsByEquipmentId, requestedStart, requestedEnd, requestedQuantity }) {
@@ -226,7 +249,7 @@ function checkAvailability({ equipmentUnits, requestsByEquipmentId, requestedSta
   };
 }
 
-// AC1: accepts event start/end date-time, equipment type, requested
+// scrum 29 AC1: accepts event start/end date-time, equipment type, requested
 // quantity, and event location. Location is accepted and echoed back but not
 // used for filtering yet - deferred to a later sprint per the story's scope.
 function validateAvailabilityQuery(input) {
@@ -266,7 +289,7 @@ function validateAvailabilityQuery(input) {
   };
 }
 
-// Scrum-29 follow-up: the equipment-request form's dropdown needs only a
+// The equipment-request form's dropdown needs only a
 // start/end window (no type/quantity/location) to ask "which units are
 // bookable for this period at all" - shared with validateAvailabilityQuery's
 // time parsing, but without the fields that check has no use for here.
@@ -294,6 +317,8 @@ module.exports = {
   validateStatusUpdate,
   WRITABLE_COLS,
   REVIEW_STATUSES,
+  EQUIPMENT_STATUSES,
+  validateEquipmentStatusUpdate,
   BLOCKING_REQUEST_STATUSES,
   startOfUtcDay,
   isBlockingOverlap,

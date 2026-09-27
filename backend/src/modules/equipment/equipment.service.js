@@ -41,7 +41,17 @@ function createEquipmentService(client) {
     );
   }
 
-  // AC4: requests are always looked up by the event they belong to. The
+  // Technical Support Staff manually record a status
+  // change (e.g. AVAILABLE -> MAINTENANCE). Returns null only when the row
+  // does not exist.
+  async function updateEquipmentStatus(id, status) {
+    return unwrap(
+      await client.from(EQUIPMENT_TABLE).update({ status }).eq("id", id).select().maybeSingle(),
+      "updateEquipmentStatus",
+    );
+  }
+
+  // scrum-27 AC4: requests are always looked up by the event they belong to. The
   // equipment_requests.event_id foreign key is declared "on delete cascade"
   // in the existing schema, so removing an event removes its requests at the
   // database level - that guarantee lives in Postgres, not here.
@@ -173,6 +183,7 @@ function createEquipmentService(client) {
   return {
     listEquipment,
     findEquipmentById,
+    updateEquipmentStatus,
     listRequestsByEvent,
     findRequestById,
     listAllRequests,

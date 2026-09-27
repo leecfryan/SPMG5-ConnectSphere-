@@ -3,6 +3,7 @@ const {
   validateStatusUpdate,
   validateAvailabilityQuery,
   validateAvailabilityWindow,
+  validateEquipmentStatusUpdate,
   checkAvailability,
   findAvailableUnits,
   isStatusAvailable,
@@ -38,6 +39,7 @@ function createEquipmentController({
   const {
     listEquipment,
     findEquipmentById,
+    updateEquipmentStatus,
     listRequestsByEvent,
     findRequestById,
     listAllRequests,
@@ -75,6 +77,31 @@ function createEquipmentController({
         requestedEnd: value.end,
       });
       res.status(200).json({ data: available });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Technical Support Staff manually record a status
+  // change (e.g. AVAILABLE -> MAINTENANCE) - the only way equipment.status
+  // ever changes today, since nothing writes it automatically.
+  async function patchEquipmentStatus(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) {
+        return res.status(400).json({ error: "Invalid equipment id" });
+      }
+
+      const { ok, errors, value } = validateEquipmentStatusUpdate(req.body);
+      if (!ok) {
+        return res.status(400).json({ error: "Validation failed", details: errors });
+      }
+
+      const updated = await updateEquipmentStatus(id, value.status);
+      if (!updated) {
+        return res.status(404).json({ error: "Equipment not found" });
+      }
+      res.status(200).json({ data: updated });
     } catch (err) {
       next(err);
     }
@@ -245,6 +272,7 @@ function createEquipmentController({
 
   return {
     getEquipmentCatalogue,
+    patchEquipmentStatus,
     getEquipmentAvailability,
     getEquipmentRequests,
     getTechSupportDashboard,

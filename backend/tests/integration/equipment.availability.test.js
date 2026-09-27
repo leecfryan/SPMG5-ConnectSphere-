@@ -245,7 +245,7 @@ describe("Scrum-29 AC4: Equipment returned on a given day is not counted as avai
   });
 });
 
-describe("Scrum-29 follow-up: the equipment catalogue endpoint optionally filters to bookable units for the request form's dropdown", () => {
+describe("The equipment catalogue endpoint optionally filters to bookable units for the request form's dropdown", () => {
   test("GET /api/equipment with no start/end includes units regardless of status (full catalogue, unchanged from before this story)", async () => {
     const type = freshType();
     const available = await insertEquipment({ type, status: "AVAILABLE" });
@@ -271,6 +271,34 @@ describe("Scrum-29 follow-up: the equipment catalogue endpoint optionally filter
     const { data } = await response.json();
     const ids = data.filter((unit) => unit.type === type).map((unit) => unit.id);
     expect(ids).toEqual([available]);
+  });
+});
+
+describe("Technical Support Staff can manually change an equipment unit's status", () => {
+  test("a technical support staff member can change status via PATCH /equipment/:id/status", async () => {
+    const type = freshType();
+    const unit = await insertEquipment({ type, status: "AVAILABLE" });
+    const base = await startApp();
+
+    const response = await send(base, `/equipment/${unit}/status`, "technical_support_staff", {
+      method: "PATCH", body: { status: "MAINTENANCE" },
+    });
+    expect(response.status).toBe(200);
+    const { data } = await response.json();
+    expect(data.status).toBe("MAINTENANCE");
+
+    const { data: refetched } = await (await send(base, "/equipment", "technical_support_staff")).json();
+    expect(refetched.find((u) => u.id === unit).status).toBe("MAINTENANCE");
+  });
+
+  test("an Event Coordinator cannot change equipment status (403); an invalid status is rejected (400); an unknown id is 404", async () => {
+    const type = freshType();
+    const unit = await insertEquipment({ type, status: "AVAILABLE" });
+    const base = await startApp();
+
+    expect((await send(base, `/equipment/${unit}/status`, "event_coordinator", { method: "PATCH", body: { status: "DAMAGED" } })).status).toBe(403);
+    expect((await send(base, `/equipment/${unit}/status`, "technical_support_staff", { method: "PATCH", body: { status: "NOT_A_REAL_STATUS" } })).status).toBe(400);
+    expect((await send(base, `/equipment/${randomUUID()}/status`, "technical_support_staff", { method: "PATCH", body: { status: "DAMAGED" } })).status).toBe(404);
   });
 });
 
@@ -301,7 +329,7 @@ describe("role gating and consistency with the create-request path", () => {
     expect(response.status).toBe(409);
   });
 
-  test("equipment excluded by Return Day + 1 (AC4) cannot be successfully requested on the return day itself", async () => {
+  test("equipment excluded by Return Day + 1 (scrum-29 AC4) cannot be successfully requested on the return day itself", async () => {
     const type = freshType();
     const unit = await insertEquipment({ type });
     await insertRequest({ equipmentId: unit, status: "APPROVED", borrowStart: "2026-09-09T08:00:00Z", borrowEnd: "2026-09-10T12:00:00Z" });

@@ -97,6 +97,16 @@ export function fetchEquipmentCatalogue(token, { start, end } = {}) {
   return request(`/api/equipment${query ? `?${query}` : ""}`, token);
 }
 
+// Scrum-29 follow-up: Technical Support Staff manually record a status
+// change (e.g. AVAILABLE -> MAINTENANCE).
+export function updateEquipmentStatus(id, status, token) {
+  return request(`/api/equipment/${id}/status`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+}
+
 export function fetchEquipmentRequests(eventId, token) {
   return request(`/api/events/${eventId}/equipment-requests`, token);
 }
