@@ -266,7 +266,7 @@ function createVenuesController(service) {
       // This check is for a helpful error message, not for safety. A slot could
       // still be confirmed for someone else between this line and the insert.
       // That is fine: this request is only pending, and the exclusion constraint
-      // from 003_yc_create_venue_bookings.sql stops the slot ever being confirmed
+      // on venue_bookings stops the slot ever being confirmed
       // twice.
       const requestId = await submitBookingRequest(id, event.name, value, req.user.id);
 
@@ -347,7 +347,7 @@ function createVenuesController(service) {
           req.user.id
         );
       } catch (err) {
-        // 23P01 is the confirmed-slot exclusion constraint from migration 003:
+        // 23P01 is the confirmed-slot exclusion constraint on venue_bookings:
         // another request already holds one of these slots. That is an answer
         // for the reviewer, not a server fault, so it is a 409 (SCRUM-20).
         if (err.code !== "23P01") throw err;
