@@ -120,7 +120,6 @@ These files appear inside both `frontend/` and `backend/`:
 | `.env.example`              | Template listing the required settings.                                                      |
 | `.gitignore`                | Tells Git which files to ignore. The frontend also has its own `.gitignore`.                 |
 | `.github/workflows/ci.yml`  | Automatic frontend, backend syntax/tests, and Docker checks on pushes and pull requests to `main`. |
-| `architecture.md`           | Overview of how the project fits together.                                                   |
 | `docs/project-structure.md` | This folder guide.                                                                           |
 
 `.git/` stores Git history and internal data. Leave it to Git.
