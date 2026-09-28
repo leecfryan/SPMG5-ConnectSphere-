@@ -8,7 +8,6 @@ Use this guide to find files and decide where new code belongs. Authentication i
 | ---------------------- | ----------------------------------------- |
 | `frontend/`            | React website that users see.             |
 | `backend/`             | Express server that handles API requests. |
-| `supabase/migrations/` | Future SQL changes for Supabase Cloud.    |
 | `tests/e2e/`           | Tests for complete user workflows.        |
 | `docs/`                | Team documentation, including this guide. |
 
@@ -131,9 +130,8 @@ These files appear inside both `frontend/` and `backend/`:
 | `backend/tests/unit/`        | Tests for individual backend functions.            |
 | `backend/tests/integration/` | Tests for backend parts working together.          |
 | `tests/e2e/`                 | Tests for a complete user journey through the app. |
-| `supabase/migrations/`       | Future SQL files for changes to Supabase Cloud.    |
 
-`backend/tests/integration/auth.test.js` and `permissions.test.js` run with Node's built-in test runner through `npm --prefix backend test` and CI. The other test folders and migrations folder remain reserved space. No automatic migrations or local Supabase setup are configured.
+`backend/tests/integration/auth.test.js` and `permissions.test.js` run with Node's built-in test runner through `npm --prefix backend test` and CI. The other test folders remain reserved space. There are no migration files: schema changes are applied by hand in the Supabase dashboard, and each lane's guide in `docs/` records the SQL it depends on.
 
 Keep the Supabase secret key on the backend, never in frontend code.
 

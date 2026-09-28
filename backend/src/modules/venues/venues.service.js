@@ -156,7 +156,7 @@ async function listSlotRowsForDate(venueId, bookingDate) {
   return data;
 }
 
-// Calls the authenticated Postgres wrapper from migration 006,
+// Calls the authenticated Postgres wrapper submit_authenticated_venue_booking_request,
 // which writes the request and its slot rows in a single transaction.
 async function submitBookingRequest(venueId, eventName, value, requesterId) {
   const { data, error } = await getSupabase().rpc("submit_authenticated_venue_booking_request", {
@@ -214,7 +214,7 @@ function applyBookingScope(query, scope) {
 }
 
 // SCRUM-22: records the decision and applies it to every slot row in one
-// transaction (migration 007). Returns null when no such request exists.
+// transaction. Returns null when no such request exists.
 //
 // Approving can fail on the confirmed-slot exclusion constraint from 003 if
 // another request already holds a slot. Postgres reports that as 23P01, which
