@@ -26,6 +26,12 @@ test('[ACCESS-E2E-UI-001] Manager accepts and assigns through the UI; coordinato
   await expect(page.getByText('Private organiser notes')).toHaveCount(0);
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await signIn(page, second);
+
+  // Confirm authentication has finished before navigating.
+  await expect(
+    page.getByRole('link', { name: 'My assigned events', exact: true })
+  ).toBeVisible();
+
   await page.goto(`/assigned-events/${event.id}`);
   await expect(page.getByRole('heading', { name: event.name })).toBeVisible();
   await page.goto('/events');

@@ -93,7 +93,7 @@ test('[REG-E2E-005] Confirmed registrations show the withdrawal restriction', as
   await expect(page.getByRole('button', { name: 'Withdraw registration', exact: true })).toHaveCount(0);
 });
 
-for (const [id, status] of [['006', 'SUBMITTED'], ['007', 'REJECTED']]) {
+for (const [id, status] of [['006', 'SUBMITTED'], ['007', 'REJECTED'], ['008', 'ACCEPTED']]) {
   test(`[REG-E2E-${id}] AC1/AC2/AC5: ${status} events are hidden from browsing and direct page links`, async ({ page, accounts, request }) => {
     const available = await setupRegistration(accounts, request);
     const hidden = await setupRegistration(accounts, request);

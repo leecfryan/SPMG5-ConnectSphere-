@@ -632,6 +632,7 @@ test("[REG-BACKEND-047] AC1/AC2: attendee listings query only approved events de
     APPROVED_EVENT,
     { ...DRAFT_EVENT, status: "SUBMITTED" },
     { ...DRAFT_EVENT, id: "rejected-event", status: "REJECTED" },
+    { ...DRAFT_EVENT, id: "accepted-event", status: "ACCEPTED" },
   ];
   let query;
   const base = await setup(t, { tables: {
@@ -651,6 +652,7 @@ test("[REG-BACKEND-048] AC2: event detail queries enforce both the requested ID 
     APPROVED_EVENT,
     { ...DRAFT_EVENT, status: "SUBMITTED" },
     { ...DRAFT_EVENT, id: "rejected-event", status: "REJECTED" },
+    { ...DRAFT_EVENT, id: "accepted-event", status: "ACCEPTED" },
   ];
   const queries = [];
   const base = await setup(t, { tables: {

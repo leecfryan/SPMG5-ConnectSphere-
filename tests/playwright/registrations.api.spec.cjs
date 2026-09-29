@@ -5,11 +5,19 @@ test('[REG-API-001] Approved event browsing excludes internal planning fields an
   const { event, headers } = await setupRegistration(accounts, request);
   const list = await request.get('/api/events', { headers: headers[1] });
   expect(list.status()).toBe(200);
-  expect((await list.json()).events.some(row => row.id === event.id)).toBe(true);
+  const listed = (await list.json()).events.find(row => row.id === event.id);
+  expect(listed).toMatchObject({ id: event.id, name: event.name, status: 'APPROVED' });
+  // A positive public event control makes an empty or broken listing fail too.
+  expect(Object.keys(listed).sort()).toEqual(['description', 'id', 'name', 'start_time', 'status']);
+  expect(JSON.stringify(listed)).not.toContain('PRIVATE');
   const detail = await request.get('/api/events/' + event.id, { headers: headers[1] });
   expect(detail.status()).toBe(200);
   const body = await detail.json();
   expect(body.event.registration_fields[0].id).toBe('full_name');
+  expect(Object.keys(body.event).sort()).toEqual([
+    'description', 'end_time', 'expected_attendance', 'id', 'name', 'purpose',
+    'registration_fields', 'start_time', 'status',
+  ]);
   expect(JSON.stringify(body)).not.toContain('PRIVATE');
   for (const field of ['organiser_id', 'coordinator_id', 'other_comments', 'equipment_needs', 'venue_requirements']) expect(body.event).not.toHaveProperty(field);
   await accounts.updateEvent(event.id, { status: 'SUBMITTED' });
@@ -60,7 +68,7 @@ test('[REG-API-007] Missing authentication and malformed dynamic details are rej
   expect((await request.post('/api/test/control', { data: { command: 'deleteRegistration' } })).status()).toBe(404);
 });
 
-for (const [id, status] of [['008', 'SUBMITTED'], ['009', 'REJECTED']]) {
+for (const [id, status] of [['008', 'SUBMITTED'], ['009', 'REJECTED'], ['011', 'ACCEPTED']]) {
   test(`[REG-API-${id}] AC1/AC2: ${status} events stay absent from listings and direct API requests`, async ({ request, accounts }) => {
     const available = await setupRegistration(accounts, request);
     const hidden = await setupRegistration(accounts, request);
