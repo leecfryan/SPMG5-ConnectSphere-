@@ -6,6 +6,7 @@ const {
   validateAgainstVenue,
   validateAgainstEvent,
   findSlotProblems,
+  findConfirmedSlotConflicts,
   deriveRequestStatus,
   validateDecision,
 } = require("./venues.bookingRequests.validation");
@@ -323,6 +324,43 @@ function createVenuesController(service) {
     }
   }
 
+  // SCRUM-20: what the reviewer is told when the database refuses an approval.
+  // Used only when the specific clash cannot be established.
+  const CONFLICT_FALLBACK =
+    "One of these slots is already confirmed for a different request. Refresh the list to see current availability.";
+
+  // SCRUM-20: name the slots that clash and what holds them. Read after the
+  // refusal rather than before it, so this reports what is actually committed
+  // now instead of what was true a moment earlier.
+  async function describeSlotConflicts(requestId, scope) {
+    try {
+      const request = await getBookingRequestById(requestId, scope);
+      if (!request || !request.venue || !request.event) return [CONFLICT_FALLBACK];
+
+      const slotRows = await listSlotRowsForDate(
+        request.venue.id,
+        request.booking_date
+      );
+      const conflicts = findConfirmedSlotConflicts(
+        (request.slots || []).map((row) => row.slot),
+        slotRows,
+        request.event.id
+      );
+
+      if (conflicts.length === 0) return [CONFLICT_FALLBACK];
+
+      return conflicts.map(
+        (conflict) =>
+          `${conflict.slot} on ${request.booking_date} is already confirmed for "${conflict.event_name}"`
+      );
+    } catch {
+      // Explaining the clash must never turn a 409 into a 500. The refusal
+      // itself already stands, so a failure here falls back to the plain
+      // message rather than losing the answer.
+      return [CONFLICT_FALLBACK];
+    }
+  }
+
   // SCRUM-22: Venue Staff approve or reject a pending booking request.
   // The router gates this with bookings.decide, so only Venue Staff get here.
   async function patchBookingRequestDecision(req, res, next) {
@@ -351,11 +389,11 @@ function createVenuesController(service) {
         // another request already holds one of these slots. That is an answer
         // for the reviewer, not a server fault, so it is a 409 (SCRUM-20).
         if (err.code !== "23P01") throw err;
+        // SCRUM-20: the request stays pending and nothing is written, because
+        // the database rejected the whole statement.
         return res.status(409).json({
           error: "Slot already confirmed for another booking",
-          details: [
-            "One of these slots is already confirmed for a different request. Refresh the list to see current availability.",
-          ],
+          details: await describeSlotConflicts(requestId, req.bookingScope),
         });
       }
 

@@ -65,8 +65,33 @@ withdrawing a request is not something a later staff decision should undo.
 Approving writes `confirmed`, which is where the exclusion constraint from
 003 applies. If another request already holds one of those slots, Postgres
 rejects the whole statement (SQLSTATE 23P01), nothing changes, and the API
-returns 409 rather than 500. Surfacing that clash properly in the UI is
-SCRUM-20.
+returns 409 rather than 500.
+
+## Blocking a conflicting booking (SCRUM-20)
+
+The block itself is the database constraint described above, not a check in the
+backend, because a check followed by a write can always be overtaken between the
+two. SCRUM-20 adds the part the constraint cannot do on its own: saying which
+slot clashed, and making sure nobody can approve past it.
+
+After a 23P01 refusal the controller re-reads the request and that day's slot
+rows and runs `findConfirmedSlotConflicts`, so the 409 names each clashing slot
+and the event holding it, for example
+`am on 2026-10-14 is already confirmed for "Charity gala"`. A slot already held
+by the request's own event is not counted as a clash. If that lookup fails for
+any reason the response falls back to the plain message, because explaining a
+refusal must never turn it into a 500.
+
+There is deliberately no override, force or priority field on a decision. The
+decision allowlist accepts `decision` and `note` and refuses anything else, so
+an approval cannot be pushed through a conflict on the grounds that the
+requester matters.
+
+In the review list a 409 is treated as an answer rather than a failure: the
+decide buttons are replaced by the named conflict, a note that the request is
+unchanged and still pending, and a Refresh list action. On the coordinator side
+a slot that is already booked is shown with the event holding it and cannot be
+selected, and other slots on the same day stay bookable.
 
 The note is optional here. SCRUM-22 says Venue Staff *may* give a reason,
 information or a suggested alternative; SCRUM-102 will make a reason mandatory
