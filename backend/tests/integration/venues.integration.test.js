@@ -104,6 +104,19 @@ test("[SCRUM-21] Invalid requirements and confirmed-slot conflicts cannot create
   expect((await send(`/${venueId}/booking-requests`, "event_coordinator", "POST", body)).status).toBe(409);
   expect(service.submitBookingRequest).not.toHaveBeenCalled();
 });
+test("[SCRUM-20] A confirmed booking reduces availability, blocks a clashing request and leaves other slots bookable", async () => {
+  const taken = { booking_date: bookingDate, slot: "am", status: "confirmed", event_name: "Taken" };
+  service.listBookingsInRange.mockResolvedValue([taken]);
+  const calendar = await send(`/${venueId}/availability?from=${bookingDate}&to=${bookingDate}`);
+  expect((await calendar.json()).data.days[0].slots).toMatchObject({ am: { status: "booked" }, pm: { status: "available" } });
+  service.listSlotRowsForDate.mockResolvedValue([taken]);
+  const clash = await send(`/${venueId}/booking-requests`, "event_coordinator", "POST", body);
+  expect(clash.status).toBe(409);
+  expect((await clash.json()).details.join(" ")).toMatch(/am/);
+  expect(service.submitBookingRequest).not.toHaveBeenCalled();
+  expect((await send(`/${venueId}/booking-requests`, "event_coordinator", "POST", { ...body, slots: ["pm"] })).status).toBe(201);
+  expect(service.submitBookingRequest).toHaveBeenCalledTimes(1);
+});
 test("[VENUE-CONFIG-001] Missing venue storage leaves sign-in intact and returns a controlled error", async () => {
   const unconfigured = createApp({ authClient }).listen(0, "127.0.0.1");
   await once(unconfigured, "listening");

@@ -140,3 +140,99 @@ test("[VENUE-DECIDE-004] A slot already confirmed elsewhere returns a conflict, 
   expect(response.status).toBe(409);
   expect((await response.json()).error).toMatch(/already confirmed/i);
 });
+
+// ---------------------------------------------------------------------------
+// SCRUM-20: block conflicting venue booking
+//
+// The block itself is the confirmed-slot exclusion constraint in Postgres, so
+// these tests are about the two things the backend is responsible for: saying
+// which slot clashed, and refusing to let anyone approve past it.
+// ---------------------------------------------------------------------------
+
+const otherEventId = "99999999-9999-4999-8999-999999999999";
+
+const stillPending = (slots) => ({
+  ...decided("pending"),
+  decided_at: null,
+  slots: slots.map((slot) => ({ slot, status: "pending" })),
+});
+
+const heldByAnotherEvent = (slot, eventName) => ({
+  booking_date: "2099-10-10",
+  slot,
+  status: "confirmed",
+  event_name: eventName,
+  request: { event_id: otherEventId },
+});
+
+// The database refuses the whole statement, which is what actually blocks it.
+function databaseRefusesTheApproval() {
+  const clash = new Error("conflicting key value violates exclusion constraint");
+  clash.code = "23P01";
+  service.decideBookingRequest.mockRejectedValue(clash);
+}
+
+test("[SCRUM-20] A refused approval names the slot that clashes and what holds it", async () => {
+  service.getBookingRequestById.mockResolvedValue(stillPending(["am", "pm"]));
+  service.listSlotRowsForDate.mockResolvedValue([heldByAnotherEvent("am", "Charity gala")]);
+  databaseRefusesTheApproval();
+
+  const response = await decide({ decision: "confirmed" });
+  const { error, details } = await response.json();
+
+  expect(response.status).toBe(409);
+  expect(error).toMatch(/already confirmed/i);
+  // The clash is identified down to the slot and the event holding it, and the
+  // free pm slot is not reported as a problem.
+  expect(details).toEqual(['am on 2099-10-10 is already confirmed for "Charity gala"']);
+  expect(service.listSlotRowsForDate).toHaveBeenCalledWith(venue.id, "2099-10-10");
+});
+
+test("[SCRUM-20] A slot already held by this request's own event is not a clash", async () => {
+  service.getBookingRequestById.mockResolvedValue(stillPending(["am"]));
+  service.listSlotRowsForDate.mockResolvedValue([
+    { booking_date: "2099-10-10", slot: "am", status: "confirmed", event_name: event.name, request: { event_id: event.id } },
+  ]);
+  databaseRefusesTheApproval();
+
+  const { details } = await (await decide({ decision: "confirmed" })).json();
+
+  expect(details[0]).toMatch(/Refresh the list/);
+});
+
+test("[SCRUM-20] An approval cannot be forced through by an override or a priority", async () => {
+  databaseRefusesTheApproval();
+
+  for (const body of [
+    { decision: "confirmed", override: true },
+    { decision: "confirmed", force: true },
+    { decision: "confirmed", priority: "VIP" },
+    { decision: "confirmed", note: "Requester is the Dean", override: "yes" },
+  ]) {
+    expect((await decide(body)).status).toBe(400);
+  }
+
+  // Importance is not a field anywhere in this flow, so nothing reached the
+  // database to be overridden in the first place.
+  expect(service.decideBookingRequest).not.toHaveBeenCalled();
+});
+
+test("[SCRUM-20] Non-conflicting requests continue through the booking process", async () => {
+  const response = await decide({ decision: "confirmed" });
+
+  expect(response.status).toBe(200);
+  expect((await response.json()).data.status).toBe("confirmed");
+  expect(service.decideBookingRequest).toHaveBeenCalledWith(
+    requestId, "confirmed", null, "verified-user"
+  );
+});
+
+test("[SCRUM-20] Explaining the clash never turns the refusal into a server error", async () => {
+  databaseRefusesTheApproval();
+  service.getBookingRequestById.mockRejectedValue(new Error("Failed to fetch booking request"));
+
+  const response = await decide({ decision: "confirmed" });
+
+  expect(response.status).toBe(409);
+  expect((await response.json()).details[0]).toMatch(/Refresh the list/);
+});

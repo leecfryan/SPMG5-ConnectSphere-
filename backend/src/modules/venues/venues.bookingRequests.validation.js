@@ -259,6 +259,34 @@ function findSlotProblems(value, calendarDay, existingSlotRows, eventId) {
   return { conflicts, duplicates };
 }
 
+// SCRUM-20: which of this request's slots are already held by a confirmed
+// booking for a different event.
+//
+// The database is what actually blocks the clash, through the confirmed-slot
+// exclusion constraint. This function exists only to say which slot clashed and
+// what holds it, so the refusal names the conflict instead of being generic.
+// Pure, so it can be reasoned about without a database.
+function findConfirmedSlotConflicts(requestedSlots, slotRows, eventId) {
+  const conflicts = [];
+
+  for (const slot of requestedSlots || []) {
+    const held = (slotRows || []).find(
+      (row) =>
+        row.slot === slot &&
+        row.status === "confirmed" &&
+        // A row belonging to this same event is not a clash with itself.
+        // Seed bookings have no request, so they count as somebody else's.
+        (!row.request || row.request.event_id !== eventId)
+    );
+
+    if (held) {
+      conflicts.push({ slot, event_name: held.event_name || "another event" });
+    }
+  }
+
+  return conflicts;
+}
+
 // A request spans one or more slot rows, and Venue Staff will eventually decide
 // on them. Until then they share a status. "mixed" exists so a partial decision
 // later is shown honestly instead of being flattened to one word.
@@ -280,6 +308,12 @@ const DECISION_NOTE_MAX = 2000;
 // SCRUM-22 lets Venue Staff add information, a reason or a suggested
 // alternative when rejecting, but does not require one. SCRUM-102 will make a
 // reason mandatory for rejections; this is the single place that changes.
+//
+// SCRUM-20: a decision carries a decision and an optional note, and nothing
+// else. There is deliberately no override, force or priority field, so an
+// approval cannot be pushed through a conflict on the grounds that the
+// requester matters. Anything else in the body is refused by the allowlist
+// below rather than ignored.
 function validateDecision(payload) {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     return { errors: ["Request body must be an object"], value: null };
@@ -326,6 +360,7 @@ module.exports = {
   validateAgainstVenue,
   validateAgainstEvent,
   findSlotProblems,
+  findConfirmedSlotConflicts,
   deriveRequestStatus,
   validateDecision,
 };
