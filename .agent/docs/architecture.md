@@ -187,7 +187,8 @@ shares the database.
 
 ### Known state
 
-- The live `events.status` check was edited by hand, and `seedData.js`
+- The live `events_status_check` constraint accepts all eight statuses below (widened by hand for SCRUM-97,
+  2026-09-27), and `seedData.js`
   writes `APPROVED` rows directly. Before a story changes a table, have the user run this in the SQL
   Editor and paste the result back, then write the SQL against what is actually live:
 
@@ -199,8 +200,10 @@ shares the database.
 - Event statuses (confirmed by the team; don't add, rename or drop one without the team agreeing):
   `DRAFT` · `SUBMITTED` · `UNDER_REVIEW` · `APPROVED` · `CONFIRMED` · `COMPLETED` · `CANCELLED` · `REJECTED`.
   `APPROVED` is the stored value for "approved / planning". Registration's event list and Venue's bookable events
-  already read it. The code currently writes only `SUBMITTED` (organisers) and `APPROVED` (seed data); the lifecycle
-  code that moves events through the rest is not built yet. Status is written only by the lifecycle code, never
+  already read it. The permitted moves between them are in `backend/src/modules/events/lifecycle.js` (SCRUM-97), and
+  `events.repository.js#transitionStatus` is the only post-submission writer. The code currently writes only
+  `SUBMITTED` (organisers) and `APPROVED` (seed data); the actions that move events through the rest are not
+  built yet. Status is written only by the lifecycle code, never
   through `WRITABLE_COLS`.
 - Roles are not in a table. They're in Supabase Auth `app_metadata.roles`, set by `backend/scripts/seedUsers.js`.
 - Relationships used for record checks: `events.organiser_id`, `events.coordinator_id`,
