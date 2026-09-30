@@ -1,6 +1,10 @@
 ﻿# ConnectSphere folder guide
 
-Use this guide to find files and decide where new code belongs. Authentication is implemented; the other feature folders are reserved for future work.
+Use this guide to find files and decide where new code belongs. Authentication,
+event requests, venue/equipment bookings and attendee registration are integrated.
+The role-specific event workspaces belong in `frontend/src/features/events/` and
+`backend/src/modules/events/`; their routes are in `backend/src/routes/`.
+See [event access](event-access.md) for the assignment and ownership contract.
 
 ## Project overview
 
@@ -8,7 +12,10 @@ Use this guide to find files and decide where new code belongs. Authentication i
 | ---------------------- | ----------------------------------------- |
 | `frontend/`            | React website that users see.             |
 | `backend/`             | Express server that handles API requests. |
-| `tests/e2e/`           | Tests for complete user workflows.        |
+| `supabase/migrations/` | Existing RBAC SQL reference (007); applied manually. |
+| `tests/playwright/`    | Browser journeys and backend API tests.    |
+| `tests/e2e/`           | Older standalone end-to-end test setup.    |
+| `.agent/docs/`         | Architecture and development conventions. |
 | `docs/`                | Team documentation, including this guide. |
 
 Docker runs the frontend on port **5173** and the backend on port **3000**. The database is hosted on **Supabase Cloud**, not in a local Docker container.
@@ -47,7 +54,9 @@ src/
 
 **Where should new code go?** A shared button belongs in `components/ui/`. An event card belongs in `features/events/components/`. An event page belongs in `features/events/pages/`.
 
-Only events has the example `components/`, `pages/`, and `hooks/` subfolders for now. Keep the other feature folders empty until needed. Existing CSS files stay where they are.
+Features now contain their own pages, components and tests. Create folders only
+when they contain code; do not add empty placeholders. Existing CSS stays with
+its feature. `hooks/useApiResource.js` handles shared authenticated data loading.
 
 Other files inside `frontend/`:
 
@@ -62,7 +71,7 @@ Other files inside `frontend/`:
 | `src/assets/hero.png`                         | Starter image.                          |
 | `src/assets/react.svg`, `src/assets/vite.svg` | Starter logos.                          |
 
-`App.jsx` manages session state and displays the sign-in form or protected account screen. `features/auth/SignIn.jsx` holds the form; `lib/supabase.js` creates the browser Auth client using public configuration from Express.
+`App.jsx` registers protected page routes under the shared AuthProvider. `features/auth/SignIn.jsx` holds the form; `lib/supabase.js` creates the browser Auth client using public configuration from Express.
 
 ## Backend
 
@@ -129,9 +138,16 @@ These files appear inside both `frontend/` and `backend/`:
 | ---------------------------- | -------------------------------------------------- |
 | `backend/tests/unit/`        | Tests for individual backend functions.            |
 | `backend/tests/integration/` | Tests for backend parts working together.          |
-| `tests/e2e/`                 | Tests for a complete user journey through the app. |
+| `tests/playwright/`                 | Tests for a complete user journey through the app. |
+| `tests/e2e/`                 | Older standalone end-to-end test setup. |
+| `supabase/migrations/`       | Existing event workflow SQL reference (007). |
 
-`backend/tests/integration/auth.test.js` and `permissions.test.js` run with Node's built-in test runner through `npm --prefix backend test` and CI. The other test folders remain reserved space. There are no migration files: schema changes are applied by hand in the Supabase dashboard, and each lane's guide in `docs/` records the SQL it depends on.
+`backend/tests/integration/auth.test.js` and `permissions.test.js` run with Node's built-in test runner through `npm --prefix backend test` and CI. Event, venue and registration tests use Vitest; equipment tests use the Node runner.
+Browser/API tests use Playwright. `tests/sql/` contains isolated database checks.
+Schema changes are applied by hand in the Supabase dashboard, and each lane's
+guide in `docs/` records its SQL. Staging moved the earlier venue migrations into
+`docs/venue-integration.md`; RBAC's existing 007 SQL reference is retained.
+No automatic migrations or local Supabase setup are configured.
 
 Keep the Supabase secret key on the backend, never in frontend code.
 

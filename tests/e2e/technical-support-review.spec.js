@@ -20,7 +20,7 @@ async function signIn(page, email) {
   await page.locator("#email").fill(email);
   await page.locator("#password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByText("You’re signed in")).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible({ timeout: 15000 });
 }
 
 async function signOut(page) {

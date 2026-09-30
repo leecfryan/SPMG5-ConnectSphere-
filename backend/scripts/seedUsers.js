@@ -7,64 +7,55 @@ const supabase = require("../src/supabase");
 
 const SEED_ID = "connectsphere-sprint1";
 const users = [
+  { email: "coordinator2.demo@example.com", name: "Demo Coordinator Two", roles: ["event_coordinator"], type: "internal" },
+  { email: "coordinator3.demo@example.com", name: "Demo Coordinator Three", roles: ["event_coordinator"], type: "internal" },
+  { email: "venue-technical.demo@example.com", name: "Demo Venue and Technical Staff", roles: ["venue_staff", "technical_support_staff"], type: "internal" },
   {
     email: "coordinator.demo@example.com",
     name: "Demo Coordinator",
-    role: "event_coordinator",
-    type: "internal",
-  },
-  {
-    email: "coordinator2.demo@example.com",
-    name: "Demo Coordinator Two",
-    role: "event_coordinator",
-    type: "internal",
-  },
-  {
-    email: "coordinator3.demo@example.com",
-    name: "Demo Coordinator Three",
-    role: "event_coordinator",
+    roles: ["event_coordinator"],
     type: "internal",
   },
   {
     email: "venue.demo@example.com",
     name: "Demo Venue Staff",
-    role: "venue_staff",
+    roles: ["venue_staff"],
     type: "internal",
   },
   {
     email: "technical.demo@example.com",
     name: "Demo Technical Staff",
-    role: "technical_support_staff",
+    roles: ["technical_support_staff"],
     type: "internal",
   },
   {
     email: "organiser.demo@example.com",
     name: "Demo Event Organiser",
-    role: "event_organiser",
+    roles: ["event_organiser"],
     type: "external",
   },
   {
     email: "attendee1.demo@example.com",
     name: "Demo Attendee One",
-    role: "attendee",
+    roles: ["attendee"],
     type: "external",
   },
   {
     email: "attendee2.demo@example.com",
     name: "Demo Attendee Two",
-    role: "attendee",
+    roles: ["attendee"],
     type: "external",
   },
   {
     email: "attendee3.demo@example.com",
     name: "Demo Attendee Three",
-    role: "attendee",
+    roles: ["attendee"],
     type: "external",
   },
   {
     email: "eventopsmanager.demo@example.com",
     name: " Demo Event Ops Manager",
-    role: "event_ops_manager",
+    roles: ["event_ops_manager"],
     type: "internal",
   },
 ];
@@ -95,8 +86,8 @@ async function seedUsers() {
     if (
       account &&
       (account.app_metadata.seed_id !== SEED_ID ||
-        JSON.stringify(account.app_metadata.roles) !==
-          JSON.stringify([user.role]) ||
+        JSON.stringify([...(account.app_metadata.roles || [])].sort()) !==
+          JSON.stringify([...user.roles].sort()) ||
         account.app_metadata.user_type !== user.type ||
         !account.email_confirmed_at)
     ) {
@@ -111,7 +102,7 @@ async function seedUsers() {
   let created = 0;
   for (const user of users) {
     if (existing.has(user.email.toLowerCase())) {
-      console.log("Already seeded: " + user.email + " (" + user.role + ")");
+      console.log("Already seeded: " + user.email + " (" + user.roles.join(", ") + ")");
       continue;
     }
     // Admin creation confirms these example.com accounts without sending email.
@@ -122,7 +113,7 @@ async function seedUsers() {
       email_confirm: true,
       app_metadata: {
         seed_id: SEED_ID,
-        roles: [user.role],
+        roles: user.roles,
         user_type: user.type,
       },
       user_metadata: { full_name: user.name },
@@ -136,13 +127,13 @@ async function seedUsers() {
     if (
       !saved.user.email_confirmed_at ||
       saved.user.app_metadata.seed_id !== SEED_ID ||
-      saved.user.app_metadata.roles?.[0] !== user.role ||
+      JSON.stringify([...(saved.user.app_metadata.roles || [])].sort()) !== JSON.stringify([...user.roles].sort()) ||
       saved.user.app_metadata.user_type !== user.type
     ) {
       throw new Error("Verification failed for " + user.email);
     }
     created += 1;
-    console.log("Created and verified: " + user.email + " (" + user.role + ")");
+    console.log("Created and verified: " + user.email + " (" + user.roles.join(", ") + ")");
   }
   console.log(
     "Done: " +

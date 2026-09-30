@@ -13,10 +13,11 @@ Frontend routing and navigation use server-derived permission identifiers from
 The integrated Venue feature has authenticated catalogue, calendar, editing and
 booking-request APIs. Its coordinator queries use the existing events.coordinator_id
 relationship; Venue Staff review venue requests across locations. See
-[Venue integration](venue-integration.md). Equipment, technical-request, attendee,
-client and internal-planning test endpoints remain fixtures, not business APIs. Full story acceptance on real records
-requires the feature owners to attach these guards and implement scoped database
-queries. This implementation does not make unguarded future endpoints safe.
+[Venue integration](venue-integration.md). Equipment request and thread APIs are integrated with assigned-coordinator or
+technical-staff scope. The role-specific event workspaces enforce organiser
+ownership and coordinator assignments. Client and attendee *planning* endpoints
+remain future feature work; capability names alone do not implement them.
+See [event access](event-access.md) for the current end-to-end contract.
 
 The integrated event feature separately grants `events.submit` to Event Organisers
 for `POST /api/events` and `/events/new`. This does not grant internal access.
@@ -41,7 +42,7 @@ A capability name ending in `.read` is refused for every non-GET by
 `requirePermission`, which is why the assignment capability is not named
 `events.assignments.read`.
 
-## Initial agreed matrix
+## Staff read matrix (manager workflow described below)
 
 The user approved this conservative starting point in this task. It is an
 implementation decision for team review, not a complete customer permission
@@ -58,15 +59,12 @@ specification.
 | clients.read | No | No | Yes | No | Yes |
 | event_organisers.read | No | No | Yes | No | Yes |
 
-Four staff roles have internal.access: Venue Staff, Technical Support Staff,
-Event Coordinators and Event Operations Managers. `/api/internal` is gated on
-this permission before any route-specific guard runs, so a role needs it to
-reach any internal page or API. Holding it does not grant a feature: every
-internal route requires its own capability in addition, so an Event Operations
-Manager reaches the assignment queue and no other internal feature. Unknown or
-missing roles grant nothing. Multiple trusted roles combine responsibilities.
-External roles grant no internal permissions, but can have separate
-event-specific access through external APIs.
+All four internal roles, including `event_ops_manager`, have `internal.access`.
+Managers have `events.review` and `events.assign`, not venue/equipment booking
+permissions. Coordinators have `events.assigned.read`; organisers have
+`events.own.read` and `events.submit`. Only attendee responsibility grants
+`events.browse` and `registrations.manage`. Unknown roles grant nothing.
+Multiple trusted roles combine capabilities while retaining each record scope.
 
 Venue and equipment catalogue access is not limited by assigned venue, equipment
 type or location. Availability responses must not expose unrelated client,

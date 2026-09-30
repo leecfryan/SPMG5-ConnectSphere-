@@ -130,11 +130,10 @@ in a separate schema change. No such database guarantee is claimed by these test
 
 ## Checks
 
-The team moved to live-database testing for equipment (Vitest, React Testing
-Library, and Playwright all against the real dev Supabase project, not
-fakes/mocks). This is a deliberate departure from the rest of the backend
-suite, which still runs on fakes/in-memory services - equipment is the first
-feature migrated, not a repo-wide change yet.
+The team moved equipment availability integration tests and dedicated equipment
+Playwright workflows to the real dev Supabase project. Pure unit tests and the
+cross-feature RBAC suite remain isolated from the database; this is not a
+repo-wide change to live testing.
 
 - `npm --prefix backend run test:equipment`: 64 Node tests, adapted to
   exercise the production router and canonical permissions. Stays on Node's
@@ -152,16 +151,18 @@ feature migrated, not a repo-wide change yet.
   test:events` (Vitest) rather than the legacy Node glob.
 - `tests/playwright/equipment.api.spec.cjs` / `equipment.browser.spec.cjs`
   (the fake in-memory Auth+backend simulator's equipment coverage) are
-  retired - `equipment_requests.requested_by`/`.event_id` are real foreign
-  keys the simulator's synthetic account ids could never satisfy once the
-  data layer went live, so keeping them was never viable. Their scenarios
-  moved to `tests/e2e/` below.
+  retired on staging. Their scenarios moved to `tests/e2e/` below. The small
+  `tests/playwright/support/equipment-storage.cjs` adapter remains only for
+  cross-feature RBAC tests, which inject isolated storage instead of writing
+  synthetic identities into the live database. Its equipment is AVAILABLE
+  and its overlap check uses the production Return Day + 1 rule.
 - `npm --prefix backend test`: auth, Equipment Node tests, and existing Vitest
   event/Venue/equipment-availability suites (the latter now live-DB). Vitest
   excludes the legacy Node test files to avoid duplicate execution.
 - Existing CI also runs frontend tests/lint/build, Docker checks and the
-  `tests/playwright` browser/API acceptance suite (still fakes, except
-  equipment which no longer has coverage there).
+  `tests/playwright` browser/API acceptance suite. That suite uses local
+  storage adapters and retains cross-feature equipment assignment/access
+  checks; dedicated equipment workflows use the live suite below.
 
 `tests/e2e/` is the live-Supabase Playwright suite, separate from CI because
 it writes to a real development database:
@@ -181,8 +182,27 @@ it writes to a real development database:
   clarification-thread visibility using the real `coordinator.demo`/
   `technical.demo` seed accounts (requires `SEED_USER_PASSWORD` and
   `THREAD_TEST_EVENT_ID` in the root `.env`, with that event actually
-  assigned to `coordinator.demo`). **Known bug, not yet fixed**: its `signIn`
-  helper asserts on `"You're signed in"`, which is `AccountPage`'s own
-  heading and never actually appears on this file's sign-in flow (it
-  navigates straight to a protected page and back, not through `/account`) -
-  the underlying app behaviour is correct, only the assertion is wrong.
+  assigned to `coordinator.demo`). Its sign-in helper waits for the shared
+  Sign out button because protected deep links do not visit the account page.
+
+## Assignment and access update
+
+Coordinator request pickers and new equipment requests require an assigned event
+in `ACCEPTED` or `APPROVED` state. Technical staff retain all equipment bookings,
+as agreed; a venue + technical account combines both booking workspaces.
+They do not gain general event planning or attendee browsing. See
+[event access](event-access.md) for manager assignment and deployment requirements.
+
+The live availability suite supplies an accepted event in its relationship
+fixture so equipment rejection tests reach the availability checks rather than
+passing on the earlier event-status rejection. Those tests assert the rejection
+message as well as HTTP 409.
+
+CI targets lowercase `staging`. Backend CI keeps the incoming live equipment
+test and its Supabase secret references. It needs the existing development schema,
+seed coordinator and assigned event. The conflict-resolution agent does not run
+live database tests locally. For local checks without database writes, run the
+auth/equipment Node suites and Vitest with
+`npm --prefix backend run test:events -- --exclude tests/integration/equipment.availability.test.js`.
+This explicitly leaves the live integration suite unverified locally; it is not
+a replacement for its CI result or the manual live Playwright run.

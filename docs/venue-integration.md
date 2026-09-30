@@ -3,7 +3,7 @@
 This integration preserves main's shared authentication, account page, staff
 responsibilities, organiser event submission, Docker configuration and tests.
 The Venue branch contributes its catalogue, operating information, calendar,
-booking form, request review, validation and database migrations.
+booking form, request review, validation and SQL schema references.
 
 ## Routes and permissions
 
@@ -31,9 +31,10 @@ Frontend visibility is only a convenience; the API enforces each operation.
 `PATCH /api/venues/:id` retains the branch's field validation and update behavior.
 `GET /api/venues/:id/availability` retains confirmed, requested, unavailable and
 closed slots, date windows and AM/PM/Night handling. Catalogue and calendar access
-are not restricted to an assigned venue or location.
+are not restricted to an assigned venue or location. Coordinators see generic
+occupied-slot labels instead of other events' names; venue staff keep event labels.
 
-`GET /api/venues/booking-events` returns upcoming, non-draft events assigned to
+`GET /api/venues/booking-events` returns upcoming, accepted (`ACCEPTED` or `APPROVED`) events assigned to
 the verified coordinator through the existing `events.coordinator_id` column.
 `POST /api/venues/:id/booking-requests` checks that same relationship, validates
 requirements and slot conflicts, and supplies the verified requester ID to the
@@ -44,7 +45,7 @@ Venue Staff can review venue requests across locations. For coordinators, both
 filter by their assigned events. The router establishes this scope from the
 verified identity; the database service applies it using an inner event join.
 Responses select venue requirements and event name/timing/status, not whole
-client, attendee or internal planning records. No event-assignment UI is added.
+client, attendee or internal planning records. Managers assign events through `/event-management`.
 An unassigned event will not appear in a coordinator's picker.
 
 ## Deciding a request (SCRUM-22)
@@ -56,7 +57,7 @@ An unassigned event will not appear in a coordinator's picker.
 decide them. The reviewer identity comes from the verified session; a
 `decided_by` sent in the body is rejected with the other unknown fields.
 
-The decision is applied by `decide_venue_booking_request` (migration 007),
+The decision is applied by `decide_venue_booking_request` (SQL recorded below),
 which records `decided_by`, `decided_at` and `decision_note` on the request and
 writes the decision to every one of its slot rows in one transaction, so a
 request is never half decided. Cancelled slots are left alone: a coordinator
@@ -106,7 +107,8 @@ The root `.env` must contain the existing `SUPABASE_URL`,
 storage configuration returns 503 without preventing sign-in or account access.
 
 The venue schema is already deployed on the team's shared Supabase database.
-There are no migration files: schema changes are applied by hand in the
+The earlier venue migration files have been replaced by the SQL reference below;
+RBAC's existing event-review SQL reference 007 remains separate. Schema changes are applied by hand in the
 dashboard, and the SQL that produced the current schema is kept in
 *Venue schema reference* at the end of this guide.
 
@@ -735,4 +737,3 @@ from (values
 ) as u(venue_name, weekday_offset, slot, reason)
 join public.venues v on v.name = u.venue_name;
 ```
-

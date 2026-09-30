@@ -10,7 +10,7 @@ const bookingDate = "2099-10-10";
 const venue = { id: venueId, name: "Across locations", is_active: true, capacity: 200,
   facilities: ["Projector"], accessibility_features: ["Lift"], room_layouts: ["Theatre"],
   operating_hours: Object.fromEntries(["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((day) => [day, { open: "08:00", close: "23:00" }])) };
-const event = { id: eventId, name: "Assigned conference", status: "SUBMITTED", start_time: "2099-10-10T00:00:00Z", end_time: "2099-10-10T15:00:00Z" };
+const event = { id: eventId, name: "Assigned conference", status: "ACCEPTED", start_time: "2099-10-10T00:00:00Z", end_time: "2099-10-10T15:00:00Z" };
 const body = { event_id: eventId, booking_date: bookingDate, slots: ["am"], expected_attendees: 100,
   room_layout: "Theatre", required_facilities: ["Projector"], accessibility_requirements: ["Lift"] };
 const service = Object.fromEntries(["listVenues", "getVenueById", "updateVenue", "listBookingsInRange", "listUnavailabilityInRange",
@@ -41,6 +41,24 @@ function send(path = "", role = "venue_staff", method = "GET", data) {
     ...(role ? { Authorization: "Bearer " + role } : {}), "Content-Type": "application/json", "x-user-role": "Coordinator",
   }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
 }
+
+test("[ACCESS-VENUE-001] Availability hides event names from coordinators but preserves occupied slots", async () => {
+  service.listBookingsInRange.mockResolvedValue([{ booking_date: bookingDate, slot: "am", status: "confirmed", event_name: "Another coordinator private event" }]);
+  const path = `/${venueId}/availability?from=${bookingDate}&to=${bookingDate}`;
+  const coordinator = await send(path, "event_coordinator");
+  expect(coordinator.status).toBe(200);
+  const text = await coordinator.text();
+  expect(text).toContain("booked");
+  expect(text).not.toContain("Another coordinator private event");
+  const staff = await send(path, "venue_staff,technical_support_staff");
+  expect(await staff.text()).toContain("Another coordinator private event");
+});
+
+test.each(["DRAFT", "SUBMITTED", "REJECTED"])("[ACCESS-VENUE-002] %s events cannot request venues", async status => {
+  service.getEventById.mockResolvedValue({ ...event, status });
+  expect((await send(`/${venueId}/booking-requests`, "event_coordinator", "POST", body)).status).toBe(400);
+  expect(service.submitBookingRequest).not.toHaveBeenCalled();
+});
 
 test.each(["", "invalid", "attendee", "event_organiser", "technical_support_staff", "event_ops_manager", "unknown"])(
   "[VENUE-AUTH-001] Invalid or unrelated identity %s cannot access any venue endpoint, even with a forged role header", async (role) => {

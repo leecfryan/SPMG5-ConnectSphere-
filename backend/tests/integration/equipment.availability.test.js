@@ -113,7 +113,7 @@ async function startApp() {
     authClient,
     equipmentDependencies: {
       equipmentService,
-      findEventById: async () => ({ id: anchorEventId, coordinator_id: anchorUserId }),
+      findEventById: async () => ({ id: anchorEventId, coordinator_id: anchorUserId, status: "ACCEPTED" }),
       findEventsByIds: async () => [],
       getUserDisplayName: async () => null,
     },
@@ -327,6 +327,7 @@ describe("role gating and consistency with the create-request path", () => {
       body: { equipment_id: unit, quantity_requested: 1, borrow_start: start, borrow_end: end },
     });
     expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "This equipment is not available for booking." });
   });
 
   test("equipment excluded by Return Day + 1 (scrum-29 AC4) cannot be successfully requested on the return day itself", async () => {
@@ -340,5 +341,6 @@ describe("role gating and consistency with the create-request path", () => {
       body: { equipment_id: unit, quantity_requested: 1, borrow_start: "2026-09-10T14:00:00Z", borrow_end: "2026-09-10T18:00:00Z" },
     });
     expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "This equipment is already requested for an overlapping period" });
   });
 });

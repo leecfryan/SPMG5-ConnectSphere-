@@ -8,6 +8,7 @@ View them in the Supabase dashboard under Authentication > Users.
 | coordinator.demo@example.com | event_coordinator | Internal |
 | coordinator2.demo@example.com | event_coordinator | Internal |
 | coordinator3.demo@example.com | event_coordinator | Internal |
+| venue-technical.demo@example.com | venue_staff + technical_support_staff | Internal |
 | eventopsmanager.demo@example.com | event_ops_manager | Internal |
 | venue.demo@example.com | venue_staff | Internal |
 | technical.demo@example.com | technical_support_staff | Internal |
@@ -44,13 +45,15 @@ Roles are stored as an array in admin-controlled `app_metadata.roles`, with
 `app_metadata.seed_id` identifies these dummy records.
 Display names are in `user_metadata.full_name`.
 
-This seed uses the five roles named in the Week 4 Release 1 instructions. It does
+The coordinator accounts share one role; each has a different verified user ID.
+Managers assign events to those IDs through the event management workspace.
+The venue/technical account has both trusted roles in the same array. It does
 not establish detailed permissions or event/client relationships. The Event
 Organiser is an external user, as are Attendees.
 
 The seed itself creates no public role/profile tables, business records, access
 policies, or sign-in UI. The application now provides sign-in; see the root README.
-Detailed role and event-relationship enforcement remains future Sprint 1 work.
+Role and event-relationship enforcement is described in [event access](event-access.md).
 Supabase's built-in `authenticated` role is separate from these application roles.
 
 Reference: https://supabase.com/docs/reference/javascript/auth-admin-createuser

@@ -15,12 +15,12 @@ installs it, not the agent.
 | Routing | React Router 7 (`react-router`), declarative `<Routes>` in `App.jsx` | `BrowserRouter` is mounted once in `main.jsx` |
 | Backend | Node 22 + Express 5, CommonJS (`require` / `module.exports`) | `cors`, `dotenv`; `nodemon` for dev |
 | Auth | Supabase Auth, email + password (`@supabase/supabase-js`) | Browser SDK signs in; Express verifies each token with `auth.getUser` |
-| Database | Supabase Postgres (cloud) | Accessed only from the backend. Schema changed by hand in the dashboard; no migration files |
+| Database | Supabase Postgres (cloud) | Accessed only from the backend. Schema changed by hand in the dashboard; existing RBAC SQL reference 007 is retained |
 | Unit / integration tests | Vitest 5 (backend and frontend), React Testing Library + user-event + jsdom on the frontend | A few older backend suites (`auth`, `permissions`, `equipment`) still run on `node:test`. Leave them; new tests use Vitest |
 | End-to-end tests | Playwright (root `package.json`), Chromium + direct HTTP API projects | Runs against a local Auth simulator; no cloud, no `.env` needed |
 | Lint | ESLint (`backend/eslint.config.mjs`, `frontend/eslint.config.js`) | No Prettier. Match surrounding formatting by hand |
 | Local runtime | npm scripts, or Docker Compose (frontend :5173, backend :3000) | Supabase is never run locally |
-| CI | GitHub Actions on push / PR to `Staging` | Frontend, backend, Docker build, Playwright |
+| CI | GitHub Actions on push / PR to `staging` | Frontend, backend (including live equipment integration), Docker build, Playwright |
 | External APIs | None | See *External integrations* below |
 | Deployment | None planned | Don't add hosting, build pipelines or production config |
 
@@ -94,7 +94,7 @@ swallows them. Inside any router, declare static paths before parameter paths.
 - `backend/src/auth/permissions.js` is the single policy table: `"<area>.<action>": { roles: [...], label?, record? }`.
   - `*.read` permissions are refused for anything but GET/HEAD. A write needs its own action permission
     (`events.submit`, `bookings.decide`, `equipment.review`, …). Never reuse a read permission for a write.
-  - `label` puts it in the staff Responsibilities list. Only read permissions get one.
+  - `label` puts it in the staff Responsibilities list; `events.review` also labels the manager's review workspace.
   - `record: true` makes `requirePermission` **throw at startup** unless the route supplies
     `authorizeRecord(req)`, which must load the real relationship from the database and return exactly `true`.
     Missing record → `false` → 403. Lookup error → 503.
@@ -104,6 +104,18 @@ swallows them. Inside any router, declare static paths before parameter paths.
 - The frontend gets the permission list from `GET /api/auth/me` and uses it for routes and navigation only. That is
   UX. The API check is the security boundary, and every AC about "cannot see / cannot change" needs an API-level
   test.
+
+### Role-specific event workspaces
+
+The role-specific event workspaces filter organiser/coordinator records by
+verified user ID. Multiple coordinators are distinct accounts sharing
+`event_coordinator`; assignment uses `events.coordinator_id`. Managers review,
+assign and explicitly publish events. Attendees use registration routes; venue
+and technical staff retain their booking workspaces, including Venue Staff's
+`bookings.decide` permission. See [event access](../../docs/event-access.md).
+
+The shared `frontend/src/hooks/useApiResource.js` hides stale data when the
+session, route or refresh revision changes.
 
 ### Adding a permission
 
@@ -136,7 +148,8 @@ swallows them. Inside any router, declare static paths before parameter paths.
 | Staff | `GET /api/internal/access` | `internal.access` |
 | Event requests | `POST /api/events` | `events.submit` |
 | Assignment | `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` | `internal.access` + `events.assign_coordinator` |
-| Registration | `GET /api/events`, `GET /api/events/:eventId` (APPROVED only); `POST /api/registrations`, `GET /api/registrations/me`, `GET /api/registrations/me/:registrationId`, `PATCH /api/registrations/:registrationId/withdraw` | authenticated, scoped to `req.user.id` |
+| Event workspaces | `GET /api/event-workspace/organiser[/<id>]`, `GET /api/event-workspace/coordinator[/<id>]`, `GET /api/event-workspace/manager[/<id>]`, `GET /api/event-workspace/coordinators`; `PATCH /api/event-workspace/<id>/decision`, `/<id>/coordinator`, `/<id>/publication` | `events.own.read` / `events.assigned.read` / `events.review` / `events.assign`, with ownership and state checks |
+| Registration | `GET /api/events`, `GET /api/events/:eventId` (APPROVED only); `POST /api/registrations`, `GET /api/registrations/me`, `GET /api/registrations/me/:registrationId`, `PATCH /api/registrations/:registrationId/withdraw` | authenticated, `events.browse` / `registrations.manage`, scoped to `req.user.id` |
 | Venues | `GET /api/venues`, `GET /api/venues/:id`, `GET /api/venues/:id/availability`, `PATCH /api/venues/:id`, `GET /api/venues/booking-events`, `POST /api/venues/:id/booking-requests`, `GET /api/venues/booking-requests[/:requestId]`, `PATCH /api/venues/booking-requests/:requestId/decision` | `internal.access` + `venues.read` / `venues.update` / `bookings.request` / `bookings.read` / `bookings.decide` |
 | Equipment | `GET /api/equipment`, `GET /api/equipment/events`, `GET|POST /api/events/:eventId/equipment-requests`, `GET /api/technical-support/equipment-requests`, `PATCH /api/equipment-requests/:id/status`, `GET|POST /api/events/:eventId/messages`, `PATCH /api/messages/:id` | `internal.access` + `equipment.*` with an event relationship check |
 
@@ -180,7 +193,10 @@ only.
 
 ### Schema changes
 
-The project has no migration files. Don't create one or suggest writing one. Tell the user every SQL change the
+Do not create new migration files. RBAC's existing
+`supabase/migrations/007_event_review_and_assignment.sql` is retained as a SQL
+reference; earlier venue schema SQL now lives in `docs/venue-integration.md`.
+Tell the user every SQL change the
 story needs, with the exact SQL, and record it in the task note; the user makes it by hand in the Supabase dashboard.
 The agent never runs it. The user tells teammates before the change and again once it's made, because everyone
 shares the database.
@@ -197,11 +213,14 @@ shares the database.
     from information_schema.columns where table_schema = 'public' and table_name = 'events';
   ```
 - Event statuses (confirmed by the team; don't add, rename or drop one without the team agreeing):
-  `DRAFT` · `SUBMITTED` · `UNDER_REVIEW` · `APPROVED` · `CONFIRMED` · `COMPLETED` · `CANCELLED` · `REJECTED`.
-  `APPROVED` is the stored value for "approved / planning". Registration's event list and Venue's bookable events
-  already read it. The code currently writes only `SUBMITTED` (organisers) and `APPROVED` (seed data); the lifecycle
-  code that moves events through the rest is not built yet. Status is written only by the lifecycle code, never
-  through `WRITABLE_COLS`.
+  `DRAFT` · `SUBMITTED` · `UNDER_REVIEW` · `ACCEPTED` · `APPROVED` · `CONFIRMED` · `COMPLETED` · `CANCELLED` · `REJECTED`.
+  The RBAC workspace implements `SUBMITTED` → `ACCEPTED` → `APPROVED` (registration open),
+  or `SUBMITTED` → `REJECTED`. Managers assign coordinators after acceptance.
+  Venue/equipment planning accepts assigned `ACCEPTED` or `APPROVED` events;
+  attendee browsing requires `APPROVED`. Other lifecycle transitions are not
+  introduced by this integration. Verify the live status constraints support
+  `ACCEPTED` before deploying; this merge does not apply SQL. Status is written
+  only by the lifecycle code, never through `WRITABLE_COLS`.
 - Roles are not in a table. They're in Supabase Auth `app_metadata.roles`, set by `backend/scripts/seedUsers.js`.
 - Relationships used for record checks: `events.organiser_id`, `events.coordinator_id`,
   `registrations.attendee_id` / `registrations.event_id`, `venue_booking_requests.event_id`,

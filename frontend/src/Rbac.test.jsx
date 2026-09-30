@@ -65,6 +65,46 @@ const labels = {
   "event_organisers.read": "Event organiser information for managed events",
 };
 
+test.each([
+  ["event_coordinator", "My assigned events"],
+  ["event_ops_manager", "Manage event requests"],
+  ["event_organiser", "My event requests"],
+  ["venue_staff", "Venues"],
+  ["technical_support_staff", "Technical support"],
+])("[ACCESS-UI-001] %s sees the relevant workspace without attendee browsing", async (role, link) => {
+  setup([role]);
+  render(<MemoryRouter initialEntries={["/account"]}><App /></MemoryRouter>);
+  const nav = await screen.findByRole("navigation", { name: "Workspace" });
+  expect(within(nav).getByRole("link", { name: link, exact: true })).toBeTruthy();
+  expect(within(nav).queryByRole("link", { name: "Browse events" })).toBeNull();
+  expect(within(nav).queryByRole("link", { name: "My registrations" })).toBeNull();
+});
+
+test("[ACCESS-UI-002] Venue and technical account combines both workspaces without coordinator access", async () => {
+  setup(["venue_staff", "technical_support_staff"]);
+  render(<MemoryRouter initialEntries={["/account"]}><App /></MemoryRouter>);
+  const nav = await screen.findByRole("navigation", { name: "Workspace" });
+  for (const name of ["Venues", "Technical support"]) expect(within(nav).getByRole("link", { name, exact: true })).toBeTruthy();
+  for (const name of ["Browse events", "My assigned events", "Manage event requests"]) expect(within(nav).queryByRole("link", { name })).toBeNull();
+});
+
+test.each(["/events", "/events/an-id", "/registrations/me", "/registrations/me/an-id", "/event-management"])(
+  "[ACCESS-UI-003] Coordinator cannot bypass a role guard by opening %s directly", async path => {
+    const { fetchMock } = setup(["event_coordinator"]);
+    render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>);
+    expect(await screen.findByRole("heading", { name: "Access denied" })).toBeTruthy();
+    expect(fetchMock.mock.calls.every(([url]) => url === "/api/auth/me")).toBe(true);
+  },
+);
+
+test("[ACCESS-UI-004] Attendee sees registration navigation without staff workspaces", async () => {
+  setup(["attendee"]);
+  render(<MemoryRouter initialEntries={["/account"]}><App /></MemoryRouter>);
+  const nav = await screen.findByRole("navigation", { name: "Workspace" });
+  for (const name of ["Browse events", "My registrations"]) expect(within(nav).getByRole("link", { name })).toBeTruthy();
+  for (const name of ["My assigned events", "Venues", "Technical support"]) expect(within(nav).queryByRole("link", { name, exact: true })).toBeNull();
+});
+
 test("[RBAC-ROLE-001] Venue Staff see venue and booking responsibilities only", async () => {
   const { fetchMock } = setup(["venue_staff"]);
   renderStaffPage();

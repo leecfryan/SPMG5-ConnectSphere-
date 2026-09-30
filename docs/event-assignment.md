@@ -78,7 +78,7 @@ All three are mounted under `/api/internal`, which already requires
   tiebreak.
 - GET coordinators: returns every account holding the `event_coordinator` role,
   including those with no events, each with `activeEvents` and `nextEventStart`
-  counted from events in `SUBMITTED` or `APPROVED` status.
+  counted from events in `SUBMITTED`, `ACCEPTED` or `APPROVED` status.
 - PUT coordinator: the `coordinatorId` in the body must be present and must
   belong to an account holding the `event_coordinator` role. The update matches
   only a row that is still `SUBMITTED` and still unassigned, so a request that
