@@ -104,6 +104,8 @@ const BOOKING_REQUEST_FIELDS = [
   "accessibility_requirements",
   "additional_requirements",
   "submitted_at",
+  "decided_at",
+  "decision_note",
   "venue:venues!venue_id(id, name, city, country, capacity)",
   "event:events!event_id!inner(id, name, status, start_time, end_time)",
   "slots:venue_bookings!request_id(slot, status)",
@@ -154,7 +156,7 @@ async function listSlotRowsForDate(venueId, bookingDate) {
   return data;
 }
 
-// Calls the authenticated Postgres wrapper from migration 006,
+// Calls the authenticated Postgres wrapper submit_authenticated_venue_booking_request,
 // which writes the request and its slot rows in a single transaction.
 async function submitBookingRequest(venueId, eventName, value, requesterId) {
   const { data, error } = await getSupabase().rpc("submit_authenticated_venue_booking_request", {
@@ -211,6 +213,28 @@ function applyBookingScope(query, scope) {
   throw new Error("Missing booking access scope");
 }
 
+// SCRUM-22: records the decision and applies it to every slot row in one
+// transaction. Returns null when no such request exists.
+//
+// Approving can fail on the confirmed-slot exclusion constraint from 003 if
+// another request already holds a slot. Postgres reports that as 23P01, which
+// the controller turns into a 409 rather than a 500.
+async function decideBookingRequest(requestId, decision, note, decidedBy) {
+  const { data, error } = await getSupabase().rpc("decide_venue_booking_request", {
+    p_request_id: requestId,
+    p_decision: decision,
+    p_decided_by: decidedBy,
+    p_note: note,
+  });
+
+  if (error) {
+    const conflict = new Error(`Failed to decide booking request: ${error.message}`);
+    conflict.code = error.code;
+    throw conflict;
+  }
+  return data;
+}
+
 module.exports = {
   listVenues,
   getVenueById,
@@ -223,4 +247,5 @@ module.exports = {
   submitBookingRequest,
   getBookingRequestById,
   listBookingRequests,
+  decideBookingRequest,
 };

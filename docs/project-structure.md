@@ -12,8 +12,10 @@ See [event access](event-access.md) for the assignment and ownership contract.
 | ---------------------- | ----------------------------------------- |
 | `frontend/`            | React website that users see.             |
 | `backend/`             | Express server that handles API requests. |
-| `supabase/migrations/` | Versioned Supabase SQL changes.    |
+| `supabase/migrations/` | Existing RBAC SQL reference (007); applied manually. |
 | `tests/playwright/`    | Browser journeys and backend API tests.    |
+| `tests/e2e/`           | Older standalone end-to-end test setup.    |
+| `.agent/docs/`         | Architecture and development conventions. |
 | `docs/`                | Team documentation, including this guide. |
 
 Docker runs the frontend on port **5173** and the backend on port **3000**. The database is hosted on **Supabase Cloud**, not in a local Docker container.
@@ -126,7 +128,6 @@ These files appear inside both `frontend/` and `backend/`:
 | `.env.example`              | Template listing the required settings.                                                      |
 | `.gitignore`                | Tells Git which files to ignore. The frontend also has its own `.gitignore`.                 |
 | `.github/workflows/ci.yml`  | Automatic frontend, backend syntax/tests, and Docker checks on pushes and pull requests to `main`. |
-| `architecture.md`           | Overview of how the project fits together.                                                   |
 | `docs/project-structure.md` | This folder guide.                                                                           |
 
 `.git/` stores Git history and internal data. Leave it to Git.
@@ -138,10 +139,15 @@ These files appear inside both `frontend/` and `backend/`:
 | `backend/tests/unit/`        | Tests for individual backend functions.            |
 | `backend/tests/integration/` | Tests for backend parts working together.          |
 | `tests/playwright/`                 | Tests for a complete user journey through the app. |
-| `supabase/migrations/`       | SQL files for changes to Supabase Cloud.    |
+| `tests/e2e/`                 | Older standalone end-to-end test setup. |
+| `supabase/migrations/`       | Existing event workflow SQL reference (007). |
 
 `backend/tests/integration/auth.test.js` and `permissions.test.js` run with Node's built-in test runner through `npm --prefix backend test` and CI. Event, venue and registration tests use Vitest; equipment tests use the Node runner.
-Browser/API tests use Playwright. `tests/sql/` contains isolated migration checks. No automatic migrations or local Supabase setup are configured.
+Browser/API tests use Playwright. `tests/sql/` contains isolated database checks.
+Schema changes are applied by hand in the Supabase dashboard, and each lane's
+guide in `docs/` records its SQL. Staging moved the earlier venue migrations into
+`docs/venue-integration.md`; RBAC's existing 007 SQL reference is retained.
+No automatic migrations or local Supabase setup are configured.
 
 Keep the Supabase secret key on the backend, never in frontend code.
 

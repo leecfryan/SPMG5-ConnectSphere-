@@ -54,8 +54,9 @@ ownership. Test fixtures must not substitute for a production assignment API.
 
 Existing `APPROVED` events remain available to attendees. Manager acceptance alone
 does not publish a new event. Rejected requests remain visible to their organiser
-and manager. Reopening rejected requests and venue booking confirmation remain
-outside this change. Technical review is shared across technical staff, not
+and manager. Reopening rejected requests remains outside this change. Venue
+booking confirmation is provided by staging's Venue Staff decision workflow;
+it does not publish the event. Technical review is shared across technical staff, not
 assignment to an individual technician.
 
 ## Routes
@@ -78,14 +79,18 @@ requests become available for coordinator planning only after manager acceptance
 
 ## Deployment and verification
 
-Apply `supabase/migrations/007_event_review_and_assignment.sql` **after 006 and
-before deploying this code**. It adds ACCEPTED/REJECTED to existing single-column
+The existing `supabase/migrations/007_event_review_and_assignment.sql` records
+the RBAC SQL needed **after the authenticated venue booking wrapper and before
+deploying this code**. Earlier venue migrations 001–006 were removed on staging;
+their schema and functions are recorded in `docs/venue-integration.md`. Apply
+schema changes manually in the Supabase dashboard after reviewing the live
+schema; Git merging does not run SQL. The RBAC SQL adds ACCEPTED/REJECTED to existing single-column
 text status CHECKs without removing their previous allowed values, indexes owner
 and coordinator lookups, and rechecks accepted status inside the atomic venue
 booking RPC. It does not reset business records. It aborts if the status column
 has an unexpected type; review custom multi-column status constraints separately.
 
-The migration has been tested locally on PostgreSQL 17 with migrations 001-006,
+Before the earlier migration files were removed, this SQL was tested locally on PostgreSQL 17 with migrations 001-006,
 including reapplication, preservation of legacy status values and constraints,
 and denied booking writes. It has **not** been applied to the live Supabase
 database. Supabase SQL-editor/database access is required; the Auth admin key
@@ -103,5 +108,8 @@ they do not certify live Supabase policies.
 
 `tests/sql/event-review.setup.sql` and `event-review.assertions.sql` are local
 database test fixtures. Never run the setup script against an existing project.
-In an empty temporary PostgreSQL database, run setup, migrations 001-007, then
-assertions using `psql -v ON_ERROR_STOP=1`. The assertions roll back their changes.
+For the historical isolated test procedure, retrieve migrations 001–006 from
+the PR's pre-merge commit `efa6505` (Git history), then run setup, that historical
+SQL, the retained 007 reference, and assertions using `psql -v ON_ERROR_STOP=1`.
+The assertions roll back their changes. This historical procedure does not
+validate staging's newer booking-decision SQL or the live database.
