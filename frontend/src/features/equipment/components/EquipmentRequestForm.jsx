@@ -1,22 +1,15 @@
 import { useState } from "react";
 
-function defaultBorrowWindow() {
-  const start = new Date(Date.now() + 24 * 60 * 60 * 1000);
-  start.setMinutes(0, 0, 0);
-  const end = new Date(start.getTime() + 3 * 60 * 60 * 1000);
-  // datetime-local inputs want "YYYY-MM-DDTHH:mm" in local time, not ISO/UTC.
-  const toLocalInput = (date) =>
-    new Date(date.getTime() - date.getTimezoneOffset() * 60000)
-      .toISOString()
-      .slice(0, 16);
-  return { start: toLocalInput(start), end: toLocalInput(end) };
-}
-
-function EquipmentRequestForm({ equipmentOptions, onSubmit, isSaving, saveError }) {
+// Scrum-29 follow-up: the borrow window is now owned by EquipmentRequestPage
+// (defaulted from the selected event's own timing, +/-30 minutes) so it can
+// also drive the live equipment-availability fetch there. This form only
+// renders it and reports edits back up - it no longer invents its own
+// unrelated default.
+function EquipmentRequestForm({ equipmentOptions, borrowWindow, onWindowChange, onSubmit, isSaving, saveError }) {
   const [equipmentId, setEquipmentId] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [technicalRequirement, setTechnicalRequirement] = useState("");
-  const [{ start, end }, setWindow] = useState(defaultBorrowWindow);
+  const { start, end } = borrowWindow;
 
   function handleSubmit(event) {
     event.preventDefault();
@@ -73,7 +66,7 @@ function EquipmentRequestForm({ equipmentOptions, onSubmit, isSaving, saveError 
           <input
             type="datetime-local"
             value={start}
-            onChange={(e) => setWindow((w) => ({ ...w, start: e.target.value }))}
+            onChange={(e) => onWindowChange({ start: e.target.value, end })}
             required
           />
         </label>
@@ -83,7 +76,7 @@ function EquipmentRequestForm({ equipmentOptions, onSubmit, isSaving, saveError 
           <input
             type="datetime-local"
             value={end}
-            onChange={(e) => setWindow((w) => ({ ...w, end: e.target.value }))}
+            onChange={(e) => onWindowChange({ start, end: e.target.value })}
             required
           />
         </label>

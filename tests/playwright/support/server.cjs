@@ -123,7 +123,6 @@ const eventsRepository = {
   },
 };
 const venuesService = require('./venue-storage.cjs')(accounts);
-const equipmentDependencies = require('./equipment-storage.cjs')(accounts);
 const dataClient = require('./registration-storage.cjs')(accounts);
 auth.patch('/__test/registrations/:id', (req, res) => {
   const registration = dataClient.registrations.find(row => row.id === req.params.id);
@@ -131,7 +130,7 @@ auth.patch('/__test/registrations/:id', (req, res) => {
   if (Object.hasOwn(req.body, 'status')) registration.status = req.body.status;
   res.sendStatus(204);
 });
-const app = createApp({ dataClient, authClient: client, eventsRepository, venuesService, equipmentDependencies, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
+const app = createApp({ dataClient, authClient: client, eventsRepository, venuesService, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
 // Fixture endpoints exercise real middleware; these are NOT production business endpoints.
 const permissions = ['venues.read', 'equipment.read', 'bookings.read', 'technical_requests.read', 'event_planning.read', 'attendees.read', 'clients.read', 'event_organisers.read'];
 for (const permission of permissions) {
