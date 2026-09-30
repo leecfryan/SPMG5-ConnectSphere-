@@ -5,6 +5,18 @@ const policies = Object.freeze({
   "events.submit": {
     roles: ["event_organiser"],
   },
+  // Registration counts for the caller's own events. No `label`: these are not
+  // staff responsibilities, and adding one would put them on
+  // /staff/responsibilities for coordinators.
+  // The list scopes organiser_id/coordinator_id in its own query, so it needs no
+  // record resolver; the single event does, hence the split.
+  "events.managed.read": {
+    roles: ["event_organiser", "event_coordinator"],
+  },
+  "events.registrations.read": {
+    roles: ["event_organiser", "event_coordinator"],
+    record: true,
+  },
   "venues.update": {
     roles: ["venue_staff", "event_coordinator"],
   },

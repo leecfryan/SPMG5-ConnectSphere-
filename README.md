@@ -98,10 +98,22 @@ bookings for their assigned events. See [Venue integration](docs/venue-integrati
 for routes, role permissions and the required database migrations, including 006.
 Merging or restarting Docker does not apply Supabase migrations automatically.
 
+## Registration information for managed events
+
+Event Organisers and Event Coordinators can open `/events/managed` from the
+workspace to list the events they own or manage, and open one to see
+"Current Registrations: X/MaxEnrollment" and "Waiting List: Y". Ownership is
+checked in the server-side query, and an event belonging to someone else is
+indistinguishable from one that does not exist. Attendee identity and submitted
+registration data are never returned. The Waiting List reads 0 until the
+waitlist story adds its status. See
+[managed event registrations](docs/managed-event-registrations.md) for the
+permissions, the columns and the test commands.
+
 ## Frontend navigation
 
 The application uses React Router: `/sign-in`, `/account`,
-`/staff/responsibilities`, `/events/new`, `/venues/*`, and `/forbidden`. The root redirects after session
+`/staff/responsibilities`, `/events/new`, `/events/managed/*`, `/venues/*`, and `/forbidden`. The root redirects after session
 checking. Protected routes wait for backend verification; navigation and feature
 guards use permission identifiers returned by `/api/auth/me`. Express remains
 responsible for enforcing every API permission and record-access check.

@@ -12,6 +12,8 @@ import EquipmentRequestPage from "./features/equipment/pages/EquipmentRequestPag
 import TechnicalSupportDashboardPage from "./features/equipment/pages/TechnicalSupportDashboardPage";
 import VenueRoutes from "./features/venues/VenueRoutes";
 import EventRequestPage from "./features/events/pages/EventRequestPage";
+import ManagedEventsPage from "./features/managedEvents/pages/ManagedEventsPage";
+import ManagedEventDetailPage from "./features/managedEvents/pages/ManagedEventDetailPage";
 import EventListPage from "./features/registrations/pages/EventListPage";
 import EventDetailPage from "./features/registrations/pages/EventDetailPage";
 import MyRegistrationsPage from "./features/registrations/pages/MyRegistrationsPage";
@@ -51,6 +53,13 @@ export default function App() {
                 <Route path="/registrations/me" element={<MyRegistrationsPage />} />
                 <Route path="/registrations/me/:registrationId" element={<RegistrationDetailPage />} />
                 <Route path="/account" element={<AccountPage />} />
+                {/* Organisers hold no internal.access, so this sits beside the other
+                    open routes rather than inside that group. The static "managed"
+                    segment outranks /events/:eventId, as /events/new already does. */}
+                <Route element={<RequirePermission permission="events.managed.read" />}>
+                  <Route path="/events/managed" element={<ManagedEventsPage />} />
+                  <Route path="/events/managed/:eventId" element={<ManagedEventDetailPage />} />
+                </Route>
                 <Route element={<RequirePermission permission="events.submit" />}>
                   <Route path="/events/new" element={<EventRequestPage />} />
                 </Route>
