@@ -92,7 +92,7 @@ async function setup(t, {
 
 test("Scrum-27 AC1: a request created with a valid equipment_id resolves to that equipment", async (t) => {
   const equipmentService = fakeEquipmentService({
-    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID, type: "PROJECTOR" } },
+    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID, type: "PROJECTOR", status: "AVAILABLE" } },
   });
   const base = await setup(t, { roleAssignments: { "coord-1": ["event_coordinator"] }, equipmentService });
 
@@ -138,7 +138,7 @@ test("the equipment catalogue is listed for authenticated technical staff", asyn
 
 test("Scrum-27 AC2: a valid quantity is persisted on the created request", async (t) => {
   const equipmentService = fakeEquipmentService({
-    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID } },
+    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID, status: "AVAILABLE" } },
   });
   const base = await setup(t, { roleAssignments: { "coord-1": ["event_coordinator"] }, equipmentService });
 
@@ -170,7 +170,7 @@ test("Scrum-27 AC2: quantity <= 0 is rejected before reaching the data layer", a
 
 test("Scrum-27 AC3: technical_requirement is persisted on the created request", async (t) => {
   const equipmentService = fakeEquipmentService({
-    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID } },
+    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID, status: "AVAILABLE" } },
   });
   const base = await setup(t, { roleAssignments: { "coord-1": ["event_coordinator"] }, equipmentService });
 
@@ -204,7 +204,7 @@ test("Scrum-27 AC4: a request is retrievable via its event_id; cascade delete is
 
 test("a Coordinator can create a request; a Technical Support Staff member cannot (403)", async (t) => {
   const equipmentService = fakeEquipmentService({
-    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID } },
+    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID, status: "AVAILABLE" } },
   });
   const base = await setup(t, {
     roleAssignments: { "coord-1": ["event_coordinator"], "tech-1": ["technical_support_staff"] },
@@ -258,7 +258,7 @@ test("Technical Support Staff can update status; a Coordinator cannot (403)", as
 
 test("an overlapping borrow window for the same equipment is rejected", async (t) => {
   const equipmentService = fakeEquipmentService({
-    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID } },
+    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID, status: "AVAILABLE" } },
     overlapping: true,
   });
   const base = await setup(t, { roleAssignments: { "coord-1": ["event_coordinator"] }, equipmentService });
@@ -274,7 +274,7 @@ test("an overlapping borrow window for the same equipment is rejected", async (t
 
 test("a non-overlapping borrow window for the same equipment is accepted", async (t) => {
   const equipmentService = fakeEquipmentService({
-    equipmentById: { [OTHER_EQUIPMENT_ID]: { id: OTHER_EQUIPMENT_ID } },
+    equipmentById: { [OTHER_EQUIPMENT_ID]: { id: OTHER_EQUIPMENT_ID, status: "AVAILABLE" } },
     overlapping: false,
   });
   const base = await setup(t, { roleAssignments: { "coord-1": ["event_coordinator"] }, equipmentService });

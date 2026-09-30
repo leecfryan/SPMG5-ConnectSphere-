@@ -9,6 +9,7 @@ import AccountPage from "./routes/AccountPage";
 import ResponsibilitiesPage from "./routes/ResponsibilitiesPage";
 import WorkspaceLayout from "./routes/WorkspaceLayout";
 import EquipmentRequestPage from "./features/equipment/pages/EquipmentRequestPage";
+import EquipmentCataloguePage from "./features/equipment/pages/EquipmentCataloguePage";
 import TechnicalSupportDashboardPage from "./features/equipment/pages/TechnicalSupportDashboardPage";
 import VenueRoutes from "./features/venues/VenueRoutes";
 import EventRequestPage from "./features/events/pages/EventRequestPage";
@@ -77,6 +78,9 @@ export default function App() {
                   </Route>
                   <Route element={<RequirePermission permission="equipment.request" />}>
                     <Route path="/equipment/requests" element={<EquipmentRequestPage />} />
+                  </Route>
+                  <Route element={<RequirePermission permission="equipment.read" />}>
+                    <Route path="/equipment/catalogue" element={<EquipmentCataloguePage />} />
                   </Route>
                   <Route element={<RequirePermission permission="equipment.review" />}>
                     <Route path="/technical-support" element={<TechnicalSupportDashboardPage />} />

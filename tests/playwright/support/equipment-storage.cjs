@@ -1,17 +1,18 @@
 // Only used by local Playwright servers, never by production startup.
 const { randomUUID } = require('node:crypto');
+const { BLOCKING_REQUEST_STATUSES, isBlockingOverlap } = require('../../../backend/src/modules/equipment/equipment.validation');
 module.exports = function equipmentStorage(accounts) {
   const requests = [];
   const messages = [];
   const events = () => [...accounts.values()].flatMap(account => account.events);
-  const equipment = () => [...accounts.values()].map(account => ({ id: account.id, type: 'Projector ' + account.id, current_location: 'Singapore' }));
+  const equipment = () => [...accounts.values()].map(account => ({ id: account.id, type: 'Projector ' + account.id, current_location: 'Singapore', status: 'AVAILABLE' }));
   const equipmentService = {
     async listEquipment() { return equipment(); },
     async findEquipmentById(id) { return equipment().find(item => item.id === id) || null; },
     async listRequestsByEvent(id) { return requests.filter(row => row.event_id === id); },
     async findRequestById(id) { return requests.find(row => row.id === id) || null; },
     async listAllRequests() { return requests; },
-    async hasOverlappingRequest(id, start, end) { return requests.some(row => row.equipment_id === id && row.status !== 'REJECTED' && row.borrow_start < end && row.borrow_end > start); },
+    async hasOverlappingRequest(id, start, end) { return requests.some(row => row.equipment_id === id && BLOCKING_REQUEST_STATUSES.includes(row.status) && isBlockingOverlap(row, start, end)); },
     async createRequest(fields, requestedBy) {
       const row = { ...fields, id: randomUUID(), requested_by: requestedBy, status: 'PENDING', created_at: new Date().toISOString() };
       requests.push(row);

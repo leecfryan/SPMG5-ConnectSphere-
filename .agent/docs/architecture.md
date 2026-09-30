@@ -20,7 +20,7 @@ installs it, not the agent.
 | End-to-end tests | Playwright (root `package.json`), Chromium + direct HTTP API projects | Runs against a local Auth simulator; no cloud, no `.env` needed |
 | Lint | ESLint (`backend/eslint.config.mjs`, `frontend/eslint.config.js`) | No Prettier. Match surrounding formatting by hand |
 | Local runtime | npm scripts, or Docker Compose (frontend :5173, backend :3000) | Supabase is never run locally |
-| CI | GitHub Actions on push / PR to `Staging` | Frontend, backend, Docker build, Playwright |
+| CI | GitHub Actions on push / PR to `staging` | Frontend, backend (including live equipment integration), Docker build, Playwright |
 | External APIs | None | See *External integrations* below |
 | Deployment | None planned | Don't add hosting, build pipelines or production config |
 
