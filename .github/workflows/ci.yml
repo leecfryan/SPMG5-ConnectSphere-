@@ -67,6 +67,9 @@ jobs:
       - name: Test authentication boundaries
         working-directory: backend
         run: npm test
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
 
   docker:
     name: Docker Checks
