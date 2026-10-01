@@ -72,18 +72,53 @@ create table events (
 
 ### Status values
 
-| Status | Set by | Meaning |
-| --- | --- | --- |
-| `SUBMITTED` | this module, at insert | Awaiting manager review; also visible in the existing assignment queue |
-| `ACCEPTED` | manager review workspace | Accepted for coordinator planning; not open for registration |
-| `REJECTED` | manager review workspace | Rejected; unavailable for planning and registration |
-| `APPROVED` | manager opens registration | Open for attendee registration |
-| `DRAFT` | nothing | The column default. Never written here; reserved for US-13. |
+SCRUM-97 defines the eight statuses and the permitted moves between them in
+`backend/src/modules/events/lifecycle.js`. The live `events_status_check`
+constraint accepts all eight; it was changed by hand in the Supabase dashboard
+on 2026-09-27 (no migration file) with:
 
-`UNDER_REVIEW`, `CONFIRMED` and `CANCELLED` are named in the Week 4
-instructions but are not implemented. Do not branch on them, and do not assume
-the set is closed. Display labels belong in each feature's own UI; stored values
-are not labels.
+```sql
+alter table public.events drop constraint if exists events_status_check;
+alter table public.events
+  add constraint events_status_check check (status in (
+    'DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'APPROVED',
+    'CONFIRMED', 'COMPLETED', 'CANCELLED', 'REJECTED'
+  ));
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> DRAFT
+    DRAFT --> SUBMITTED
+    SUBMITTED --> UNDER_REVIEW
+    UNDER_REVIEW --> APPROVED
+    UNDER_REVIEW --> REJECTED
+    APPROVED --> CONFIRMED
+    CONFIRMED --> COMPLETED
+    SUBMITTED --> CANCELLED
+    UNDER_REVIEW --> CANCELLED
+    APPROVED --> CANCELLED
+    CONFIRMED --> CANCELLED
+```
+
+| Status | Badge label | Set by today |
+| --- | --- | --- |
+| `DRAFT` | Draft | nothing (column default; US-13) |
+| `SUBMITTED` | Submitted | `createSubmitted`, at insert |
+| `UNDER_REVIEW` | Under review | not yet (SCRUM-98) |
+| `APPROVED` | Approved – planning | not yet (SCRUM-99); read by registration and venue |
+| `CONFIRMED` | Confirmed | not yet (confirm story) |
+| `COMPLETED` | Completed | not yet (complete story) |
+| `CANCELLED` | Cancelled | not yet (cancel story) |
+| `REJECTED` | Rejected | not yet (reject story) |
+
+`COMPLETED`, `CANCELLED` and `REJECTED` are terminal. Any move not on the diagram
+is refused. After submission, `status` is written only by
+`events.repository.js#transitionStatus(id, from, to, extra)`. That function checks
+`canTransition`, then updates with `.eq("status", from)`, so a caller that loses a
+race gets `null` (answer 409) and never overwrites. Stored values are not labels;
+labels live in `StatusBadge.jsx`. Test cases, traceability and coverage are in
+[Event lifecycle tests](event-lifecycle-tests.md).
 
 ### Fields the client cannot set
 
@@ -391,12 +426,14 @@ the Week 12 release and is not part of this sprint.
 
 ## Current limitations
 
-- Role-scoped list and detail endpoints are implemented in the event workspace;
-  each route enforces permissions and event ownership or assignment.
-- The `CHECK` constraint on `events.status` has not been verified against the
-  live database since `APPROVED` came into use.
-- Migration 007 extends the existing `events` status constraints for review.
-  It must be applied to the target database before deployment.
-- The remaining status lifecycle — `UNDER_REVIEW`, `CONFIRMED`,
-  `CANCELLED` — is named in the Week 4 instructions and is not yet designed.
+- Event list and detail endpoints are not implemented here. New read endpoints
+  need permission and event-relationship checks before returning protected data.
+- The `events_status_check` constraint was widened by hand to the eight
+  SCRUM-97 statuses on 2026-09-27 (SQL under *Status values*).
+- There is no migration file for `events`. Schema changes are made in the
+  Supabase dashboard and need to be reflected in this document in the same
+  sitting.
+- The status lifecycle is defined (SCRUM-97), but no action moves an event past
+  `SUBMITTED` yet. Review, approve, reject, confirm, cancel and complete arrive
+  with their own stories.
 - US-13 has no Jira issue, so `US-13` remains the label in code and tests.

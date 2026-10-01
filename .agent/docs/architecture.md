@@ -203,7 +203,8 @@ shares the database.
 
 ### Known state
 
-- The live `events.status` check was edited by hand, and `seedData.js`
+- The live `events_status_check` constraint accepts all eight statuses below (widened by hand for SCRUM-97,
+  2026-09-27), and `seedData.js`
   writes `APPROVED` rows directly. Before a story changes a table, have the user run this in the SQL
   Editor and paste the result back, then write the SQL against what is actually live:
 
@@ -213,18 +214,13 @@ shares the database.
     from information_schema.columns where table_schema = 'public' and table_name = 'events';
   ```
 - Event statuses (confirmed by the team; don't add, rename or drop one without the team agreeing):
-  `DRAFT` · `SUBMITTED` · `UNDER_REVIEW` · `ACCEPTED` · `APPROVED` · `CONFIRMED` · `COMPLETED` · `CANCELLED` · `REJECTED`.
-  The RBAC workspace implements `SUBMITTED` → `ACCEPTED` → `APPROVED` (registration open),
-  or `SUBMITTED` → `REJECTED`. Managers assign coordinators after acceptance.
-  Venue/equipment planning accepts assigned `ACCEPTED` or `APPROVED` events;
-  attendee browsing requires `APPROVED`. Other lifecycle transitions are not
-  introduced by this integration. Verify the live status constraints support
-  `ACCEPTED` before deploying; this merge does not apply SQL. Status is written
-  only by the lifecycle code, never through `WRITABLE_COLS`.
-- Roles are not in a table. They're in Supabase Auth `app_metadata.roles`, set by `backend/scripts/seedUsers.js`.
-- Relationships used for record checks: `events.organiser_id`, `events.coordinator_id`,
-  `registrations.attendee_id` / `registrations.event_id`, `venue_booking_requests.event_id`,
-  `equipment_requests.event_id`.
+  `DRAFT` · `SUBMITTED` · `UNDER_REVIEW` · `APPROVED` · `CONFIRMED` · `COMPLETED` · `CANCELLED` · `REJECTED`.
+  `APPROVED` is the stored value for "approved / planning". Registration's event list and Venue's bookable events
+  already read it. The permitted moves between them are in `backend/src/modules/events/lifecycle.js` (SCRUM-97), and
+  `events.repository.js#transitionStatus` is the only post-submission writer. The code currently writes only
+  `SUBMITTED` (organisers) and `APPROVED` (seed data); the actions that move events through the rest are not
+  built yet. Status is written only by the lifecycle code, never
+  through `WRITABLE_COLS`.
 
 Keep this section current: when a manual schema change is made, update this section and remove whatever it resolved.
 
