@@ -20,7 +20,7 @@ async function signIn(page, email) {
   await page.locator("#email").fill(email);
   await page.locator("#password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByText("You’re signed in")).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible({ timeout: 15000 });
 }
 
 async function signOut(page) {
@@ -71,8 +71,12 @@ test("Scrum-28-Scrum65/66: a Technical Support message is visible to, and answer
   await expect(page.getByText(messageText)).toBeVisible();
 
   await signOut(page);
+  // signIn() already navigates to /equipment/requests?event=<EVENT_ID> before
+  // signing in, and the app returns to that same URL after auth - the
+  // coordinator no longer has a free-text event id field to fill (removed
+  // alongside Scrum-29's dropdown/borrow-window work; they select from their
+  // assigned-events dropdown instead).
   await signIn(page, COORDINATOR_EMAIL);
-  await page.locator('input[placeholder="Paste the event\'s UUID"]').fill(EVENT_ID);
 
   // AC4: the Coordinator sees the same thread - proves it isn't Technical
   // Support-only storage/UI, and that this Coordinator is authorised for

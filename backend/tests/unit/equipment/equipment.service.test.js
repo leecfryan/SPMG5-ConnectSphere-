@@ -1,7 +1,7 @@
 // Unlike equipment.functional.test.js (which fakes hasOverlappingRequest
 // entirely with a hardcoded true/false to test the controller's handling of
 // it), this file exercises the REAL query chain in equipment.service.js -
-// against a fake Supabase client that actually applies .eq/.neq/.lt/.gt
+// against a fake Supabase client that actually applies .eq/.neq/.lt/.gt/.in
 // filters to an in-memory table, not a stub that ignores them. That's the
 // only way to genuinely prove the overlap guard is scoped to one piece of
 // equipment_id, not to a whole event.
@@ -21,6 +21,7 @@ function fakeSupabase(tables) {
         neq(field, value) { rows = rows.filter((r) => r[field] !== value); return builder; },
         lt(field, value) { rows = rows.filter((r) => r[field] < value); return builder; },
         gt(field, value) { rows = rows.filter((r) => r[field] > value); return builder; },
+        in(field, values) { rows = rows.filter((r) => values.includes(r[field])); return builder; },
         limit(n) { limitN = n; return builder; },
         then(resolve, reject) {
           const data = limitN !== null ? rows.slice(0, limitN) : rows;
@@ -70,12 +71,26 @@ test("the same equipment cannot be double-booked for an overlapping window, even
   assert.equal(overlapping, true);
 });
 
-test("back-to-back windows on the same equipment (touching, not crossing) do not count as overlapping", async () => {
+// Scrum-29 AC2/AC4 (team decision): superseded the prior Rule A behaviour,
+// where a back-to-back window starting exactly when the existing one ended
+// was allowed. Overlap is now day-granularity with touching endpoints
+// blocked ("Return Day + 1") - see equipment.validation.js's isBlockingOverlap.
+test("a window starting the same calendar day the existing request ends is now blocked (Return Day + 1)", async () => {
   const service = createEquipmentService(fakeSupabase({ equipment_requests: [existingRequest()] }));
   const overlapping = await service.hasOverlappingRequest(
     EQ_PROJECTOR,
-    "2026-01-01T12:00:00.000Z", // starts exactly when the existing request ends
+    "2026-01-01T12:00:00.000Z", // starts exactly when the existing request ends, same day
     "2026-01-01T13:00:00.000Z",
+  );
+  assert.equal(overlapping, true);
+});
+
+test("a window starting the day after the existing request ends is available", async () => {
+  const service = createEquipmentService(fakeSupabase({ equipment_requests: [existingRequest()] }));
+  const overlapping = await service.hasOverlappingRequest(
+    EQ_PROJECTOR,
+    "2026-01-02T00:00:00.000Z", // the day after existingRequest()'s borrow_end
+    "2026-01-02T01:00:00.000Z",
   );
   assert.equal(overlapping, false);
 });

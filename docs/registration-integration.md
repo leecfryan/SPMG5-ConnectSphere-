@@ -11,11 +11,12 @@ Equipment remain in the same app. No additional frontend server or port is neede
 | `/registrations/me` | Signed-in user's registration history and status |
 | `/registrations/me/:registrationId` | Own submitted details and eligible withdrawal |
 
-All four pages require the shared verified session. As on the Registration branch,
-any authenticated account may participate using its own identity; this does not
-grant staff permissions or access to another attendee's records. Internal pages
-still require main's existing permissions. The static `/events/new` organiser
-route takes precedence over `/events/:eventId` and retains `events.submit`.
+All four pages require a verified session and attendee responsibility. Event
+browsing uses `events.browse`; registration actions use `registrations.manage`,
+independently enforced by React Router and Express. Staff with an additional
+attendee responsibility retain those attendee capabilities. Staff-only accounts
+use their responsibility-specific workspaces. The `/events/new` organiser route
+retains `events.submit`. See [event access](event-access.md).
 
 ## Preserved behavior and integration corrections
 

@@ -135,7 +135,7 @@ Run from the repository root. Node 22.
 | Playwright report | `npm run test:playwright:report` |
 | Seed demo users (user runs) | `npm --prefix backend run seed:users`. Accounts are in [docs/seed-users.md](docs/seed-users.md) |
 
-**CI** ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on push and PR to `Staging` and runs all four
+**CI** ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on push and PR to `staging` and runs all four
 suites: frontend lint + test + build, backend check + test, Docker build, and Playwright. Every one of them must
 be green locally before you call a story done.
 

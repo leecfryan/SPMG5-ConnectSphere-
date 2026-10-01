@@ -16,7 +16,7 @@ module.exports = function venueStorage(accounts) {
     async listBookingsInRange(id, from, to) { return requests.filter(r => r.venue.id === id && r.booking_date >= from && r.booking_date <= to).flatMap(r => r.slots.map(slot => ({ ...slot, booking_date: r.booking_date, event_name: r.event.name }))); },
     async listUnavailabilityInRange() { return []; },
     async getEventById(id, coordinatorId) { return events().find(event => event.id === id && event.coordinator_id === coordinatorId) || null; },
-    async listBookableEvents(coordinatorId) { return events().filter(event => event.coordinator_id === coordinatorId && event.status !== 'DRAFT'); },
+    async listBookableEvents(coordinatorId) { return events().filter(event => event.coordinator_id === coordinatorId && ['ACCEPTED', 'APPROVED'].includes(event.status)); },
     async listSlotRowsForDate(id, date) { return requests.filter(r => r.venue.id === id && r.booking_date === date).flatMap(r => r.slots.map(slot => ({ ...slot, booking_date: date, event_name: r.event.name, request: { event_id: r.event_id } }))); },
     async submitBookingRequest(id, name, value, requesterId) {
       const event = events().find(event => event.id === value.event_id && event.coordinator_id === requesterId);

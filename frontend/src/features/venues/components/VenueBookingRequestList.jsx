@@ -68,6 +68,9 @@ function DecisionPanel({ request, onDecided }) {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
+  // SCRUM-20: a clash is kept apart from an ordinary failure, because it is an
+  // answer about the booking rather than something that went wrong.
+  const [conflict, setConflict] = useState(null);
 
   const requestId = request.id;
 
@@ -77,8 +80,37 @@ function DecisionPanel({ request, onDecided }) {
 
     decideBookingRequest(requestId, decision, note.trim() === "" ? null : note.trim(), token)
       .then(onDecided)
-      .catch((err) => setError(err.message))
+      .catch((err) => {
+        // 409 means the database refused the approval because a slot is
+        // already confirmed elsewhere. The request is untouched and still
+        // pending, so the decide buttons are replaced by a refresh rather
+        // than inviting the reviewer to try the same thing again.
+        if (err.status === 409) setConflict(err.message);
+        else setError(err.message);
+      })
       .finally(() => setBusy(null));
+  }
+
+  // SCRUM-20: nothing was written, so the only useful next step is to look at
+  // what is actually committed now.
+  if (conflict) {
+    return (
+      <div className="v-decision">
+        <p className="v-alert v-alert-error" role="alert">
+          <IconAlert />
+          <span>{conflict}</span>
+        </p>
+        <p className="v-hint">
+          This request has not been changed and is still pending. It cannot be
+          approved while another event holds the slot.
+        </p>
+        <div className="v-decision-actions">
+          <button type="button" className="v-btn v-btn-primary" onClick={onDecided}>
+            Refresh list
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (

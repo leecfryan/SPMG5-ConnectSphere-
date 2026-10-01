@@ -9,10 +9,13 @@ import AccountPage from "./routes/AccountPage";
 import ResponsibilitiesPage from "./routes/ResponsibilitiesPage";
 import WorkspaceLayout from "./routes/WorkspaceLayout";
 import EquipmentRequestPage from "./features/equipment/pages/EquipmentRequestPage";
+import EquipmentCataloguePage from "./features/equipment/pages/EquipmentCataloguePage";
 import TechnicalSupportDashboardPage from "./features/equipment/pages/TechnicalSupportDashboardPage";
 import VenueRoutes from "./features/venues/VenueRoutes";
 import EventRequestPage from "./features/events/pages/EventRequestPage";
 import AssignmentQueuePage from "./features/events/pages/AssignmentQueuePage";
+import EventWorkspacePage from "./features/events/pages/EventWorkspacePage";
+import EventWorkspaceDetailPage from "./features/events/pages/EventWorkspaceDetailPage";
 import EventListPage from "./features/registrations/pages/EventListPage";
 import EventDetailPage from "./features/registrations/pages/EventDetailPage";
 import MyRegistrationsPage from "./features/registrations/pages/MyRegistrationsPage";
@@ -29,7 +32,7 @@ function Home() {
 
 export default function App() {
   const location = useLocation();
-  const fullWorkspace = location.pathname === "/venues" || location.pathname.startsWith("/venues/") || location.pathname.startsWith("/equipment/") || location.pathname === "/technical-support" || location.pathname === "/events/assignments";
+  const fullWorkspace = ["/venues", "/equipment", "/technical-support", "/assigned-events", "/my-event-requests", "/event-management", "/events/assignments"].some(path => location.pathname === path || location.pathname.startsWith(path + "/"));
   return (
     <AuthProvider>
       <div className="app-shell">
@@ -47,10 +50,24 @@ export default function App() {
             <Route path="/sign-in" element={<SignInPage />} />
             <Route element={<RequireAuth />}>
               <Route element={<WorkspaceLayout />}>
-                <Route path="/events" element={<EventListPage />} />
-                <Route path="/events/:eventId" element={<EventDetailPage />} />
-                <Route path="/registrations/me" element={<MyRegistrationsPage />} />
-                <Route path="/registrations/me/:registrationId" element={<RegistrationDetailPage />} />
+                <Route element={<RequirePermission permission="events.browse" />}>
+                  <Route path="/events" element={<EventListPage />} />
+                  <Route path="/events/:eventId" element={<EventDetailPage />} />
+                </Route>
+                <Route element={<RequirePermission permission="registrations.manage" />}>
+                  <Route path="/registrations/me" element={<MyRegistrationsPage />} />
+                  <Route path="/registrations/me/:registrationId" element={<RegistrationDetailPage />} />
+                </Route>
+                {[
+                  ["events.own.read", "my-event-requests", "organiser"],
+                  ["events.assigned.read", "assigned-events", "coordinator"],
+                  ["events.review", "event-management", "manager"],
+                ].map(([permission, path, scope]) => (
+                  <Route key={path} element={<RequirePermission permission={permission} />}>
+                    <Route path={`/${path}`} element={<EventWorkspacePage scope={scope} />} />
+                    <Route path={`/${path}/:eventId`} element={<EventWorkspaceDetailPage scope={scope} />} />
+                  </Route>
+                ))}
                 <Route path="/account" element={<AccountPage />} />
                 <Route element={<RequirePermission permission="events.submit" />}>
                   <Route path="/events/new" element={<EventRequestPage />} />
@@ -61,6 +78,9 @@ export default function App() {
                   </Route>
                   <Route element={<RequirePermission permission="equipment.request" />}>
                     <Route path="/equipment/requests" element={<EquipmentRequestPage />} />
+                  </Route>
+                  <Route element={<RequirePermission permission="equipment.read" />}>
+                    <Route path="/equipment/catalogue" element={<EquipmentCataloguePage />} />
                   </Route>
                   <Route element={<RequirePermission permission="equipment.review" />}>
                     <Route path="/technical-support" element={<TechnicalSupportDashboardPage />} />
