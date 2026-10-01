@@ -6,7 +6,7 @@ module.exports = function registrationEventRoutes(dataClient) {
     if (!dataClient) return res.status(503).json({ message: "This feature is not yet configured." });
     const { data: events, error } = await dataClient
       .from("events")
-      .select("id, name, description, start_time, status")
+      .select("id, name, description, start_time, status, enrolled_attendees, expected_attendance")
       .eq("status", "APPROVED")
       .order("start_time", { ascending: true });
     if (error) {
@@ -21,7 +21,7 @@ module.exports = function registrationEventRoutes(dataClient) {
     if (!dataClient) return res.status(503).json({ message: "This feature is not yet configured." });
     const { data: event, error } = await dataClient
       .from("events")
-      .select("id, name, purpose, description, start_time, end_time, expected_attendance, status, registration_fields")
+      .select("id, name, purpose, description, start_time, end_time, enrolled_attendees, expected_attendance, status, registration_fields")
       .eq("id", req.params.eventId)
       .eq("status", "APPROVED")
       .maybeSingle();

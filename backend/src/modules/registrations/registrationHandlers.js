@@ -1,4 +1,20 @@
 const express = require("express");
+const {
+  claimRegistrationSeat,
+  releaseClaimedSeat,
+  releaseRegistrationSeat,
+} = require("./registrationSeats");
+
+const FULL_MESSAGE =
+  "This event has reached or exceeded capacity. Registration is unavailable; waiting-list redirection is pending implementation.";
+const BUSY_MESSAGE =
+  "Registration is busy right now. Please retry.";
+
+function logSeatReleaseFailure(message, result) {
+  if (result.error || result.exhausted || !result.released) {
+    console.error(message, result.error?.message || "compare-and-set did not update a row");
+  }
+}
 
 module.exports = function registrationRoutes(dataClient) {
   const router = express.Router();
@@ -17,7 +33,7 @@ module.exports = function registrationRoutes(dataClient) {
 
     const { data: event, error: eventError } = await dataClient
       .from("events")
-      .select("id, status, registration_fields")
+      .select("id, status, registration_fields, enrolled_attendees, expected_attendance")
       .eq("id", eventId)
       .maybeSingle();
 
@@ -50,6 +66,21 @@ module.exports = function registrationRoutes(dataClient) {
       return res.status(409).json({ message: "You are already registered for this event." });
     }
 
+    const claim = await claimRegistrationSeat(dataClient, eventId, event);
+    if (claim.status === "full") {
+      return res.status(409).json({ message: FULL_MESSAGE });
+    }
+    if (claim.status === "busy") {
+      return res.status(503).json({ message: BUSY_MESSAGE });
+    }
+    if (claim.status === "missing") {
+      return res.status(404).json({ message: "Event not found." });
+    }
+    if (claim.status === "error") {
+      console.error("Registration seat claim error:", claim.error?.message);
+      return res.status(500).json({ message: "Unable to submit your registration. Please try again." });
+    }
+
     const { data: registration, error } = await dataClient
       .from("registrations")
       .insert({
@@ -62,6 +93,15 @@ module.exports = function registrationRoutes(dataClient) {
       .single();
 
     if (error) {
+      try {
+        const release = await releaseClaimedSeat(dataClient, eventId, claim.enrolled);
+        logSeatReleaseFailure("Registration seat release failed:", release);
+      } catch (releaseError) {
+        console.error(
+          "Registration seat release failed:",
+          releaseError instanceof Error ? releaseError.message : String(releaseError),
+        );
+      }
       if (error.code === "23505") return res.status(409).json({ message: "You are already registered for this event." });
       console.error("Registration insert error:", error.message);
       return res.status(500).json({ message: "Unable to submit your registration. Please try again." });
@@ -108,7 +148,7 @@ module.exports = function registrationRoutes(dataClient) {
   router.patch("/:registrationId/withdraw", async (req, res) => {
     const { data: existing, error: fetchError } = await dataClient
       .from("registrations")
-      .select("id, status, events(start_time)")
+      .select("id, event_id, status, events(start_time)")
       .eq("id", req.params.registrationId)
       .eq("attendee_id", req.user.id)
       .maybeSingle();
@@ -140,12 +180,30 @@ module.exports = function registrationRoutes(dataClient) {
       .update({ status: "withdrawn" })
       .eq("id", req.params.registrationId)
       .eq("attendee_id", req.user.id)
+      .eq("status", existing.status)
       .select()
       .single();
 
     if (error) {
+      if (error.code === "PGRST116") {
+        return res.status(409).json({ message: "This registration has already changed." });
+      }
       console.error("Registration withdraw error:", error.message);
       return res.status(500).json({ message: "Unable to withdraw your registration. Please try again." });
+    }
+
+    // New registrations begin as pending and hold a seat. Confirmed rows are
+    // also counted, but this endpoint already prevents withdrawing them.
+    if (existing.status === "pending") {
+      try {
+        const release = await releaseRegistrationSeat(dataClient, existing.event_id);
+        logSeatReleaseFailure("Withdrawn registration seat release failed:", release);
+      } catch (releaseError) {
+        console.error(
+          "Withdrawn registration seat release failed:",
+          releaseError instanceof Error ? releaseError.message : String(releaseError),
+        );
+      }
     }
 
     res.json({ registration });

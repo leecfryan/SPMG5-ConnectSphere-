@@ -5,6 +5,8 @@
 .event-list__name { display: block; font-weight: 600; font-size: 15px; color: #152c37; margin-bottom: 5px; }
 .event-list__date { display: inline-block; font-size: 12px; font-weight: 600; color: #426e60; letter-spacing: 0.2px; margin-bottom: 6px; }
 .event-list__desc { font-size: 13px; color: #61716f; line-height: 1.55; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.event-list__availability { display: block; margin-top: 8px; font-size: 12px; font-weight: 600; color: #426e60; }
+.event-list__availability.is-full, .event-meta__item.is-full { color: #97372c; }
 
 /* Registration list */
 .registration-list { list-style: none; padding: 0; margin: 24px 0 0; display: flex; flex-direction: column; gap: 8px; }

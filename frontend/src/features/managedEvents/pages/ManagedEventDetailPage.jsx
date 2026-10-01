@@ -40,6 +40,7 @@ export default function ManagedEventDetailPage() {
   }
 
   const summary = result.summary;
+  const isFull = Number.isInteger(summary.maxEnrollment) && summary.enrolled >= summary.maxEnrollment;
   return (
     <section className="card" aria-labelledby="managed-event-title">
       <Link to="/events/managed" className="back-link">Back to my events</Link>
@@ -48,9 +49,10 @@ export default function ManagedEventDetailPage() {
       <dl className="account-details">
         <div>
           <dt>Current Registrations</dt>
-          {/* expected_attendance is the organiser's expected headcount, not a hard
-              capacity, and it is nullable. "-" says "not stated" rather than 0. */}
-          <dd>{summary.enrolled}/{summary.maxEnrollment ?? "-"}</dd>
+          <dd>
+            {summary.enrolled}/{summary.maxEnrollment ?? "-"}
+            {isFull && <span className="status-badge status-full"> Full</span>}
+          </dd>
         </div>
         <div>
           <dt>Waiting List</dt>

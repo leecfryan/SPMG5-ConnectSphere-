@@ -102,13 +102,20 @@ Merging or restarting Docker does not apply Supabase migrations automatically.
 
 Event Organisers and Event Coordinators can open `/events/managed` from the
 workspace to list the events they own or manage, and open one to see
-"Current Registrations: X/MaxEnrollment" and "Waiting List: Y". Ownership is
-checked in the server-side query, and an event belonging to someone else is
-indistinguishable from one that does not exist. Attendee identity and submitted
-registration data are never returned. The Waiting List reads 0 until the
-waitlist story adds its status. See
+"Current Registrations: X/MaxEnrollment" and "Waiting List: Y". Registration
+uses `expected_attendance` as a hard cap and stops when the cap is reached;
+the pages mark full events. Full-event responses mention that waiting-list
+redirection is pending implementation, but there is no waitlist or redirect yet.
+Ownership is checked in the server-side query, and an event belonging to
+someone else is indistinguishable from one that does not exist. Attendee identity
+and submitted registration data are never returned. The Waiting List reads 0
+until the waitlist story adds its status. See
 [managed event registrations](docs/managed-event-registrations.md) for the
 permissions, the columns and the test commands.
+
+The opt-in live Supabase capacity suite is documented in
+[Registration integration](docs/registration-integration.md); it creates and
+cleans up only uniquely identified temporary test events.
 
 ## Frontend navigation
 

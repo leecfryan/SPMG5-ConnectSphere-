@@ -16,7 +16,7 @@ sent to `/forbidden` if they type the URL.
 ## What the detail page shows
 
 ```
-Current Registrations: X/MaxEnrollment
+Current Registrations: X/MaxEnrollment (Full when X reaches the cap)
 Waiting List: Y
 ```
 
@@ -31,19 +31,31 @@ from the `events` table. **`docs/event-requests.md` does not list
 `enrolled_attendees`** in its copy of the schema; that document is out of date
 and the live Supabase schema is the source of truth.
 
-`expected_attendance` is the organiser's *expected* headcount, not a hard
-capacity. Nothing rejects a registration once it is reached. The label
-"MaxEnrollment" is this feature's display name for the column, not a limit the
-system enforces.
+For registration capacity, `expected_attendance` is now treated as the event's
+hard cap. Event organisers should set it to the maximum number of registrations
+the event can accept. A null value means no cap is configured; zero means the
+event is full immediately. The managed-event list and detail page show the
+current count against this cap and mark a full event.
+
+Registration uses a server-side compare-and-set update of
+`events.enrolled_attendees` before inserting the registration. Concurrent
+attempts retry up to three times. A full event returns 409; its message says
+waiting-list redirection is pending implementation, but no redirect or waitlist
+is currently provided. Both `pending` and `confirmed` registrations occupy a
+seat; new registrations are inserted as `pending`. Failed inserts attempt a
+guarded counter rollback, and withdrawing a pending registration attempts a
+guarded decrement. Confirmed registrations cannot be withdrawn by the current
+flow.
 
 ## The waiting list is 0 until the waitlist story lands
 
-There is no waitlist concept in the data yet. `registrations.status` is
-constrained to `pending`, `confirmed` and `withdrawn`, and nothing writes
-`waitlisted`. The service counts rows with that status through
+There is no waitlist concept in the application yet. Registration writes
+`pending`, while `confirmed` and `withdrawn` are handled by the existing
+workflow; nothing writes `waitlisted`. The service counts rows with that status through
 `.select('id', { count: 'exact', head: true })`, so **the Waiting List reads 0
-for every event until the waitlist story is implemented and its migration adds
-the status to the check constraint.**
+for every event until the waitlist story is implemented. Full registrations
+are refused rather than queued. Implementing a waitlist will require a defined
+status and verified database support; this change does not modify Supabase.
 
 The status name is held in one constant, `WAITLIST_STATUS`, at the top of
 `managedEvents.service.js`, precisely so that a rename is a one-line change.

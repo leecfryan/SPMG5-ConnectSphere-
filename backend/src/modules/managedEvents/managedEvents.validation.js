@@ -27,9 +27,8 @@ function toCount(value) {
   return Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
-// expected_attendance is nullable too, and it is the organiser's expected
-// headcount rather than a hard capacity. Null is kept as null so the UI can
-// show "-" and tell "no expectation stated" apart from a real zero.
+// expected_attendance is nullable. It is the registration cap; null means
+// there is no configured cap, while zero means the event is already full.
 function toLimit(value) {
   return Number.isInteger(value) && value >= 0 ? value : null;
 }

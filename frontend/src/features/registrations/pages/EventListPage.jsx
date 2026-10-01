@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 import { useRegistrationResource } from "../hooks/useRegistrationResource";
+import { getRegistrationAvailability, registrationAvailabilityLabel } from "../registrationAvailability";
 
 function formatDate(iso) {
   if (!iso) return null;
@@ -23,19 +24,25 @@ export default function EventListPage() {
         <p>No events are currently open for registration.</p>
       ) : (
         <ul className="event-list" aria-label="Available events">
-          {events.map((event) => (
-            <li key={event.id}>
-              <Link to={`/events/${event.id}`} className="event-list__item">
-                <span className="event-list__name">{event.name}</span>
-                {event.start_time && (
-                  <span className="event-list__date">{formatDate(event.start_time)}</span>
-                )}
-                {event.description && (
-                  <p className="event-list__desc">{event.description}</p>
-                )}
-              </Link>
-            </li>
-          ))}
+          {events.map((event) => {
+            const availability = getRegistrationAvailability(event);
+            return (
+              <li key={event.id}>
+                <Link to={`/events/${event.id}`} className="event-list__item">
+                  <span className="event-list__name">{event.name}</span>
+                  {event.start_time && (
+                    <span className="event-list__date">{formatDate(event.start_time)}</span>
+                  )}
+                  {event.description && (
+                    <p className="event-list__desc">{event.description}</p>
+                  )}
+                  <span className={`event-list__availability${availability.isFull ? " is-full" : ""}`}>
+                    {registrationAvailabilityLabel(event)}
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>

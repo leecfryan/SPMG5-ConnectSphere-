@@ -46,7 +46,8 @@ export default function ManagedEventsPage() {
                   <span className="event-list__date">{formatDate(event.start_time)}</span>
                 )}
                 <span className="event-list__desc">
-                  {event.status} · {event.enrolled} registered
+                  {event.status} · {event.enrolled}/{event.maxEnrollment ?? "-"} registered
+                  {isAtCapacity(event) && " · Full"}
                 </span>
               </Link>
             </li>
@@ -55,6 +56,10 @@ export default function ManagedEventsPage() {
       )}
     </section>
   );
+}
+
+function isAtCapacity(event) {
+  return Number.isInteger(event.maxEnrollment) && event.enrolled >= event.maxEnrollment;
 }
 
 function formatDate(iso) {
