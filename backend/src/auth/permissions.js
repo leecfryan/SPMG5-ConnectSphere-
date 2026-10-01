@@ -28,6 +28,8 @@ const policies = Object.freeze({
     roles: ["technical_support_staff", "event_coordinator"],
   },
   "events.assign_coordinator": { roles: ["event_ops_manager"] },
+  // SCRUM-98/99: only the event's assigned coordinator reviews and decides it (discussions #80, #101).
+  "events.decide": { roles: ["event_coordinator"], record: true },
   "internal.access": {
     roles: [
       "event_coordinator",

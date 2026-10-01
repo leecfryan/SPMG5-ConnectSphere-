@@ -11,6 +11,7 @@ const equipmentRoutes = require("./routes/equipment.routes");
 const createEventsRoutes = require("./routes/events.routes");
 const createAssignmentsRoutes = require("./routes/assignments.routes");
 const createEventWorkspaceRoutes = require("./routes/eventWorkspace.routes");
+const createReviewRoutes = require("./routes/review.routes");
 
 function createApp({ authClient, dataClient, eventsRepository, assignmentDependencies, venuesService, equipmentDependencies, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
   const app = express();
@@ -40,6 +41,7 @@ function createApp({ authClient, dataClient, eventsRepository, assignmentDepende
     res.json({ responsibilities: getResponsibilities(req.user.roles) });
   });
   app.use("/api/internal", createAssignmentsRoutes(assignmentDependencies));
+  app.use("/api/internal", createReviewRoutes(eventsRepository));
   app.use("/api/venues", authenticate, requirePermission("internal.access"), createVenuesRoutes(venuesService));
   app.use(errorHandler);
   return app;
