@@ -1,7 +1,7 @@
 # Event Status Lifecycle — Test Documentation
 
 **Deliverable evidence for SCRUM-97 (Progress an event through its status lifecycle), epic Event Lifecycle &
-Approval.** Branch: `feature/eventLifecycleStatus` · **15 documented cases, 43 automated tests, all passing**
+Approval.** SCRUM-98 (review) and SCRUM-99 (approve) are in §8. Branch: `feature/eventLifecycleStatus` · **15 documented cases, 43 automated tests, all passing**
 — 34 backend unit, 9 frontend component, plus 1 manual database case.
 
 Story context — the eight statuses, the permitted moves, who sets each status and the schema change — is in
@@ -53,7 +53,7 @@ data*. One extra test (the lifecycle is frozen, §3) guards the rules themselves
 | Layer | File | Tests | Pre-conditions for every case in that file |
 | --- | --- | --- | --- |
 | Lifecycle (unit) | `backend/tests/unit/events/lifecycle.test.js` | 28 | None. `lifecycle.js` is pure; it is loaded with `createRequire`. Expected statuses and moves are **typed into the test from the agreed lifecycle table**, not read back from the module, so a wrong edit to `TRANSITIONS` goes red. |
-| Repository (unit) | `backend/tests/unit/events/events.transition.test.js` | 6 | `recorder()` stubs Supabase with a Proxy that records every query-builder call and resolves to a chosen `{ data, error }`. Modules are reset before each test. |
+| Repository (unit) | `backend/tests/unit/events/events.transition.test.js` | 8 (2 added with SCRUM-98, §8) | `recorder()` stubs Supabase with a Proxy that records every query-builder call and resolves to a chosen `{ data, error }`. Modules are reset before each test. |
 | Component (frontend) | `frontend/src/features/events/components/StatusBadge.test.jsx` | 9 | jsdom; `StatusBadge` rendered on its own; `cleanup` after each test. |
 
 ---
@@ -129,14 +129,10 @@ One test was renamed during review: the backward-move test claimed "from review 
 
 ## 7. Gaps, and why they are gaps
 
-**No user action moves an event past `SUBMITTED` yet.** AC2's "consequence of an action a permitted user
-performed" needs the actions themselves: review (SCRUM-98) and approve/reject (SCRUM-99). Until then AC2 is
-proven at the foundation — status can't be edited freely, and the only writer checks the lifecycle and is
-race-safe — not through an endpoint with a permission guard. Those stories add integration tests for 401 / 403 /
-404 / 409 on each action.
-
-**Invalid moves are refused in code, not yet through the app.** TC-03 to TC-09 prove the rule. The API-level
-refusal (409 on, say, approving an event that is still `SUBMITTED`) arrives with SCRUM-99's endpoint.
+**AC2 and AC3 through the app arrive with SCRUM-98/99 (§8).** Start review, approve and reject are the first
+user actions that move an event past `SUBMITTED`, each behind a permission and a record check, with 401 / 403 /
+404 / 409 integration tests. Cancel, confirm and complete have no action yet, so those moves are proven only at
+unit level (TC-02 to TC-09).
 
 **The coordinator can't see status yet.** The badge appears on the organiser's request page and the Operations
 Manager's assignment queue and detail panel. The coordinator's own views are SCRUM-98. No Playwright case checks
@@ -149,10 +145,82 @@ through the code.
 
 ---
 
-## 8. Requirements sources
+## 8. SCRUM-98 and SCRUM-99 — review and approve
+
+**Server actions built (2026-10-01).** The coordinator's read views, the decision UI, venue/equipment eligibility
+and the Playwright journey are later slices; their cases are listed as *Not yet automated*.
+
+> **SCRUM-98:** As an Event Coordinator, I want to review the full contents of a submitted event request so that I
+> can decide whether planning should proceed.
+>
+> 1. The assigned Event Coordinator can open a submitted request and see all information supplied by the Event
+>    Organiser.
+> 2. The request moves to an 'under review' state when review begins.
+> 3. The reviewing coordinator and the review outcome are recorded against the event.
+> 4. A coordinator not assigned to the event cannot record a review outcome for it.
+>
+> **SCRUM-99:** As an Event Coordinator, I want to approve a request once it contains sufficient information, so
+> that venue and equipment planning can begin.
+>
+> 1. Approval moves the event into planning and makes it eligible for venue and equipment arrangements.
+> 2. Approval does not commit ConnectSphere to any venue, equipment, technical support or registration arrangement.
+> 3. The approval decision, the approver and the time of approval are visible to the relevant users.
+
+| Layer | File | Pre-conditions |
+| --- | --- | --- |
+| Service (unit) | `backend/tests/unit/events/review.service.test.js` | Fake repository; clock fixed at `2026-10-01T02:00:00.000Z` |
+| Repository (unit) | `backend/tests/unit/events/events.transition.test.js` | `recorder()` as in §2 |
+| HTTP (integration) | `backend/tests/integration/events.review.test.js` | Real `createApp`; `authClient.getUser` faked (token = `<user id>:<roles>`); repository faked by an in-memory event `aaaaaaaa-0001-…`, `SUBMITTED`, assigned to `coord-assigned`, whose update honours the same status and coordinator filters as the real one |
+
+| ID | AC | Type | Scenario | Test data | Expected result | Automated test | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-98-01 | 98-1 | Happy | Assigned coordinator opens their submitted event | — | Every organiser-supplied field shown | Not yet automated (slice 3) | — |
+| TC-SCRUM-98-02 | 98-1 | Negative | Another coordinator opens it | — | 403 | Not yet automated (slice 3) | — |
+| TC-SCRUM-98-03 | 98-1, 98-4 | Negative | Any other role calls the review actions | `event_ops_manager`, `event_organiser`, `venue_staff`, `technical_support_staff`, `attendee`, `unknown` × the 3 actions | 403; nothing written | `SCRUM-98 AC4: %s cannot start, approve or reject a review` (×6) | 2026-10-01 · pass · local |
+| TC-SCRUM-98-04 | 98-1 | Failure | No or invalid session | no token, `invalid` × the 3 actions | 401 | `SCRUM-98: an unauthenticated caller (%j) reaches no review action` (×2) | 2026-10-01 · pass · local |
+| TC-SCRUM-98-05 | 98-2 | Happy | Assigned coordinator starts review | `POST …/start-review` | 200; `UNDER_REVIEW`; write filtered on `SUBMITTED` and the caller | `SCRUM-98 AC2: the assigned coordinator starts review and the event is UNDER_REVIEW`; `SCRUM-98 AC2: starting review moves SUBMITTED to UNDER_REVIEW for the calling coordinator only` | 2026-10-01 · pass · local |
+| TC-SCRUM-98-06 | 98-2 | Conflict | Start review twice | second `start-review` | 409 with the refresh message; still `UNDER_REVIEW` | `SCRUM-98 AC2 conflict: starting review twice is a 409 and changes nothing` | 2026-10-01 · pass · local |
+| TC-SCRUM-98-07 | 98-2 | Negative | Assignment does not start review | — | Status stays `SUBMITTED` (#95) | Existing SCRUM-26 tests in [Coordinator assignment tests](event-assignment-tests.md) | 2026-10-01 · pass · local |
+| TC-SCRUM-98-08 | 98-3 | Happy | Reject with a reason | `{ note: "Attendance numbers are missing" }` | 200; `REJECTED`, `decided_by` = caller, `decided_at` = server clock, reason trimmed | `SCRUM-98 AC3: rejecting with a reason records REJECTED, the reviewer and the reason`; `SCRUM-98 AC3: rejecting records the reviewer, the time and the trimmed reason` | 2026-10-01 · pass · local |
+| TC-SCRUM-98-09 | 98-3 | Boundary | Reject without a reason | `{}`, `""`, `"   "` (HTTP); also `undefined`, `null`, `42` (unit) | 400 "Give a reason for rejecting this request."; still `UNDER_REVIEW`; no write | `SCRUM-98 boundary: rejecting without a reason (%j) is a 400 and changes nothing` (×3); `SCRUM-98 boundary: a rejection without a written reason (%j) is refused before any write` (×5) | 2026-10-01 · pass · local |
+| TC-SCRUM-98-10 | 98-4 | Negative | Unassigned coordinator acts | `coord-other` × the 3 actions; plus an unknown and a malformed id | 403, same message each time; nothing written; `SUBMITTED` | `SCRUM-98 AC4: a coordinator not assigned to the event cannot record anything on it`; `SCRUM-98 AC4: an unknown or malformed event id gets the same 403, revealing nothing` | 2026-10-01 · pass · local |
+| TC-SCRUM-98-11 | 98-4 | Conflict | Reassigned between the access check and the write | the write finds `coordinator_id` changed | 409; no `decided_by` written; write filtered on `coordinator_id` | `SCRUM-98 AC4 conflict: an event reassigned after the access check records no outcome`; `SCRUM-98 AC4: with a coordinator given, the write also requires that coordinator to still hold the event` | 2026-10-01 · pass · local |
+| TC-SCRUM-98-12 | 98-3 | Negative | Body tries to set status, approver, time or coordinator | `{ status: "CONFIRMED", decided_by: "coord-other", decided_at: "2000-01-01…", coordinator_id: "coord-other" }` | `APPROVED`; server values kept | `SCRUM-98: status, decided_by and decided_at in the body are ignored; the server's values win` | 2026-10-01 · pass · local |
+| TC-SCRUM-98-13 | 98-3 | Failure | Event deleted after the access check | the write and the re-read find nothing | 404 | `SCRUM-98: an event deleted after the access check is a 404`; `SCRUM-98: a guarded write that matches nothing is not_found when the event is gone` | 2026-10-01 · pass · local |
+| TC-SCRUM-98-14 | 98-3 | Failure | Storage fails | write error; access-check error; no storage configured | 500 safe message; 503 and nothing written; 503 | `SCRUM-98 failure: a storage error on the write is a safe 500`; `… during the access check is a 503 and nothing is written`; `… without storage configured, the actions answer 503` | 2026-10-01 · pass · local |
+| TC-SCRUM-99-01 | 99-1, 98-3 | Happy | Approve an event under review | `{ note: "All details supplied" }` | 200; `APPROVED`, `decided_by` = caller, `decided_at` set, note saved | `SCRUM-99 AC1/SCRUM-98 AC3: approving records APPROVED, the approver and the time`; `… approving records the approver, the time and no note` | 2026-10-01 · pass · local |
+| TC-SCRUM-99-02 | 99-1 | Conflict | Approve an event not under review | `SUBMITTED`; already `APPROVED` (approve and reject) | 409; status unchanged | `SCRUM-99 AC1 conflict: an event that is not under review cannot be approved`; `SCRUM-99 conflict: an approved event cannot be approved or rejected again`; `SCRUM-98 conflict: a guarded write that matches nothing is a conflict when the event still exists` | 2026-10-01 · pass · local |
+| TC-SCRUM-99-03 | 99-1 | Happy | Approved event listed for venue and equipment | — | Listed | Not yet automated (`fix/eventStatusAlignment`) | — |
+| TC-SCRUM-99-04 | 99-1 | Negative | Pre-approval event in venue/equipment | — | Not listed | Not yet automated (`fix/eventStatusAlignment`) | — |
+| TC-SCRUM-99-05 | 99-2 | Happy | Approval commits to nothing | approve | Only `decided_by`, `decided_at`, `decision_note` (and `status`) written; no other repository call | `SCRUM-99 AC2: approval writes only the decision columns` | 2026-10-01 · pass · local |
+| TC-SCRUM-99-06 | 99-3 | Happy | Organiser sees the decision | — | Decision, approver, time | Not yet automated (slice 4) | — |
+| TC-SCRUM-99-07 | 99-3 | Happy | Manager sees the decision | — | Decision, approver, time | Not yet automated (slice 4) | — |
+| TC-SCRUM-99-08 | 99-3 | Negative | Other organiser / unassigned coordinator | — | Can't see it | Not yet automated (slice 4) | — |
+| TC-SCRUM-99-09 | all | Happy | Submit → assign → start review → approve, end to end | — | Organiser sees "Approved – planning", approver and time | Not yet automated (slice 6) | — |
+| TC-SCRUM-99-10 | 99-1 | Boundary | Approval note handling | `"  Looks complete  "`, `"   "`; and `42`, `true`, an object, an array | Trimmed; blank stored as `null`; non-text refused with 400 before any write | `SCRUM-99: an approval note is trimmed, and a blank one is stored as none`; `SCRUM-99 boundary: an approval note that is not text (%j) is refused before any write` (×4); `SCRUM-99 boundary: an approval note that is not text is a 400` | 2026-10-01 · pass · local |
+
+**Coverage** (2026-10-01, `test:cov`, local): `review.service.js`, `review.controller.js` and `review.routes.js` are
+100% statements, branches and functions; the new coordinator branch of `transitionStatus` is covered both ways.
+
+**Test review.** Each case was checked against a plausible wrong implementation:
+
+| Mutation | Test that goes red |
+| --- | --- |
+| Drop the record check, or compare against the wrong id | TC-98-10 |
+| Drop `.eq("coordinator_id", …)` from the write | TC-98-11 (unit) |
+| Take `decided_by` from the body | TC-98-12 |
+| Allow `SUBMITTED → APPROVED` | TC-99-02 |
+| Let a blank reason through | TC-98-09 |
+| Write anything besides the decision columns on approve | TC-99-05 |
+
+TC-SCRUM-98-13, 98-14 and 99-10 were added during build. They aren't in the original draft, but each is the
+failure or boundary path of an AC above.
+
+## 9. Requirements sources
 
 | Ref | What it says |
 | --- | --- |
 | **SCRUM-97** (backlog US-40) | Progress an event through its status lifecycle, 3 SP. AC in §1. |
 | Team-agreed lifecycle table | The 8 statuses and 10 permitted moves; recorded in `.agent/docs/architecture.md` §Database. `APPROVED` is the stored value for "approved / planning" because Registration and Venue already query it. |
-| **SCRUM-98**, **SCRUM-99** | Review and approve: the actions that use this lifecycle. See §7. |
+| **SCRUM-98**, **SCRUM-99** (backlog US-36, US-38) | Review and approve: the actions that use this lifecycle. See §8. |
+| Discussions #80, #94, #95, #101, #125 | The assigned coordinator decides; the manager only assigns; assignment doesn't start review; `decided_by` kept apart from `coordinator_id`; who sees the outcome |

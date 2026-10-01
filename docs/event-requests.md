@@ -66,6 +66,9 @@ create table events (
   organiser_id        uuid not null,
   coordinator_id      uuid,        -- set by coordinator assignment
   submitted_at        timestamptz,
+  decided_by          uuid,        -- SCRUM-98/99: coordinator who approved or rejected
+  decided_at          timestamptz, -- SCRUM-98/99: when
+  decision_note       text,        -- SCRUM-98/99: required on reject, optional on approve
   created_at          timestamptz not null default now()
 );
 ```
@@ -105,12 +108,12 @@ stateDiagram-v2
 | --- | --- | --- |
 | `DRAFT` | Draft | nothing (column default; US-13) |
 | `SUBMITTED` | Submitted | `createSubmitted`, at insert |
-| `UNDER_REVIEW` | Under review | not yet (SCRUM-98) |
-| `APPROVED` | Approved – planning | not yet (SCRUM-99); read by registration and venue |
+| `UNDER_REVIEW` | Under review | the assigned coordinator's *Start review* (SCRUM-98) |
+| `APPROVED` | Approved – planning | the assigned coordinator's *Approve* (SCRUM-99); read by registration and venue |
 | `CONFIRMED` | Confirmed | not yet (confirm story) |
 | `COMPLETED` | Completed | not yet (complete story) |
 | `CANCELLED` | Cancelled | not yet (cancel story) |
-| `REJECTED` | Rejected | not yet (reject story) |
+| `REJECTED` | Rejected | the assigned coordinator's *Reject* (SCRUM-98) |
 
 `COMPLETED`, `CANCELLED` and `REJECTED` are terminal. Any move not on the diagram
 is refused. After submission, `status` is written only by
@@ -141,6 +144,7 @@ one in.
 | `submitted_at` | `createSubmitted`, server clock |
 | `organiser_id` | the controller, from the verified session |
 | `coordinator_id` | coordinator assignment — see [Coordinator assignment](event-assignment.md) |
+| `decided_by`, `decided_at`, `decision_note` | the review actions (§Review and approval), from the verified session and server clock |
 | `created_at` | database default |
 | `registration_fields` | the registration feature |
 
@@ -163,6 +167,9 @@ Module at `backend/src/modules/events/`.
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
 | POST | /api/events | requireAuth + events.submit | Create and submit an event request |
+| POST | /api/internal/events/:eventId/start-review | requireAuth + internal.access + events.decide (assigned coordinator) | `SUBMITTED → UNDER_REVIEW` |
+| POST | /api/internal/events/:eventId/approve | same | `UNDER_REVIEW → APPROVED`; body `{ "note"?: string }` |
+| POST | /api/internal/events/:eventId/reject | same | `UNDER_REVIEW → REJECTED`; body `{ "note": string }` (required) |
 
 ### Rules enforced server-side
 
@@ -177,6 +184,49 @@ Module at `backend/src/modules/events/`.
   necessarily in the future itself.
 - A request either inserts one complete row or inserts nothing. There is no
   partial success.
+
+### Review and approval (SCRUM-98, SCRUM-99)
+
+`review.service.js`, `review.controller.js`, `routes/review.routes.js`. Only the
+event's **assigned coordinator** may act (discussions #80, #101); the Operations
+Manager assigns but does not decide. Assignment leaves the event `SUBMITTED`;
+review begins when the coordinator clicks *Start review* (#95).
+
+- `events.decide` is a `record: true` permission. The record check loads the
+  event and requires `coordinator_id` to be the caller. Someone else's event,
+  an unknown id and a malformed id all get the same 403, so existence is not
+  revealed.
+- Each action is one conditional update through `transitionStatus`, filtered on
+  the expected status **and** `coordinator_id`. If the event moved on or was
+  reassigned in between, nothing is written and the answer is 409.
+- Approve and reject record `decided_by` (the caller), `decided_at` (server
+  clock) and `decision_note` (trimmed; blank is stored as `null`). `decided_by`
+  is kept apart from `coordinator_id` so a later reassignment does not rewrite
+  who decided (#94).
+- Approval writes nothing else: no venue booking, equipment request or
+  registration change (SCRUM-99 AC2).
+- `REJECTED` is final; there is no resubmission (#67, team proposal).
+
+| Status | When | Message |
+| --- | --- | --- |
+| 200 | Done | `{ event }`, the updated row |
+| 400 | Reject without a reason | "Give a reason for rejecting this request." |
+| 400 | Approval note that is not text | "The note must be text." |
+| 401 | No or invalid session | "Please sign in to continue." |
+| 403 | Not a coordinator, or not this event's coordinator | "You do not have permission to access this information." |
+| 404 | Event deleted after the access check | "That event request no longer exists." |
+| 409 | Wrong status, or reassigned meanwhile | "This event request has changed since you opened it. Refresh to see its current status." |
+| 503 | The access check could not reach storage | "Unable to check access. Please try again." |
+
+**Schema reference.** The three decision columns are added by hand in the
+Supabase SQL editor (no migration file):
+
+```sql
+alter table public.events
+  add column if not exists decided_by uuid,
+  add column if not exists decided_at timestamptz,
+  add column if not exists decision_note text;
+```
 
 ### Request
 
