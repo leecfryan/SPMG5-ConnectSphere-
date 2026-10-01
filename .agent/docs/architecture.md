@@ -15,9 +15,9 @@ installs it, not the agent.
 | Routing | React Router 7 (`react-router`), declarative `<Routes>` in `App.jsx` | `BrowserRouter` is mounted once in `main.jsx` |
 | Backend | Node 22 + Express 5, CommonJS (`require` / `module.exports`) | `cors`, `dotenv`; `nodemon` for dev |
 | Auth | Supabase Auth, email + password (`@supabase/supabase-js`) | Browser SDK signs in; Express verifies each token with `auth.getUser` |
-| Database | Supabase Postgres (cloud) | Accessed only from the backend. Schema changed by hand in the dashboard; existing RBAC SQL reference 007 is retained |
+| Database | Supabase Postgres (cloud) | Accessed only from the backend. Schema changed by hand in the dashboard; SQL recorded in each lane guide's *Schema reference*, no migration files |
 | Unit / integration tests | Vitest 5 (backend and frontend), React Testing Library + user-event + jsdom on the frontend | A few older backend suites (`auth`, `permissions`, `equipment`) still run on `node:test`. Leave them; new tests use Vitest |
-| End-to-end tests | Playwright (root `package.json`), Chromium + direct HTTP API projects | Runs against a local Auth simulator; no cloud, no `.env` needed |
+| End-to-end tests | Playwright (root `package.json`), Chromium + direct HTTP API projects | `tests/playwright/` runs against a local Auth simulator; no cloud, no `.env` needed. `tests/e2e/` is a separate real-Supabase package, run by hand and not in CI; add new specs to `tests/playwright/` only |
 | Lint | ESLint (`backend/eslint.config.mjs`, `frontend/eslint.config.js`) | No Prettier. Match surrounding formatting by hand |
 | Local runtime | npm scripts, or Docker Compose (frontend :5173, backend :3000) | Supabase is never run locally |
 | CI | GitHub Actions on push / PR to `staging` | Frontend, backend (including live equipment integration), Docker build, Playwright |
@@ -193,11 +193,11 @@ only.
 
 ### Schema changes
 
-Do not create new migration files. RBAC's existing
-`supabase/migrations/007_event_review_and_assignment.sql` is retained as a SQL
-reference; earlier venue schema SQL now lives in `docs/venue-integration.md`.
-Tell the user every SQL change the
-story needs, with the exact SQL, and record it in the task note; the user makes it by hand in the Supabase dashboard.
+Do not create migration files. No `supabase/` folder or migration `.sql` file is committed: hand-applied SQL is
+recorded in a *Schema reference* section of the lane's guide in `docs/` (precedent: the venue SQL in
+`docs/venue-integration.md`). The isolated `tests/sql/` harness builds its own fixtures and must not depend on a
+migration file. Tell the user every SQL change the
+story needs, with the exact SQL, and record it in the task note and the lane guide; the user makes it by hand in the Supabase dashboard.
 The agent never runs it. The user tells teammates before the change and again once it's made, because everyone
 shares the database.
 

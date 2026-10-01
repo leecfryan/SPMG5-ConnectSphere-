@@ -1,6 +1,6 @@
 # UI reference
 
-The frontend as it is on `Staging`: the shell, the three layout modes, the palette, shared classes and components,
+The frontend as it is on `staging`: the shell, the three layout modes, the palette, shared classes and components,
 and the patterns every screen follows. Route-by-route behaviour lives in
 [../../docs/frontend-routing.md](../../docs/frontend-routing.md).
 
