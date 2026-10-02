@@ -2,13 +2,13 @@
 
 **Backlog ID:** US-<n> · **Epic:** <epic> · **Lane:** <lane> · **Points:** <sp> · **Assignee:** <name>
 **Branch:** `feature/<threeWordSummary>` or `fix/<threeWordSummary>` · **Mode:** build | teach
-**State:** 📋 planned
+**State:** 📋 planned · **Jira status:** To Do | In Progress | In Review | Done
 
 ## Contract (word for word, as given by the user on <YYYY-MM-DD>)
 
-> **Story:** As a <role>, I want <goal> so that <benefit>.
+> **Story:** As a <role>, I want <goal>, so that <benefit>.
 >
-> **Acceptance criteria**
+> **Acceptance criteria** (checklist or Given / When / Then)
 > 1. …
 > 2. …
 
@@ -52,7 +52,9 @@ Interpretations of the AC and design choices, with the reason and who agreed.
 ## Touches
 
 - **Shared files:** <app.js / permissions.js / App.jsx / WorkspaceLayout.jsx / Playwright support, or none>
-- **Schema change (manual, no migration file):** <none, or the SQL. Added by user on <date>?>
+- **Schema change (manual, no migration file):** <none, or the SQL. Added by user on <date>? Copied to the lane
+  guide's *Schema reference*?>
+- **New files:** <none, or each path and why no existing file fit>
 - **New permission:** <none, or name + roles>
 - **New routes:** <frontend paths and API endpoints>
 
@@ -70,7 +72,8 @@ Interpretations of the AC and design choices, with the reason and who agreed.
 
 Plain-language walkthrough for the user and the Week 13 Q&A.
 
-- **AC → test → code:** <for each AC, which test proves it and where the code lives>
+- **AC → test → code:** <for each AC, which test case IDs (`TC-SCRUM-<n>-NN`) and tests prove it, and where the
+  code lives>
 - **Key decisions and tradeoffs:** <what was chosen, what else was considered, why>
 - **Likely instructor questions:** <three questions, each with a short answer>
 
