@@ -135,6 +135,21 @@ test("[SCRUM-20] A confirmed booking reduces availability, blocks a clashing req
   expect((await send(`/${venueId}/booking-requests`, "event_coordinator", "POST", { ...body, slots: ["pm"] })).status).toBe(201);
   expect(service.submitBookingRequest).toHaveBeenCalledTimes(1);
 });
+test("[SCRUM-102] A rejected request stays in the booking history with its reason, while its slot is freed", async () => {
+  const reason = "Held for the gala. Orchard Seminar Room 3 is free that morning.";
+  const rejected = { id: requestId, event, venue, booking_date: bookingDate, decision_note: reason, slots: [{ slot: "am", status: "rejected" }] };
+  service.listBookingRequests.mockResolvedValue([rejected]);
+  service.getBookingRequestById.mockResolvedValue(rejected);
+  const listed = await send("/booking-requests?status=rejected", "event_coordinator");
+  expect(listed.status).toBe(200);
+  const [only] = (await listed.json()).data;
+  expect(only).toMatchObject({ id: requestId, status: "rejected", decision_note: reason });
+  expect((await (await send(`/booking-requests/${requestId}`, "event_coordinator")).json()).data.decision_note).toBe(reason);
+  // Rejecting frees the slot without erasing the record: the request is still
+  // listed above, but only pending and confirmed bookings reach the calendar.
+  const calendar = await send(`/${venueId}/availability?from=${bookingDate}&to=${bookingDate}`);
+  expect((await calendar.json()).data.days[0].slots.am.status).toBe("available");
+});
 test("[VENUE-CONFIG-001] Missing venue storage leaves sign-in intact and returns a controlled error", async () => {
   const unconfigured = createApp({ authClient }).listen(0, "127.0.0.1");
   await once(unconfigured, "listening");

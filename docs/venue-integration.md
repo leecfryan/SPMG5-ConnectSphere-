@@ -94,11 +94,35 @@ unchanged and still pending, and a Refresh list action. On the coordinator side
 a slot that is already booked is shown with the event holding it and cannot be
 selected, and other slots on the same day stay bookable.
 
-The note is optional here. SCRUM-22 says Venue Staff *may* give a reason,
-information or a suggested alternative; SCRUM-102 will make a reason mandatory
-for rejections, which is a change to `validateDecision` alone, not a new column.
 A rejection records the decision and nothing else: any resulting booking change
 is made by the Event Coordinator, so no counter-offer is applied automatically.
+
+## Rejecting with a reason (SCRUM-102)
+
+A rejection must carry a reason. `validateDecision` refuses a `rejected`
+decision whose note is missing, null, not text, or only whitespace, and returns
+400 before anything is written. Approving still needs no note, because no
+acceptance criterion has asked staff to justify a yes. That one function is the
+only place the rule lives.
+
+The suggested alternative shares the same note rather than having a column of
+its own. SCRUM-102 says Venue Staff *may* attach a suggested venue or
+arrangement, which free text satisfies, and a separate column would mean a hand
+made schema change on a shared database plus a field in four layers that nothing
+queries. If the team ever needs to report on alternatives separately, that is a
+new story and a new column.
+
+The note is trimmed and stored in `decision_note`, returned by both request
+endpoints and shown in the Decision block on the request card, so the requesting
+coordinator reads the reason and the suggestion without a separate conversation.
+In the reject form the reason is required: Confirm rejection stays disabled
+until something is typed, and the hint says so.
+
+A rejected request stays in the booking history. `listBookingRequests` applies
+no status filter, so the Rejected and All filters still show it with its reason.
+Its slot rows leave the calendar, because only pending and confirmed bookings
+are drawn. That is the intended split: rejecting frees the slot without erasing
+the record of what was asked for and why it was refused.
 
 ## Database deployment
 
