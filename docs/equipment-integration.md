@@ -188,12 +188,12 @@ it writes to a real development database:
 ## Assignment and access update
 
 Coordinator request pickers and new equipment requests require an assigned event
-in `ACCEPTED` or `APPROVED` state. Technical staff retain all equipment bookings,
+in `APPROVED` or `CONFIRMED` state (`PLANNING_STATUSES` in `events/lifecycle.js`). Technical staff retain all equipment bookings,
 as agreed; a venue + technical account combines both booking workspaces.
 They do not gain general event planning or attendee browsing. See
 [event access](event-access.md) for manager assignment and deployment requirements.
 
-The live availability suite supplies an accepted event in its relationship
+The live availability suite supplies an approved event in its relationship
 fixture so equipment rejection tests reach the availability checks rather than
 passing on the earlier event-status rejection. Those tests assert the rejection
 message as well as HTTP 409.

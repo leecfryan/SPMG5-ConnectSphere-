@@ -10,7 +10,7 @@ const bookingDate = "2099-10-10";
 const venue = { id: venueId, name: "Across locations", is_active: true, capacity: 200,
   facilities: ["Projector"], accessibility_features: ["Lift"], room_layouts: ["Theatre"],
   operating_hours: Object.fromEntries(["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((day) => [day, { open: "08:00", close: "23:00" }])) };
-const event = { id: eventId, name: "Assigned conference", status: "ACCEPTED", start_time: "2099-10-10T00:00:00Z", end_time: "2099-10-10T15:00:00Z" };
+const event = { id: eventId, name: "Assigned conference", status: "APPROVED", start_time: "2099-10-10T00:00:00Z", end_time: "2099-10-10T15:00:00Z" };
 const body = { event_id: eventId, booking_date: bookingDate, slots: ["am"], expected_attendees: 100,
   room_layout: "Theatre", required_facilities: ["Projector"], accessibility_requirements: ["Lift"] };
 const service = Object.fromEntries(["listVenues", "getVenueById", "updateVenue", "listBookingsInRange", "listUnavailabilityInRange",
@@ -54,7 +54,7 @@ test("[ACCESS-VENUE-001] Availability hides event names from coordinators but pr
   expect(await staff.text()).toContain("Another coordinator private event");
 });
 
-test.each(["DRAFT", "SUBMITTED", "REJECTED"])("[ACCESS-VENUE-002] %s events cannot request venues", async status => {
+test.each(["DRAFT", "SUBMITTED", "UNDER_REVIEW", "REJECTED"])("[ACCESS-VENUE-002] %s events cannot request venues", async status => {
   service.getEventById.mockResolvedValue({ ...event, status });
   expect((await send(`/${venueId}/booking-requests`, "event_coordinator", "POST", body)).status).toBe(400);
   expect(service.submitBookingRequest).not.toHaveBeenCalled();

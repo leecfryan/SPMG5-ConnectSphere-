@@ -2,7 +2,7 @@ import { test, expect } from "vitest";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { STATUSES, TRANSITIONS, canTransition } = require("../../../src/modules/events/lifecycle");
+const { STATUSES, TRANSITIONS, ACTIVE_STATUSES, PLANNING_STATUSES, canTransition } = require("../../../src/modules/events/lifecycle");
 
 const AGREED_STATUSES = [
   "DRAFT",
@@ -89,4 +89,15 @@ test("SCRUM-97 AC2: the lifecycle cannot be changed at runtime", () => {
   expect(Object.isFrozen(STATUSES)).toBe(true);
   expect(Object.isFrozen(TRANSITIONS)).toBe(true);
   for (const next of Object.values(TRANSITIONS)) expect(Object.isFrozen(next)).toBe(true);
+});
+
+// Typed from the agreed lifecycle, not read back from the module.
+test("SCRUM-99 AC1: only approved and confirmed events are open to venue and equipment planning", () => {
+  expect([...PLANNING_STATUSES].sort()).toEqual(["APPROVED", "CONFIRMED"]);
+  expect(Object.isFrozen(PLANNING_STATUSES)).toBe(true);
+});
+
+test("SCRUM-98: active events are those submitted and not yet finished, rejected or cancelled", () => {
+  expect([...ACTIVE_STATUSES].sort()).toEqual(["APPROVED", "CONFIRMED", "SUBMITTED", "UNDER_REVIEW"]);
+  expect(Object.isFrozen(ACTIVE_STATUSES)).toBe(true);
 });

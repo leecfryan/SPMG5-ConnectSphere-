@@ -34,7 +34,7 @@ closed slots, date windows and AM/PM/Night handling. Catalogue and calendar acce
 are not restricted to an assigned venue or location. Coordinators see generic
 occupied-slot labels instead of other events' names; venue staff keep event labels.
 
-`GET /api/venues/booking-events` returns upcoming, accepted (`ACCEPTED` or `APPROVED`) events assigned to
+`GET /api/venues/booking-events` returns upcoming, approved (`APPROVED` or `CONFIRMED`, `PLANNING_STATUSES` in `events/lifecycle.js`) events assigned to
 the verified coordinator through the existing `events.coordinator_id` column.
 `POST /api/venues/:id/booking-requests` checks that same relationship, validates
 requirements and slot conflicts, and supplies the verified requester ID to the

@@ -14,7 +14,7 @@ test("[VENUE-DB-001] Both event lookup and picker constrain the real database qu
   expect(query.eq).toHaveBeenCalledWith("coordinator_id", "verified-coordinator");
   query.eq.mockClear();
   await service.listBookableEvents("verified-coordinator");
-  expect(query.in).toHaveBeenCalledWith("status", ["ACCEPTED", "APPROVED"]);
+  expect(query.in).toHaveBeenCalledWith("status", ["APPROVED", "CONFIRMED"]);
   expect(query.eq).toHaveBeenCalledWith("coordinator_id", "verified-coordinator");
 });
 test("[VENUE-DB-002] Booking list and direct lookup filter parents using the assigned event join", async () => {
