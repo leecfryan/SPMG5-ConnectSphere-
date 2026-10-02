@@ -34,13 +34,11 @@ row is ever written here.
 
 ## Role-scoped review and planning
 
-Organisers see their own requests; coordinators see only assigned accepted or
-open events. Managers can accept or reject submissions, assign coordinators,
-and explicitly open registration. Acceptance uses `ACCEPTED`, rejection uses
-`REJECTED`, and opening registration uses `APPROVED`. Only attendees can browse
-the registration catalogue. Apply migration 007 before deploying these changes.
+Organisers see their own requests; coordinators see only their assigned active
+events. Managers assign and reassign coordinators but do not decide: the assigned
+coordinator approves or rejects (SCRUM-98/99). Venue and equipment arrangements
+need an approved event. Only attendees can browse the registration catalogue.
 See [event access](event-access.md) for the complete workflow and API contract.
-The existing manager assignment queue remains available for compatibility.
 
 ## Database
 

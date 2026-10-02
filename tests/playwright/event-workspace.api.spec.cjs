@@ -4,8 +4,9 @@ const venueId = '11111111-1111-4111-8111-111111111111';
 
 test('[ACCESS-E2E-API-001] Real assignment, bookings and reassignment preserve responsibility scopes', async ({ accounts, request }) => {
   const { headers, event, first, second, date, update } = await setupWorkflow(accounts, request);
-  expect((await update('decision', { decision: 'accept' })).status()).toBe(200);
   expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
+  // Stands in for the assigned coordinator's approval (SCRUM-99); bookings need an approved event.
+  await accounts.updateEvent(event.id, { status: 'APPROVED' });
   const equipmentFields = { equipment_id: first.id, quantity_requested: 1, technical_requirement: 'HDMI', borrow_start: date + 'T01:00:00Z', borrow_end: date + 'T03:00:00Z' };
   const equipmentPath = `/api/events/${event.id}/equipment-requests`;
   const equipment = await request.post(equipmentPath, { headers: headers.first, data: equipmentFields });
@@ -35,15 +36,16 @@ test('[ACCESS-E2E-API-001] Real assignment, bookings and reassignment preserve r
   expect((await request.get(`/api/venues/booking-requests/${venueBookingId}`, { headers: headers.second })).status()).toBe(200);
 });
 
-test('[ACCESS-E2E-API-002] Registration remains unavailable until manager publication', async ({ accounts, request }) => {
+// SCRUM-98/99: the manager only assigns; approval is the coordinator's, and when
+// registration opens is the Registration lane's start time, not a manager action.
+test('[ACCESS-E2E-API-002] Assignment alone neither approves an event nor opens it to attendees', async ({ accounts, request }) => {
   const { event, first, headers, update } = await setupWorkflow(accounts, request);
   const register = () => request.post('/api/registrations', { headers: headers.attendee, data: { eventId: event.id, registrationData: {} } });
-  expect((await register()).status()).toBe(409);
-  expect((await update('decision', { decision: 'accept' })).status()).toBe(200);
   expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
+  const managerView = await request.get(`/api/event-workspace/manager/${event.id}`, { headers: headers.manager });
+  expect((await managerView.json()).event.status).toBe('SUBMITTED');
   expect((await request.get(`/api/events/${event.id}`, { headers: headers.attendee })).status()).toBe(404);
   expect((await register()).status()).toBe(409);
-  expect((await update('publication', { openRegistration: true })).status()).toBe(200);
-  expect((await request.get(`/api/events/${event.id}`, { headers: headers.attendee })).status()).toBe(200);
-  expect((await register()).status()).toBe(201);
+  expect((await update('decision', { decision: 'accept' })).status()).toBe(404);
+  expect((await update('publication', { openRegistration: true })).status()).toBe(404);
 });

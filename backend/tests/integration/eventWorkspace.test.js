@@ -12,8 +12,8 @@ async function setup(t) {
     id: randomUUID(), email: key + "@example.test", email_confirmed_at: "2026-01-01", app_metadata: { roles: values }, user_metadata: {},
   }]));
   const records = [
-    { id: randomUUID(), name: "First private event", status: "ACCEPTED", coordinator_id: users.first.id, organiser_id: users.organiser.id, other_comments: "Private planning" },
-    { id: randomUUID(), name: "Second private event", status: "ACCEPTED", coordinator_id: users.second.id, organiser_id: users.otherOrganiser.id },
+    { id: randomUUID(), name: "First private event", status: "APPROVED", coordinator_id: users.first.id, organiser_id: users.organiser.id, other_comments: "Private planning" },
+    { id: randomUUID(), name: "Second private event", status: "APPROVED", coordinator_id: users.second.id, organiser_id: users.otherOrganiser.id },
     { id: randomUUID(), name: "Submitted request", status: "SUBMITTED", coordinator_id: null, organiser_id: users.organiser.id },
   ];
   const accounts = new Map([[users.organiser.id, { events: records }]]);
@@ -73,20 +73,25 @@ test("[ACCESS-004] Venue and technical responsibilities do not grant full planni
   }
 });
 
-test("[WORKFLOW-001] Manager accepts, assigns and separately opens registration", async t => {
+// SCRUM-98/99: the manager assigns at SUBMITTED and the assigned coordinator
+// decides later (discussions #73, #80, #95, #101).
+test("[WORKFLOW-001] Manager assigns a submitted request; assignment alone neither starts review nor opens it to attendees", async t => {
   const { send, records, users } = await setup(t);
   const id = records[2].id;
-  expect((await send(`/event-workspace/${id}/coordinator`, "manager", "PATCH", { coordinatorId: users.first.id, expectedCoordinatorId: null })).status).toBe(409);
-  expect((await send(`/event-workspace/${id}/decision`, "manager", "PATCH", { decision: "accept" })).status).toBe(200);
-  expect(records[2].status).toBe("ACCEPTED");
-  expect((await send(`/events/${id}`, "attendee")).status).toBe(404);
-  expect((await send(`/event-workspace/${id}/publication`, "manager", "PATCH", { openRegistration: true })).status).toBe(409);
   expect((await send(`/event-workspace/${id}/coordinator`, "manager", "PATCH", { coordinatorId: users.first.id, expectedCoordinatorId: null })).status).toBe(200);
+  expect(records[2]).toMatchObject({ status: "SUBMITTED", coordinator_id: users.first.id });
   expect((await send(`/event-workspace/coordinator/${id}`, "first")).status).toBe(200);
-  expect((await send(`/event-workspace/${id}/publication`, "manager", "PATCH", { openRegistration: true })).status).toBe(200);
-  const published = await (await send(`/events/${id}`, "attendee")).json();
-  expect(JSON.stringify(published)).toContain("Submitted request");
-  expect(JSON.stringify(published)).not.toContain("coordinator_id");
+  expect((await send(`/event-workspace/coordinator/${id}`, "second")).status).toBe(404);
+  expect((await send(`/events/${id}`, "attendee")).status).toBe(404);
+});
+
+test("[WORKFLOW-007] The manager can no longer accept, reject or open registration", async t => {
+  const { send, records } = await setup(t);
+  const id = records[2].id;
+  expect((await send(`/event-workspace/${id}/decision`, "manager", "PATCH", { decision: "accept" })).status).toBe(404);
+  expect((await send(`/event-workspace/${id}/decision`, "manager", "PATCH", { decision: "reject" })).status).toBe(404);
+  expect((await send(`/event-workspace/${id}/publication`, "manager", "PATCH", { openRegistration: true })).status).toBe(404);
+  expect(records[2].status).toBe("SUBMITTED");
 });
 
 test("[WORKFLOW-002] Reassignment revokes the previous coordinator and stale assignments fail", async t => {
@@ -99,11 +104,11 @@ test("[WORKFLOW-002] Reassignment revokes the previous coordinator and stale ass
   expect((await send(`/event-workspace/coordinator/${records[0].id}`, "second")).status).toBe(200);
 });
 
-test("[WORKFLOW-003] Rejecting a request leaves it unavailable for assignment and attendees", async t => {
+test("[WORKFLOW-003] A rejected request is unavailable for assignment and attendees", async t => {
   const { send, records, users } = await setup(t);
   const id = records[2].id;
-  expect((await send(`/event-workspace/${id}/decision`, "manager", "PATCH", { decision: "reject" })).status).toBe(200);
-  expect((await send(`/event-workspace/${id}/decision`, "manager", "PATCH", { decision: "accept" })).status).toBe(409);
+  // Rejection is the assigned coordinator's action (SCRUM-98); set directly here.
+  records[2].status = "REJECTED";
   expect((await send(`/event-workspace/${id}/coordinator`, "manager", "PATCH", { coordinatorId: users.first.id, expectedCoordinatorId: null })).status).toBe(409);
   expect((await send(`/events/${id}`, "attendee")).status).toBe(404);
   expect((await (await send(`/event-workspace/organiser/${id}`, "organiser")).json()).event.status).toBe("REJECTED");
@@ -126,11 +131,10 @@ test("[WORKFLOW-004] Only verified active coordinators appear in the manager dir
   expect((await (await send("/event-workspace/coordinators")).json()).coordinators.map(row => row.id)).toEqual([users.first.id]);
 });
 
-test("[WORKFLOW-005] Non-managers cannot decide, publish, or self-assign an event", async t => {
+test("[WORKFLOW-005] Non-managers cannot assign or self-assign an event", async t => {
   const { send, records, users } = await setup(t);
   for (const user of ["first", "organiser", "attendee", "dual"]) {
-    for (const [action, body] of [["decision", { decision: "accept" }], ["publication", { openRegistration: true }],
-      ["coordinator", { coordinatorId: users.first.id, expectedCoordinatorId: null }]]) {
+    for (const [action, body] of [["coordinator", { coordinatorId: users.first.id, expectedCoordinatorId: null }]]) {
       expect((await send(`/event-workspace/${records[2].id}/${action}`, user, "PATCH", body)).status).toBe(403);
     }
   }
@@ -141,9 +145,7 @@ test("[WORKFLOW-005] Non-managers cannot decide, publish, or self-assign an even
 test("[WORKFLOW-006] Malformed IDs and forged lifecycle fields are rejected", async t => {
   const { send, records, users } = await setup(t);
   expect((await send("/event-workspace/manager/not-an-id")).status).toBe(400);
-  expect((await send(`/event-workspace/${records[2].id}/decision`, "manager", "PATCH", { decision: "accept", coordinator_id: "forged" })).status).toBe(400);
-  expect((await send(`/event-workspace/${records[2].id}/decision`, "manager", "PATCH", { decision: "APPROVED" })).status).toBe(400);
-  expect((await send(`/event-workspace/${records[2].id}/publication`, "manager", "PATCH", { openRegistration: "true" })).status).toBe(400);
+  expect((await send(`/event-workspace/${records[2].id}/coordinator`, "manager", "PATCH", { coordinatorId: users.first.id, expectedCoordinatorId: null, status: "APPROVED" })).status).toBe(400);
   expect((await send(`/event-workspace/${records[0].id}/coordinator`, "manager", "PATCH", { coordinatorId: [users.second.id], expectedCoordinatorId: users.first.id })).status).toBe(400);
 });
 

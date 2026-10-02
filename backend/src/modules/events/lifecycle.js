@@ -20,10 +20,18 @@ const TRANSITIONS = Object.freeze({
   REJECTED: Object.freeze([]),
 });
 
+// Events still in progress: counted in a coordinator's workload and open to
+// (re)assignment by the Operations Manager (discussions #94, #101).
+const ACTIVE_STATUSES = Object.freeze(["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED"]);
+
+// SCRUM-99 AC1: only approved (and later confirmed) events may have venue and
+// equipment arranged. Booking before approval is refused.
+const PLANNING_STATUSES = Object.freeze(["APPROVED", "CONFIRMED"]);
+
 function canTransition(from, to) {
   // hasOwn, not `in`: "toString" or "__proto__" must not read as a status.
   if (!Object.hasOwn(TRANSITIONS, from)) return false;
   return TRANSITIONS[from].includes(to);
 }
 
-module.exports = { STATUSES, TRANSITIONS, canTransition };
+module.exports = { STATUSES, TRANSITIONS, ACTIVE_STATUSES, PLANNING_STATUSES, canTransition };

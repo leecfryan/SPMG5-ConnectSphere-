@@ -1,17 +1,20 @@
 const { test, expect, signIn } = require('./support/fixtures.cjs');
 const { setupWorkflow } = require('./support/event-workspace-fixtures.cjs');
 
-test('[ACCESS-E2E-UI-001] Manager accepts and assigns through the UI; coordinators have separate workspaces', async ({ page, accounts, request }) => {
+test('[ACCESS-E2E-UI-001] Manager assigns through the UI; coordinators have separate workspaces', async ({ page, accounts, request }) => {
   const { manager, first, second, event, update } = await setupWorkflow(accounts, request);
   await page.goto('/event-management');
   await signIn(page, manager);
   await page.getByRole('link', { name: event.name, exact: true }).click();
   await expect(page.getByText('Private organiser notes')).toBeVisible();
-  await page.getByRole('button', { name: 'Accept event', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Open registration', exact: true })).toBeDisabled();
+  // SCRUM-98/99: the manager assigns a submitted request but cannot decide it.
+  await expect(page.getByRole('button', { name: 'Accept event', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Open registration', exact: true })).toHaveCount(0);
   await page.getByLabel('Event coordinator', { exact: true }).selectOption(first.id);
   await page.getByRole('button', { name: 'Save coordinator assignment' }).click();
-  await expect(page.getByRole('button', { name: 'Open registration', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Save coordinator assignment' })).toBeDisabled();
+  // Stands in for the assigned coordinator's approval (SCRUM-99), which unlocks arrangements.
+  await accounts.updateEvent(event.id, { status: 'APPROVED' });
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await signIn(page, first);
   await page.getByRole('link', { name: 'My assigned events', exact: true }).click();

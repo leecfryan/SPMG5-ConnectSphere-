@@ -9,6 +9,7 @@
 //   4. findSlotProblems             the slots are actually requestable that day
 
 const { SLOTS, isValidDateString } = require("./venues.availability");
+const { PLANNING_STATUSES } = require("../events/lifecycle");
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -197,8 +198,8 @@ function validateAgainstVenue(value, venue) {
 function validateAgainstEvent(value, event, today) {
   const errors = [];
 
-  if (!["ACCEPTED", "APPROVED"].includes(event.status)) {
-    errors.push("The event must be accepted before requesting a venue");
+  if (!PLANNING_STATUSES.includes(event.status)) {
+    errors.push("The event must be approved before requesting a venue");
     return errors;
   }
 
