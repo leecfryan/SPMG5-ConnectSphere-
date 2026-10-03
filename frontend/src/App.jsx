@@ -74,6 +74,7 @@ export default function App() {
                   <Route element={<RequirePermission permission="equipment.review" />}>
                     <Route path="/technical-support" element={<TechnicalSupportDashboardPage />} />
                   </Route>
+                  {/* SCRUM-26: the Event Operations Manager's assignment queue. */}
                   <Route element={<RequirePermission permission="events.assign_coordinator" />}>
                     <Route path="/events/assignments" element={<AssignmentQueuePage />} />
                   </Route>

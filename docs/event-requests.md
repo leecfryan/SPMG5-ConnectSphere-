@@ -101,6 +101,8 @@ one in.
 | `registration_fields` | the registration feature |
 
 Keep `WRITABLE_COLS` and the schema above in step: change one, change the other.
+`registration_start` and `registration_end` are optional, client-supplied event
+fields written from the explicit allowlist.
 
 ---
 
@@ -297,7 +299,7 @@ so a query ordering only by `submitted_at` places them arbitrarily. Order by
 | --- | --- | --- |
 | Venue | `venue_requirements`, `accessibility_needs` | Free text, optional, may be null, capped at 2000 characters. The venue reference lives on the venue side. |
 | Equipment | `equipment_needs` | Free text, optional, may be null. Parsing it into structured requests is the equipment feature's work. |
-| Registration | `id`, `status`, `registration_fields`, `registration_start`, `registration_end` | `registration_fields` is the registration feature's column; the registration window is set on the event request. |
+| Registration | `id`, `status`, `registration_fields`, `registration_start`, `registration_end` | `registration_fields` is the registration feature's column; registration windows are set on the event request. |
 | Assignment | `status`, `coordinator_id`, `submitted_at` | See [Coordinator assignment](event-assignment.md). |
 
 `venue_requirements` and `equipment_needs` are free text rather than structured

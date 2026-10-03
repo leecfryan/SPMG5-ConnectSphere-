@@ -26,6 +26,21 @@ Venue writes use separate capabilities: `venues.update` for Venue Staff and
 Event Coordinators, and `bookings.request` for Event Coordinators. They do not
 change the read responsibilities listed below or grant external roles access.
 
+Event writes use `events.submit` (Event Organisers, external) and
+`events.assign_coordinator` (Event Operations Managers). Neither appears in the
+read matrix below, which lists read permissions only.
+
+| Write capability | Holder | Guards |
+| --- | --- | --- |
+| `venues.update` | Venue Staff, Event Coordinators | Venue editing |
+| `bookings.request` | Event Coordinators | Booking requests |
+| `events.submit` | Event Organisers | `POST /api/events`, `/events/new` |
+| `events.assign_coordinator` | Event Operations Managers | The assignment queue: `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` |
+
+A capability name ending in `.read` is refused for every non-GET by
+`requirePermission`, which is why the assignment capability is not named
+`events.assignments.read`.
+
 ## Initial agreed matrix
 
 The user approved this conservative starting point in this task. It is an
@@ -43,13 +58,15 @@ specification.
 | clients.read | No | No | Yes | No | Yes |
 | event_organisers.read | No | No | Yes | No | Yes |
 
-The original three staff roles have internal.access. The current policy also
-defines `event_organisers.read` for Event Coordinators and Event Operations
-Managers, but does not grant `internal.access` to `event_ops_manager`. Manager-only
-accounts therefore cannot enter internal pages/APIs until the team changes that
-policy; this routing refactor preserves it. Unknown or missing roles grant nothing.
-Multiple trusted roles combine responsibilities. External roles grant no internal
-permissions, but can have separate event-specific access through external APIs.
+Four staff roles have internal.access: Venue Staff, Technical Support Staff,
+Event Coordinators and Event Operations Managers. `/api/internal` is gated on
+this permission before any route-specific guard runs, so a role needs it to
+reach any internal page or API. Holding it does not grant a feature: every
+internal route requires its own capability in addition, so an Event Operations
+Manager reaches the assignment queue and no other internal feature. Unknown or
+missing roles grant nothing. Multiple trusted roles combine responsibilities.
+External roles grant no internal permissions, but can have separate
+event-specific access through external APIs.
 
 Venue and equipment catalogue access is not limited by assigned venue, equipment
 type or location. Availability responses must not expose unrelated client,
@@ -117,8 +134,11 @@ must still be guarded and scoped, because that client can bypass RLS.
 ## Acceptance evidence
 
 Run npm --prefix backend test. permissions.test.js covers:
-- The eight read permissions against the original five roles, plus the current
-  manager-only internal-access restriction in the authentication tests.
+- The eight read permissions against the original five roles, plus the Event
+  Operations Manager's internal-access grant in the authentication tests —
+  which asserts the blast radius, not just the grant: the manager reaches
+  `/api/internal/access` and is still refused all six venue, equipment and
+  technical-support routes.
 - Venue/equipment access across locations and types.
 - Multi-role accounts, role removal, and missing or malformed roles.
 - Anonymous/invalid sessions and forged role claims.
@@ -130,11 +150,16 @@ Existing authentication tests continue to run in the same CI job.
 Manual checks:
 1. Sign in as Venue Staff and open `/staff/responsibilities`: see only venue and booking responsibilities.
 2. Sign in as Technical Support Staff: see only equipment and technical responsibilities.
-3. Sign in as Event Coordinator: see the coordination responsibilities.
-4. Sign in as Organiser or Attendee: no staff navigation link; entering
+3. Sign in as Event Coordinator: see the coordination responsibilities. The
+   workspace nav has no "Assign coordinators" link, and `/events/assignments`
+   opens `/forbidden` despite the account holding `internal.access`.
+4. Sign in as Event Operations Manager: "Assign coordinators" appears, the
+   queue loads, and `/venues`, `/equipment/requests` and `/technical-support`
+   all open `/forbidden`.
+5. Sign in as Organiser or Attendee: no staff navigation link; entering
    `/staff/responsibilities` directly opens `/forbidden`. An authenticated request
    to /api/internal/access returns 403.
-5. Without a token, /api/internal/access returns 401. Direct browser navigation
+6. Without a token, /api/internal/access returns 401. Direct browser navigation
    does not attach the bearer token even if another tab is signed in.
 
 ## Requirements sources

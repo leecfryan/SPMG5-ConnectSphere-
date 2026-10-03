@@ -62,7 +62,8 @@ const matrix = [
   ['venue_staff', ['venues.read', 'bookings.read']],
   ['technical_support_staff', ['equipment.read', 'technical_requests.read']],
   ['event_coordinator', permissions],
-  ['attendee', []], ['event_organiser', []], ['event_ops_manager', []],
+  // SCRUM-26 grants managers internal access; organiser reads still require a record check.
+  ['attendee', []], ['event_organiser', []], ['event_ops_manager', ['event_organisers.read']],
 ];
 for (const [roleIndex, [role, allowed]] of matrix.entries()) {
   for (const [permissionIndex, permission] of permissions.entries()) {
@@ -98,6 +99,29 @@ test('[API-RBAC-049] Combined roles return unique capabilities and removal immed
   await accounts.update(account, { roles: ['attendee'] });
   expect((await request.get('/api/internal/access', { headers })).status()).toBe(403);
   expect((await (await request.get('/api/auth/me', { headers })).json()).permissions).toEqual([]);
+});
+
+test('[API-RBAC-050] Operations manager access remains limited to its permissions and authorised records', async ({ request, accounts }) => {
+  const account = await accounts.create(['event_ops_manager']);
+  const headers = bearer(await accounts.session(account));
+  const identity = await request.get('/api/auth/me', { headers });
+  expect(identity.status()).toBe(200);
+  expect((await identity.json()).permissions.sort()).toEqual([
+    'event_organisers.read', 'events.assign_coordinator', 'internal.access',
+  ]);
+
+  for (const path of ['/api/venues', '/api/equipment', '/api/equipment/events', '/api/technical-support/equipment-requests']) {
+    expect((await request.get(path, { headers })).status()).toBe(403);
+  }
+  // These fixture endpoints exercise the real record guard, not production event storage.
+  for (const id of ['unrelated-event', 'missing-event', 'truthy', 'provider-down']) {
+    const response = await request.get('/api/internal/fixtures/event_organisers.read/' + id, { headers });
+    expect(response.status()).toBe(id === 'provider-down' ? 503 : 403);
+    expect(Object.keys(await response.json())).toEqual(['message']);
+  }
+  const counts = await accounts.counts(account);
+  expect(counts.record).toBe(4);
+  expect(counts.handler).toBe(0);
 });
 
 for (const [index, roles] of [[], ['superadmin', '__proto__'], 'venue_staff', null].entries()) {

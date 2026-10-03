@@ -14,6 +14,7 @@ same frontend port (Docker: 5173); routing does not start another Vite process.
 | `/venues/*` | Internal venue pages; see [Venue integration](venue-integration.md) for child routes. |
 | `/equipment/requests?event=<uuid>` | Assigned coordinator Equipment request page; requires `equipment.request`. |
 | `/technical-support` | Technical dashboard; requires `equipment.review`. |
+| `/events/assignments` | Requires `events.assign_coordinator`; the Event Operations Manager's queue for routing submitted requests to coordinators. See [Coordinator assignment](event-assignment.md). |
 | `/account` | Backend-verified identity for every signed-in role. |
 | `/staff/responsibilities` | Requires `internal.access`; lists responsibilities from the protected staff API. |
 | `/forbidden` | Signed-in access-denied page. |
@@ -76,10 +77,12 @@ role is removed even before the UI receives another auth event.
 Venue and Equipment implement this integration pattern; other features should follow it.
 See [Equipment integration](equipment-integration.md) for action permissions and event scope.
 Multi-role users share feature URLs; they are not redirected to a single role's
-dashboard. Existing read permissions are retained; Venue adds explicit write capabilities. In particular,
-`event_ops_manager` has `event_organisers.read` but lacks `internal.access` in the
-current policy, so manager-only accounts cannot enter internal pages/APIs. This
-requires a separate team policy decision rather than an implicit router grant.
+dashboard. Existing read permissions are retained; Venue adds explicit write capabilities. `event_ops_manager` holds `event_organisers.read` and `internal.access`, and
+reaches the assignment queue at `/events/assignments` through its own
+`events.assign_coordinator` capability. Every other internal page keeps the
+permission it requires, so this role is denied them individually rather than at
+the shared gate. Permission grants belong in the permission policy, not in the
+router. See [staff access](staff-access.md).
 
 ## Hosting and Docker
 

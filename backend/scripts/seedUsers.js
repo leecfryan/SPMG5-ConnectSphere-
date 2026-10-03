@@ -14,6 +14,18 @@ const users = [
     type: "internal",
   },
   {
+    email: "coordinator2.demo@example.com",
+    name: "Demo Coordinator Two",
+    role: "event_coordinator",
+    type: "internal",
+  },
+  {
+    email: "coordinator3.demo@example.com",
+    name: "Demo Coordinator Three",
+    role: "event_coordinator",
+    type: "internal",
+  },
+  {
     email: "venue.demo@example.com",
     name: "Demo Venue Staff",
     role: "venue_staff",

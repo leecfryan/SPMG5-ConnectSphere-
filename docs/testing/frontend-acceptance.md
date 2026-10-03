@@ -54,10 +54,11 @@ venue, booking and equipment business pages/API handlers are not implemented by
 this task. Auth/network transports remain fakes; Express token verification and
 record authorisation are not exercised by this frontend suite.
 
-The existing `event_ops_manager` policy is documented as a regression case:
-it has `event_organisers.read` but lacks `internal.access`, so internal route
-access remains denied. Passing that test confirms current behavior, not customer
-approval of that policy. See `docs/staff-access.md`.
+The `event_ops_manager` policy is documented as a guard-matrix case: it has
+`event_organisers.read` and `internal.access`, so internal pages are denied by
+their own permissions rather than at the shared gate. Passing that test confirms
+current behavior, not customer approval of that policy. See
+`docs/staff-access.md`.
 
 ## Running and viewing results
 

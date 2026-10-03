@@ -105,49 +105,72 @@ test.each([
   ["AUTH-FORM-004", "ryan@gmail.com"],
   ["AUTH-FORM-005", "staff@connectsphere.sg"],
   ["AUTH-FORM-006", "attendee.demo@example.com"],
-])("[%s] Submit entered credentials for %s without a domain allowlist", async (_id, email) => {
-  //Arrange
-  const user = userEvent.setup();
+])(
+  "[%s] Submit entered credentials for %s without a domain allowlist",
+  async (_id, email) => {
+    //Arrange
+    const user = userEvent.setup();
 
-  const signInWithPassword = vi.fn().mockResolvedValue({ error: null });
+    const signInWithPassword = vi.fn().mockResolvedValue({ error: null });
 
-  const fakeClient = {
-    auth: { signInWithPassword },
-  };
+    const fakeClient = {
+      auth: { signInWithPassword },
+    };
 
-  render(<SignIn client={fakeClient} />);
+    render(<SignIn client={fakeClient} />);
 
-  //Act: enter an invalid email and a password
-  const emailInput = screen.getByLabelText("Email address");
+    //Act: enter an invalid email and a password
+    const emailInput = screen.getByLabelText("Email address");
 
-  await user.type(emailInput, email);
+    await user.type(emailInput, email);
 
-  await user.type(
-    screen.getByLabelText("Password", { exact: true }),
-    "ExamplePassword123!",
-  );
+    await user.type(
+      screen.getByLabelText("Password", { exact: true }),
+      "ExamplePassword123!",
+    );
 
-  await user.click(
-    screen.getByRole("button", { name: "Sign in", exact: true }),
-  );
+    await user.click(
+      screen.getByRole("button", { name: "Sign in", exact: true }),
+    );
 
-  //Assert
-  expect(emailInput.validity.typeMismatch).toBe(false);
-  expect(emailInput.validity.valid).toBe(true);
-  expect(signInWithPassword).toHaveBeenCalledExactlyOnceWith({
-    email,
-    password: "ExamplePassword123!",
-  });
-  expect(screen.getByLabelText("Password", { exact: true }).value).toBe("");
-  expect(screen.queryByRole("alert")).toBeNull();
-});
+    //Assert
+    expect(emailInput.validity.typeMismatch).toBe(false);
+    expect(emailInput.validity.valid).toBe(true);
+    expect(signInWithPassword).toHaveBeenCalledExactlyOnceWith({
+      email,
+      password: "ExamplePassword123!",
+    });
+    expect(screen.getByLabelText("Password", { exact: true }).value).toBe("");
+    expect(screen.queryByRole("alert")).toBeNull();
+  },
+);
 
 test.each([
-  ["AUTH-FORM-007", 400, "Unable to sign in. Check your email and password and try again."],
-  ["AUTH-FORM-008", 422, "Unable to sign in. Check your email and password and try again."],
-  ["AUTH-FORM-009", 429, "Too many sign-in attempts. Please wait a moment and try again."],
-  ["AUTH-FORM-010", 503, "Sign-in is temporarily unavailable. Please try again."],
-  ["AUTH-FORM-011", undefined, "Sign-in is temporarily unavailable. Please try again."],
+  [
+    "AUTH-FORM-007",
+    400,
+    "Unable to sign in. Check your email and password and try again.",
+  ],
+  [
+    "AUTH-FORM-008",
+    422,
+    "Unable to sign in. Check your email and password and try again.",
+  ],
+  [
+    "AUTH-FORM-009",
+    429,
+    "Too many sign-in attempts. Please wait a moment and try again.",
+  ],
+  [
+    "AUTH-FORM-010",
+    503,
+    "Sign-in is temporarily unavailable. Please try again.",
+  ],
+  [
+    "AUTH-FORM-011",
+    undefined,
+    "Sign-in is temporarily unavailable. Please try again.",
+  ],
 ])(
   "[%s] Provider status %s displays a safe message and clears the password",
   async (_id, status, message) => {
@@ -248,7 +271,11 @@ test("[AUTH-FORM-014] Password visibility toggles without submitting or changing
   expect(password.type).toBe("password");
   await user.click(screen.getByRole("button", { name: "Show password" }));
   expect(password.type).toBe("text");
-  expect(screen.getByRole("button", { name: "Hide password" }).getAttribute("aria-pressed")).toBe("true");
+  expect(
+    screen
+      .getByRole("button", { name: "Hide password" })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
   await user.click(screen.getByRole("button", { name: "Hide password" }));
   expect(password.type).toBe("password");
   expect(password.value).toBe("Secret with spaces");
@@ -260,7 +287,13 @@ test("[AUTH-FORM-015] Keyboard Enter submits the filled form exactly once", asyn
   const signInWithPassword = vi.fn().mockResolvedValue({ error: null });
   render(<SignIn client={{ auth: { signInWithPassword } }} />);
   await user.type(screen.getByLabelText("Email address"), "user@client.sg");
-  await user.type(screen.getByLabelText("Password", { exact: true }), "TypedPassword!{Enter}");
-  expect(signInWithPassword).toHaveBeenCalledExactlyOnceWith({ email: "user@client.sg", password: "TypedPassword!" });
+  await user.type(
+    screen.getByLabelText("Password", { exact: true }),
+    "TypedPassword!{Enter}",
+  );
+  expect(signInWithPassword).toHaveBeenCalledExactlyOnceWith({
+    email: "user@client.sg",
+    password: "TypedPassword!",
+  });
   expect(screen.getByLabelText("Password", { exact: true }).value).toBe("");
 });

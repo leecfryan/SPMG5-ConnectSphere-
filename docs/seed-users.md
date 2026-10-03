@@ -6,6 +6,9 @@ View them in the Supabase dashboard under Authentication > Users.
 | Email | Role | User type |
 | --- | --- | --- |
 | coordinator.demo@example.com | event_coordinator | Internal |
+| coordinator2.demo@example.com | event_coordinator | Internal |
+| coordinator3.demo@example.com | event_coordinator | Internal |
+| eventopsmanager.demo@example.com | event_ops_manager | Internal |
 | venue.demo@example.com | venue_staff | Internal |
 | technical.demo@example.com | technical_support_staff | Internal |
 | organiser.demo@example.com | event_organiser | External |

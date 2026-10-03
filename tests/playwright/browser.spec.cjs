@@ -148,7 +148,7 @@ for (const [id, role, labels] of staffCases) {
   });
 }
 
-for (const [index, role] of ['attendee', 'event_organiser', 'event_ops_manager'].entries()) {
+for (const [index, role] of ['attendee', 'event_organiser'].entries()) {
   test(`[E2E-RBAC-00${index + 4}] ${role} cannot bypass the internal gate with a direct URL`, async ({ page, accounts }) => {
     const account = await accounts.create([role]);
     await page.goto('/staff/responsibilities');
@@ -159,6 +159,27 @@ for (const [index, role] of ['attendee', 'event_organiser', 'event_ops_manager']
     await expect(page.getByRole('listitem')).toHaveCount(0);
   });
 }
+
+test('[E2E-RBAC-006] Operations managers can enter their workspace but not other staff features', async ({ page, accounts }) => {
+  const account = await accounts.create(['event_ops_manager']);
+  await page.goto('/staff/responsibilities');
+  await signIn(page, account);
+  await expect(page).toHaveURL(/\/staff\/responsibilities$/);
+  await expect(page.getByRole('listitem')).toHaveText(['Event organiser information for managed events']);
+  await expect(page.getByRole('link', { name: 'Assign coordinators', exact: true })).toHaveAttribute('href', '/events/assignments');
+  await expect(page.getByRole('link', { name: 'Responsibilities', exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('listitem')).toHaveText(['Event organiser information for managed events']);
+
+  for (const name of ['Venues', 'Request equipment', 'Technical support']) {
+    await expect(page.getByRole('link', { name, exact: true })).toHaveCount(0);
+  }
+  for (const path of ['/venues', '/equipment/requests', '/technical-support']) {
+    await page.goto(path);
+    await expect(page).toHaveURL(/\/forbidden$/);
+    await expect(page.getByRole('heading', { name: 'Access denied' })).toBeVisible();
+  }
+});
 
 test('[E2E-RBAC-007] Removed roles are enforced by the backend before frontend permissions refresh', async ({ page, accounts }) => {
   const account = await accounts.create();
