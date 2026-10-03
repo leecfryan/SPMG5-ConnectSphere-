@@ -98,35 +98,10 @@ bookings for their assigned events. See [Venue integration](docs/venue-integrati
 for routes, role permissions and the required database migrations, including 006.
 Merging or restarting Docker does not apply Supabase migrations automatically.
 
-## Registration information for managed events
-
-Event Organisers and Event Coordinators can open `/events/managed` from the
-workspace to list the events they own or manage, and open one to see
-"Current Registrations: X/MaxEnrollment" and "Waiting List: Y". Registration
-uses `expected_attendance` as a hard cap and stops when the cap is reached;
-the pages mark full events. Full-event responses mention that waiting-list
-redirection is pending implementation, but there is no waitlist or redirect yet.
-Ownership is checked in the server-side query, and an event belonging to
-someone else is indistinguishable from one that does not exist. Attendee identity
-and submitted registration data are never returned. The Waiting List reads 0
-until the waitlist story adds its status. See
-[managed event registrations](docs/managed-event-registrations.md) for the
-permissions, the columns and the test commands.
-
-Attendees can also see registration opening/closing times and a countdown.
-The server enforces the inclusive UTC window; the coordinator/organiser can
-extend a closed window from the managed-event detail page. The window columns
-were added manually in Supabase with no migration file; environment setup notes
-are in [Registration integration](docs/registration-integration.md).
-
-The opt-in live Supabase capacity suite is documented in
-[Registration integration](docs/registration-integration.md); it creates and
-cleans up only uniquely identified temporary test events.
-
 ## Frontend navigation
 
 The application uses React Router: `/sign-in`, `/account`,
-`/staff/responsibilities`, `/events/new`, `/events/managed/*`, `/venues/*`, and `/forbidden`. The root redirects after session
+`/staff/responsibilities`, `/events/new`, `/venues/*`, and `/forbidden`. The root redirects after session
 checking. Protected routes wait for backend verification; navigation and feature
 guards use permission identifiers returned by `/api/auth/me`. Express remains
 responsible for enforcing every API permission and record-access check.

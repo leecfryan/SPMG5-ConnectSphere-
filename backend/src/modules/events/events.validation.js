@@ -16,7 +16,6 @@
 
 const NAME_MAX = 200;
 const TEXT_MAX = 2000;
-const { validateRegistrationWindow } = require("./registrationWindow");
 
 // Free-text fields we store verbatim. Never required (US-12 ER-04: "where
 // relevant"); the venue / equipment / registration features parse them later.
@@ -134,13 +133,8 @@ function validateForSubmission(input) {
   }
 
   checkOptionalText(data, errors);
-  errors.push(...validateRegistrationWindow(data).errors);
 
   return { ok: errors.length === 0, errors };
 }
 
-module.exports = {
-  validateDraft,
-  validateForSubmission,
-  validateRegistrationWindow,
-};
+module.exports = { validateDraft, validateForSubmission };

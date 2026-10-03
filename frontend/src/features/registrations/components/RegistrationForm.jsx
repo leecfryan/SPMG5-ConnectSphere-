@@ -1,12 +1,6 @@
 import { useState } from "react";
 
-export default function RegistrationForm({
-  fields = [],
-  onSubmit,
-  busy,
-  disabled,
-  disabledReasonId,
-}) {
+export default function RegistrationForm({ fields = [], onSubmit, busy, disabled }) {
   const [values, setValues] = useState(() =>
     Object.fromEntries(fields.map((f) => [f.id, ""]))
   );
@@ -42,12 +36,7 @@ export default function RegistrationForm({
           />
         </div>
       ))}
-      <button
-        className="primary"
-        type="submit"
-        disabled={busy || disabled}
-        aria-describedby={disabled && disabledReasonId ? disabledReasonId : undefined}
-      >
+      <button className="primary" type="submit" disabled={busy || disabled}>
         {busy ? "Registering…" : "Register for this event"}
       </button>
     </form>

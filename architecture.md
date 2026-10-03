@@ -65,7 +65,3 @@ Equipment pages run under the shared AuthProvider and permission routes. The bac
 ## Registration integration
 
 Approved event reads and attendee-owned registrations are composed alongside organiser submission and staff routes. Registration pages use the shared AuthProvider and API helper; test control endpoints remain outside production. See [Registration integration](docs/registration-integration.md).
-
-## Managed event registration integration
-
-Organisers and Coordinators read registration counts for their own events through `/api/managed-events`, scoped by `organiser_id` / `coordinator_id` in the query rather than by any request parameter. It sits outside `/api/internal` because organisers hold no `internal.access`, and outside `/api/events` so the registration router's `GET /:eventId` cannot swallow the detail path. Two permissions, one per route: the list carries no record resolver because its query is already scoped, the single event does. An unrelated event and a non-existent one answer identically, so the browser cannot tell them apart. See [managed event registrations](docs/managed-event-registrations.md).
