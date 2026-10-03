@@ -21,6 +21,7 @@ const policies = Object.freeze({
     roles: ["event_organiser", "event_coordinator"],
     record: true,
   },
+  "events.assign_coordinator": { roles: ["event_ops_manager"] },
   "venues.update": {
     roles: ["venue_staff", "event_coordinator"],
   },
@@ -31,7 +32,7 @@ const policies = Object.freeze({
   "equipment.review": { roles: ["technical_support_staff"] },
   "equipment.messages": { roles: ["technical_support_staff", "event_coordinator"] },
   "internal.access": {
-    roles: ["event_coordinator", "venue_staff", "technical_support_staff"],
+    roles: ["event_coordinator", "venue_staff", "technical_support_staff", "event_ops_manager"],
   },
   "venues.read": {
     roles: ["venue_staff", "event_coordinator"],

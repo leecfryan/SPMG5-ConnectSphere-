@@ -15,10 +15,10 @@ function formatDate(iso) {
 function EventDetailPage() {
   const { eventId } = useParams();
   const navigate = useNavigate();
-  const { data, error: eventError, refresh } = useRegistrationResource(`/api/events/${eventId}`);
+  const { data, receivedAt, error: eventError, refresh } = useRegistrationResource(`/api/events/${eventId}`);
   const event = data?.event;
   const availability = event ? getRegistrationAvailability(event) : null;
-  const windowState = useRegistrationWindow(event, data?.server_time, refresh);
+  const windowState = useRegistrationWindow(event, data?.server_time, receivedAt, refresh);
   const [registeredEventId, setRegisteredEventId] = useState(null);
   const registered = registeredEventId === eventId;
   const { register, busy, error: regError } = useEventRegistration();
@@ -119,4 +119,3 @@ export default function EventDetailPageRoute() {
   const { eventId } = useParams();
   return <EventDetailPage key={eventId} />;
 }
-

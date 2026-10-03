@@ -209,15 +209,16 @@ test("RBAC: missing and malformed roles return no permissions", async (t) => {
   }
 });
 
-test("RBAC: exposing capabilities does not broaden the existing operations manager internal gate", async (t) => {
+test("RBAC: operations managers receive internal access for assignment, without venue access", async (t) => {
   const base = await setup(t, async () => ({ data: { user: {
     id: "manager", app_metadata: { roles: ["event_ops_manager"] },
   } }, error: null }));
   const headers = { Authorization: "Bearer valid" };
   const { user, permissions } = await (await fetch(base + "/api/auth/me", { headers })).json();
   assert.deepEqual(user.accountTypes, ["internal"]);
-  assert.deepEqual(permissions, ["event_organisers.read"]);
-  assert.equal((await fetch(base + "/api/internal/access", { headers })).status, 403);
+  assert.deepEqual(permissions, ["events.assign_coordinator", "internal.access", "event_organisers.read"]);
+  assert.equal((await fetch(base + "/api/internal/access", { headers })).status, 200);
+  assert.equal((await fetch(base + "/api/venues", { headers })).status, 403);
 });
 
 

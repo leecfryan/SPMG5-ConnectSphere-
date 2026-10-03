@@ -12,6 +12,7 @@ import EquipmentRequestPage from "./features/equipment/pages/EquipmentRequestPag
 import TechnicalSupportDashboardPage from "./features/equipment/pages/TechnicalSupportDashboardPage";
 import VenueRoutes from "./features/venues/VenueRoutes";
 import EventRequestPage from "./features/events/pages/EventRequestPage";
+import AssignmentQueuePage from "./features/events/pages/AssignmentQueuePage";
 import ManagedEventsPage from "./features/managedEvents/pages/ManagedEventsPage";
 import ManagedEventDetailPage from "./features/managedEvents/pages/ManagedEventDetailPage";
 import EventListPage from "./features/registrations/pages/EventListPage";
@@ -30,7 +31,7 @@ function Home() {
 
 export default function App() {
   const location = useLocation();
-  const fullWorkspace = location.pathname === "/venues" || location.pathname.startsWith("/venues/") || location.pathname.startsWith("/equipment/") || location.pathname === "/technical-support";
+  const fullWorkspace = location.pathname === "/venues" || location.pathname.startsWith("/venues/") || location.pathname.startsWith("/equipment/") || location.pathname === "/technical-support" || location.pathname === "/events/assignments";
   return (
     <AuthProvider>
       <div className="app-shell">
@@ -72,6 +73,9 @@ export default function App() {
                   </Route>
                   <Route element={<RequirePermission permission="equipment.review" />}>
                     <Route path="/technical-support" element={<TechnicalSupportDashboardPage />} />
+                  </Route>
+                  <Route element={<RequirePermission permission="events.assign_coordinator" />}>
+                    <Route path="/events/assignments" element={<AssignmentQueuePage />} />
                   </Route>
                   <Route path="/staff/responsibilities" element={<ResponsibilitiesPage />} />
                 </Route>
