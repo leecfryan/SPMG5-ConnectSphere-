@@ -9,16 +9,12 @@ const WRITABLE_COLS = [
   "description",
   "start_time",
   "end_time",
-  "registration_start",
-  "registration_end",
   "expected_attendance",
   "venue_requirements",
   "accessibility_needs",
   "equipment_needs",
   "other_comments",
 ];
-
-const ACTIVE_STATUSES = ["SUBMITTED", "APPROVED"];
 
 
 function pickCol(input) {
@@ -121,6 +117,8 @@ async function findSubmittedUnassigned() {
     "findSubmittedUnassigned",
   );
 }
+
+const ACTIVE_STATUSES = ["SUBMITTED", "APPROVED"];
 
 async function findActiveAssignments() {
   return unwrap(

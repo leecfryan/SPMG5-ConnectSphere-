@@ -1,12 +1,7 @@
 const repository = require("./events.repository");
 const { validateForSubmission } = require("./events.validation");
 
-const TIME_FIELDS = new Set([
-  "start_time",
-  "end_time",
-  "registration_start",
-  "registration_end",
-]);
+const TIME_FIELDS = new Set(["start_time", "end_time"]);
 const NUMBER_FIELDS = new Set(["expected_attendance"]);
 
 function blank(value) {
