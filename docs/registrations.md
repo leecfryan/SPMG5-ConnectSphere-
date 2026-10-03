@@ -242,3 +242,39 @@ registration and withdrawal, then delete registrations and the event for that
 ID. They do not modify seeded events or accounts. See
 [Registration integration](registration-integration.md) for setup and the
 application-level counter reconciliation limitation.
+
+## Registration windows
+
+Events may set `registration_start` and `registration_end` independently of the
+event schedule. They are optional UTC instants: null start means open
+immediately; null end means no close time. Both bounds are inclusive. A server
+window refusal returns 409, with an opening-time message before the start and
+`Registration has closed.` after the end. The handler checks event status and
+required fields first, then the window, then duplicates, then claims capacity
+and inserts. A window refusal cannot update the seat counter.
+
+Attendee list/detail APIs add the window timestamps and a top-level
+`server_time`. The list and detail display local times and a live days/hours/
+minutes/seconds countdown before opening. At zero they re-fetch server time;
+the form remains disabled until a server response confirms opening. The window
+is enforced again by the registration endpoint, so UI state is informational.
+Full events keep the existing Full state ahead of their window state.
+
+Organisers may set the fields on a new request; Event Organisers and Event
+Coordinators can edit the registration window on a managed event, including
+extending it after close. The PATCH is partial and validates the submitted
+boundary against the stored other boundary. It allows past dates and null
+clears; changing dates does not affect existing registrations.
+
+The project owner added both database columns manually in Supabase; no
+migration file exists. New environments must add them manually:
+
+```text
+registration_start — timestamptz, nullable — earliest registration instant, UTC.
+registration_end   — timestamptz, nullable — latest inclusive registration instant, UTC.
+```
+
+The demo seed deliberately omits both keys from event upserts: new rows receive
+the nullable default, and existing configured windows survive a reseed. See
+[Registration integration](registration-integration.md) for the endpoint,
+authorization, countdown retry, and timezone details.

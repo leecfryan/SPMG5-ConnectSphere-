@@ -33,7 +33,7 @@ module.exports = function registrationRoutes(dataClient) {
 
     const { data: event, error: eventError } = await dataClient
       .from("events")
-      .select("id, status, registration_fields, enrolled_attendees, expected_attendance")
+      .select("id, status, registration_fields, enrolled_attendees, expected_attendance, registration_start, registration_end")
       .eq("id", eventId)
       .maybeSingle();
 
@@ -52,6 +52,16 @@ module.exports = function registrationRoutes(dataClient) {
       if (!val || (typeof val === "string" && !val.trim())) {
         return res.status(400).json({ message: `${field.label} is required.` });
       }
+    }
+
+    const now = Date.now();
+    if (event.registration_start && now < new Date(event.registration_start).getTime()) {
+      return res.status(409).json({
+        message: `Registration has not opened yet. It opens on ${new Date(event.registration_start).toISOString()}.`,
+      });
+    }
+    if (event.registration_end && now > new Date(event.registration_end).getTime()) {
+      return res.status(409).json({ message: "Registration has closed." });
     }
 
     const { data: existing, error: duplicateError } = await dataClient

@@ -25,5 +25,19 @@ module.exports = function createManagedEventsRoutes({ authenticate, managedEvent
 
   router.get("/", authenticate, requirePermission("events.managed.read"), available, controller.listManagedEvents);
   router.get("/:eventId", authenticate, requirePermission("events.registrations.read", canManageEvent), available, controller.getRegistrationSummary);
+  router.get(
+    "/:eventId/registration-window",
+    authenticate,
+    requirePermission("events.registrations.read", canManageEvent),
+    available,
+    controller.getRegistrationWindow,
+  );
+  router.patch(
+    "/:eventId/registration-window",
+    authenticate,
+    requirePermission("events.registration-window.update", canManageEvent),
+    available,
+    controller.updateRegistrationWindow,
+  );
   return router;
 };

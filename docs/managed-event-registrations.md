@@ -24,9 +24,11 @@ Waiting List: Y
 | --- | --- | --- |
 | X | `events.enrolled_attendees` | Nullable. Null renders as `0`. |
 | MaxEnrollment | `events.expected_attendance` | Nullable. Null renders as `-`, not `0`. |
+| Registration opens/closes | `events.registration_start` / `events.registration_end` | Nullable UTC instants; null start opens immediately, null end is unbounded. |
 | Y | count of `registrations` where `status = 'waitlisted'` | Always `0` today. See below. |
 
-`events.enrolled_attendees` and `events.expected_attendance` are read directly
+`events.enrolled_attendees`, `events.expected_attendance`,
+`events.registration_start`, and `events.registration_end` are read directly
 from the `events` table. **`docs/event-requests.md` does not list
 `enrolled_attendees`** in its copy of the schema; that document is out of date
 and the live Supabase schema is the source of truth.
@@ -64,13 +66,24 @@ differs, this count silently keeps returning 0.
 
 ## Authorisation
 
-Two permissions were added to `backend/src/auth/permissions.js`, both granted
-to Event Organisers and Event Coordinators:
+Three permissions are defined in `backend/src/auth/permissions.js`; all are
+granted to Event Organisers and Event Coordinators:
 
 | Permission | `record` | Route |
 | --- | --- | --- |
 | `events.managed.read` | no | `GET /api/managed-events` |
 | `events.registrations.read` | **yes** | `GET /api/managed-events/:eventId` |
+| `events.registration-window.update` | **yes** | `PATCH /api/managed-events/:eventId/registration-window` |
+
+The update permission is granted to Event Organisers and Event Coordinators.
+The patch route repeats the event ownership/assignment check and only accepts
+window values; it cannot update event status, ownership, registration counts or
+other event fields. See [Registration integration](registration-integration.md)
+for partial-update validation and the manually added Supabase columns.
+
+The managed-event detail page includes the registration-window editor. It shows
+the close time and a reopen hint after the window has closed. Past end dates are
+valid inputs so a coordinator or organiser can extend the window.
 
 The list scopes `organiser_id` / `coordinator_id` in its own query, so it needs
 no record resolver. The single event does: `canManageEvent` in
@@ -88,8 +101,8 @@ client.from("events").select(EVENT_FIELDS).or(`organiser_id.eq.${userId},coordin
 The user id is asserted to be a UUID by `isEventId` before it is spliced into
 that Postgrest filter.
 
-Neither permission carries a `label`, so `/staff/responsibilities` is unchanged
-- these are not staff responsibilities.
+None of these permissions carries a `label`, so `/staff/responsibilities` is
+unchanged - these are not staff responsibilities.
 
 ### Denials are deliberately identical
 
@@ -111,11 +124,16 @@ truth: they cannot see it.
 | --- | --- | --- | --- |
 | GET | `/api/managed-events` | `events.managed.read` | `{ events: [...] }` |
 | GET | `/api/managed-events/:eventId` | `events.registrations.read` | `{ summary: {...} }` |
+| GET | `/api/managed-events/:eventId/registration-window` | `events.registrations.read` | `{ window: {...}, server_time }` |
+| PATCH | `/api/managed-events/:eventId/registration-window` | `events.registration-window.update` | `{ event: {...}, server_time }` |
 
-Responses carry only `id`, `name`, `start_time`, `end_time`, `status`,
-`enrolled`, `maxEnrollment` and `waitingList`. **Attendee identity and
+The summary response carries only `id`, `name`, `start_time`, `end_time`,
+`status`, `enrolled`, `maxEnrollment` and `waitingList`. The separate
+registration-window response carries only `registration_start` and
+`registration_end`, plus server time. **Attendee identity and
 `registration_data` never leave the server** - the waitlist figure is a
 `head: true` count, so no registration row is transferred to be counted.
+The PATCH response returns the updated event fields and server time.
 
 The router is mounted at `/api/managed-events`, not `/api/internal` (Event
 Organisers hold no `internal.access`) and not `/api/events` (the registration

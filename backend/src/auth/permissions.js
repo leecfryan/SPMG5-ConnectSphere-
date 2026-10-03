@@ -17,6 +17,10 @@ const policies = Object.freeze({
     roles: ["event_organiser", "event_coordinator"],
     record: true,
   },
+  "events.registration-window.update": {
+    roles: ["event_organiser", "event_coordinator"],
+    record: true,
+  },
   "venues.update": {
     roles: ["venue_staff", "event_coordinator"],
   },

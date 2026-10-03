@@ -386,7 +386,7 @@ explicit column list. That is the point of the list.
 `events.repository.js` writes only the columns in `WRITABLE_COLS`:
 
 ```
-name · purpose · description · start_time · end_time · expected_attendance
+name · purpose · description · start_time · end_time · registration_start · registration_end · expected_attendance
 venue_requirements · accessibility_needs · equipment_needs · other_comments
 ```
 
@@ -422,6 +422,8 @@ Both validators return `{ ok, errors: [{ field, message }] }`, and `errors` list
 | `description` | — | required | non-empty after trim, ≤ 2000 |
 | `start_time` | — | required | parseable, in the future |
 | `end_time` | — | required | parseable, strictly after `start_time` |
+| `registration_start` | optional | optional | nullable UTC instant; when both window endpoints exist, earlier than `registration_end` |
+| `registration_end` | optional | optional | nullable UTC instant; when both window endpoints exist, later than `registration_start` |
 | `expected_attendance` | — | required | integer > 0 |
 | `venue_requirements`, `accessibility_needs`, `equipment_needs`, `other_comments` | never | never | optional free text, ≤ 2000 |
 

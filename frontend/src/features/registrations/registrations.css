@@ -26,6 +26,9 @@
 .event-meta { display: flex; flex-direction: column; gap: 6px; margin: 16px 0 20px; padding: 16px 18px; background: #f4f7f5; border-radius: 9px; }
 .event-meta__item { font-size: 13px; color: #3a4f47; line-height: 1.5; }
 .event-meta__label { font-weight: 600; color: #152c37; margin-right: 6px; }
+.registration-window-notice { display: block; margin-top: 8px; color: #425249; font-size: 13px; line-height: 1.5; }
+.registration-window-notice p { margin: 3px 0; }
+.registration-window-notice .secondary { margin-top: 8px; }
 .event-description { font-size: 14px; color: #425249; line-height: 1.7; margin: 16px 0 0; }
 .event-register-section { margin-top: 28px; padding-top: 24px; border-top: 1px solid #e7ece8; }
 .event-register-section h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.3px; margin-bottom: 4px; }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useAuth } from "../../auth/useAuth";
-import { fetchEventRegistrationSummary } from "../managedEventsService";
+import { fetchEventRegistrationSummary, fetchManagedRegistrationWindow } from "../managedEventsService";
+import RegistrationWindowEditor from "../components/RegistrationWindowEditor";
 import "../../events/events.css";
 
 // The server answers 403 for an event that belongs to someone else and for one
@@ -11,7 +12,7 @@ const NOT_ACCESSIBLE = "You don't have access to registration information for th
 
 export default function ManagedEventDetailPage() {
   const { eventId } = useParams();
-  const { token } = useAuth();
+  const { token, hasPermission } = useAuth();
   const [result, setResult] = useState(null);
   // Keyed by path and token: a session change must never leave one account's
   // counts on screen while the next request is in flight.
@@ -20,7 +21,20 @@ export default function ManagedEventDetailPage() {
   useEffect(() => {
     let active = true;
     fetchEventRegistrationSummary(eventId, token)
-      .then((summary) => { if (active) setResult({ key, summary }); })
+      .then(async (summary) => {
+        let window;
+        let windowError;
+        try {
+          window = await fetchManagedRegistrationWindow(eventId, token);
+        } catch (error) {
+          windowError = error;
+        }
+        if (active) setResult({
+          key,
+          summary: { ...summary, ...window },
+          windowError,
+        });
+      })
       .catch((error) => { if (active) setResult({ key, error }); });
     return () => { active = false; };
   }, [eventId, token, key]);
@@ -62,6 +76,22 @@ export default function ManagedEventDetailPage() {
       <p className="card-note">
         {summary.status}{summary.start_time ? ` · ${formatDate(summary.start_time)}` : ""}
       </p>
+      {result.windowError && (
+        <p className="error" role="alert">
+          Registration window settings could not be loaded. Refresh the page before editing them.
+        </p>
+      )}
+      {!result.windowError && typeof hasPermission === "function" && hasPermission("events.registration-window.update") && (
+        <RegistrationWindowEditor
+          event={summary}
+          token={token}
+          onSaved={(saved) => {
+            setResult((current) => current?.key === key
+              ? { ...current, summary: { ...current.summary, ...saved } }
+              : current);
+          }}
+        />
+      )}
     </section>
   );
 }

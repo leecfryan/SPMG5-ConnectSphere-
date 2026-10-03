@@ -113,6 +113,12 @@ until the waitlist story adds its status. See
 [managed event registrations](docs/managed-event-registrations.md) for the
 permissions, the columns and the test commands.
 
+Attendees can also see registration opening/closing times and a countdown.
+The server enforces the inclusive UTC window; the coordinator/organiser can
+extend a closed window from the managed-event detail page. The window columns
+were added manually in Supabase with no migration file; environment setup notes
+are in [Registration integration](docs/registration-integration.md).
+
 The opt-in live Supabase capacity suite is documented in
 [Registration integration](docs/registration-integration.md); it creates and
 cleans up only uniquely identified temporary test events.

@@ -9,6 +9,8 @@ const WRITABLE_COLS = [
   "description",
   "start_time",
   "end_time",
+  "registration_start",
+  "registration_end",
   "expected_attendance",
   "venue_requirements",
   "accessibility_needs",

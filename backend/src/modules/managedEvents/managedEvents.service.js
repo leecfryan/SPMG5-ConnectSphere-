@@ -5,6 +5,11 @@
 // equipment.service.test.js for why the fake applies .or/.eq rather than
 // ignoring them.
 const { EVENT_FIELDS, toListItem, toSummary } = require("./managedEvents.validation");
+const {
+  REGISTRATION_WINDOW_FIELDS,
+  normaliseRegistrationWindow,
+  validateRegistrationWindow,
+} = require("../events/registrationWindow");
 
 // Waitlist story not implemented yet; status not in the registrations check
 // constraint, so count is 0 until it lands. Confirm the final status name with
@@ -74,7 +79,63 @@ function createManagedEventsService(client) {
     return toSummary(event, await countWaitingList(event.id));
   }
 
-  return { listManagedEvents, findManagedEvent, getRegistrationSummary };
+  async function getRegistrationWindow(eventId, userId) {
+    const { data, error } = await client
+      .from("events")
+      .select("registration_start, registration_end")
+      .eq("id", eventId)
+      .or(ownershipFilter(userId))
+      .maybeSingle();
+    if (error) throw new Error(`managedEvents.service: getRegistrationWindow failed - ${error.message}`);
+    return data;
+  }
+
+  async function updateRegistrationWindow(event, userId, input) {
+    const source = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+    const supplied = REGISTRATION_WINDOW_FIELDS.some((field) => source[field] !== undefined);
+    if (!supplied) {
+      return {
+        ok: false,
+        errors: [{ field: "registration_window", message: "at least one registration date is required" }],
+      };
+    }
+
+    const { fields, errors } = normaliseRegistrationWindow(source);
+    if (errors.length) return { ok: false, errors };
+
+    const storedWindow = await getRegistrationWindow(event.id, userId);
+    if (!storedWindow) return { ok: true, event: null };
+    const proposed = {
+      registration_start: Object.hasOwn(fields, "registration_start")
+        ? fields.registration_start
+        : storedWindow.registration_start ?? null,
+      registration_end: Object.hasOwn(fields, "registration_end")
+        ? fields.registration_end
+        : storedWindow.registration_end ?? null,
+    };
+    const validation = validateRegistrationWindow(proposed);
+    if (!validation.ok) return { ok: false, errors: validation.errors };
+
+    const { data, error } = await client
+      .from("events")
+      .update(fields)
+      .eq("id", event.id)
+      .or(ownershipFilter(userId))
+      .select(EVENT_FIELDS)
+      .maybeSingle();
+    if (error) {
+      throw new Error(`managedEvents.service: updateRegistrationWindow failed - ${error.message}`);
+    }
+    return { ok: true, event: data ? { ...data, ...fields } : null };
+  }
+
+  return {
+    listManagedEvents,
+    findManagedEvent,
+    getRegistrationSummary,
+    getRegistrationWindow,
+    updateRegistrationWindow,
+  };
 }
 
 module.exports = { createManagedEventsService, WAITLIST_STATUS, ownershipFilter };

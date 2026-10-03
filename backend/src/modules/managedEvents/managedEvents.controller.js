@@ -24,13 +24,66 @@ function createManagedEventsController(service) {
       });
     }
     try {
-      res.json({ summary: await service.getRegistrationSummary(event) });
+      res.json({
+        summary: await service.getRegistrationSummary(event),
+        server_time: new Date().toISOString(),
+      });
     } catch (error) {
       next(error);
     }
   }
 
-  return { listManagedEvents, getRegistrationSummary };
+  async function updateRegistrationWindow(req, res, next) {
+    const event = req.managedEvent;
+    if (!event) {
+      return res.status(403).json({
+        message: "You do not have permission to access this information.",
+      });
+    }
+
+    try {
+      const result = await service.updateRegistrationWindow(event, req.user.id, req.body);
+      if (!result.ok) {
+        return res.status(400).json({
+          message: "Please correct the registration window.",
+          details: result.errors,
+        });
+      }
+      if (!result.event) {
+        return res.status(403).json({
+          message: "You do not have permission to access this information.",
+        });
+      }
+      return res.json({
+        event: result.event,
+        server_time: new Date().toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async function getRegistrationWindow(req, res, next) {
+    const event = req.managedEvent;
+    if (!event) {
+      return res.status(403).json({
+        message: "You do not have permission to access this information.",
+      });
+    }
+    try {
+      const window = await service.getRegistrationWindow(event.id, req.user.id);
+      if (!window) {
+        return res.status(403).json({
+          message: "You do not have permission to access this information.",
+        });
+      }
+      return res.json({ window, server_time: new Date().toISOString() });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  return { listManagedEvents, getRegistrationSummary, getRegistrationWindow, updateRegistrationWindow };
 }
 
 module.exports = createManagedEventsController;

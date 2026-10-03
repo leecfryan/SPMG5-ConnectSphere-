@@ -22,6 +22,10 @@ route takes precedence over `/events/:eventId` and retains `events.submit`.
 - The server lists/details only `APPROVED` events; the browser cannot select a
   different status filter. Event reads expose attendee-facing fields, excluding
   organiser/coordinator identities, internal comments and planning requirements.
+  The original list/detail response shapes remain unchanged. Registration
+  windows and the server clock are loaded from the separate
+  `/api/events/registration-windows` and
+  `/api/events/registration-windows/:eventId` endpoints.
 - Dynamic registration fields, required-field validation, duplicate rejection,
   pending status, ownership, submitted details and registration history remain.
   Requester identity and initial status cannot be overridden through the body.
@@ -41,6 +45,27 @@ route takes precedence over `/events/:eventId` and retains `events.submit`.
   update failure is logged without failing the completed withdrawal.
 - No waitlist is implemented. A full event is refused with a message explaining
   that waiting-list redirection is pending; no redirect or waitlist entry occurs.
+- Registration windows are checked with backend server time after event status
+  and required-field checks but before duplicate lookup and capacity claim. Both
+  boundaries are inclusive (`registration_start <= now <= registration_end`).
+  A request before the start returns 409 with the opening time; a request after
+  the end returns 409 with a closed message. Neither refusal claims a seat nor
+  inserts a registration.
+- A null `registration_start` means registration is open immediately; a null
+  `registration_end` means there is no closing instant. Both null preserve the
+  previous behavior. Attendee pages show the window in browser-local time and
+  use the API's server time to estimate the countdown. The opening transition
+  re-requests server time and keeps registration disabled until the server
+  confirms it is open. This UI is informational; the POST check remains
+  authoritative.
+- Event Organisers and Event Coordinators can set or change only the window on
+  events they own/manage through
+  `PATCH /api/managed-events/:eventId/registration-window`. The patch accepts
+  either or both fields; omitted fields retain their stored values and null
+  clears a boundary. A shared validator checks the resulting pair and requires
+  a non-null end to be later than a non-null start. Past dates are allowed so a
+  closed window can be extended. An end after the event starts shows a warning
+  but is allowed; changes do not alter existing registrations.
 - Non-text structured registration values are rejected to prevent malformed
   details from crashing the React detail view. Failed duplicate lookups fail
   closed; database unique violations return a safe 409 duplicate response.
@@ -63,6 +88,44 @@ The feature assumes the existing `events.registration_fields` column, approved
 event status, and `registrations` table documented in `registrations.md`. This PR
 does not include Registration SQL migrations; the repository's current migrations
 cover Venue. Existing database configuration must be verified for deployment.
+
+The project owner added these two columns manually in the Supabase dashboard.
+There is no migration file for them. Anyone setting up another environment must
+add the columns manually before deploying this code:
+
+```text
+registration_start — timestamptz, nullable — earliest instant attendees may register; stored as a UTC instant.
+registration_end   — timestamptz, nullable — latest inclusive instant attendees may register; stored as a UTC instant.
+```
+
+The Event Organiser form accepts these optional values on `POST /api/events`.
+The managed-event window endpoint accepts partial updates; invalid timestamps
+or an end not later than the effective start return 400 with field details.
+Non-permitted or unrelated users receive 403. Attendee window refusals return
+409 Conflict: `Registration has not opened yet. It opens on <ISO UTC date>.`
+or `Registration has closed.` Coordinator inputs are interpreted in the
+coordinator's browser timezone and converted to ISO UTC before saving; attendees
+see local date/time with a timezone abbreviation. Countdown revalidation makes
+at most four server-time requests (immediate, then 250, 500 and 1000 ms delays)
+per opening transition; if they do not confirm opening, the attendee can
+manually request another check.
+
+The managed-event registration summary retains its existing response shape.
+Its separate `GET /api/managed-events/:eventId/registration-window` endpoint
+returns the two window fields and `server_time`. The attendee window endpoints
+likewise return a separate `{ windows, server_time }` or `{ window,
+server_time }` payload. The existing event-list/detail payloads are unchanged.
+
+The seed script deliberately omits both columns from its event upserts. New rows
+therefore use the nullable database default (`null`), while reseeding does not
+overwrite a window already configured on an existing demo event.
+
+The codebase has no generated Supabase TypeScript database-types file; the
+frontend and backend use JavaScript. The attendee and managed-event APIs use
+explicit column lists and response serializers, and those lists/shapes include
+both window fields. The event repository's internal `findById`,
+`findByIds` and `findSubmittedUnassigned` helpers use `select("*")`, so they
+already read the new columns without a query change.
 
 Registration rows need generated UUIDs/timestamps, event/user foreign keys,
 `registration_data`, status values `pending`, `confirmed`, `withdrawn`, and a
@@ -88,10 +151,14 @@ requires database-level enforcement beyond these application tests.
 
 ## Validation
 
-- Existing Registration cases remain unchanged. The new capacity integration
+- Existing Registration behavior remains covered. The new capacity integration
   suite covers seat claims, full/busy responses, CAS races, insert rollback,
   duplicate checks, null semantics and pending-withdrawal decrements. New
   managed-event UI tests cover registration/cap display and the Full state.
+  Registration-window tests cover window boundaries, denied writes, partial
+  extension, disabled attendee states, server-time confirmation, and timer
+  cleanup. A few exact response/select assertions were updated for the
+  intentionally additive API fields.
 - 12 API/browser cases (`REG-API-*`, `REG-E2E-*`) cover browsing, internal-field
   privacy, required data, identity/ownership, duplicate registration, status,
   withdrawal guards, sign-out, retries and protected staff routes.
