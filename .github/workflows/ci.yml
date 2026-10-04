@@ -142,18 +142,29 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: tests/e2e/package-lock.json
-      - name: Install test dependencies
-        working-directory: tests/e2e
-        run: npm ci
+          cache-dependency-path: |
+            tests/e2e/package-lock.json
+            frontend/package-lock.json
+            backend/package-lock.json
+      # playwright.config.js's webServer starts the real backend (npm run
+      # dev -> nodemon) and real frontend (npm run dev -> vite) dev servers -
+      # both need their own dependencies installed, not just tests/e2e's.
+      - name: Install test and application dependencies
+        run: |
+          npm --prefix tests/e2e ci
+          npm --prefix frontend ci
+          npm --prefix backend ci
       - name: Install Chromium
         working-directory: tests/e2e
         run: npx playwright install --with-deps chromium
       - name: Run live-DB E2E tests
         working-directory: tests/e2e
+        # backend/src/server.js throws at startup without SUPABASE_PUBLISHABLE_KEY
+        # too, not just the two secrets the other jobs use.
         run: npx playwright test
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
       - name: Save report
         if: ${{ !cancelled() }}
