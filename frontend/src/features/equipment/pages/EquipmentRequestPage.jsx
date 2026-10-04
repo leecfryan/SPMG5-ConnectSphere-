@@ -47,7 +47,12 @@ function defaultWindowForEvent(event) {
 // entry, so every eventId here is either empty or one of their own assignments.
 function EquipmentRequestPage() {
   const { token, user } = useAuth();
-  const currentUserId = user.id;
+  // Scrum-30: guarded, not user.id directly - AuthProvider briefly exposes
+  // user/token as null on an auth re-verification blip (e.g. Supabase
+  // re-firing onAuthStateChange on browser tab-focus regain, even with no
+  // real session change), which crashed this unconditionally before the
+  // page's own `if (!token)` check ever got a chance to run.
+  const currentUserId = user?.id;
   const [params, setParams] = useSearchParams();
   const eventId = params.get("event") || "";
   const setEventId = (id) => setParams(id ? { event: id } : {}, { replace: true });
