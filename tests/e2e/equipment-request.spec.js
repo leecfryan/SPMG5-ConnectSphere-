@@ -25,7 +25,10 @@ test.describe("Scrum-27 AC1-4: equipment request page", () => {
   test.beforeEach(async () => { setup = await setupEquipment(); });
   test.afterEach(async () => { await setup.teardown(); });
 
-  test("AC1-3: a coordinator records equipment type, quantity and technical requirement on a new request", async ({ page }) => {
+  // Scrum-30: rewritten for the two-step reserve flow - pick a type, review
+  // the auto-assigned single unit, submit. No quantity field and no
+  // per-unit picker exist in this form any more.
+  test("Scrum-30: a coordinator reserves one unit of a type by picking the type and reviewing, not a specific unit", async ({ page }) => {
     await signIn(page, setup.coordinator);
     await Promise.all([
       page.waitForResponse((res) => res.url().includes("/api/equipment/events")),
@@ -35,8 +38,9 @@ test.describe("Scrum-27 AC1-4: equipment request page", () => {
       page.waitForResponse((res) => res.url().includes("/api/equipment?") && res.request().method() === "GET"),
       page.getByLabel("Assigned event").selectOption(setup.eventId),
     ]);
-    await page.getByLabel("Equipment type").selectOption(setup.equipmentId);
-    await page.getByLabel("Quantity required").fill("2");
+    await page.getByLabel("Equipment type").selectOption(setup.equipmentType);
+    await expect(page.getByText(`You have requested 1 ${setup.equipmentType}.`)).toBeVisible();
+    await expect(page.getByLabel("Quantity required")).toHaveCount(0);
     const requirementText = `E2E check ${Date.now()}`;
     await page.getByLabel("Technical requirement").fill(requirementText);
 
@@ -45,10 +49,11 @@ test.describe("Scrum-27 AC1-4: equipment request page", () => {
       page.getByRole("button", { name: "Submit request", exact: true }).click(),
     ]);
     expect(response.status(), await response.text()).toBe(201);
+    expect((await response.json()).data).toMatchObject({ equipment_id: setup.equipmentId, quantity_requested: 1 });
 
     const row = page.locator(".eq-request-row", { hasText: requirementText });
     await expect(row).toBeVisible({ timeout: 10000 });
-    await expect(row).toContainText("× 2");
+    await expect(row).toContainText("× 1");
     await expect(row).toContainText("PENDING");
   });
 
@@ -68,8 +73,12 @@ test.describe("Scrum-29 follow-up: availability-filtered dropdown and event-deri
   test.beforeEach(async () => { setup = await setupEquipment(); });
   test.afterEach(async () => { await setup.teardown(); });
 
-  test("the equipment dropdown excludes a unit that is not AVAILABLE, of the same type", async ({ page }) => {
-    const damagedId = await createEquipmentUnit({ type: setup.equipmentType, status: "DAMAGED" });
+  // Scrum-30: the dropdown is now type-level, built only from bookable units
+  // for the window - a type disappears from it entirely once every one of
+  // its units is unavailable, rather than one option among several per unit.
+  test("a type with no AVAILABLE units at all for the window does not appear in the type dropdown", async ({ page }) => {
+    const damagedOnlyType = `${setup.equipmentType}_DAMAGED_ONLY`;
+    const damagedId = await createEquipmentUnit({ type: damagedOnlyType, status: "DAMAGED" });
     try {
       await signIn(page, setup.coordinator);
       await page.goto("/equipment/requests");
@@ -78,8 +87,8 @@ test.describe("Scrum-29 follow-up: availability-filtered dropdown and event-deri
         page.getByLabel("Assigned event").selectOption(setup.eventId),
       ]);
       const optionValues = await page.getByLabel("Equipment type").locator("option").evaluateAll((els) => els.map((e) => e.value));
-      expect(optionValues).toContain(setup.equipmentId); // AVAILABLE
-      expect(optionValues).not.toContain(damagedId); // DAMAGED
+      expect(optionValues).toContain(setup.equipmentType); // has an AVAILABLE unit
+      expect(optionValues).not.toContain(damagedOnlyType); // every unit DAMAGED
     } finally {
       await deleteEquipmentUnit(damagedId);
     }
@@ -120,6 +129,13 @@ test.describe("role gating: direct URL access", () => {
     ["technical_support_staff", "/equipment/requests"],
     ["event_coordinator", "/technical-support"],
     ["venue_staff", "/technical-support"],
+    // Scrum-30: the catalogue page moved from equipment.read to
+    // equipment.review - a Coordinator no longer has a route to it, nor to
+    // the add/edit management routes (equipment.manage). The guard runs
+    // before any id is looked up, so a placeholder id is enough for /edit.
+    ["event_coordinator", "/equipment/catalogue"],
+    ["event_coordinator", "/equipment/catalogue/new"],
+    ["event_coordinator", "/equipment/catalogue/00000000-0000-0000-0000-000000000000/edit"],
   ]) {
     test(`${role} cannot open ${route} directly`, async ({ page }) => {
       const account = await createAccount([role]);
