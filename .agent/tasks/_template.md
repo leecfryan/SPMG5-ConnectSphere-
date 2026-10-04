@@ -23,13 +23,13 @@
 
 Written and agreed **before** code. Expected results come from the AC and clarifications, never from the code.
 
-| ID | AC | Type | Scenario | Pre-conditions | Steps | Test data | Expected result | Automated by | Latest execution |
-|---|---|---|---|---|---|---|---|---|---|
-| TC-SCRUM-<n>-01 | 1 | Happy | | | | | | | ☐ |
-| TC-SCRUM-<n>-02 | 1 | Negative | | | | | | | ☐ |
-| TC-SCRUM-<n>-03 | 2 | Boundary | | | | | | | ☐ |
-| TC-SCRUM-<n>-04 | | Conflict | | | | | | | ☐ |
-| TC-SCRUM-<n>-05 | | Failure | | | | | | | ☐ |
+| Epic | Scrum-# | AC # | Type | Test Case ID | Test Scenario | Pre-conditions | Test Steps | Test Data | Expected Result | Created By* | Date of Creation* | Actual Result | Pass / Fail / Not Executed / Blocked | Remarks | Executed By | Date of Execution |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| <epic> | SCRUM-<n> | 1 | Happy | TC-SCRUM-<n>-01 | | | | | <name> | <YYYY-MM-DD> | | Not Executed | | | |
+| <epic> | SCRUM-<n> | 1 | Negative | TC-SCRUM-<n>-02 | | | | | <name> | <YYYY-MM-DD> | | Not Executed | | | |
+| <epic> | SCRUM-<n> | 2 | Boundary | TC-SCRUM-<n>-03 | | | | | <name> | <YYYY-MM-DD> | | Not Executed | | | |
+| <epic> | SCRUM-<n> | | Conflict | TC-SCRUM-<n>-04 | | | | | <name> | <YYYY-MM-DD> | | Not Executed | | | |
+| <epic> | SCRUM-<n> | | Failure | TC-SCRUM-<n>-05 | | | | | <name> | <YYYY-MM-DD> | | Not Executed | | | |
 
 **Coverage** (story's files): backend <lines / branches> · frontend <lines / branches> · gaps and reasons: <…>
 

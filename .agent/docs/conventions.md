@@ -114,24 +114,30 @@ becomes at least one test case.
 
 ### 2. Write the test case specification
 
-The Week 4 template, one row per case, kept in the lane's `docs/` test guide (the Deliverable 3 document) and
-drafted in the task note first:
+As of 2026-10-02 the team uses one standard test case register format, kept in the lane's `docs/` test guide (the
+Deliverable 3 document) and drafted in the task note first:
 
 | Field | Content |
 |---|---|
-| Test case ID | `TC-SCRUM-<n>-NN` (unique, never reused) |
-| AC | The AC number(s) it is evidence for |
-| Scenario | One-line objective, e.g. "Unassigned coordinator cannot approve" |
+| Epic | The epic name (e.g. Equipment) |
+| Scrum-# | `SCRUM-<n>` |
+| AC # | The AC number(s) this case is evidence for |
 | Type | Happy · Negative · Boundary · Conflict · Failure · Cross-cutting |
+| Test Case ID | `TC-SCRUM-<n>-NN` (unique, never reused) |
+| Test Scenario | One-line objective, e.g. "Unassigned coordinator cannot approve" |
 | Pre-conditions | Data and state needed, e.g. "Event E1 `UNDER_REVIEW`, assigned to coordinator.demo; signed in as coordinator2.demo" |
-| Steps | Exact actions a person could follow, e.g. "1. Open `/events/E1/review` 2. Click *Approve*" |
-| Test data | Exact inputs (accounts, IDs, values). Not "a valid event" |
-| Expected result | Specific observable outcome, e.g. "403 *You do not have permission…*; event status still `UNDER_REVIEW`" |
-| Automated by | The test ID(s) that execute this case, or **Manual** with the reason |
-| Latest execution | Date · pass/fail · where (local / CI run link) |
+| Test Steps | Exact actions a person could follow, e.g. "1. Open `/events/E1/review` 2. Click *Approve*" |
+| Test Data | Exact inputs (accounts, IDs, values). Not "a valid event" |
+| Expected Result | Specific observable outcome, e.g. "403 *You do not have permission…*; event status still `UNDER_REVIEW`" |
+| Created By* / Date of Creation* | Who wrote the case and when. Required fields (hence the `*`) |
+| Actual Result | What actually happened on the most recent run |
+| Pass / Fail / Not Executed / Blocked | The case's current status |
+| Remarks | Free text — this is also where the automated test ID(s) that execute the case go (e.g. "Automated: `tests/integration/equipment-reserve.test.js`"), or **Manual** with the reason, since the register has no dedicated *Automated by* column |
+| Executed By / Date of Execution | Who ran it and when, for the result recorded above |
 
-The specification is written once and changes only when the requirement changes. The *Latest execution* column is
-updated each time the story's tests are run for a PR, because a pass only holds for that build.
+The specification is written once and changes only when the requirement changes. *Actual Result*, the status
+column, *Executed By* and *Date of Execution* are updated each time the story's tests are run for a PR, because a
+pass only holds for that build.
 
 Expected results come from the **AC and customer clarifications, never from what the code currently does**. If you
 can't justify an expected value without reading the implementation, ask the user.
