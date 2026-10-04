@@ -146,12 +146,8 @@ New module at `backend/src/modules/registrations/`.
 
 ### Rules enforced server-side
 
-- POST: reject if event `status !== APPROVED`. Reject duplicate registration for the same attendee + event. Validate required fields from `registration_fields` — missing or blank required fields return 400 with the field's label. Claim a seat by compare-and-set on `events.enrolled_attendees` against `events.expected_attendance` before inserting. Expected attendance is the hard cap for registration; null is unlimited and zero is full. Full events return 409; contention retries three times before returning a retryable busy response.
+- POST: reject if event `status !== APPROVED`. Reject duplicate registration for the same attendee + event. Validate required fields from `registration_fields` — missing or blank required fields return 400 with the field's label.
 - PATCH withdraw: verify the row belongs to `req.user.id`. Reject if already withdrawn. Reject if `status = confirmed` (organiser has locked it). Reject if the event has already started. Reject if the event starts within 24 hours.
-- A successful withdrawal of a pending registration attempts a guarded decrement of `events.enrolled_attendees`. A failed decrement is logged and does not undo the withdrawal.
-- Pending and confirmed registrations occupy seats; new registrations begin as pending. Confirmed registrations remain non-withdrawable under the existing rule.
-- No waitlist is implemented. Full registrations are refused; the response notes that waiting-list redirection is pending implementation, but does not redirect or queue the attendee.
-- The approved-event list and event detail API include `enrolled_attendees` and `expected_attendance`; the browser displays remaining slots and marks full events. This is an informational snapshot, not a guarantee that a slot remains available until submission.
 - GET /me routes: always filter by `attendee_id = req.user.id` — never trust a client-supplied attendee ID.
 
 ---
@@ -220,61 +216,3 @@ New feature folder at `frontend/src/features/registrations/`.
 ## Integration update — 2026-09-20
 
 The Registration feature now shares main's router, session provider and API transport. Original registration/withdrawal scenarios are included in the isolated combined browser suite; production deletion controls were removed. See [Registration integration](registration-integration.md) for current behavior, validation and database prerequisites. Live Supabase verification remains outstanding.
-
-## Capacity and live verification
-
-`events.expected_attendance` is the hard registration cap and
-`events.enrolled_attendees` is the application-maintained seat counter. The
-server claims seats with a guarded compare-and-set before inserting a
-registration, retries contention up to three times, refuses a full event with
-409, and attempts a guarded rollback if insertion fails. A null cap means
-unlimited; a zero cap is full. Browsing and event details expose the counter and
-cap so attendees can see remaining slots. Pending and confirmed rows occupy
-seats; a successful pending withdrawal attempts to release one.
-
-Run the opt-in live acceptance suite with
-`npm --prefix backend run test:registration-live`. It requires the
-`RUN_LIVE_REGISTRATION_CAPACITY_TESTS=true` opt-in, Supabase URL/secret and
-publishable keys, `SEED_USER_PASSWORD`, and the seeded demo organiser and two
-attendees. The tests create a random-ID approved event, exercise real event
-reads, successful registration, full-cap rejection, parallel last-seat
-registration and withdrawal, then delete registrations and the event for that
-ID. They do not modify seeded events or accounts. See
-[Registration integration](registration-integration.md) for setup and the
-application-level counter reconciliation limitation.
-
-## Registration windows
-
-Events may set `registration_start` and `registration_end` independently of the
-event schedule. They are optional UTC instants: null start means open
-immediately; null end means no close time. Both bounds are inclusive. A server
-window refusal returns 409, with an opening-time message before the start and
-`Registration has closed.` after the end. The handler checks event status and
-required fields first, then the window, then duplicates, then claims capacity
-and inserts. A window refusal cannot update the seat counter.
-
-Attendee list/detail APIs add the window timestamps and a top-level
-`server_time`. The list and detail display local times and a live days/hours/
-minutes/seconds countdown before opening. At zero they re-fetch server time;
-the form remains disabled until a server response confirms opening. The window
-is enforced again by the registration endpoint, so UI state is informational.
-Full events keep the existing Full state ahead of their window state.
-
-Organisers may set the fields on a new request; Event Organisers and Event
-Coordinators can edit the registration window on a managed event, including
-extending it after close. The PATCH is partial and validates the submitted
-boundary against the stored other boundary. It allows past dates and null
-clears; changing dates does not affect existing registrations.
-
-The project owner added both database columns manually in Supabase; no
-migration file exists. New environments must add them manually:
-
-```text
-registration_start — timestamptz, nullable — earliest registration instant, UTC.
-registration_end   — timestamptz, nullable — latest inclusive registration instant, UTC.
-```
-
-The demo seed deliberately omits both keys from event upserts: new rows receive
-the nullable default, and existing configured windows survive a reseed. See
-[Registration integration](registration-integration.md) for the endpoint,
-authorization, countdown retry, and timezone details.

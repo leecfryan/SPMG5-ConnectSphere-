@@ -80,7 +80,7 @@ happy path → cross-cutting → negative → boundary. IDs below are prefixed a
 | Happy path | 11 | ER-H01–H11 |
 | Negative | 20 | ER-N01–N20, plus the 2 supporting cases named at the end of §4.3 |
 | Boundary | 23 | ER-B01–B23 — heaviest by design; every rule in the validation contract has a threshold |
-| Cross-cutting | **0 in the original catalog** | Auth/permissions are covered by the merged HTTP integration tests in `tests/integration/events.submit.test.js` |
+| Cross-cutting | **0** | Auth/permissions land with the merge — see §7 |
 | Deferred (US-13, not yet in Jira) | 8 | ER-D01–D08 — `validateDraft` is tested but **called by nothing**, see §7 |
 | **Total** | **64** | 62 with an ER id + the 2 supporting cases. This is the backend suite only; the 16 frontend cases are counted separately in §6 |
 
@@ -310,12 +310,13 @@ field mapping and lifecycle ownership — `WRITABLE_COLS` in, row out — and th
 no value at which its behaviour changes. Its four tests are happy-path and negative
 only, and that is the correct shape for the layer.
 
-**The original 64-case catalog has no cross-cutting cases.** The merged
-`tests/integration/events.submit.test.js` now covers authentication, role
-authorization, and verified ownership over HTTP. The controller obtains
-`organiser_id` from the verified `req.user.id`; it does not use a placeholder.
-The historical unit cases below continue to record the original validation and
-repository contract.
+**There are no cross-cutting tests, because there is nothing yet to cross.**
+`POST /api/events` is deliberately unguarded: `feature/SignIn` owns `requireAuth`
+and `requirePermission`, and this lane intentionally did not write a second set.
+`events.controller.js` carries a hardcoded `DEV_ORGANISER_ID` behind a `TODO` for
+the same reason. Authentication, authorisation and ownership tests arrive with the
+merge, and **until then a green suite here is not evidence the endpoint is secure.**
+It is evidence the validation contract holds.
 
 **SCRUM-50 is proven indirectly.** "Available for coordinator assignment and
 subsequent review" is satisfied by the shape of the stored row: `status = SUBMITTED`,
@@ -384,8 +385,7 @@ real Supabase instance to close that gap.
    showing the event name, formatted start time, a `Submitted` badge and the row's
    uuid as the reference.
 3. **Confirm the row in Supabase.** `status = 'SUBMITTED'`, `submitted_at` set,
-   `coordinator_id` null, and `organiser_id` matching the authenticated
-   Event Organiser's verified user id.
+   `coordinator_id` null, `organiser_id` the `DEV_ORGANISER_ID` placeholder.
 4. **Confirm the new column does not break inserts.** Registration added
    `registration_fields` to `events` without notice. Writes go through the explicit
    `WRITABLE_COLS` list, so an unknown column cannot break them — verify rather than
@@ -400,7 +400,7 @@ real Supabase instance to close that gap.
    exactly this, because the server reads a zoneless string in its own zone (UTC in
    Docker).
 8. **Delete the test rows.** The database is shared across all four lanes. Remove
-   anything created above and any identified legacy test rows.
+   anything created above, plus the dev-era `organiser_id = 00000000-…0001` rows.
 
 ---
 

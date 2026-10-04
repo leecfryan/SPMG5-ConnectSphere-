@@ -3,9 +3,6 @@ import { useParams, useNavigate, Link } from "react-router";
 import { useRegistrationResource } from "../hooks/useRegistrationResource";
 import RegistrationForm from "../components/RegistrationForm";
 import { useEventRegistration } from "../hooks/useEventRegistration";
-import { getRegistrationAvailability, registrationAvailabilityLabel } from "../registrationAvailability";
-import { useRegistrationWindow } from "../useRegistrationWindow";
-import RegistrationWindowNotice from "../components/RegistrationWindowNotice";
 
 function formatDate(iso) {
   if (!iso) return null;
@@ -15,10 +12,8 @@ function formatDate(iso) {
 function EventDetailPage() {
   const { eventId } = useParams();
   const navigate = useNavigate();
-  const { data, receivedAt, error: eventError, refresh } = useRegistrationResource(`/api/events/${eventId}`);
+  const { data, error: eventError } = useRegistrationResource(`/api/events/${eventId}`);
   const event = data?.event;
-  const availability = event ? getRegistrationAvailability(event) : null;
-  const windowState = useRegistrationWindow(event, data?.server_time, receivedAt, refresh);
   const [registeredEventId, setRegisteredEventId] = useState(null);
   const registered = registeredEventId === eventId;
   const { register, busy, error: regError } = useEventRegistration();
@@ -69,43 +64,25 @@ function EventDetailPage() {
             {formatDate(event.end_time)}
           </span>
         )}
-        {event.expected_attendance != null && (
+        {event.expected_attendance && (
           <span className="event-meta__item">
-            <span className="event-meta__label">Registration capacity</span>
+            <span className="event-meta__label">Expected attendance</span>
             {event.expected_attendance}
           </span>
         )}
-        <span className={`event-meta__item${availability.isFull ? " is-full" : ""}`} aria-live="polite">
-          <span className="event-meta__label">Availability</span>
-          {registrationAvailabilityLabel(event)}
-        </span>
       </div>
 
       {event.description && <p className="event-description">{event.description}</p>}
 
       <div className="event-register-section">
-        <RegistrationWindowNotice event={event} state={windowState} />
         {registered ? (
           <p role="status">You are registered. Taking you to your registrations…</p>
         ) : event.status === "APPROVED" ? (
           <>
-            {availability.isFull ? (
-              <p role="status">This event is full. Waiting-list redirection is pending implementation.</p>
-            ) : (
-              <>
-                <h2>Register for this event</h2>
-                <p>Fill in your details below to secure your spot.</p>
-                {regError && <p className="error" role="alert">{regError}</p>}
-                <RegistrationForm
-                  key={eventId}
-                  fields={event.registration_fields ?? []}
-                  onSubmit={handleSubmit}
-                  busy={busy}
-                  disabled={windowState.status !== "open"}
-                  disabledReasonId={windowState.hasWindow ? `registration-window-message-${event.id}` : undefined}
-                />
-              </>
-            )}
+            <h2>Register for this event</h2>
+            <p>Fill in your details below to secure your spot.</p>
+            {regError && <p className="error" role="alert">{regError}</p>}
+            <RegistrationForm key={eventId} fields={event.registration_fields ?? []} onSubmit={handleSubmit} busy={busy} disabled={false} />
           </>
         ) : (
           <p>Registration is not currently open for this event.</p>
