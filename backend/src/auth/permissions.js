@@ -13,6 +13,9 @@ const policies = Object.freeze({
   },
   "equipment.request": { roles: ["event_coordinator"] },
   "equipment.review": { roles: ["technical_support_staff"] },
+  // Scrum-30 AC1: add/update/retire a catalogue record - separate from
+  // equipment.review, which only ever gated the quick operational-status PATCH.
+  "equipment.manage": { roles: ["technical_support_staff"] },
   "equipment.messages": { roles: ["technical_support_staff", "event_coordinator"] },
   "events.assign_coordinator": { roles: ["event_ops_manager"] },
   "internal.access": {
