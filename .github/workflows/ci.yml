@@ -122,3 +122,43 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 14
+
+  playwright-live:
+    name: Live-DB E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # tests/e2e hits the real shared dev Supabase project (not a fake/mocked
+    # backend). Two of these jobs running at once - e.g. two PRs open at the
+    # same time - could collide on shared state, so only one run proceeds at
+    # a time; a second one queues instead of racing the first.
+    concurrency:
+      group: playwright-live-db
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tests/e2e/package-lock.json
+      - name: Install test dependencies
+        working-directory: tests/e2e
+        run: npm ci
+      - name: Install Chromium
+        working-directory: tests/e2e
+        run: npx playwright install --with-deps chromium
+      - name: Run live-DB E2E tests
+        working-directory: tests/e2e
+        run: npx playwright test
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+      - name: Save report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-live-results
+          path: tests/e2e/test-results/
+          retention-days: 14
