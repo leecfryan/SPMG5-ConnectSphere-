@@ -6,7 +6,7 @@
 // reporter's output doubles as the traceability report.
 
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
-import { EVENT_LIMITS, submitEventRequest } from "./eventsService";
+import { EVENT_LIMITS, submitEventRequest, updateEventRequest } from "./eventsService";
 
 // A response only has to answer .status and .json() for the service.
 const jsonResponse = (status, payload) => ({ status, json: async () => payload });
@@ -233,4 +233,41 @@ test("SCRUM-44: EVENT_LIMITS mirrors the backend caps and is frozen", () => {
   expect(() => {
     EVENT_LIMITS.name = 10;
   }).toThrow();
+});
+
+test("[SCRUM-100-SERVICE-001] Saving event edits uses the scoped PATCH endpoint and preserves local time intent", async () => {
+  const event = { id: "event-reference", name: "Updated" };
+  fetch.mockResolvedValue({ ...jsonResponse(200, { event }), ok: true });
+  const result = await updateEventRequest(event.id, { name: "Updated", start_time: "2099-01-01T09:00" }, "verified-token");
+  expect(result).toEqual({ event, errors: [], message: "" });
+  expect(fetch.mock.calls[0][0]).toBe("/api/event-workspace/organiser/event-reference");
+  expect(fetch.mock.calls[0][1].method).toBe("PATCH");
+  expect(fetch.mock.calls[0][1].headers.Authorization).toBe("Bearer verified-token");
+  expect(sentBody()).toEqual({ name: "Updated", start_time: "2099-01-01T01:00:00.000Z" });
+});
+
+test("[SCRUM-100-SERVICE-002] A missing session sends no edit request", async () => {
+  expect(await updateEventRequest("event", { name: "Updated" })).toEqual({ event: null, errors: [], message: "Please sign in to update an event." });
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test("[SCRUM-100-SERVICE-003] Field validation errors are available for correcting the edit form", async () => {
+  const errors = [{ field: "name", message: "required" }];
+  fetch.mockResolvedValue({ ...jsonResponse(400, { errors, message: "Check the event details and try again." }), ok: false });
+  expect(await updateEventRequest("event", { name: "" }, "verified-token")).toEqual({ event: null, errors, message: "" });
+});
+
+test("[SCRUM-100-SERVICE-004] Refused edits preserve the server's safe message", async () => {
+  fetch.mockResolvedValue({ ...jsonResponse(403, { message: "You can only edit events you are responsible for." }), ok: false });
+  expect((await updateEventRequest("event", { name: "Updated" }, "verified-token")).message).toBe("You can only edit events you are responsible for.");
+});
+
+test("[SCRUM-100-SERVICE-005] Network failure cannot look like a saved edit", async () => {
+  fetch.mockRejectedValue(new Error("Private network diagnostic"));
+  expect(await updateEventRequest("event", { name: "Updated" }, "verified-token")).toEqual({ event: null, errors: [], message: "Unable to connect. Check your connection and try again." });
+});
+
+test("[SCRUM-100-SERVICE-006] A malformed successful response cannot claim an event was saved", async () => {
+  fetch.mockResolvedValue({ ...jsonResponse(200, {}), ok: true });
+  expect(await updateEventRequest("event", { name: "Updated" }, "verified-token")).toEqual({ event: null, errors: [], message: "Unable to update the event. Please refresh and try again." });
 });

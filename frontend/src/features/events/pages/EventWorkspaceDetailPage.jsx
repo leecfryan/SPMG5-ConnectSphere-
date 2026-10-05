@@ -1,12 +1,16 @@
+import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { useAuth } from "../../auth/useAuth";
 import { useApiResource } from "../../../hooks/useApiResource";
 import { workspaces } from "../workspaces";
 import EventReviewControls from "../components/EventReviewControls";
+import EventRequestForm from "../components/EventRequestForm";
 import "../workspace.css";
 
 function Detail({ scope, eventId }) {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const [editing, setEditing] = useState(false);
+  const [saved, setSaved] = useState(false);
   const { data, loading, error, reload } = useApiResource(`/api/event-workspace/${scope}/${eventId}`);
   const event = data?.event;
   const fields = [
@@ -22,6 +26,14 @@ function Detail({ scope, eventId }) {
     <button type="button" onClick={reload}>Refresh event</button>
     {event && <>
       <h1>{event.name}</h1>
+      {saved && <p role="status">Event changes saved.</p>}
+      {scope === "organiser" && <>
+        {event.organiser_id === user.id && hasPermission("events.own.update") ?
+          (editing ? <EventRequestForm key={event.id} event={event} onCancel={() => setEditing(false)} onSubmitted={() => {
+            setEditing(false); setSaved(true); reload();
+          }} /> : <button type="button" onClick={() => { setSaved(false); setEditing(true); }}>Edit event</button>) :
+          <p>View only. Only the responsible organiser can edit this event.</p>}
+      </>}
       <p>Coordinator: {event.coordinator_id || "Not assigned yet"}</p>
       <dl>{fields.map(([label, field]) => <div key={field}><dt>{label}</dt><dd>{event[field] ?? "Not provided"}</dd></div>)}</dl>
       {scope === "manager" && <EventReviewControls key={`${event.id}:${event.status}:${event.coordinator_id}`} event={event} onUpdated={reload} />}

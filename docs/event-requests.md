@@ -35,7 +35,8 @@ row is ever written here.
 
 ## Role-scoped review and planning
 
-Organisers see their own requests; coordinators see only their assigned active
+Organisers see their own requests and view-only requests from their client organisation
+(SCRUM-100); they can edit only their own event details. Coordinators see only their assigned active
 events. Managers assign and reassign coordinators but do not decide: the assigned
 coordinator approves or rejects (SCRUM-98/99). Venue and equipment arrangements
 need an approved event. Only attendees can browse the registration catalogue.

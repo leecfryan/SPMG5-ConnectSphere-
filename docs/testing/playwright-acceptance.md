@@ -139,15 +139,27 @@ This is browser-to-backend acceptance coverage with a simulated external Auth
 service. It does not prove live Supabase credential verification, cryptographic
 JWT rejection, database/RLS rules, real event relationship queries, production
 HTTPS/SPA rewrites, or Firefox/WebKit behavior. Live acceptance should use a
-dedicated test Supabase project and actual feature endpoints once they exist.
+dedicated test Supabase project and the actual deployed feature endpoints.
 The record resolver here uses test-owned fixtures, not a database. Complete story
 acceptance still requires those integrations.
 
-This suite is scoped to sign-in and RBAC. Feature pages built on top of it have
-no browser case here: `/events/assignments` (SCRUM-26) is covered in jsdom by
+The original catalog above is scoped to sign-in and RBAC. Additional feature
+workflows live in their own specs and guides. Assignment queue UI `/events/assignments` (SCRUM-26) is covered in jsdom by
 `AssignmentQueuePage.test.jsx` and at the route guard by `Rbac.test.jsx`, and its
 case catalog is [coordinator assignment tests](../event-assignment-tests.md).
 Adding a browser case for it is deliberate future work, not an oversight.
 
 References: [Playwright web servers](https://playwright.dev/docs/test-webserver)
 and [Playwright API testing](https://playwright.dev/docs/api-testing).
+
+## SCRUM-100 organiser event scope (2026-10-05)
+
+The consolidated [Access testing guide](frontend-acceptance.md#scrum-100-organiser-event-scope-2026-10-05) documents the unit, integration, API and browser layers, fourteen agreed TC specifications, exact fixture data, run commands, response matrix, coverage gaps and latest results.
+
+The existing `event-workspace.api.spec.cjs` now has 13 tests (11 SCRUM-100), and `event-workspace.browser.spec.cjs` has 4 (2 SCRUM-100). The story proves own save/read-back, same-company peer view-only, unrelated-client list/search/direct-reference denial, full-row preservation, every non-organiser role denied, missing/forged credentials, role revocation and invalid partial edits. Browser cases use real PATCH responses, including revocation after Edit opens.
+
+From the repository root, run `npm run test:playwright -- tests/playwright/event-workspace.api.spec.cjs tests/playwright/event-workspace.browser.spec.cjs`: latest focused result 17 passed. Full `npm run test:playwright` regression passed 148 (105 API, 43 Chromium), with no failed, flaky or skipped tests on 2026-10-05. Historical totals earlier in this guide describe earlier runs. The current full report is `playwright-report/index.html`, with JSON `test-results/results.json`; `npm run test:playwright:report` opens it. Generated reports are ignored and replaced on the next run. Live Supabase/RLS and GitHub CI remain separate unverified evidence.
+
+### PR #24 merge repair result (2026-10-05)
+
+After removing the duplicate frontend import and updating EVENT-API-101's exact organiser capability list to retain staging's three registration-management permissions, the complete isolated API/browser regression passed all 148 cases (105 API, 43 Chromium), with no failed, flaky or skipped tests. The diagnostic command used --max-failures=3 and reached every case; no runner config changed. See the consolidated Access test guide's PR #24 staging merge repair section for logs, frontend results, unchanged owner/company checks and the separate live-DB CI rerun limitation.
