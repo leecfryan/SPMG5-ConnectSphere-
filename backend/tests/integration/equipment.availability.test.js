@@ -116,6 +116,10 @@ async function startApp() {
       findEventById: async () => ({ id: anchorEventId, coordinator_id: anchorUserId, status: "APPROVED" }),
       findEventsByIds: async () => [],
       getUserDisplayName: async () => null,
+      // SCRUM-104: this file's own events are never CANCELLED - a real query
+      // here would also sweep any other suite's throwaway cancelled events
+      // running concurrently against the shared dev database.
+      listCancelledEventIds: async () => [],
     },
   });
   server = app.listen(0, "127.0.0.1");

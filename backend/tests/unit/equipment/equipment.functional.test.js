@@ -78,6 +78,9 @@ async function setup(t, {
   findEventById = async () => ({ id: VALID_EVENT_ID, coordinator_id: "coord-1", status: "APPROVED" }),
   findEventsByIds = async (ids) => ids.map((id) => ({ id, name: "Event " + id })),
   getUserDisplayName = async (id) => "User " + id,
+  // SCRUM-104: equipment reads sweep for cancelled events first - no test in
+  // this file exercises that sweep, so an empty list is the correct no-op fake.
+  listCancelledEventIds = async () => [],
 }) {
   const app = express();
   app.use(express.json());
@@ -87,7 +90,7 @@ async function setup(t, {
     next();
   });
 
-  app.use("/api", equipmentRoutes({ authenticate: (req, res, next) => next(), equipmentService, findEventById, findEventsByIds, getUserDisplayName }));
+  app.use("/api", equipmentRoutes({ authenticate: (req, res, next) => next(), equipmentService, findEventById, findEventsByIds, getUserDisplayName, listCancelledEventIds }));
 
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
