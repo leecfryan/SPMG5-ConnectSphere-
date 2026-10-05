@@ -1,8 +1,9 @@
 # Current access update
 
-Attendee responsibility is required for browsing and registration. The role and
-publication contract in [event access](event-access.md) supersedes older
-references below to access for any signed-in user.
+Attendee responsibility is required for browsing and registration. The role
+contract in [event access](event-access.md) supersedes older references below to
+access for any signed-in user. The manager's "open registration" action was
+removed; when registration opens is set by the registration start time.
 
 # Attendee Registration — Sprint 1 scope
 

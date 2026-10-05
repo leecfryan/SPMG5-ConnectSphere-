@@ -10,7 +10,7 @@ const { once } = require("node:events");
 
 const requestId = "33333333-3333-4333-8333-333333333333";
 const venue = { id: "11111111-1111-4111-8111-111111111111", name: "Across locations", capacity: 200 };
-const event = { id: "22222222-2222-4222-8222-222222222222", name: "Assigned conference", status: "ACCEPTED" };
+const event = { id: "22222222-2222-4222-8222-222222222222", name: "Assigned conference", status: "APPROVED" };
 
 const decided = (status, note = null) => ({
   id: requestId,
@@ -235,4 +235,77 @@ test("[SCRUM-20] Explaining the clash never turns the refusal into a server erro
 
   expect(response.status).toBe(409);
   expect((await response.json()).details[0]).toMatch(/Refresh the list/);
+});
+
+// ---------------------------------------------------------------------------
+// SCRUM-102: reject a booking with a reason and suggested alternative
+//
+// SCRUM-22 left the reason optional because its own AC said staff *may* give
+// one. These tests hold the new rule: a rejection without a reason is refused,
+// an approval without one is not.
+// ---------------------------------------------------------------------------
+
+const ALTERNATIVE =
+  "Marina is already held for the gala that morning. Orchard Seminar Room 3 is free AM on the same date and seats 80.";
+
+test("[SCRUM-102] A rejection with no reason is refused and nothing is decided", async () => {
+  const response = await decide({ decision: "rejected" });
+
+  expect(response.status).toBe(400);
+  expect((await response.json()).details.join(" ")).toMatch(/note is required when rejecting/i);
+  expect(service.decideBookingRequest).not.toHaveBeenCalled();
+});
+
+test("[SCRUM-102] An empty or whitespace-only reason does not count as a reason", async () => {
+  for (const body of [
+    { decision: "rejected", note: null },
+    { decision: "rejected", note: "" },
+    { decision: "rejected", note: "   " },
+    { decision: "rejected", note: "\n\t " },
+  ]) {
+    expect((await decide(body)).status).toBe(400);
+  }
+
+  expect(service.decideBookingRequest).not.toHaveBeenCalled();
+});
+
+test("[SCRUM-102] A rejection carrying a reason and a suggested alternative is recorded", async () => {
+  service.getBookingRequestById.mockResolvedValue(decided("rejected", ALTERNATIVE));
+
+  const response = await decide({ decision: "rejected", note: `  ${ALTERNATIVE}  ` });
+  const { data } = await response.json();
+
+  expect(response.status).toBe(200);
+  expect(data.status).toBe("rejected");
+  // The suggested alternative travels in the same note, trimmed but otherwise
+  // untouched, so nothing the reviewer wrote is lost.
+  expect(service.decideBookingRequest).toHaveBeenCalledWith(
+    requestId, "rejected", ALTERNATIVE, "verified-user"
+  );
+  expect(data.decision_note).toBe(ALTERNATIVE);
+});
+
+test("[SCRUM-102] The requesting coordinator reads the reason under their own scope", async () => {
+  service.getBookingRequestById.mockResolvedValue(decided("rejected", ALTERNATIVE));
+
+  const listed = await fetch(`${base}/api/venues/booking-requests/${requestId}`, {
+    headers: { Authorization: "Bearer event_coordinator" },
+  });
+  const { data } = await listed.json();
+
+  expect(listed.status).toBe(200);
+  expect(data.decision_note).toBe(ALTERNATIVE);
+  // Scope comes from the session, so a coordinator only ever reads their own.
+  expect(service.getBookingRequestById).toHaveBeenCalledWith(
+    requestId, { coordinatorId: "verified-user" }
+  );
+});
+
+test("[SCRUM-102] Approving still needs no reason", async () => {
+  const response = await decide({ decision: "confirmed" });
+
+  expect(response.status).toBe(200);
+  expect(service.decideBookingRequest).toHaveBeenCalledWith(
+    requestId, "confirmed", null, "verified-user"
+  );
 });

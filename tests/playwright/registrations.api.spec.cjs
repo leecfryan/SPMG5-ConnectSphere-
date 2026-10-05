@@ -68,7 +68,7 @@ test('[REG-API-007] Missing authentication and malformed dynamic details are rej
   expect((await request.post('/api/test/control', { data: { command: 'deleteRegistration' } })).status()).toBe(404);
 });
 
-for (const [id, status] of [['008', 'SUBMITTED'], ['009', 'REJECTED'], ['011', 'ACCEPTED']]) {
+for (const [id, status] of [['008', 'SUBMITTED'], ['009', 'REJECTED'], ['011', 'UNDER_REVIEW']]) {
   test(`[REG-API-${id}] AC1/AC2: ${status} events stay absent from listings and direct API requests`, async ({ request, accounts }) => {
     const available = await setupRegistration(accounts, request);
     const hidden = await setupRegistration(accounts, request);

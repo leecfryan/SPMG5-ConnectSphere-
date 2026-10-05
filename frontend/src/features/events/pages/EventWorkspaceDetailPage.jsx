@@ -25,7 +25,7 @@ function Detail({ scope, eventId }) {
       <p>Coordinator: {event.coordinator_id || "Not assigned yet"}</p>
       <dl>{fields.map(([label, field]) => <div key={field}><dt>{label}</dt><dd>{event[field] ?? "Not provided"}</dd></div>)}</dl>
       {scope === "manager" && <EventReviewControls key={`${event.id}:${event.status}:${event.coordinator_id}`} event={event} onUpdated={reload} />}
-      {scope === "coordinator" && event.coordinator_id === user.id && ["ACCEPTED", "APPROVED"].includes(event.status) && <nav className="event-actions" aria-label="Event arrangements">
+      {scope === "coordinator" && event.coordinator_id === user.id && ["APPROVED", "CONFIRMED"].includes(event.status) && <nav className="event-actions" aria-label="Event arrangements">
         <Link to="/venues">Arrange venue bookings</Link>
         <Link to={`/equipment/requests?event=${encodeURIComponent(event.id)}`}>Arrange equipment and technical support</Link>
       </nav>}

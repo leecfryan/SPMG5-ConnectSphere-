@@ -27,12 +27,9 @@ module.exports = function createEventWorkspaceRoutes(client) {
   router.get("/coordinators", requirePermission("events.assign"), available, async (req, res) => {
     res.json({ coordinators: await service.coordinators() });
   });
-  router.patch("/:id/decision", requirePermission("events.review"), available, validId, async (req, res) => {
-    if (!validBody(req.body, ["decision"]) || !["accept", "reject"].includes(req.body.decision)) {
-      return res.status(400).json({ message: "Choose accept or reject." });
-    }
-    changed(res, await service.decide(req.params.id, req.body.decision === "accept" ? "ACCEPTED" : "REJECTED"));
-  });
+  // The manager assigns and reassigns but does not decide: approval belongs to the
+  // assigned coordinator (SCRUM-98/99, discussions #80, #101). When registration
+  // opens is the Registration lane's registration start time, not a manager action.
   router.patch("/:id/coordinator", requirePermission("events.assign"), available, validId, async (req, res) => {
     if (!validBody(req.body, ["coordinatorId", "expectedCoordinatorId"]) || !isUuid(req.body.coordinatorId) ||
       !(req.body.expectedCoordinatorId === null || isUuid(req.body.expectedCoordinatorId))) {
@@ -42,12 +39,6 @@ module.exports = function createEventWorkspaceRoutes(client) {
       return res.status(400).json({ message: "This account is not an active event coordinator." });
     }
     changed(res, await service.assign(req.params.id, req.body.coordinatorId, req.body.expectedCoordinatorId));
-  });
-  router.patch("/:id/publication", requirePermission("events.review"), available, validId, async (req, res) => {
-    if (!validBody(req.body, ["openRegistration"]) || req.body.openRegistration !== true) {
-      return res.status(400).json({ message: "Choose to open registration." });
-    }
-    changed(res, await service.publish(req.params.id));
   });
   return router;
 };

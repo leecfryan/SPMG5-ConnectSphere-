@@ -1,6 +1,6 @@
 // Importing the application/validation must not require administrative credentials.
 const getSupabase = () => require("../../supabase");
-const { canTransition } = require("./lifecycle");
+const { canTransition, ACTIVE_STATUSES } = require("./lifecycle");
 
 const TABLE = "events";
 
@@ -133,8 +133,6 @@ async function findSubmittedUnassigned() {
     "findSubmittedUnassigned",
   );
 }
-
-const ACTIVE_STATUSES = ["SUBMITTED", "ACCEPTED", "APPROVED"];
 
 async function findActiveAssignments() {
   return unwrap(

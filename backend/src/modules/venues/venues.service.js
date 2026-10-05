@@ -1,5 +1,6 @@
 // Lazy construction keeps sign-in available when venue storage is not configured.
 const getSupabase = () => require("../../supabase");
+const { PLANNING_STATUSES } = require("../events/lifecycle");
 
 // SCRUM-82, 83, 84: everything a Coordinator needs to assess a venue
 const VENUE_FIELDS = [
@@ -123,15 +124,15 @@ async function getEventById(id, coordinatorId) {
   return data;
 }
 
-// SCRUM-85: the events a coordinator can pick from. Drafts are left out
-// because their timing is not final (see validateAgainstEvent), and events
-// that have already ended have nothing left to book.
+// SCRUM-85: the events a coordinator can pick from. Only approved events may be
+// booked (SCRUM-99 AC1, see validateAgainstEvent), and events that have already
+// ended have nothing left to book.
 async function listBookableEvents(coordinatorId) {
   const { data, error } = await getSupabase()
     .from("events")
     .select(EVENT_FIELDS)
     .eq("coordinator_id", coordinatorId)
-      .in("status", ["ACCEPTED", "APPROVED"])
+    .in("status", PLANNING_STATUSES)
     .not("start_time", "is", null)
     .gte("end_time", new Date().toISOString())
     .order("start_time", { ascending: true });

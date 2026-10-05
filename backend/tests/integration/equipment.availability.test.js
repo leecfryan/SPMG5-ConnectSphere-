@@ -113,7 +113,7 @@ async function startApp() {
     authClient,
     equipmentDependencies: {
       equipmentService,
-      findEventById: async () => ({ id: anchorEventId, coordinator_id: anchorUserId, status: "ACCEPTED" }),
+      findEventById: async () => ({ id: anchorEventId, coordinator_id: anchorUserId, status: "APPROVED" }),
       findEventsByIds: async () => [],
       getUserDisplayName: async () => null,
     },

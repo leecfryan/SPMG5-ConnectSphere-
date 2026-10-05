@@ -34,7 +34,7 @@ module.exports = function equipmentStorage(accounts) {
     },
     async findEventById(id) { return events().find(event => event.id === id) || null; },
     async findEventsByIds(ids) { return events().filter(event => ids.includes(event.id)); },
-    async listAssignedEvents(id) { return events().filter(event => event.coordinator_id === id && ['ACCEPTED', 'APPROVED'].includes(event.status)); },
+    async listAssignedEvents(id) { return events().filter(event => event.coordinator_id === id && ['APPROVED', 'CONFIRMED'].includes(event.status)); },
     async getUserDisplayName(id) { return accounts.get(id)?.email || null; },
   };
 };

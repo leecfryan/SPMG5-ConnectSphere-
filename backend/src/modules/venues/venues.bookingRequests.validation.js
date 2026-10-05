@@ -9,6 +9,7 @@
 //   4. findSlotProblems             the slots are actually requestable that day
 
 const { SLOTS, isValidDateString } = require("./venues.availability");
+const { PLANNING_STATUSES } = require("../events/lifecycle");
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -197,8 +198,8 @@ function validateAgainstVenue(value, venue) {
 function validateAgainstEvent(value, event, today) {
   const errors = [];
 
-  if (!["ACCEPTED", "APPROVED"].includes(event.status)) {
-    errors.push("The event must be accepted before requesting a venue");
+  if (!PLANNING_STATUSES.includes(event.status)) {
+    errors.push("The event must be approved before requesting a venue");
     return errors;
   }
 
@@ -303,9 +304,11 @@ const DECISIONS = ["confirmed", "rejected"];
 const DECISION_FIELDS = ["decision", "note"];
 const DECISION_NOTE_MAX = 2000;
 
-// SCRUM-22 lets Venue Staff add information, a reason or a suggested
-// alternative when rejecting, but does not require one. SCRUM-102 will make a
-// reason mandatory for rejections; this is the single place that changes.
+// SCRUM-22 let Venue Staff add information, a reason or a suggested
+// alternative when rejecting, without requiring one. SCRUM-102 makes that
+// reason mandatory, and this function is the single place the rule lives.
+// The suggested alternative shares the same note rather than having a column
+// of its own: AC2 only says staff *may* attach one, which free text satisfies.
 //
 // SCRUM-20: a decision carries a decision and an optional note, and nothing
 // else. There is deliberately no override, force or priority field, so an
@@ -337,6 +340,19 @@ function validateDecision(payload) {
     } else if (note.length > DECISION_NOTE_MAX) {
       errors.push(`note must be ${DECISION_NOTE_MAX} characters or fewer`);
     }
+  }
+
+  // SCRUM-102: a rejection must carry a reason, so the coordinator can act on
+  // it without a separate conversation. Whitespace does not count as one.
+  // Approving stays optional: no acceptance criterion has ever asked staff to
+  // justify a yes.
+  if (
+    payload.decision === "rejected" &&
+    (typeof note !== "string" || note.trim() === "")
+  ) {
+    errors.push(
+      "note is required when rejecting: give a reason, and a suggested alternative venue or arrangement if you have one"
+    );
   }
 
   if (errors.length > 0) return { errors, value: null };

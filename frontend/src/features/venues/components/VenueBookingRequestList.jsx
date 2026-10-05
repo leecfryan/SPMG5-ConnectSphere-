@@ -73,6 +73,9 @@ function DecisionPanel({ request, onDecided }) {
   const [conflict, setConflict] = useState(null);
 
   const requestId = request.id;
+  // SCRUM-102: read during render rather than inside the handler, so the
+  // disabled state and the hint both follow what is typed.
+  const hasReason = note.trim() !== "";
 
   function decide(decision) {
     setBusy(decision);
@@ -117,16 +120,21 @@ function DecisionPanel({ request, onDecided }) {
     <div className="v-decision">
       {isRejecting && (
         <label className="v-field">
-          <span className="v-label">Reason or suggested alternative (optional)</span>
+          {/* SCRUM-102: required on a rejection, and the same box carries the
+              suggested alternative. */}
+          <span className="v-label">Reason, and a suggested alternative if you have one</span>
           <textarea
             className="v-input"
             rows="2"
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="e.g. already held for another event, try Orchard Seminar Room 3"
+            required
           />
           <span className="v-hint">
-            Shared with the coordinator, who makes any resulting booking change.
+            {hasReason
+              ? "Shared with the coordinator, who makes any resulting booking change."
+              : "A reason is required to reject. It is shared with the coordinator, who makes any resulting booking change."}
           </span>
         </label>
       )}
@@ -153,7 +161,8 @@ function DecisionPanel({ request, onDecided }) {
               type="button"
               className="v-btn v-btn-danger"
               onClick={() => decide("rejected")}
-              disabled={busy !== null}
+              disabled={busy !== null || !hasReason}
+              title={hasReason ? undefined : "Type a reason first"}
             >
               {busy === "rejected" ? "Rejecting..." : "Confirm rejection"}
             </button>

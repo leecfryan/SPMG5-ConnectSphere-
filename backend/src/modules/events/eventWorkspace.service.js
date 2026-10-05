@@ -1,3 +1,5 @@
+const { ACTIVE_STATUSES } = require("./lifecycle");
+
 const FIELDS = [
   "id", "name", "purpose", "description", "start_time", "end_time",
   "expected_attendance", "venue_requirements", "accessibility_needs",
@@ -20,8 +22,8 @@ function createEventWorkspaceService(client) {
   function scopedQuery(scope, userId) {
     let query = client.from("events").select(FIELDS);
     if (scope === "organiser") query = query.eq("organiser_id", userId);
-    else if (scope === "coordinator") query = query.eq("coordinator_id", userId).in("status", ["ACCEPTED", "APPROVED"]);
-    else if (scope === "manager") query = query.in("status", ["SUBMITTED", "ACCEPTED", "APPROVED", "REJECTED"]);
+    else if (scope === "coordinator") query = query.eq("coordinator_id", userId).in("status", ACTIVE_STATUSES);
+    else if (scope === "manager") query = query.in("status", [...ACTIVE_STATUSES, "REJECTED"]);
     else throw new Error("Unknown event scope");
     return query;
   }
@@ -47,16 +49,12 @@ function createEventWorkspaceService(client) {
       if (error) throw error;
       return isCoordinator(data?.user);
     },
-    decide: (id, status) => unwrap(client.from("events").update({ status })
-      .eq("id", id).eq("status", "SUBMITTED").select(FIELDS).maybeSingle()),
     assign(id, coordinatorId, expectedCoordinatorId) {
       let query = client.from("events").update({ coordinator_id: coordinatorId })
-        .eq("id", id).in("status", ["ACCEPTED", "APPROVED"]);
+        .eq("id", id).in("status", ACTIVE_STATUSES);
       query = expectedCoordinatorId === null ? query.is("coordinator_id", null) : query.eq("coordinator_id", expectedCoordinatorId);
       return unwrap(query.select(FIELDS).maybeSingle());
     },
-    publish: (id) => unwrap(client.from("events").update({ status: "APPROVED" })
-      .eq("id", id).eq("status", "ACCEPTED").not("coordinator_id", "is", null).select(FIELDS).maybeSingle()),
   };
 }
 
