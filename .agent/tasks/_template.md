@@ -2,13 +2,13 @@
 
 **Backlog ID:** US-<n> · **Epic:** <epic> · **Lane:** <lane> · **Points:** <sp> · **Assignee:** <name>
 **Branch:** `feature/<threeWordSummary>` or `fix/<threeWordSummary>` · **Mode:** build | teach
-**State:** 📋 planned · **Jira status:** To Do | In Progress | In Review | Done
+**State:** 📋 planned
 
 ## Contract (word for word, as given by the user on <YYYY-MM-DD>)
 
-> **Story:** As a <role>, I want <goal>, so that <benefit>.
+> **Story:** As a <role>, I want <goal> so that <benefit>.
 >
-> **Acceptance criteria** (checklist or Given / When / Then)
+> **Acceptance criteria**
 > 1. …
 > 2. …
 
@@ -23,13 +23,13 @@
 
 Written and agreed **before** code. Expected results come from the AC and clarifications, never from the code.
 
-| ID | AC | Type | Scenario | Pre-conditions | Steps | Test data | Expected result | Automated by | Latest execution |
-|---|---|---|---|---|---|---|---|---|---|
-| TC-SCRUM-<n>-01 | 1 | Happy | | | | | | | ☐ |
-| TC-SCRUM-<n>-02 | 1 | Negative | | | | | | | ☐ |
-| TC-SCRUM-<n>-03 | 2 | Boundary | | | | | | | ☐ |
-| TC-SCRUM-<n>-04 | | Conflict | | | | | | | ☐ |
-| TC-SCRUM-<n>-05 | | Failure | | | | | | | ☐ |
+| Epic | Scrum-# | AC # | Type | Test Case ID | Test Scenario | Pre-conditions | Test Steps | Test Data | Expected Result | Created By* | Date of Creation* | Actual Result | Pass / Fail / Not Executed / Blocked | Remarks | Executed By | Date of Execution |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| <epic> | SCRUM-<n> | 1 | Happy | TC-SCRUM-<n>-01 | | | | | <name> | <YYYY-MM-DD> | | Not Executed | | | |
+| <epic> | SCRUM-<n> | 1 | Negative | TC-SCRUM-<n>-02 | | | | | <name> | <YYYY-MM-DD> | | Not Executed | | | |
+| <epic> | SCRUM-<n> | 2 | Boundary | TC-SCRUM-<n>-03 | | | | | <name> | <YYYY-MM-DD> | | Not Executed | | | |
+| <epic> | SCRUM-<n> | | Conflict | TC-SCRUM-<n>-04 | | | | | <name> | <YYYY-MM-DD> | | Not Executed | | | |
+| <epic> | SCRUM-<n> | | Failure | TC-SCRUM-<n>-05 | | | | | <name> | <YYYY-MM-DD> | | Not Executed | | | |
 
 **Coverage** (story's files): backend <lines / branches> · frontend <lines / branches> · gaps and reasons: <…>
 
@@ -52,9 +52,7 @@ Interpretations of the AC and design choices, with the reason and who agreed.
 ## Touches
 
 - **Shared files:** <app.js / permissions.js / App.jsx / WorkspaceLayout.jsx / Playwright support, or none>
-- **Schema change (manual, no migration file):** <none, or the SQL. Added by user on <date>? Copied to the lane
-  guide's *Schema reference*?>
-- **New files:** <none, or each path and why no existing file fit>
+- **Schema change (manual, no migration file):** <none, or the SQL. Added by user on <date>?>
 - **New permission:** <none, or name + roles>
 - **New routes:** <frontend paths and API endpoints>
 

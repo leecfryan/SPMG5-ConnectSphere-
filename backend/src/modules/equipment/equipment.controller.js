@@ -4,6 +4,8 @@ const {
   validateAvailabilityQuery,
   validateAvailabilityWindow,
   validateEquipmentStatusUpdate,
+  validateCreateEquipment,
+  validateUpdateEquipment,
   checkAvailability,
   findAvailableUnits,
   isStatusAvailable,
@@ -41,6 +43,9 @@ function createEquipmentController({
     listEquipment,
     findEquipmentById,
     updateEquipmentStatus,
+    createEquipment,
+    updateEquipment,
+    retireEquipment,
     listRequestsByEvent,
     findRequestById,
     listAllRequests,
@@ -99,6 +104,63 @@ function createEquipmentController({
       }
 
       const updated = await updateEquipmentStatus(id, value.status);
+      if (!updated) {
+        return res.status(404).json({ error: "Equipment not found" });
+      }
+      res.status(200).json({ data: updated });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Scrum-30 AC1/AC2: add a new catalogue record.
+  async function postEquipment(req, res, next) {
+    try {
+      const { ok, errors, value } = validateCreateEquipment(req.body);
+      if (!ok) {
+        return res.status(400).json({ error: "Validation failed", details: errors });
+      }
+      const created = await createEquipment(value);
+      res.status(201).json({ data: created });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Scrum-30 AC1/AC2: edit an existing record's type, description, location
+  // or status - a fuller management action than patchEquipmentStatus above.
+  async function patchEquipment(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) {
+        return res.status(400).json({ error: "Invalid equipment id" });
+      }
+
+      const { ok, errors, value } = validateUpdateEquipment(req.body);
+      if (!ok) {
+        return res.status(400).json({ error: "Validation failed", details: errors });
+      }
+
+      const updated = await updateEquipment(id, value);
+      if (!updated) {
+        return res.status(404).json({ error: "Equipment not found" });
+      }
+      res.status(200).json({ data: updated });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Scrum-30 AC1: retire - sets status to UNAVAILABLE and nothing else. The
+  // row is never deleted (see equipment.service.js's retireEquipment).
+  async function patchEquipmentRetire(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) {
+        return res.status(400).json({ error: "Invalid equipment id" });
+      }
+
+      const updated = await retireEquipment(id);
       if (!updated) {
         return res.status(404).json({ error: "Equipment not found" });
       }
@@ -275,6 +337,9 @@ function createEquipmentController({
   return {
     getEquipmentCatalogue,
     patchEquipmentStatus,
+    postEquipment,
+    patchEquipment,
+    patchEquipmentRetire,
     getEquipmentAvailability,
     getEquipmentRequests,
     getTechSupportDashboard,

@@ -10,8 +10,10 @@ and sign-in/session handling remain available together on frontend port 5173.
 | --- | --- |
 | `/equipment/requests?event=<uuid>` | `internal.access` + `equipment.request`: event coordinators |
 | `/technical-support` | `internal.access` + `equipment.review`: technical support staff |
-| Equipment catalogue | `equipment.read`: coordinators and technical staff |
+| Equipment catalogue page (`/equipment/catalogue`) | `equipment.review`: technical staff only (Scrum-30; coordinators no longer have a route to it) |
+| `GET /api/equipment` (backend endpoint) | `equipment.read`: coordinators and technical staff - coordinators still use this indirectly via the reserve flow's own fetch |
 | `GET /api/equipment/availability` | `internal.access` + `equipment.read`: coordinators and technical staff |
+| Add / update / retire a catalogue record | `equipment.manage`: technical staff only (Scrum-30) |
 | Assigned-event picker | Coordinators; backend filters by `events.coordinator_id` |
 | Read an event's equipment requests | Technical staff across events; coordinator only for assigned events |
 | Submit equipment request | Coordinator assigned to the event |

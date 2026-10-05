@@ -17,6 +17,7 @@ Scrum-51 sit under Scrum-25. Epic Scrum-7.
 
 - An Event Organiser can provide the event name, purpose and description.
 - The Organiser can provide the proposed date and time and the expected attendance.
+- The Organiser can optionally set when registration opens and closes.
 - The Organiser can provide venue requirements and accessibility needs.
 - The Organiser can provide equipment and registration needs where relevant.
 
@@ -54,6 +55,8 @@ create table events (
   description         text,
   start_time          timestamptz,
   end_time            timestamptz,
+  registration_start  timestamptz, -- optional registration opening time
+  registration_end    timestamptz, -- optional registration closing time
   expected_attendance integer,
   venue_requirements  text,        -- free text; read by the venue feature
   accessibility_needs text,
@@ -126,7 +129,7 @@ labels live in `StatusBadge.jsx`. Test cases, traceability and coverage are in
 `events.repository.js` writes only the columns in `WRITABLE_COLS`:
 
 ```
-name · purpose · description · start_time · end_time · expected_attendance
+name · purpose · description · start_time · end_time · registration_start · registration_end · expected_attendance
 venue_requirements · accessibility_needs · equipment_needs · other_comments
 ```
 
@@ -147,6 +150,8 @@ one in.
 | `registration_fields` | the registration feature |
 
 Keep `WRITABLE_COLS` and the schema above in step: change one, change the other.
+`registration_start` and `registration_end` are optional, client-supplied event
+fields written from the explicit allowlist.
 
 ---
 
@@ -264,6 +269,8 @@ the browser, where the organiser's zone is known.
   "description": "An evening reception with a short programme and dinner.",
   "start_time": "2026-11-14T10:00:00.000Z",
   "end_time": "2026-11-14T18:00:00.000Z",
+  "registration_start": "2026-10-15T00:00:00.000Z",
+  "registration_end": "2026-11-13T23:59:59.000Z",
   "expected_attendance": 250,
   "venue_requirements": "Theatre-style seating, stage, AV booth",
   "accessibility_needs": "Step-free access, hearing loop",
@@ -284,6 +291,8 @@ the table:
     "name": "Annual Alumni Homecoming",
     "start_time": "2026-11-14T10:00:00+00:00",
     "end_time": "2026-11-14T18:00:00+00:00",
+    "registration_start": "2026-10-15T00:00:00+00:00",
+    "registration_end": "2026-11-13T23:59:59+00:00",
     "expected_attendance": 250,
     "registration_fields": null,
     "status": "SUBMITTED",
@@ -328,6 +337,8 @@ to us.
 | `description` | — | required | non-empty after trim, ≤ 2000 |
 | `start_time` | — | required | parseable, in the future |
 | `end_time` | — | required | parseable, strictly after `start_time` |
+| `registration_start` | optional | optional | nullable, parseable date/time |
+| `registration_end` | optional | optional | nullable, parseable date/time; when both endpoints are set, strictly after `registration_start` |
 | `expected_attendance` | — | required | integer > 0 |
 | `venue_requirements`, `accessibility_needs`, `equipment_needs`, `other_comments` | never | never | optional free text, ≤ 2000 |
 
@@ -366,7 +377,7 @@ Feature folder at `frontend/src/features/events/`.
 
 | File | Description |
 | --- | --- |
-| `eventsService.js` | Submits the request and converts both timestamps to ISO with a zone |
+| `eventsService.js` | Submits the request and converts event and registration timestamps to ISO with a zone |
 | `eventFormat.js` | Date and reference formatting shared with the assignment screens |
 | `reviewService.js` | `startReview`, `approveEvent`, `rejectEvent`: the three review calls; only the note is sent |
 
@@ -411,7 +422,7 @@ so a query ordering only by `submitted_at` places them arbitrarily. Order by
 | --- | --- | --- |
 | Venue | `venue_requirements`, `accessibility_needs` | Free text, optional, may be null, capped at 2000 characters. The venue reference lives on the venue side. |
 | Equipment | `equipment_needs` | Free text, optional, may be null. Parsing it into structured requests is the equipment feature's work. |
-| Registration | `id`, `status`, `registration_fields` | `registration_fields` is the registration feature's column; this module neither reads nor writes it. |
+| Registration | `id`, `status`, `registration_fields`, `registration_start`, `registration_end` | `registration_fields` is the registration feature's column; registration windows are set on the event request. |
 | Assignment | `status`, `coordinator_id`, `submitted_at` | See [Coordinator assignment](event-assignment.md). |
 
 `venue_requirements` and `equipment_needs` are free text rather than structured
@@ -430,10 +441,10 @@ several.
 
 | Scrum | Done when |
 | --- | --- |
-| 23 | A signed-in Event Organiser can enter event name, purpose, description, proposed start and end time, expected attendance, venue requirements, accessibility needs, equipment needs and other comments. Required fields are validated in the browser and again on the server. Optional fields may be left blank and are stored as null. |
+| 23 | A signed-in Event Organiser can enter event name, purpose, description, proposed start and end time, optional registration opening and closing times, expected attendance, venue requirements, accessibility needs, equipment needs and other comments. Required fields are validated in the browser and again on the server. Optional fields may be left blank and are stored as null. |
+| 25 | Submitting stores one complete row with `status = 'SUBMITTED'` and `submitted_at` set by the server, owned by the signed-in Organiser. The request is then visible to coordinator assignment. An invalid submission returns every problem at once, each against its own field, and creates no row. |
 | 98 | The assigned coordinator opens a submitted request and sees everything the organiser supplied; *Start review* moves it to `UNDER_REVIEW`; approve or reject records `decided_by`, `decided_at` and the note or reason; any other coordinator or role is refused (403 on actions, 404 on reads) and nothing is written. |
 | 99 | Approval moves `UNDER_REVIEW → APPROVED`, after which venue and equipment arrangements accept the event (`APPROVED`/`CONFIRMED` only); approval writes only the decision columns; the outcome, approver and time are shown to the organiser, the assigned coordinator and the manager. |
-| 25 | Submitting stores one complete row with `status = 'SUBMITTED'` and `submitted_at` set by the server, owned by the signed-in Organiser. The request is then visible to coordinator assignment. An invalid submission returns every problem at once, each against its own field, and creates no row. |
 
 ---
 
@@ -451,7 +462,7 @@ SCRUM-23/25; [event lifecycle tests](event-lifecycle-tests.md) §8 covers SCRUM-
 
 | Layer | File | Covers |
 | --- | --- | --- |
-| Unit | `tests/unit/events/events.validation.test.js` | Required fields, caps, date ordering, attendance, optional-field handling |
+| Unit | `tests/unit/events/events.validation.test.js` | Required fields, caps, event and registration-window date ordering, attendance, optional-field handling |
 | Unit | `tests/unit/events/events.service.test.js` | Normalisation and the dropped-duplicate-message rule |
 | Unit | `tests/unit/events/events.repository.test.js` | That `status`, `submitted_at` and `organiser_id` are set outside `WRITABLE_COLS` |
 | Integration | `tests/integration/events.submit.test.js` | The HTTP contract: 201, 400, 500 and the error shape |
@@ -476,9 +487,10 @@ afterwards.
    `coordinator_id` null, `organiser_id` matching the signed-in Organiser.
 4. Submit an empty form. Expect every required field flagged at once and no row created.
 5. Submit with an end time before the start time. Expect one error, on `end_time` only.
-6. Enter a local time and confirm the stored `timestamptz` is the intended instant
+6. Submit registration times in reverse order. Expect an error on `registration_end`.
+7. Enter a local event or registration time and confirm the stored `timestamptz` is the intended instant
    rather than shifted by the organiser's UTC offset.
-7. Delete the test rows.
+8. Delete the test rows.
 
 ---
 

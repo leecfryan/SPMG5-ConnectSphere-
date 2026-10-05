@@ -163,6 +163,13 @@ function validateStatusUpdate(input) {
 // this is currently the only way equipment.status ever changes.
 const EQUIPMENT_STATUSES = ["AVAILABLE", "IN_USE", "MAINTENANCE", "UNAVAILABLE", "DAMAGED", "UNDER_MAINTENANCE"];
 
+// Scrum-30: UNAVAILABLE is reachable only through the dedicated retire action
+// (equipment.manage). The quick operational-status change (equipment.review)
+// covers day-to-day condition changes only, so it never offers or accepts
+// UNAVAILABLE - that keeps "retired" a deliberate, confirmed action rather
+// than one option among many in a status dropdown.
+const OPERATIONAL_STATUSES = EQUIPMENT_STATUSES.filter((status) => status !== "UNAVAILABLE");
+
 function validateEquipmentStatusUpdate(input) {
   const data = asObject(input);
   const errors = [];
@@ -172,12 +179,87 @@ function validateEquipmentStatusUpdate(input) {
     errors.push(err(field, "cannot be changed through this endpoint"));
   }
 
-  if (!EQUIPMENT_STATUSES.includes(data.status)) {
-    errors.push(err("status", `must be one of ${EQUIPMENT_STATUSES.join(", ")}`));
+  if (!OPERATIONAL_STATUSES.includes(data.status)) {
+    errors.push(err("status", `must be one of ${OPERATIONAL_STATUSES.join(", ")}`));
   }
 
   if (errors.length > 0) return { ok: false, errors, value: null };
   return { ok: true, errors: [], value: { status: data.status } };
+}
+
+// Scrum-30 AC1/AC2: a new catalogue record. status defaults to AVAILABLE
+// (the schema's own default) when omitted, but may be set to any recognised
+// value up front - unlike the quick-status endpoint above, creating a record
+// is a full management action, not a day-to-day condition tweak.
+function validateCreateEquipment(input) {
+  const data = asObject(input);
+  const errors = [];
+
+  if (typeof data.type !== "string" || data.type.trim() === "") {
+    errors.push(err("type", "required"));
+  }
+  if (typeof data.current_location !== "string" || data.current_location.trim() === "") {
+    errors.push(err("current_location", "required"));
+  }
+  if (data.description !== undefined && data.description !== null && typeof data.description !== "string") {
+    errors.push(err("description", "must be text"));
+  }
+  if (data.status !== undefined && !EQUIPMENT_STATUSES.includes(data.status)) {
+    errors.push(err("status", `must be one of ${EQUIPMENT_STATUSES.join(", ")}`));
+  }
+
+  if (errors.length > 0) return { ok: false, errors, value: null };
+
+  const value = {
+    type: data.type.trim(),
+    current_location: data.current_location.trim(),
+  };
+  if (typeof data.description === "string") value.description = data.description.trim();
+  if (data.status !== undefined) value.status = data.status;
+
+  return { ok: true, errors: [], value };
+}
+
+// Scrum-30 AC1/AC2: editing an existing record's type, description, location
+// or status. Every field is optional (a caller changes only what it means
+// to), but at least one must be present, and any field given must be valid -
+// same "every problem, not just the first" shape as the rest of this file.
+const EDITABLE_EQUIPMENT_FIELDS = ["type", "description", "current_location", "status"];
+
+function validateUpdateEquipment(input) {
+  const data = asObject(input);
+  const errors = [];
+
+  const unknown = Object.keys(data).filter((key) => !EDITABLE_EQUIPMENT_FIELDS.includes(key));
+  for (const field of unknown) {
+    errors.push(err(field, "cannot be changed through this endpoint"));
+  }
+
+  if (Object.keys(data).length === 0) {
+    errors.push(err("type", "at least one field is required"));
+  }
+  if (data.type !== undefined && (typeof data.type !== "string" || data.type.trim() === "")) {
+    errors.push(err("type", "must be a non-empty string"));
+  }
+  if (data.current_location !== undefined && (typeof data.current_location !== "string" || data.current_location.trim() === "")) {
+    errors.push(err("current_location", "must be a non-empty string"));
+  }
+  if (data.description !== undefined && data.description !== null && typeof data.description !== "string") {
+    errors.push(err("description", "must be text"));
+  }
+  if (data.status !== undefined && !EQUIPMENT_STATUSES.includes(data.status)) {
+    errors.push(err("status", `must be one of ${EQUIPMENT_STATUSES.join(", ")}`));
+  }
+
+  if (errors.length > 0) return { ok: false, errors, value: null };
+
+  const value = {};
+  if (data.type !== undefined) value.type = data.type.trim();
+  if (data.current_location !== undefined) value.current_location = data.current_location.trim();
+  if (data.description !== undefined) value.description = data.description === null ? null : data.description.trim();
+  if (data.status !== undefined) value.status = data.status;
+
+  return { ok: true, errors: [], value };
 }
 
 // Scrum-29: equipment availability check.
@@ -318,7 +400,10 @@ module.exports = {
   WRITABLE_COLS,
   REVIEW_STATUSES,
   EQUIPMENT_STATUSES,
+  OPERATIONAL_STATUSES,
   validateEquipmentStatusUpdate,
+  validateCreateEquipment,
+  validateUpdateEquipment,
   BLOCKING_REQUEST_STATUSES,
   startOfUtcDay,
   isBlockingOverlap,

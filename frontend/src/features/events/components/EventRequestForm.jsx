@@ -1,5 +1,9 @@
 import { useRef, useState } from "react";
 import { EVENT_LIMITS, submitEventRequest } from "../eventsService";
+import {
+  registrationEndsAfterEventStarts,
+  registrationWindowValidationError,
+} from "../registrationWindowFields";
 import { useAuth } from "../../auth/useAuth";
 
 // Mirrors WRITABLE_COLS in backend/src/modules/events/events.repository.js. The
@@ -11,6 +15,8 @@ const EMPTY = {
   description: "",
   start_time: "",
   end_time: "",
+  registration_start: "",
+  registration_end: "",
   expected_attendance: "",
   venue_requirements: "",
   accessibility_needs: "",
@@ -128,6 +134,15 @@ export default function EventRequestForm({ onSubmitted }) {
   async function submit(event) {
     event.preventDefault();
     if (submitting.current) return;
+    const windowError = registrationWindowValidationError(
+      fields.registration_start,
+      fields.registration_end,
+    );
+    if (windowError) {
+      setErrors([{ field: "registration_end", message: windowError }]);
+      setMessage("");
+      return;
+    }
     submitting.current = true;
     setBusy(true);
     setErrors([]);
@@ -216,6 +231,29 @@ export default function EventRequestForm({ onSubmitted }) {
           inputMode="numeric"
           placeholder="120"
         />
+        <h2>Registration window</h2>
+        <p>Optional. Times use your local timezone and can be independent of the event schedule.</p>
+        <div className="field-pair">
+          <div>
+            <TextField
+              {...wire("registration_start")}
+              label="Registration opens"
+              type="datetime-local"
+            />
+          </div>
+          <div>
+            <TextField
+              {...wire("registration_end")}
+              label="Registration closes"
+              type="datetime-local"
+            />
+          </div>
+        </div>
+        {registrationEndsAfterEventStarts(fields.registration_end, fields.start_time) && (
+          <p className="field-hint">
+            Registration closes after the event starts. This is allowed, but attendees may register after the event begins.
+          </p>
+        )}
       </div>
 
       <div className="form-section">

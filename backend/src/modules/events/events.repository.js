@@ -10,13 +10,14 @@ const WRITABLE_COLS = [
   "description",
   "start_time",
   "end_time",
+  "registration_start",
+  "registration_end",
   "expected_attendance",
   "venue_requirements",
   "accessibility_needs",
   "equipment_needs",
   "other_comments",
 ];
-
 
 function pickCol(input) {
   const source = input && typeof input === "object" ? input : {};
