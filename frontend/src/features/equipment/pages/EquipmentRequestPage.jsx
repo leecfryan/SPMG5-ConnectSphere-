@@ -77,10 +77,15 @@ function EquipmentRequestPage() {
     setBorrowWindow(selectedEvent ? defaultWindowForEvent(selectedEvent) : null);
   }
 
+  const [refreshKey, setRefreshKey] = useState(0);
+
   // Scrum-29 AC2/AC3/AC4: only equipment actually bookable for the current
   // borrow window - re-fetched whenever that window changes, so editing the
   // times live-updates the dropdown instead of only failing at submit time.
-  const windowKey = borrowWindow ? [eventId, borrowWindow.start, borrowWindow.end].join("|") : null;
+  // refreshKey is folded in so a successful booking re-fetches availability,
+  // not just the requests list - otherwise the next booking for the same
+  // window keeps being offered the unit that was just reserved.
+  const windowKey = borrowWindow ? [eventId, borrowWindow.start, borrowWindow.end, refreshKey].join("|") : null;
   const [availableResult, setAvailableResult] = useState(null);
   useEffect(() => {
     if (!borrowWindow) return;
@@ -98,7 +103,6 @@ function EquipmentRequestPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [forbiddenMessage, setForbiddenMessage] = useState(null);
-  const [refreshKey, setRefreshKey] = useState(0);
   const requestKey = JSON.stringify([eventId, token, refreshKey]);
   const current = requestResult?.key === requestKey;
   const requests = current ? requestResult.requests : [];

@@ -11,7 +11,7 @@ const EMPTY_EQUIPMENT = [];
 // only - UNAVAILABLE is reachable solely through the dedicated Retire action
 // below, matching equipment.validation.js's OPERATIONAL_STATUSES restriction
 // on the same PATCH /equipment/:id/status endpoint.
-const OPERATIONAL_STATUSES = ["AVAILABLE", "IN_USE", "MAINTENANCE", "DAMAGED", "UNDER_MAINTENANCE"];
+const OPERATIONAL_STATUSES = ["AVAILABLE", "IN_USE", "DAMAGED", "UNDER_MAINTENANCE"];
 
 // Scrum-29 follow-up: every equipment row's type, location and status -
 // technical staff can also change status here, since nothing in the app

@@ -27,6 +27,7 @@ function EquipmentFormPage({ mode }) {
         if (!active) return;
         const match = list.find((item) => item.id === id);
         if (!match) setLoadError("Equipment not found.");
+        else if (match.status === "UNAVAILABLE") setLoadError("This equipment has been retired and can no longer be edited.");
         else setEquipment(match);
       })
       .catch((error) => { if (active) setLoadError(error.message); });
