@@ -42,6 +42,13 @@ function fakeEquipmentService({ equipmentById = {}, requestsByEvent = {}, reques
     async listAllRequests() {
       return allRequests;
     },
+    // SCRUM-103 (added scope): the catalogue's live "in use today" overlay -
+    // no test in this file exercises that logic itself (covered live in
+    // equipment-status-change.test.js), so reusing the existing allRequests
+    // fixture (default []) keeps every other test here unaffected.
+    async listApprovedRequestsForEquipmentIds(equipmentIds) {
+      return allRequests.filter((request) => equipmentIds.includes(request.equipment_id) && request.status === "APPROVED");
+    },
     async hasOverlappingRequest(equipmentId, borrowStart, borrowEnd) {
       calls.hasOverlappingRequest.push({ equipmentId, borrowStart, borrowEnd });
       return overlapping;
