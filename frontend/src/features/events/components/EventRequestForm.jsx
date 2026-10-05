@@ -1,16 +1,21 @@
 import { useRef, useState } from "react";
-import { EVENT_LIMITS, submitEventRequest } from "../eventsService";
+import { EVENT_LIMITS, submitEventRequest, updateEventRequest } from "../eventsService";
+import {
+  registrationEndsAfterEventStarts,
+  registrationWindowValidationError,
+} from "../registrationWindowFields";
 import { useAuth } from "../../auth/useAuth";
 
-// Mirrors WRITABLE_COLS in backend/src/modules/events/events.repository.js. The
-// backend ignores anything outside that list, so an extra key here is inert -
-// a missing one silently drops what the organiser typed.
+// Ownership, assignment and status are server-controlled; the form edits only
+// the existing event-detail fields in WRITABLE_COLS.
 const EMPTY = {
   name: "",
   purpose: "",
   description: "",
   start_time: "",
   end_time: "",
+  registration_start: "",
+  registration_end: "",
   expected_attendance: "",
   venue_requirements: "",
   accessibility_needs: "",
@@ -106,9 +111,21 @@ function TextAreaField({
   );
 }
 
-export default function EventRequestForm({ onSubmitted }) {
+function initialFields(event) {
+  if (!event) return EMPTY;
+  const fields = Object.fromEntries(Object.keys(EMPTY).map(field => [field, String(event[field] ?? "")]));
+  for (const field of ["start_time", "end_time"]) {
+    if (!event[field]) continue;
+    const date = new Date(event[field]);
+    fields[field] = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+  }
+  return fields;
+}
+
+export default function EventRequestForm({ onSubmitted, event: existingEvent, onCancel }) {
   const { token } = useAuth();
-  const [fields, setFields] = useState(EMPTY);
+  const initial = initialFields(existingEvent);
+  const [fields, setFields] = useState(() => initial);
   const [errors, setErrors] = useState([]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -128,14 +145,26 @@ export default function EventRequestForm({ onSubmitted }) {
   async function submit(event) {
     event.preventDefault();
     if (submitting.current) return;
+    const windowError = registrationWindowValidationError(
+      fields.registration_start,
+      fields.registration_end,
+    );
+    if (windowError) {
+      setErrors([{ field: "registration_end", message: windowError }]);
+      setMessage("");
+      return;
+    }
     submitting.current = true;
     setBusy(true);
     setErrors([]);
     setMessage("");
     try {
-      const result = await submitEventRequest(fields, token);
+      const changes = Object.fromEntries(Object.entries(fields).filter(([field, value]) => value !== initial[field]));
+      const result = existingEvent
+        ? await updateEventRequest(existingEvent.id, changes, token)
+        : await submitEventRequest(fields, token);
       if (result.event) {
-        setFields(EMPTY);
+        if (!existingEvent) setFields(EMPTY);
         onSubmitted(result.event);
         return;
       }
@@ -216,6 +245,29 @@ export default function EventRequestForm({ onSubmitted }) {
           inputMode="numeric"
           placeholder="120"
         />
+        <h2>Registration window</h2>
+        <p>Optional. Times use your local timezone and can be independent of the event schedule.</p>
+        <div className="field-pair">
+          <div>
+            <TextField
+              {...wire("registration_start")}
+              label="Registration opens"
+              type="datetime-local"
+            />
+          </div>
+          <div>
+            <TextField
+              {...wire("registration_end")}
+              label="Registration closes"
+              type="datetime-local"
+            />
+          </div>
+        </div>
+        {registrationEndsAfterEventStarts(fields.registration_end, fields.start_time) && (
+          <p className="field-hint">
+            Registration closes after the event starts. This is allowed, but attendees may register after the event begins.
+          </p>
+        )}
       </div>
 
       <div className="form-section">
@@ -259,12 +311,13 @@ export default function EventRequestForm({ onSubmitted }) {
         )
       )}
 
-      <button className="primary" type="submit" disabled={busy}>
-        {busy ? "Submitting…" : "Submit request"}
+      <button className="primary" type="submit" disabled={busy || (existingEvent && Object.keys(fields).every(field => fields[field] === initial[field]))}>
+        {existingEvent ? (busy ? "Saving…" : "Save changes") : (busy ? "Submitting…" : "Submit request")}
       </button>
+      {existingEvent && <button className="secondary" type="button" disabled={busy} onClick={onCancel}>Cancel editing</button>}
       <p className="card-note">
-        Submitting sends your request to ConnectSphere for coordinator
-        assignment and review.
+        {existingEvent ? "Saving updates your event details. Your event's status and assignment stay the same." :
+          "Submitting sends your request to ConnectSphere for coordinator assignment and review."}
       </p>
     </form>
   );

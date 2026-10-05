@@ -6,9 +6,9 @@ const registrationRoutes = require("../../../src/modules/registrations/registrat
 // contracts prevent SELECT * (including in joins) from leaking future columns.
 test.each([
   ["ATT-UNIT-001", "event listing", eventRoutes, "/", "events",
-    "id,name,description,start_time,status"],
+    "id,name,description,start_time,status,enrolled_attendees,expected_attendance"],
   ["ATT-UNIT-002", "event detail", eventRoutes, "/event-public", "events",
-    "id,name,purpose,description,start_time,end_time,expected_attendance,status,registration_fields"],
+    "id,name,purpose,description,start_time,end_time,enrolled_attendees,expected_attendance,status,registration_fields"],
   ["ATT-UNIT-003", "own registration listing", registrationRoutes, "/me", "registrations",
     "id,event_id,status,created_at,updated_at,registration_data,events(name,start_time)"],
   ["ATT-UNIT-004", "own registration detail", registrationRoutes, "/me/registration-own", "registrations",

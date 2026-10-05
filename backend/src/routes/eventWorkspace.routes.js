@@ -16,14 +16,34 @@ module.exports = function createEventWorkspaceRoutes(client) {
   const changed = (res, event) => event ? res.json({ event }) : res.status(409).json({ message: "The event is unavailable or has changed. Refresh and try again." });
   for (const [scope, permission] of Object.entries({ organiser: "events.own.read", coordinator: "events.assigned.read", manager: "events.review" })) {
     router.get(`/${scope}`, requirePermission(permission), available, async (req, res) => {
-      res.json({ events: await service.list(scope, req.user.id) });
+      try {
+        res.json({ events: await service.list(scope, req.user.id) });
+      } catch {
+        res.status(503).json({ message: "Unable to load events. Please try again." });
+      }
     });
     router.get(`/${scope}/:id`, requirePermission(permission), available, validId, async (req, res) => {
-      const event = await service.find(scope, req.user.id, req.params.id);
-      if (!event) return res.status(404).json({ message: "Event not found." });
-      res.json({ event });
+      try {
+        const event = await service.find(scope, req.user.id, req.params.id);
+        if (!event) return res.status(404).json({ message: "Event not found." });
+        res.json({ event });
+      } catch {
+        res.status(503).json({ message: "Unable to load the event. Please try again." });
+      }
     });
   }
+  router.patch("/organiser/:id", requirePermission("events.own.update"), available, validId, async (req, res) => {
+    try {
+      const result = await service.updateOrganiserEvent(req.user.id, req.params.id, req.body);
+      if (result.ok) return res.json({ event: result.event });
+      if (result.reason === "not_found") return res.status(404).json({ message: "Event not found." });
+      if (result.reason === "forbidden") return res.status(403).json({ message: "You can only edit events you are responsible for." });
+      if (result.reason === "invalid") return res.status(400).json({ message: "Check the event details and try again.", errors: result.errors });
+      return res.status(409).json({ message: "The event responsibility has changed. Refresh and try again." });
+    } catch {
+      return res.status(503).json({ message: "Unable to update the event. Please try again." });
+    }
+  });
   router.get("/coordinators", requirePermission("events.assign"), available, async (req, res) => {
     res.json({ coordinators: await service.coordinators() });
   });

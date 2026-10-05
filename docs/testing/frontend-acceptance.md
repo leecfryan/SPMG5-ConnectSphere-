@@ -1,7 +1,8 @@
-# Sign-in and RBAC frontend acceptance tests
+# Access acceptance tests: sign-in, RBAC and organiser event scope
 
 This suite uses Vitest, React Testing Library, user-event and jsdom. Application
-code, backend endpoints, database data and role assignments are unchanged.
+code and endpoints changed for the later stories documented below; the original
+sign-in suite does not write cloud data or change live role assignments.
 Component tests render the actual application, session provider, router and
 guards. Small authentication service/configuration tests use Vitest directly.
 No real credentials or cloud connections are used.
@@ -267,3 +268,281 @@ Verified on 2026-09-18: **134 passed, 0 failed, 0 skipped**. Titles below are ta
 | RBAC-DATA-005 | Network failure grants no data access and permits retry |
 | RBAC-DATA-006 | An empty permitted list does not invent staff responsibilities |
 | RBAC-DATA-007 | Leaving the staff component aborts a pending request and ignores its late response |
+
+
+## SCRUM-100 organiser event scope (2026-10-05)
+
+This is the Access lane's consolidated test guide for SCRUM-100. The user
+approved the fourteen specifications below before implementation, then requested
+the unit/integration/API/E2E testing follow-up. Event Organisers are external
+clients. Organisers in the same company can read each other's requests; each
+organiser can edit only their own requests. See [event access](../event-access.md#scrum-100-external-client-organiser-scope)
+and [manual account setup](../seed-users.md#scrum-100-client-organisations).
+
+### Requirements and traceability
+
+| AC | Acceptance criterion supplied by the user | Test specifications |
+| --- | --- | --- |
+| 1 | Given an event they are responsible for, the Event Organiser can view, edit and update it. | TC-SCRUM-100-01/02/13 |
+| 2 | Given an event belonging to another Event Organiser in the same client organisation, the Organiser can view it but cannot edit or update it. | TC-SCRUM-100-03/04 |
+| 3 | Given an event belonging to an unrelated client organisation, the Organiser cannot view it in any listing, search result or by direct reference. | TC-SCRUM-100-05/06/07/09/11/14 |
+| 4 | Attempting an unauthorised edit is refused and leaves the event unchanged. | TC-SCRUM-100-04/06/08/10/11/12 |
+
+Validation, dependency failure, session changes and mobile/keyboard checks support
+these AC and the repository's Definition of Done. They do not introduce new
+permissions or client/staff account combinations.
+
+### Layers: what is real and what is simulated
+
+| Layer | Files (relative to repository root) | What it proves | Boundary replaced in tests |
+| --- | --- | --- | --- |
+| Backend unit | `backend/tests/unit/events/eventWorkspace.service.test.js`, `events.validation.test.js` in the same folder | Direct service/validator rules, normalisation, protected fields, membership, failures and owner race; no HTTP server | Auth admin methods and the existing in-memory storage adapter. Service and validation are real. |
+| Frontend helper unit | `frontend/src/features/events/eventsService.test.js` | Correct authenticated PATCH, local-time conversion, validation/error contracts | Auth SDK session and fetch transport |
+| Backend integration | `backend/tests/integration/eventWorkspace.test.js` | Real Express app, authentication, permission/record checks, validation, response codes and stored state together over local HTTP | Auth token lookup and storage; organiser service remains real |
+| Frontend component/flow integration | `frontend/src/features/events/pages/EventWorkspaceDetailPage.test.jsx`, `EventWorkspacePage.test.jsx` | Real App, AuthProvider, router, guards and form/list behaviour together in jsdom | Auth SDK and fetch; fake server responses here do not prove server security |
+| Backend API acceptance | `tests/playwright/event-workspace.api.spec.cjs` | Direct HTTP calls to the running Express app, actual SDK transport to local Auth simulator, role denials and complete stored-row comparisons | External Auth service and database storage. Production guards, routes and service rules remain real. |
+| Browser E2E | `tests/playwright/event-workspace.browser.spec.cjs` | Real Chromium login, UI, proxy, backend, save/reload, colleague view-only, search/direct-link denial and revoked access during editing | Same local Auth/storage boundaries; no intercepted or mocked PATCH response |
+
+Unit tests make failures easy to locate. Integration tests prove the pieces work
+together. API tests bypass buttons to prove security. Browser tests prove the
+journey a user actually follows. The suites reuse installed Vitest/Playwright;
+there are no new packages, configuration files or test harnesses.
+
+### Fixture data
+
+| Symbol | Account and event | Trusted membership / starting data |
+| --- | --- | --- |
+| A / E-A | Responsible organiser and their request | `app_metadata.roles: ['event_organiser']`, company Alpha |
+| B / E-B | Another organiser and their request | Same role and Alpha membership; A has read-only access |
+| C / E-C | Unrelated client organiser and their request | Beta membership; forged `user_metadata.organisation_id: Alpha` cannot grant access |
+
+Service unit fixtures use account IDs `alice`, `bob`, `cara`, event IDs
+`event-alice`, `event-bob`, `event-cara`, and company keys `alpha`/`beta`.
+HTTP tests use generated valid UUIDs and compare the IDs returned by setup;
+never substitute these short unit IDs into an HTTP URL. Playwright creates A/B/C
+with unique Alpha/Beta UUIDs per test and submits their requests through POST
+`/api/events`. Every test gets isolated accounts/storage and cleans them up.
+
+The unit and Playwright fixtures use attendance `20`, start
+`2099-01-01T01:00:12.345Z`, end `2099-01-01T03:00:12.345Z`. The unit starting
+status is `APPROVED`; Playwright submissions start `SUBMITTED`. Neither state
+grants a colleague editing rights. Partial saves must preserve status, owner,
+coordinator, submission time and unedited timestamp milliseconds. Frontend tests
+pin `TZ=Asia/Singapore`. Integration fixtures also include older staff events;
+the expected list there includes all Alpha-owned fixture events, not exactly two.
+
+### Agreed test case specifications
+
+In the automation column, UNIT/VAL/SERVICE/UI abbreviate the corresponding
+`SCRUM-100-...` IDs in the catalog below. INT means the descriptive
+`[SCRUM-100 ACn]` cases in `eventWorkspace.test.js`; use the objective in the row
+to locate the matching full test title. API/E2E IDs keep their full prefixes.
+All execution entries refer to local isolated tests on 2026-10-05, not live
+Supabase or CI. Each row specifies setup, action, input and observable outcome.
+
+| ID | AC / type | Preconditions, steps and test data | Expected result | Automated by | Latest execution |
+| --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-100-01 | 1 / Happy | A authenticated; GET organiser list, then GET E-A or open `/my-event-requests/<E-A UUID>` | Own request visible, detail readable, Edit event available | UNIT-001; INT AC1; UI-001; EVENT-API-100; E2E-EVENT-100 | Local pass, 2026-10-05 |
+| TC-SCRUM-100-02 | 1 / Happy | Open E-A, change name to `Client request updated in the browser` and equipment needs to `Two microphones`, save and reload. Unit input also checks `  Revised workshop  `, attendance `"1"`, blank optional comment | Persisted changed fields; trimmed name/integer attendance/null optional comment where supplied; all protected and untouched fields retained | UNIT-002; SERVICE-001; UI-001; INT AC1; EVENT-API-100; E2E-EVENT-100 | Local pass, 2026-10-05 |
+| TC-SCRUM-100-03 | 2 / Happy | A and B belong to Alpha; list and directly open E-B | E-B visible under Other organisers' event requests; same-company/view-only explanation; no Edit event button | UNIT-001; INT AC2 including directory pagination; UI-002/007; EVENT-API-100; E2E-EVENT-100 | Local pass, 2026-10-05 |
+| TC-SCRUM-100-04 | 2,4 / Negative | A sends PATCH E-B with `{name: 'Unauthorised peer change'}` despite having no UI edit control | 403; every stored E-B field equals its before snapshot | UNIT-003; INT AC2; EVENT-API-100; E2E-EVENT-100 | Local pass, 2026-10-05 |
+| TC-SCRUM-100-05 | 3 / Negative | A lists requests and searches E-C's exact name; sends search/organisation/organiser query claims targeting Beta | E-C and private fields absent from server list and browser search; own/peer positive controls remain visible before filtering | UNIT-001; INT AC3; UI-007; EVENT-API-100; E2E-EVENT-100 | Local pass, 2026-10-05 |
+| TC-SCRUM-100-06 | 3,4 / Negative | A GETs/PATCHes known E-C UUID, then opens its browser URL; compare missing-record GET | Same safe 404 `Event not found.` for hidden/missing reference, no E-C detail or controls, complete E-C row unchanged | UNIT-003; INT AC3/AC4; EVENT-API-100; E2E-EVENT-100 | Local pass, 2026-10-05 |
+| TC-SCRUM-100-07 | 3 / Boundary | Remove A's trusted organisation; integration also tries blank and non-string values, with forged profile membership | Own read/edit retained; E-B hidden; missing memberships never join accounts into one group | UNIT-005; INT AC3; EVENT-API-101 | Local pass, 2026-10-05 |
+| TC-SCRUM-100-08 | 1,4 / Negative | PATCH E-A with a valid name plus `organiser_id`, or `status`, `coordinator_id`, organisation or unknown fields | Whole request rejected with 400; no partial name save or protected-field change | UNIT-004; INT AC4; EVENT-API-100 | Local pass, 2026-10-05 |
+| TC-SCRUM-100-09 | 3 / Negative | Forge company in profile/query/body; then change trusted Alpha membership to Beta or remove it using test admin setup | Untrusted claims ignored; current trusted affiliation governs next request, old colleague visibility revoked, own access retained | UNIT-005/008; INT AC3; EVENT-API-100/101 | Local pass, 2026-10-05 |
+| TC-SCRUM-100-10 | 4 / Conflict | Change E-A owner from A to B between access lookup and UPDATE; A attempts `{name: 'Stale change'}` | 409; row reflects only the independently injected owner change, none of A's requested edits | UNIT-007; INT AC4 responsibility-race case | Local pass, 2026-10-05 |
+| TC-SCRUM-100-11 | 3,4 / Failure | Inject membership/directory/record-read/save failure; UI initially receives safe lookup failure then Retry succeeds | 503 HTTP with no private provider diagnostics or unscoped fallback; no event write. UI shows safe error/retry | UNIT-006; INT AC3/AC4 failure cases; UI-010; SERVICE-005 | Local pass, 2026-10-05 |
+| TC-SCRUM-100-12 | 4 / Cross-cutting | PATCH without token/with forged token; try every non-organiser role; remove A's role after a valid GET or after opening Edit with `Do not save this revoked edit` | 401 without valid session, 403 for denied/revoked role; complete stored rows unchanged. Open form retains entered text and safe error; reload denies access | INT AC4; SERVICE-002/004; UI-005; EVENT-API-102–109; E2E-EVENT-101 | Local pass, 2026-10-05 |
+| TC-SCRUM-100-13 | 1 / Boundary | PATCH malformed UUID, `{}`, whitespace name, 201-char name/2001-char text, attendance 0/1/1.5, invalid/past changed start, end equal to/after start; also edit an unchanged 2020 schedule | Invalid request 400/no write. Name 200/text 2000/attendance 1 accepted; changed future schedule strictly ordered; unchanged past times retained | UNIT-002/004; VAL-001–003 plus existing boundary tests; INT AC1/AC4; UI-004; EVENT-API-110 | Local pass, 2026-10-05 |
+| TC-SCRUM-100-14 | 3 / Cross-cutting | Start detail fetch for A, switch session/account, then resolve A's delayed response | A's records and edit controls disappear; delayed response cannot restore old-account data | UI-006; UI-008 for pending list state | Local pass, 2026-10-05 |
+
+### Automated case catalog
+
+| IDs | Behaviour |
+| --- | --- |
+| SCRUM-100-UNIT-001 | Own/peer read positive controls; outsider absent |
+| SCRUM-100-UNIT-002 | Normalised partial owner save and preservation of untouched fields/other rows |
+| SCRUM-100-UNIT-003 | Peer/outside/missing refusal before any storage update call |
+| SCRUM-100-UNIT-004 | Invalid/protected inputs cannot partially mutate a row |
+| SCRUM-100-UNIT-005 | Missing trusted company ignores profile claims; own access retained |
+| SCRUM-100-UNIT-006 | Membership/directory/record-read failure stops all writes |
+| SCRUM-100-UNIT-007 | Atomic owner predicate rejects stale responsibility |
+| SCRUM-100-UNIT-008 | Changed trusted company replaces old colleague access on next lookup |
+| SCRUM-100-VAL-001–003 | Field limits/attendance one, strict changed schedule, unchanged past schedule |
+| SCRUM-100-SERVICE-001–006 | PATCH/time conversion, no session, field errors, denial, network failure, malformed success |
+| SCRUM-100-UI-001–006 | Changed-fields save, peer view-only, cancel, validation correction, denied-save input retention, account switch |
+| SCRUM-100-UI-007–010 | Own/peer grouping and scoped search, loading, empty state, failure/retry |
+| Backend `[SCRUM-100 AC1]` (2), AC2 (2), AC3 (5), AC4 (6) | Fifteen descriptive integration tests cover successful/read-only/hidden scope, pagination, metadata forgery/change, validation, all denied roles, race and dependency failures |
+| EVENT-API-100/101 | Scope, owner save/read-back, peer/outside denial/full rows, protected fields, query/profile spoofing and membership removal |
+| EVENT-API-102–107 | Separate denied PATCH case for attendee, ops manager, coordinator, venue staff, technical staff, and venue+technical account respectively. The dual staff account is an existing supported policy, not a new client/staff combination. |
+| EVENT-API-108 | Missing and forged bearer token: 401 and unchanged storage |
+| EVENT-API-109 | Previously valid organiser token after role removal: 403 and unchanged storage |
+| EVENT-API-110 | Empty/blank/partly invalid bodies and malformed reference: safe 400, no partial save |
+| E2E-EVENT-100 | Login, own/peer list, exact-name search, keyboard edit, save/reload, timestamps, 375px overflow, peer API denial and outside direct link |
+| E2E-EVENT-101 | Real PATCH 403 after role removal during editing; input retained, full rows unchanged, reload Access denied |
+
+There are 55 SCRUM-100-named automated tests across these layers: 11 backend
+unit, 15 backend integration, 16 frontend helper/flow, 11 API and 2 browser.
+File totals below are larger because the existing files also retain older stories.
+No test has been deleted or marked skipped.
+
+### HTTP contract checked independently of buttons
+
+All paths below are under `/api/event-workspace/organiser`.
+
+| Status | Trigger / outcome | Evidence |
+| --- | --- | --- |
+| 200 | Scoped list/detail; valid own PATCH persists and can be read back | Integration, EVENT-API-100, E2E-EVENT-100 |
+| 400 | Malformed UUID or invalid/protected body; safe validation message, no partial write | Integration, EVENT-API-100/110 |
+| 401 | Missing/forged session; no write or private details | Integration, EVENT-API-108 |
+| 403 | Visible peer edit or wrong/revoked role; full row unchanged | Integration, EVENT-API-100/102–109, E2E-EVENT-100/101 |
+| 404 | Outside/missing UUID; identical `Event not found.` body avoids existence disclosure | Integration, EVENT-API-100, E2E-EVENT-100 |
+| 409 | Owner changes between lookup and conditional UPDATE; stale edits absent | Integration and UNIT-007; this race is injected at the storage boundary, not through Playwright |
+| 503 | Trusted membership/directory/storage unavailable; no fallback/unscoped response or write | Integration plus UNIT-006; dependency failure is injected, not a live outage |
+
+### Run just this story
+
+Open PowerShell in `C:\Users\ryanl\OneDrive\Documents\GitHub\ConnectSphere`.
+Use the installed dependencies; the agent did not install anything. You can
+prefix a command with `! ` in Codex to send its output into the conversation.
+
+| Layer | Command from repository root | Expected file totals |
+| --- | --- | --- |
+| Backend service + validation unit | `npm --prefix backend run test:events -- tests/unit/events/eventWorkspace.service.test.js tests/unit/events/events.validation.test.js` | 41 passed, 2 files |
+| Backend integration | `npm --prefix backend run test:events -- tests/integration/eventWorkspace.test.js` | 27 passed, 1 file |
+| Frontend helper + real App flows | `npm --prefix frontend test -- --run --maxWorkers=1 src/features/events/eventsService.test.js src/features/events/pages/EventWorkspaceDetailPage.test.jsx src/features/events/pages/EventWorkspacePage.test.jsx` | 36 passed, 3 files |
+| Direct backend API | `npm run test:api -- tests/playwright/event-workspace.api.spec.cjs` | 13 passed; 11 SCRUM-100 + 2 older workflows |
+| Browser E2E | `npm run test:e2e -- tests/playwright/event-workspace.browser.spec.cjs` | 4 passed; 2 SCRUM-100 + 2 older workflows |
+| Both Playwright layers | `npm run test:playwright -- tests/playwright/event-workspace.api.spec.cjs tests/playwright/event-workspace.browser.spec.cjs` | 17 passed |
+
+To run only story-named cases, append `--testNamePattern SCRUM-100` to a Vitest
+command or `--grep SCRUM-100` to a Playwright command. This intentionally filters
+older tests; use the unfiltered commands above and full regression below for
+handoff. Playwright starts its own local servers; Docker and live credentials
+are not required. Do not separately start servers on its test ports.
+
+A failure prints the test name and expected/actual result. Check its case ID
+above and retain the output; do not loosen assertions. For occupied ports use
+the existing [Playwright port guidance](playwright-acceptance.md#ports-and-ci).
+For frontend resource timeouts run that suite alone with `--maxWorkers=1` as
+shown. Missing dependencies/browser binaries require the user's installation
+step under AGENTS.md; the agent must not install them automatically.
+
+### Latest execution and regression (local, 2026-10-05)
+
+| Check | Result |
+| --- | --- |
+| Backend unit focused command above | 41 passed, including all 8 new direct service tests |
+| Backend integration focused command above | 27 passed, including all 15 SCRUM-100 cases |
+| Focused workspace Playwright command above | 17 passed, 0 failed/flaky/skipped |
+| Isolated backend Vitest coverage command below | 332 passed, 17 files |
+| Existing backend auth/permissions `node:test` suites | 29 passed |
+| Existing backend equipment `node:test` unit suites | 67 passed |
+| Full frontend coverage command below, run alone with one worker | 223 passed, 14 files; 0 failed |
+| `npm run test:playwright` | 148 passed: 105 API + 43 Chromium; 0 failed/flaky/skipped |
+| `npm --prefix backend run check -- --ignore-pattern '.vitest/**'` | Passed source lint; existing generated report excluded explicitly |
+| `npm --prefix frontend run lint` | Passed, with one unused-disable warning in generated `coverage/block-navigation.js` |
+| `git diff --check` / HEAD and index inspection | Passed; HEAD unchanged, nothing staged or committed |
+
+The first full frontend coverage run overlapped other suites and timed out in
+three tests (220 passed, 3 failed). The controlled single-worker run completed
+223/223 without source changes, relaxed assertions or raised timeouts. A local
+pass is evidence for that run; CI still provides independent execution.
+
+Run these coverage commands separately, from the same repository root:
+
+```powershell
+npm --prefix backend run test:cov -- --exclude tests/integration/equipment.availability.test.js --exclude 'tests/unit/equipment/**' --exclude tests/integration/auth.test.js --exclude tests/integration/permissions.test.js
+npm --prefix frontend run test:cov -- --run --maxWorkers=1 --reporter=default --reporter=json --outputFile=.vitest/SCRUM-100-results.json
+```
+
+The backend exclusions keep the cloud-writing equipment integration out of
+agent execution and run the older Node suites with their own runner. The older
+isolated commands are `npm --prefix backend run test:auth` and
+`npm --prefix backend run test:equipment`; both were verified using the Node
+spec reporter. Do not run unrestricted backend `npm test` or the older
+`tests/e2e/` live package as an isolated test: they need separate shared-data
+agreement and actual Supabase access.
+
+Reports are ignored generated artifacts, not files to commit:
+
+- Full Playwright report: `playwright-report/index.html`; JSON `test-results/results.json`. Run `npm run test:playwright:report` from the root to inspect failures/traces. Subsequent runs replace these reports.
+- Latest successful frontend machine report: `frontend/.vitest/SCRUM-100-results.json`; coverage `frontend/coverage/index.html` and `coverage-final.json`. That run overrides the HTML test reporter; `frontend/.vitest/index.html` may still contain the earlier concurrent run. Use the JSON for these recorded results, or rerun with the default reporters and one worker to refresh test HTML.
+- Backend coverage: `backend/coverage/index.html` and `coverage-final.json`. Vitest does not instrument Playwright or `node:test`.
+
+The standard backend lint command includes a pre-existing generated `.vitest`
+report and previously failed with 960 diagnostics there. The explicit source
+check above passes; no unrelated config/report deletion was made. No build or
+Docker files changed in this testing follow-up. The earlier frontend build
+passed with its existing bundle-size advisory; Docker daemon was unavailable
+on the earlier attempt. Full cloud backend integration, live RLS, Docker build,
+GitHub CI and teammate review remain unverified. Existing CI discovers the new
+unit/adjacent frontend tests and runs both Playwright projects, so no new npm
+script or CI edit is needed. These results do not complete the whole repository's
+Definition of Done or authorise marking Jira Done.
+
+### Coverage and documented gaps
+
+| File | Statements | Branches | Story gap review |
+| --- | --- | --- | --- |
+| backend auth/permissions.js | 100% | 85.71% | Uncovered fallback at line 81 belongs to pre-existing policy resolution; new update permission is exercised through real role guards. |
+| backend events/eventWorkspace.service.js | 92.86% | 84.13% | Every added organiser branch is hit. Existing unknown-scope paths at 46–47 are unreachable through fixed routes; directory coordinator choice/error/name-fallback branches at 79–91 predate SCRUM-100. |
+| backend events/events.service.js | 100% | 100% | Re-exported normalise helper measured by existing submission and edit tests. |
+| backend events/events.validation.js | 100% | 100% | New partial-edit validator measured completely, including invalid and boundary inputs. |
+| backend routes/eventWorkspace.routes.js | 100% | 97.06% | New PATCH and scoped-read/error branches all hit; uncovered existing available/no-service branch at line 10 is outside configured fixtures. |
+| frontend events/eventsService.js | 100% | 100% | New save helper covers session, success, validation, denial, network and malformed success. |
+| frontend EventRequestForm.jsx | 88.42% | 72.07% | Editing measured in real App tests. Missing statements at 56/152 and branches at 110/149/153/278/282 belong to existing submit/default-form wiring, covered by EVENT-E2E-001/002/006/007 in Playwright (not Vitest instrumentation). Date-missing initialisation at 113 is legacy/partial-record fallback; normal submitted events have both times. Existing field-shell hint/required/error alternatives at 30/37/46/73/75/102–104, duplicate-submit early return at 142 and plural fallback at 271 are inherited presentation/guard paths; edits use required name error and safe server messages. Busy editing label is not held pending by the fast unit transport; saving persistence is independently checked by browser/API tests. |
+| frontend EventWorkspaceDetailPage.jsx | 95.92% | 86.89% | 100% lines; organiser read/edit/view-only/save/cancel/failure paths hit. Gaps at 39–40/50 are coordinator/manager JSX and existing route wrapper, exercised by prior workspace browser tests. Null-display alternative at 44 is inherited display behaviour. |
+| frontend EventWorkspacePage.jsx | 95.95% | 89.58% | 100% lines; organiser grouping/search/loading/empty/error/retry hit. Uncovered arms at 8/14/49–50 are other-scope list presentation and JSX source-map paths; coordinator/manager journeys pass in Playwright. |
+| frontend lib/api.js | 23.08% | 33.33% | Existing Venue API wrappers and unrelated transport fallback paths are outside this story's unit scope. New error.errors array/non-array arms are both hit through save tests. Full browser regression verifies Venue integration. |
+
+Percentages come from the ignored coverage-final.json artifacts, not inferred from
+test counts. Vitest does not instrument Playwright or node:test; no whole-repo
+100% claim is made. Source positions above are the V8 branch-map positions;
+JSX can map multiple branch arms to one source expression. Demo seed changes are
+outside the Vitest include path; syntax and source lint were checked, but the
+live seed was deliberately not executed. No tests were deleted or marked skipped.
+
+Measured line coverage: backend organiser service 96.77%, validator/routes/normalise 100%; frontend helper/detail/list 100%, shared form 96.83%. The form busy-editing-label branch is an explicitly unmeasured story branch; no blanket 100% organiser UI branch claim is made. These gaps are reported rather than hidden by coverage exclusions.
+
+### Five-question review of the tests
+
+1. **Which AC?** The specification and catalog tables map every added case to AC1–4 or the required validation/session/usability checks.
+2. **Which plausible bug would fail?** Removing the organisation filter fails own-positive/outside-negative reads; allowing peer updates fails 403/full-row comparisons; removing the UPDATE owner predicate fails UNIT-007 and integration 409. Accepting protected fields or partially applying invalid data fails complete-row comparisons. Returning success without persistence fails API read-back and browser reload. Caching a revoked role fails API-109 and E2E-101. Old-account responses fail UI-006. Strict time/length boundaries catch permissive validation. These are reasoned counterexamples, not a mutation-tool run.
+3. **Can the user explain arrange/action/result?** Three accounts, two companies, three event requests: A can save E-A, read E-B, and cannot find E-C. Each case changes just the relevant role, membership, input or dependency; the tables give exact values and expected outcomes.
+4. **Are expectations justified independently?** Owner editing, same-company read-only, outside invisibility and unchanged denied writes come from the user's AC. Trusted Auth metadata is the agreed identity model. Safe HTTP codes follow the existing API contract; field limits reuse the existing submission requirements.
+5. **Deterministic and non-vacuous?** Isolated accounts/storage, far-future dates, fixed timezone and positive owner/peer reads prevent false passes from empty fixtures. Denials compare full stored rows, not just status or a hidden button. The controlled frontend rerun is recorded above; CI and live policies are separate evidence.
+
+### Manual demo and new files
+
+For the live demo, use the three organiser accounts configured as described in
+[seed users](../seed-users.md#scrum-100-client-organisations). As A, open own
+request, edit/reload it, open B's request and confirm view-only, search C's exact
+name and open its known direct URL. Compare denied-edit storage before/after
+using an approved test account, not another client's production event.
+The user reports the Auth setup and app working; the agent has not independently
+verified live Supabase/RLS or executed the seed. Keep client and internal staff
+accounts separate as agreed. Original brief/course-section private clarifications
+remain unavailable for the original implementation source review.
+
+| New test file in this uncommitted story | Why it exists |
+| --- | --- |
+| `backend/tests/unit/events/eventWorkspace.service.test.js` | Added in the testing follow-up: direct service unit coverage previously exercised only through HTTP |
+| `frontend/src/features/events/pages/EventWorkspaceDetailPage.test.jsx` | Added during implementation: real App organiser read/edit/denial/session flows |
+| `frontend/src/features/events/pages/EventWorkspacePage.test.jsx` | Added during implementation: real App scoped grouping/search/loading/empty/retry flows |
+
+All other test changes extend existing files. This guide extends the existing
+Access test guide; there is no new committed Markdown guide. Working notes and
+gate evidence stay ignored under `.agent/docs/other/`. No commits, staging,
+live database writes or dependency installs were performed.
+
+### PR #24 staging merge repair (2026-10-05)
+
+The pushed merge commit 01687eb7ad30563d164b05676582492243f10b43 introduced a second eventsService import in EventRequestForm.jsx. Both declarations bound EVENT_LIMITS and submitEventRequest, so frontend lint failed before tests/build. The same parse error stopped the app rendering its login form, making browser cases wait through their 30-second timeouts. The live E2E job ended with 14 failed, 5 passed and 3 skipped in seven minutes; the isolated browser/API job was cancelled after repeated compiler errors. This was a compilation failure followed by test timeouts, not evidence of an application infinite loop.
+
+The local repair removes only the duplicate declaration, preserving updateEventRequest and staging's registration-window imports/inputs/validation. After compilation was fixed, full Playwright found one stale assertion in EVENT-API-101: staging now grants organisers events.managed.read, events.registrations.read and events.registration-window.update alongside the three SCRUM-100/submission capabilities. The exact permission-list assertion now includes those existing grants; production policy and all organisation/owner checks stay unchanged. See the existing managed-event registrations guide for their record restrictions.
+
+Latest merged-branch local checks supersede the earlier frontend execution total: lint/build passed; frontend Vitest 284 passed in 25 files, with no failures/skips/unhandled errors; isolated Playwright 148 passed (105 API, 43 Chromium), zero failed/flaky/skipped. Commands: npm --prefix frontend run lint, npm --prefix frontend run build, npm --prefix frontend test -- --run --maxWorkers=1, and npm run test:playwright -- --max-failures=3. The failure cap was a command-line option for diagnosis, not a config change; all 148 cases completed. Counts were independently read from the fresh frontend HTML metadata and Playwright JSON. The HTML test report is now current; the older frontend .vitest/SCRUM-100-results.json still describes the pre-merge 223-test run. Earlier coverage figures also describe that earlier run and were not remeasured for this import-only production repair.
+
+The local checkout was fast-forwarded to the already-existing pushed merge commit from a clean index; no new commit was created. Current origin/staging is an ancestor (zero commits behind). git diff --check passed and the index remains empty. No test was deleted or marked skipped, no dependencies were installed, and the shared live Supabase tests were not run by the agent. Backend and Docker had passed for this PR revision; neither was changed or rerun for the frontend repair. New GitHub CI/live-DB evidence requires a later user-authorised commit and push. No CI workflow/config change, commit or push was performed by the agent.

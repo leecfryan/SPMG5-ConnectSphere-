@@ -4,6 +4,7 @@ const policies = Object.freeze({
   "events.browse": { roles: ["attendee"] },
   "registrations.manage": { roles: ["attendee"] },
   "events.own.read": { roles: ["event_organiser"] },
+  "events.own.update": { roles: ["event_organiser"] },
   "events.assigned.read": { roles: ["event_coordinator"] },
   "events.review": { roles: ["event_ops_manager"], label: "Event request review and coordinator assignment" },
   "events.assign": { roles: ["event_ops_manager"] },
@@ -11,6 +12,23 @@ const policies = Object.freeze({
   "events.submit": {
     roles: ["event_organiser"],
   },
+  // Registration counts for the caller's own events. No `label`: these are not
+  // staff responsibilities, and adding one would put them on
+  // /staff/responsibilities for coordinators.
+  // The list scopes organiser_id/coordinator_id in its own query, so it needs no
+  // record resolver; the single event does, hence the split.
+  "events.managed.read": {
+    roles: ["event_organiser", "event_coordinator"],
+  },
+  "events.registrations.read": {
+    roles: ["event_organiser", "event_coordinator"],
+    record: true,
+  },
+  "events.registration-window.update": {
+    roles: ["event_organiser", "event_coordinator"],
+    record: true,
+  },
+  "events.assign_coordinator": { roles: ["event_ops_manager"] },
   "venues.update": {
     roles: ["venue_staff", "event_coordinator"],
   },
@@ -24,11 +42,12 @@ const policies = Object.freeze({
   },
   "equipment.request": { roles: ["event_coordinator"] },
   "equipment.review": { roles: ["technical_support_staff"] },
-  // Scrum-30 AC1: add/update/retire a catalogue record - separate from
-  // equipment.review, which only ever gated the quick operational-status PATCH.
   "equipment.manage": { roles: ["technical_support_staff"] },
-  "equipment.messages": { roles: ["technical_support_staff", "event_coordinator"] },
-  "events.assign_coordinator": { roles: ["event_ops_manager"] },
+  "equipment.messages": {
+    roles: ["technical_support_staff", "event_coordinator"],
+  },
+  // SCRUM-98/99: only the event's assigned coordinator reviews and decides it (discussions #80, #101).
+  "events.decide": { roles: ["event_coordinator"], record: true },
   "internal.access": {
     roles: [
       "event_coordinator",

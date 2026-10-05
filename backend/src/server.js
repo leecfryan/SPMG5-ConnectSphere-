@@ -23,6 +23,9 @@ const app = createApp({
   } : undefined,
   venuesService: process.env.SUPABASE_SECRET_KEY ? require("./modules/venues/venues.service") : undefined,
   equipmentDependencies: process.env.SUPABASE_SECRET_KEY ? require("./modules/equipment/equipment.dependencies")() : undefined,
+  managedEventsService: process.env.SUPABASE_SECRET_KEY
+    ? require("./modules/managedEvents/managedEvents.service").createManagedEventsService(require("./supabase"))
+    : undefined,
   frontendOrigin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
 });
 const port = process.env.PORT || 3000;

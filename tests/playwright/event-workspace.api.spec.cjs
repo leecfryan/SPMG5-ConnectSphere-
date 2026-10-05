@@ -1,5 +1,5 @@
 const { test, expect } = require('./support/fixtures.cjs');
-const { setupWorkflow } = require('./support/event-workspace-fixtures.cjs');
+const { setupWorkflow, setupOrganiserAccess } = require('./support/event-workspace-fixtures.cjs');
 const venueId = '11111111-1111-4111-8111-111111111111';
 
 test('[ACCESS-E2E-API-001] Real assignment, bookings and reassignment preserve responsibility scopes', async ({ accounts, request }) => {
@@ -48,4 +48,140 @@ test('[ACCESS-E2E-API-002] Assignment alone neither approves an event nor opens 
   expect((await register()).status()).toBe(409);
   expect((await update('decision', { decision: 'accept' })).status()).toBe(404);
   expect((await update('publication', { openRegistration: true })).status()).toBe(404);
+});
+
+// SCRUM-98 AC4: only the assigned coordinator can start, approve or reject a review.
+test('[REVIEW-E2E-API-001] SCRUM-98/99 review actions: assigned coordinator only, in lifecycle order', async ({ accounts, request }) => {
+  const { event, first, headers, update } = await setupWorkflow(accounts, request);
+  for (const role of ['venue_staff', 'technical_support_staff']) {
+    headers[role] = { Authorization: 'Bearer ' + (await accounts.session(await accounts.create([role]))).access_token };
+  }
+  expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
+  const act = (action, as, data) => request.post(`/api/internal/events/${event.id}/${action}`, { headers: as, data });
+  const status = async () => (await (await request.get(`/api/event-workspace/manager/${event.id}`, { headers: headers.manager })).json()).event;
+
+  for (const action of ['start-review', 'approve', 'reject']) {
+    for (const role of ['second', 'organiser', 'manager', 'venue_staff', 'technical_support_staff', 'attendee']) {
+      expect((await act(action, headers[role], { note: 'Not allowed' })).status(), `${role} ${action}`).toBe(403);
+    }
+    expect((await act(action, undefined, { note: 'No session' })).status(), `anonymous ${action}`).toBe(401);
+  }
+  expect((await status()).status).toBe('SUBMITTED');
+
+  // SCRUM-99 AC1: approval only follows a started review.
+  expect((await act('approve', headers.first)).status()).toBe(409);
+  expect((await act('start-review', headers.first)).status()).toBe(200);
+  expect((await status()).status).toBe('UNDER_REVIEW');
+  expect((await act('approve', headers.first, { note: 'Ready for planning' })).status()).toBe(200);
+  const approved = await status();
+  expect(approved).toMatchObject({ status: 'APPROVED', approved_rejected_by: first.id, approval_rejection_remark: 'Ready for planning', approved_rejected_by_name: 'Coordinator One' });
+  expect(Date.parse(approved.approved_rejected_at)).not.toBeNaN();
+  expect((await act('reject', headers.first, { note: 'Too late' })).status()).toBe(409);
+  expect((await status()).status).toBe('APPROVED');
+});
+
+test('[EVENT-API-100] SCRUM-100: Client organiser sees own and same-company requests and denied edits leave complete records unchanged', async ({ accounts, request }) => {
+  const { organiser, colleague, outsider, headers, events, beta } = await setupOrganiserAccess(accounts, request);
+  const visible = await request.get('/api/event-workspace/organiser', { headers: headers.organiser });
+  expect(visible.status()).toBe(200);
+  expect((await visible.json()).events.map(event => event.id).sort()).toEqual([events.organiser.id, events.colleague.id].sort());
+  expect((await request.get(`/api/event-workspace/organiser/${events.colleague.id}`, { headers: headers.organiser })).status()).toBe(200);
+  const peerBefore = await accounts.events(colleague);
+  expect((await request.patch(`/api/event-workspace/organiser/${events.colleague.id}`, { headers: headers.organiser, data: { name: 'Unauthorised peer change' } })).status()).toBe(403);
+  expect(await accounts.events(colleague)).toEqual(peerBefore);
+  const hiddenBefore = await accounts.events(outsider);
+  const hidden = await request.get(`/api/event-workspace/organiser/${events.outsider.id}`, { headers: headers.organiser });
+  expect(hidden.status()).toBe(404);
+  expect(await hidden.json()).toEqual({ message: 'Event not found.' });
+  expect((await request.patch(`/api/event-workspace/organiser/${events.outsider.id}`, { headers: headers.organiser, data: { name: 'Unauthorised outside change' } })).status()).toBe(404);
+  expect(await accounts.events(outsider)).toEqual(hiddenBefore);
+  const search = await request.get('/api/event-workspace/organiser', { headers: headers.organiser, params: { search: events.outsider.name, organisation_id: beta, organiser_id: outsider.id } });
+  expect((await search.json()).events.map(event => event.id).sort()).toEqual([events.organiser.id, events.colleague.id].sort());
+  const ownBefore = await accounts.events(organiser);
+  const ownPath = `/api/event-workspace/organiser/${events.organiser.id}`;
+  expect((await request.patch(ownPath, { headers: headers.organiser, data: { name: 'Forged change', organiser_id: colleague.id, status: 'APPROVED' } })).status()).toBe(400);
+  expect(await accounts.events(organiser)).toEqual(ownBefore);
+  const updated = await request.patch(ownPath, { headers: headers.organiser, data: { name: 'Updated own client request', equipment_needs: 'Two microphones' } });
+  expect(updated.status()).toBe(200);
+  const saved = (await request.get(ownPath, { headers: headers.organiser })).json();
+  expect((await saved).event).toMatchObject({ name: 'Updated own client request', equipment_needs: 'Two microphones', organiser_id: organiser.id, status: 'SUBMITTED' });
+  expect((await accounts.events(organiser))[0]).toMatchObject({ ...ownBefore[0], name: 'Updated own client request', equipment_needs: 'Two microphones' });
+});
+
+test('[EVENT-API-101] SCRUM-100: Untrusted profile company does not grant access and removed membership revokes peer access', async ({ accounts, request }) => {
+  const { organiser, headers, events } = await setupOrganiserAccess(accounts, request);
+  const outsiderView = await request.get('/api/event-workspace/organiser', { headers: headers.outsider });
+  expect((await outsiderView.json()).events.map(event => event.id)).toEqual([events.outsider.id]);
+  const me = await request.get('/api/auth/me', { headers: headers.organiser });
+  expect((await me.json()).permissions).toEqual([
+    'events.own.read', 'events.own.update', 'events.submit',
+    'events.managed.read', 'events.registrations.read', 'events.registration-window.update',
+  ]);
+  await accounts.update(organiser, { appMetadata: {} });
+  expect((await request.get(`/api/event-workspace/organiser/${events.colleague.id}`, { headers: headers.organiser })).status()).toBe(404);
+  expect((await request.get(`/api/event-workspace/organiser/${events.organiser.id}`, { headers: headers.organiser })).status()).toBe(200);
+});
+
+const organiserDeniedRoles = [
+  ['attendee'], ['event_ops_manager'], ['event_coordinator'], ['venue_staff'],
+  ['technical_support_staff'], ['venue_staff', 'technical_support_staff'],
+];
+for (const [index, roles] of organiserDeniedRoles.entries()) {
+  test('[EVENT-API-' + (102 + index) + '] SCRUM-100: ' + roles.join(' + ') + ' cannot edit an organiser request', async ({ accounts, request }) => {
+    const { organiser, headers, events } = await setupOrganiserAccess(accounts, request);
+    const deniedAccount = await accounts.create(roles);
+    const deniedSession = await accounts.session(deniedAccount);
+    const eventPath = '/api/event-workspace/organiser/' + events.organiser.id;
+    expect((await request.get(eventPath, { headers: headers.organiser })).status()).toBe(200);
+    const before = await accounts.events(organiser);
+    const denied = await request.patch(eventPath, {
+      headers: { Authorization: 'Bearer ' + deniedSession.access_token },
+      data: { name: 'Denied role edit', equipment_needs: 'Must not change' },
+    });
+    expect(denied.status()).toBe(403);
+    expect(await denied.json()).toEqual({ message: 'You do not have permission to access this information.' });
+    expect(await accounts.events(organiser)).toEqual(before);
+  });
+}
+
+test('[EVENT-API-108] SCRUM-100: Missing and forged credentials cannot mutate any organiser request', async ({ accounts, request }) => {
+  const { organiser, headers, events } = await setupOrganiserAccess(accounts, request);
+  const eventPath = '/api/event-workspace/organiser/' + events.organiser.id;
+  expect((await request.get(eventPath, { headers: headers.organiser })).status()).toBe(200);
+  const before = await accounts.events(organiser);
+  for (const deniedHeaders of [{}, { Authorization: 'Bearer forged-token' }]) {
+    const denied = await request.patch(eventPath, { headers: deniedHeaders, data: { name: 'Anonymous change' } });
+    expect(denied.status()).toBe(401);
+    expect(await denied.text()).not.toContain(events.organiser.description);
+    expect(await accounts.events(organiser)).toEqual(before);
+  }
+});
+
+test('[EVENT-API-109] SCRUM-100: Revoked organiser role refuses an update using the previously valid token', async ({ accounts, request }) => {
+  const { organiser, headers, events } = await setupOrganiserAccess(accounts, request);
+  const eventPath = '/api/event-workspace/organiser/' + events.organiser.id;
+  expect((await request.get(eventPath, { headers: headers.organiser })).status()).toBe(200);
+  const before = await accounts.events(organiser);
+  await accounts.update(organiser, { roles: [] });
+  const denied = await request.patch(eventPath, { headers: headers.organiser, data: { name: 'Revoked change' } });
+  expect(denied.status()).toBe(403);
+  expect(await accounts.events(organiser)).toEqual(before);
+});
+
+test('[EVENT-API-110] SCRUM-100: Invalid bodies and malformed references return safe errors without a partial save', async ({ accounts, request }) => {
+  const { organiser, headers, events } = await setupOrganiserAccess(accounts, request);
+  const eventPath = '/api/event-workspace/organiser/' + events.organiser.id;
+  const before = await accounts.events(organiser);
+  for (const data of [{}, { name: '  ' }, { name: 'Partial change', expected_attendance: 0 }, { name: 'Partial change', start_time: 'invalid' }]) {
+    const response = await request.patch(eventPath, { headers: headers.organiser, data });
+    expect(response.status()).toBe(400);
+    const body = await response.json();
+    expect(body.message).toBe('Check the event details and try again.');
+    expect(body.errors.length).toBeGreaterThan(0);
+    expect(await accounts.events(organiser)).toEqual(before);
+  }
+  const malformed = await request.patch('/api/event-workspace/organiser/not-a-uuid', { headers: headers.organiser, data: { name: 'Invalid reference' } });
+  expect(malformed.status()).toBe(400);
+  expect(await malformed.json()).toEqual({ message: 'Invalid event id.' });
+  expect(await accounts.events(organiser)).toEqual(before);
 });

@@ -10,7 +10,7 @@ same frontend port (Docker: 5173); routing does not start another Vite process.
 | `/sign-in` | Shared email/password form; verified users return to the requested local URL or `/account`. |
 | `/events` and `/events/:eventId` | Attendee-only browsing of events open for registration (`events.browse`). |
 | `/registrations/me` and `/registrations/me/:registrationId` | Requires `registrations.manage`; own registration status, details and eligible withdrawal. |
-| `/my-event-requests` and `/:eventId` | Organiser-owned requests; requires `events.own.read`. |
+| `/my-event-requests` and `/:eventId` | Own and same-client requests; requires `events.own.read`. Own detail editing also requires `events.own.update`; colleagues are view only. |
 | `/assigned-events` and `/:eventId` | Coordinator-assigned planning records; requires `events.assigned.read`. |
 | `/event-management` and `/:eventId` | Manager review, assignment and opening registration; requires `events.review`. |
 | `/events/new` | Requires `events.submit`; organiser event form. |

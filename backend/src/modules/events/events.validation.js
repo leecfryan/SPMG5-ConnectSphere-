@@ -16,6 +16,7 @@
 
 const NAME_MAX = 200;
 const TEXT_MAX = 2000;
+const { validateRegistrationWindow } = require("./registrationWindow");
 
 // Free-text fields we store verbatim. Never required (US-12 ER-04: "where
 // relevant"); the venue / equipment / registration features parse them later.
@@ -133,8 +134,35 @@ function validateForSubmission(input) {
   }
 
   checkOptionalText(data, errors);
+  errors.push(...validateRegistrationWindow(data).errors);
 
   return { ok: errors.length === 0, errors };
 }
 
-module.exports = { validateDraft, validateForSubmission };
+// SCRUM-100: validate changed fields without treating an existing event as a new submission.
+function validateUpdate(input, current) {
+  const errors = [];
+  if (Object.hasOwn(input, "name")) checkName(input, errors);
+  for (const field of ["purpose", "description"]) {
+    if (Object.hasOwn(input, field)) checkRequiredText(input, field, errors);
+  }
+  checkOptionalText(input, errors);
+  if (Object.hasOwn(input, "start_time") || Object.hasOwn(input, "end_time")) {
+    const schedule = { ...current, ...input };
+    const start = checkRequiredTime(schedule, "start_time", errors);
+    const end = checkRequiredTime(schedule, "end_time", errors);
+    if (start !== null && start !== new Date(current.start_time).getTime() && start <= Date.now()) {
+      errors.push(err("start_time", "must be in the future"));
+    }
+    if (start !== null && end !== null && end <= start) {
+      errors.push(err("end_time", "must be after start_time"));
+    }
+  }
+  if (Object.hasOwn(input, "expected_attendance") &&
+    (!Number.isInteger(input.expected_attendance) || input.expected_attendance <= 0)) {
+    errors.push(err("expected_attendance", "must be a whole number greater than zero"));
+  }
+  return { ok: errors.length === 0, errors };
+}
+
+module.exports = { validateDraft, validateForSubmission, validateUpdate };
