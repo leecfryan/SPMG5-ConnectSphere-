@@ -1,7 +1,7 @@
 const path = require("node:path");
 require("dotenv").config({ path: path.resolve(__dirname, "../../.env"), quiet: true });
 const { test, expect } = require("@playwright/test");
-const { setupEquipment, deleteEquipmentUnit } = require("./support/live-equipment-fixtures");
+const { setupEquipment, deleteEquipmentUnit, createEquipmentUnit, freshType } = require("./support/live-equipment-fixtures");
 
 // Scrum-30 AC1: add/update/retire a catalogue record, driven through the
 // real browser UI against the real dev Supabase project - same live-DB
@@ -73,5 +73,44 @@ test.describe("Scrum-30 AC1: Technical Support Staff add, update and retire equi
     await expect(retiredRow).toBeVisible();
     await expect(retiredRow).toHaveClass(/eq-request-row-retired/);
     await expect(retiredRow).toContainText("UNAVAILABLE");
+  });
+});
+
+test.describe("SCRUM-103 (added scope): retired equipment can be restored to AVAILABLE", () => {
+  let setup;
+  let restoreType;
+  let restoreId;
+  test.beforeEach(async () => {
+    setup = await setupEquipment();
+    restoreType = freshType();
+    restoreId = await createEquipmentUnit({ type: restoreType, status: "UNAVAILABLE" });
+  });
+  test.afterEach(async () => {
+    await deleteEquipmentUnit(restoreId);
+    await setup.teardown();
+  });
+
+  test("[SCRUM-103 added-scope / TC-103-13] restoring a retired unit through the UI sets it back to AVAILABLE", async ({ page }) => {
+    await signIn(page, setup.technical);
+    await page.goto("/equipment/catalogue");
+
+    await page.getByLabel("Show retired equipment").check();
+    const row = page.locator(".eq-request-row", { hasText: restoreType });
+    await expect(row).toBeVisible();
+    // "UNAVAILABLE" contains "AVAILABLE" as a substring, so the badge is
+    // matched on exact text, not toContainText, to avoid a vacuous pass.
+    const badge = row.locator(".eq-status");
+    await expect(badge).toHaveText("UNAVAILABLE");
+
+    await Promise.all([
+      page.waitForResponse((res) => res.url().endsWith(`/api/equipment/${restoreId}/status`) && res.request().method() === "PATCH"),
+      row.getByRole("button", { name: "Restore to available" }).click(),
+    ]);
+
+    await expect(badge).toHaveText("AVAILABLE", { timeout: 10000 });
+
+    await page.reload();
+    await page.getByLabel("Show retired equipment").check();
+    await expect(page.locator(".eq-request-row", { hasText: restoreType }).locator(".eq-status")).toHaveText("AVAILABLE");
   });
 });
