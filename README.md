@@ -95,8 +95,11 @@ Venue Staff and Event Coordinators can open `/venues` from the workspace.
 The catalogue, operating-information editor, availability calendar and booking
 request review are integrated with shared sign-in and RBAC. Coordinators request
 bookings for their assigned events. See [Venue integration](docs/venue-integration.md)
-for routes, role permissions and the required database migrations, including 006.
-Merging or restarting Docker does not apply Supabase migrations automatically.
+for routes, role permissions and the venue schema reference. Schema changes are
+applied by hand in the Supabase dashboard. Earlier venue migrations are recorded
+in that guide; RBAC's existing event-review SQL reference 007 is retained (see
+[event access](docs/event-access.md)). Merging or restarting Docker does not
+change the database.
 
 ## Registration information for managed events
 

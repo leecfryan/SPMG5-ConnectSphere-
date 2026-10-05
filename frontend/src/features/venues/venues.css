@@ -1694,3 +1694,41 @@
     transform: none;
   }
 }
+
+/* --- SCRUM-22 decide a booking request ------------------------------------ */
+
+.v-decision {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--v-border);
+  border-radius: var(--v-radius-md);
+  background: var(--v-surface-muted);
+}
+
+.v-decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* Rejecting cannot be undone by the reviewer, so it reads as destructive
+   rather than as a second neutral button next to Approve. */
+.v-btn-danger {
+  color: #fff;
+  background: var(--v-danger);
+  border-color: var(--v-danger);
+}
+
+.v-btn-danger:hover:not(:disabled) {
+  background: #7d2c23;
+  border-color: #7d2c23;
+}
+
+@media (max-width: 640px) {
+  .v-decision-actions,
+  .v-decision-actions .v-btn {
+    width: 100%;
+  }
+}

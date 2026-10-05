@@ -1,10 +1,29 @@
 const {
   validateCreateRequest,
   validateStatusUpdate,
+  validateAvailabilityQuery,
+  validateAvailabilityWindow,
+  validateEquipmentStatusUpdate,
+  checkAvailability,
+  findAvailableUnits,
+  isStatusAvailable,
 } = require("./equipment.validation");
+const { PLANNING_STATUSES } = require("../events/lifecycle");
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Shared by getEquipmentCatalogue's optional window filter and
+// getEquipmentAvailability: equipment_id -> that unit's PENDING/APPROVED requests.
+function groupRequestsByEquipmentId(requests) {
+  const requestsByEquipmentId = new Map();
+  for (const request of requests) {
+    const forUnit = requestsByEquipmentId.get(request.equipment_id) || [];
+    forUnit.push(request);
+    requestsByEquipmentId.set(request.equipment_id, forUnit);
+  }
+  return requestsByEquipmentId;
+}
 
 // Takes its data-access dependencies rather than importing them, so tests
 // can supply fakes (see equipment.functional.test.js) instead of hitting the
@@ -21,18 +40,104 @@ function createEquipmentController({
   const {
     listEquipment,
     findEquipmentById,
+    updateEquipmentStatus,
     listRequestsByEvent,
     findRequestById,
     listAllRequests,
     hasOverlappingRequest,
+    listEquipmentByType,
+    listActiveRequestsForEquipment,
     createRequest,
     updateStatus,
   } = equipmentService;
 
+  // The request form's equipment dropdown. With no start/end query params,
+  // this is the full catalogue (unchanged behaviour, used e.g. for the
+  // Technical Support dashboard's equipment-type lookups and to label
+  // already-made requests). With both start and end given, it narrows to
+  // only the units bookable for that period (AC2/AC3/AC4, via the same
+  // findAvailableUnits used by getEquipmentAvailability) - so the dropdown
+  // can stop offering equipment that would just be rejected on submit.
   async function getEquipmentCatalogue(req, res, next) {
     try {
       const equipment = await listEquipment();
-      res.status(200).json({ data: equipment });
+      if (req.query.start === undefined && req.query.end === undefined) {
+        return res.status(200).json({ data: equipment });
+      }
+
+      const { ok, errors, value } = validateAvailabilityWindow(req.query);
+      if (!ok) {
+        return res.status(400).json({ error: "Validation failed", details: errors });
+      }
+
+      const requests = await listActiveRequestsForEquipment(equipment.map((unit) => unit.id));
+      const available = findAvailableUnits({
+        equipmentUnits: equipment,
+        requestsByEquipmentId: groupRequestsByEquipmentId(requests),
+        requestedStart: value.start,
+        requestedEnd: value.end,
+      });
+      res.status(200).json({ data: available });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Technical Support Staff manually record a status
+  // change (e.g. AVAILABLE -> MAINTENANCE) - the only way equipment.status
+  // ever changes today, since nothing writes it automatically.
+  async function patchEquipmentStatus(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) {
+        return res.status(400).json({ error: "Invalid equipment id" });
+      }
+
+      const { ok, errors, value } = validateEquipmentStatusUpdate(req.body);
+      if (!ok) {
+        return res.status(400).json({ error: "Validation failed", details: errors });
+      }
+
+      const updated = await updateEquipmentStatus(id, value.status);
+      if (!updated) {
+        return res.status(404).json({ error: "Equipment not found" });
+      }
+      res.status(200).json({ data: updated });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Scrum-29: is enough suitable equipment available for an event's period?
+  // AC1: accepts start/end date-time, type, quantity and location (location
+  // is validated and echoed back but not used for filtering - deferred).
+  // AC2/AC3/AC4 are all decided inside checkAvailability/findAvailableUnits.
+  async function getEquipmentAvailability(req, res, next) {
+    try {
+      const { ok, errors, value } = validateAvailabilityQuery(req.query);
+      if (!ok) {
+        return res.status(400).json({ error: "Validation failed", details: errors });
+      }
+
+      const equipmentUnits = await listEquipmentByType(value.type);
+      const requests = await listActiveRequestsForEquipment(equipmentUnits.map((unit) => unit.id));
+
+      const result = checkAvailability({
+        equipmentUnits,
+        requestsByEquipmentId: groupRequestsByEquipmentId(requests),
+        requestedStart: value.start,
+        requestedEnd: value.end,
+        requestedQuantity: value.quantity,
+      });
+
+      res.status(200).json({
+        data: {
+          equipment_type: value.type,
+          location: value.location,
+          period: { start: value.start, end: value.end },
+          ...result,
+        },
+      });
     } catch (err) {
       next(err);
     }
@@ -104,9 +209,19 @@ function createEquipmentController({
       const event = await findEventById(value.event_id);
       if (!event) return res.status(404).json({ error: "Event not found" });
       if (event.coordinator_id !== req.user.id) return res.status(403).json({ error: "You can only request equipment for events assigned to you." });
+      if (!PLANNING_STATUSES.includes(event.status)) return res.status(409).json({ error: "The event must be approved before requesting equipment." });
 
       const equipment = await findEquipmentById(value.equipment_id);
       if (!equipment) return res.status(404).json({ error: "Equipment not found" });
+
+      // Scrum-29 AC3: equipment that is not AVAILABLE (IN_USE, MAINTENANCE,
+      // and after the team's status-constraint update, UNAVAILABLE, DAMAGED,
+      // UNDER_MAINTENANCE) cannot be requested - matches the availability
+      // check's exclusion, so an item shown as unavailable there can never
+      // be successfully requested here.
+      if (!isStatusAvailable(equipment)) {
+        return res.status(409).json({ error: "This equipment is not available for booking." });
+      }
 
       const overlapping = await hasOverlappingRequest(
         value.equipment_id,
@@ -159,6 +274,8 @@ function createEquipmentController({
 
   return {
     getEquipmentCatalogue,
+    patchEquipmentStatus,
+    getEquipmentAvailability,
     getEquipmentRequests,
     getTechSupportDashboard,
     postEquipmentRequest,

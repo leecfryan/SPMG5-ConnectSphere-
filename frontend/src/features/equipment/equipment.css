@@ -86,10 +86,6 @@
   margin: 4px 0 0;
 }
 
-.eq-event-picker {
-  margin-bottom: 8px;
-}
-
 /* --- form --- */
 
 .eq-form-grid {
@@ -238,6 +234,16 @@
 .eq-status-pending { background: #fff7e6; color: #92600a; }
 .eq-status-approved { background: #e6f4ea; color: #185c4b; }
 .eq-status-rejected { background: #fff2ee; color: #97372c; }
+
+/* --- Scrum-29 follow-up: equipment catalogue status badges (distinct from
+   the request-status badges above, hence the "-equipment-" segment) --- */
+
+.eq-status-equipment-available { background: #e6f4ea; color: #185c4b; }
+.eq-status-equipment-in_use { background: #fff7e6; color: #92600a; }
+.eq-status-equipment-maintenance,
+.eq-status-equipment-under_maintenance { background: #fff7e6; color: #92600a; }
+.eq-status-equipment-unavailable,
+.eq-status-equipment-damaged { background: #fff2ee; color: #97372c; }
 
 /* --- Scrum-28: Technical Support dashboard --- */
 

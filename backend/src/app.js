@@ -11,6 +11,7 @@ const equipmentRoutes = require("./routes/equipment.routes");
 const createEventsRoutes = require("./routes/events.routes");
 const createAssignmentsRoutes = require("./routes/assignments.routes");
 const createManagedEventsRoutes = require("./routes/managedEvents.routes");
+const createEventWorkspaceRoutes = require("./routes/eventWorkspace.routes");
 
 function createApp({ authClient, dataClient, eventsRepository, assignmentDependencies, venuesService, equipmentDependencies, managedEventsService, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
   const app = express();
@@ -28,10 +29,11 @@ function createApp({ authClient, dataClient, eventsRepository, assignmentDepende
     res.json({ user: req.user, permissions: getPermissions(req.user.roles) });
   });
   app.use("/api/events", createEventsRoutes(eventsRepository, authenticate));
+  app.use("/api/event-workspace", authenticate, createEventWorkspaceRoutes(dataClient));
   app.use("/api", equipmentRoutes({ authenticate, ...equipmentDependencies }));
   // These routes expose approved event information and each user's own registrations.
-  app.use("/api/events", authenticate, registrationEventRoutes(dataClient));
-  app.use("/api/registrations", authenticate, (req, res, next) => dataClient ? next() :
+  app.use("/api/events", authenticate, requirePermission("events.browse"), registrationEventRoutes(dataClient));
+  app.use("/api/registrations", authenticate, requirePermission("registrations.manage"), (req, res, next) => dataClient ? next() :
     res.status(503).json({ message: "This feature is not yet configured." }), registrationRoutes(dataClient));
   // All internal routes must be registered after this gate, with their own permission guard.
   app.use("/api/internal", authenticate, requirePermission("internal.access"));

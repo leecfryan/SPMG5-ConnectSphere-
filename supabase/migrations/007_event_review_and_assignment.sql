@@ -1,6 +1,31 @@
--- Apply after 005. Keeps its atomic request/slot creation and adds verified
--- requester attribution. The backend alone supplies p_requested_by after auth.
--- Existing requests and the original function remain intact.
+-- Apply after 006 before deploying the event workspace. Existing rows and
+-- existing status values are preserved. Only single-column status CHECKs are
+-- extended; unrelated business constraints remain intact.
+begin;
+do $$
+declare
+  v_check record;
+  v_status_column smallint;
+begin
+  select attnum into strict v_status_column from pg_attribute
+    where attrelid = 'public.events'::regclass and attname = 'status' and not attisdropped;
+  if (select atttypid from pg_attribute where attrelid = 'public.events'::regclass and attnum = v_status_column)
+      not in ('text'::regtype, 'varchar'::regtype) then
+    raise exception 'Expected events.status to be text/varchar. Review its type before applying this migration.';
+  end if;
+  for v_check in select conname, pg_get_expr(conbin, conrelid) as expression
+    from pg_constraint where conrelid = 'public.events'::regclass and contype = 'c'
+      and conkey = array[v_status_column]::smallint[]
+  loop
+    execute format('alter table public.events drop constraint %I', v_check.conname);
+    execute format('alter table public.events add constraint %I check ((%s) or status in (''ACCEPTED'', ''REJECTED''))',
+      v_check.conname, v_check.expression);
+  end loop;
+end;
+$$;
+create index if not exists events_coordinator_id_idx on public.events (coordinator_id);
+create index if not exists events_organiser_id_idx on public.events (organiser_id);
+
 create or replace function public.submit_authenticated_venue_booking_request(
   p_venue_id uuid,
   p_event_id uuid,
@@ -28,9 +53,10 @@ begin
   -- Recheck the trusted event relationship inside the write transaction.
   perform 1 from public.events
     where id = p_event_id and coordinator_id = p_requested_by
+      and status in ('ACCEPTED', 'APPROVED')
     for share;
   if not found then
-    raise exception 'Event is not assigned to this coordinator';
+    raise exception 'Event must be accepted and assigned to this coordinator';
   end if;
 
   v_request_id := public.submit_venue_booking_request(
@@ -52,3 +78,5 @@ revoke execute on function public.submit_authenticated_venue_booking_request(
 grant execute on function public.submit_authenticated_venue_booking_request(
   uuid, uuid, text, date, text[], integer, text, text[], text[], text, uuid
 ) to service_role;
+
+commit;

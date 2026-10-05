@@ -79,14 +79,44 @@ export function submitBookingRequest(venueId, payload, token) {
   });
 }
 
+// SCRUM-22: Venue Staff approve or reject a request. The note is optional and
+// only meaningful on a rejection.
+export function decideBookingRequest(requestId, decision, note, token) {
+  return request(`/api/venues/booking-requests/${requestId}/decision`, token, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ decision, note }),
+  });
+}
+
 // SCRUM-88: what Venue Staff review
 export function fetchBookingRequests({ status } = {}, token) {
   const query = status ? `?status=${encodeURIComponent(status)}` : "";
   return request(`/api/venues/booking-requests${query}`, token);
 }
 
-export function fetchEquipmentCatalogue(token) {
-  return request("/api/equipment", token);
+// Scrum-29 follow-up: with no window, the full catalogue (used for the
+// catalogue page and for labelling existing requests). With both start and
+// end, only equipment bookable for that period - used to filter the request
+// form's dropdown so it stops offering equipment that would just be rejected.
+export function fetchEquipmentCatalogue(token, { start, end } = {}) {
+  const params = new URLSearchParams();
+  if (start) params.set("start", start);
+  if (end) params.set("end", end);
+  const query = params.toString();
+  return request(`/api/equipment${query ? `?${query}` : ""}`, token);
+}
+
+// Scrum-29 follow-up: Technical Support Staff manually record a status
+// change (e.g. AVAILABLE -> MAINTENANCE).
+export function updateEquipmentStatus(id, status, token) {
+  return request(`/api/equipment/${id}/status`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
 }
 
 export function fetchEquipmentRequests(eventId, token) {

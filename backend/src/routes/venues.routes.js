@@ -24,5 +24,8 @@ module.exports = function createVenuesRoutes(service) {
   router.get("/:id/availability", requirePermission("venues.read"), available, controller.getVenueAvailability);
   router.patch("/:id", requirePermission("venues.update"), available, controller.patchVenue);
   router.post("/:id/booking-requests", requirePermission("bookings.request"), available, controller.postBookingRequest);
+  // SCRUM-22: Venue Staff decide a request. bookingScope is applied so the
+  // response comes back through the same visibility rule as the review list.
+  router.patch("/booking-requests/:requestId/decision", requirePermission("bookings.decide", bookingScope), available, controller.patchBookingRequestDecision);
   return router;
 };
