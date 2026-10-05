@@ -188,14 +188,36 @@ test("[SCRUM-18] A blocked period and closed hours both remove a venue from the 
   const response = await send(`/?date=${bookingDate}&slots=pm`, "event_coordinator");
   expect((await response.json()).data).toEqual([]);
 });
-test("[SCRUM-18] A date with no slots means free at any point that day", async () => {
+test("[SCRUM-18] A date with no slots keeps a venue that is free for part of the day", async () => {
+  service.listVenues.mockResolvedValue([venue, otherVenue]);
+  service.listBookingsForVenuesOnDate.mockResolvedValue([
+    { venue_id: venueId, booking_date: bookingDate, slot: "am", status: "confirmed", event_name: "Taken" },
+    ...["am", "pm", "night"].map((slot) => ({ venue_id: otherVenue.id, booking_date: bookingDate, slot, status: "confirmed", event_name: "Full day" })),
+  ]);
+  service.listUnavailabilityForVenuesOnDate.mockResolvedValue([]);
+  // A bare date asks about the day, so one open slot is enough: a venue booked
+  // in the morning is still a candidate for the evening. Only a venue with
+  // nothing left drops out.
+  const { data } = await (await send(`/?date=${bookingDate}`, "event_coordinator")).json();
+  expect(data.map((row) => row.id)).toEqual([venueId]);
+});
+test("[SCRUM-18] Naming slots requires all of them, which a bare date does not", async () => {
   service.listVenues.mockResolvedValue([venue]);
   service.listBookingsForVenuesOnDate.mockResolvedValue([
     { venue_id: venueId, booking_date: bookingDate, slot: "am", status: "confirmed", event_name: "Taken" },
   ]);
   service.listUnavailabilityForVenuesOnDate.mockResolvedValue([]);
-  // Every slot must be open, so one confirmed booking is enough to exclude it.
-  expect((await (await send(`/?date=${bookingDate}`, "event_coordinator")).json()).data).toEqual([]);
+  // The same venue and the same day: kept for a bare date, dropped once the
+  // taken slot is actually asked for.
+  expect((await (await send(`/?date=${bookingDate}`, "event_coordinator")).json()).data).toHaveLength(1);
+  expect((await (await send(`/?date=${bookingDate}&slots=am,pm`, "event_coordinator")).json()).data).toEqual([]);
+});
+test("[SCRUM-18] A minimum capacity of zero means no minimum, matching the catalogue's input", async () => {
+  const response = await send("/?minCapacity=0", "event_coordinator");
+  expect(response.status).toBe(200);
+  // Zero is what the capacity input allows at its lowest, so it must not be an
+  // error. It simply does not filter.
+  expect(service.listVenues).toHaveBeenCalledWith({});
 });
 test("[SCRUM-18] Malformed filters are refused instead of silently returning everything", async () => {
   for (const query of ["?minCapacity=lots", "?minCapacity=-5", "?date=2099-02-31", "?date=10-10-2099", "?slots=am&", "?slots=breakfast&date=2099-10-10", "?sortBy=price"]) {

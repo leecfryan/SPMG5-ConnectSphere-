@@ -133,7 +133,7 @@ returning the whole catalogue.
 | Filter | Meaning |
 | --- | --- |
 | `city` | Case-insensitive match on the venue's city |
-| `minCapacity` | A positive whole number; the venue seats at least this many |
+| `minCapacity` | A whole number of zero or more; zero means no minimum, as a blank field does |
 | `facilities` | Comma separated; the venue offers **all** of them |
 | `accessibility` | Comma separated; the venue offers **all** of them |
 | `roomLayout` | The venue supports this layout |
@@ -148,11 +148,16 @@ Date availability cannot be a column filter, because it depends on
 `venue_bookings` and `venue_unavailability`. The controller applies it after
 the shortlist comes back: one query for that day's bookings and one for its
 blocked periods across every candidate, then `buildAvailabilityCalendar` from
-SCRUM-17 decides each venue. A venue is kept when every requested slot is
-`available` or `pending`, which is the same list a booking request is allowed
-on, so "free" means one thing across the lane. A pending request therefore
-leaves a venue in the results: only a confirmed booking takes a slot. A date
-with no slots means every slot that day must be open.
+SCRUM-17 decides each venue. A slot counts as free when it is `available` or
+`pending`, which is the same list a booking request is allowed on, so "free"
+means one thing across the lane. A pending request therefore leaves a venue in
+the results: only a confirmed booking takes a slot.
+
+Naming slots and giving a bare date ask different questions. Named slots were
+asked for, so **all** of them must be free. A date on its own asks about the
+day, so **any** one free slot keeps the venue: a hall booked in the morning is
+still a candidate for the evening. Only a venue with nothing left that day drops
+out. The catalogue page says the same above the slot chips.
 
 Two queries cover the whole shortlist however many venues match, rather than a
 round trip per venue.

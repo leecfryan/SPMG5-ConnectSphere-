@@ -166,11 +166,13 @@ function validateVenueSearch(query) {
     value.city = String(query.city).trim();
   }
 
+  // Zero means "no minimum", the same as leaving the field blank, so the
+  // catalogue's capacity input and this rule agree on what is allowed.
   if (query.minCapacity !== undefined && String(query.minCapacity).trim() !== "") {
     const capacity = Number(query.minCapacity);
-    if (!Number.isInteger(capacity) || capacity <= 0) {
-      errors.push("minCapacity must be a positive whole number");
-    } else {
+    if (!Number.isInteger(capacity) || capacity < 0) {
+      errors.push("minCapacity must be a whole number of zero or more");
+    } else if (capacity > 0) {
       value.minCapacity = capacity;
     }
   }
@@ -214,8 +216,13 @@ function validateVenueSearch(query) {
     }
   }
 
-  // A date on its own means "free at some point that day".
-  if (value.date && !value.slots) value.slots = [...SLOTS];
+  // Naming slots means all of them must be open, because they were asked for.
+  // A date on its own means free at some point that day, so any one slot is
+  // enough: a venue booked in the morning is still a candidate for the evening.
+  if (value.date) {
+    value.slotMatch = value.slots ? "all" : "any";
+    if (!value.slots) value.slots = [...SLOTS];
+  }
 
   if (errors.length > 0) return { errors, value: null };
   return { errors: [], value };

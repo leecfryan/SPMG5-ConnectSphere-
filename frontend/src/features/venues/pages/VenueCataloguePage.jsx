@@ -141,6 +141,7 @@ export default function VenueCataloguePage() {
                 className="v-input"
                 type="number"
                 min="0"
+                step="1"
                 value={minCapacityFilter}
                 onChange={(e) => setMinCapacityFilter(e.target.value)}
                 placeholder="e.g. 100"
@@ -209,8 +210,8 @@ export default function VenueCataloguePage() {
               </div>
             )}
             <span className="v-hint">
-              {dateFilter && slotFilter.length === 0
-                ? "Any slot that day."
+              {slotFilter.length === 0
+                ? "No slot ticked means any slot that day."
                 : "A venue is shown only if every ticked slot is still open."}
             </span>
           </fieldset>

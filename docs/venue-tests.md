@@ -127,10 +127,10 @@ accessibility, facilities, layout, and date and slot availability.
 
 | AC | Criterion | Test cases | Where the rule lives |
 | --- | --- | --- | --- |
-| 1 | Date and time requirements | 03, 04, 05, 06, M2, M3 | `filterByAvailability` in `venues.controller.js`, over `buildAvailabilityCalendar` |
-| 2 | Capacity, location, accessibility | 01, 06, M1 | `listVenues` in `venues.service.js` |
+| 1 | Date and time requirements | 03, 04, 05, 06, 08, M2, M3 | `filterByAvailability` in `venues.controller.js`, over `buildAvailabilityCalendar` |
+| 2 | Capacity, location, accessibility | 01, 07, 08, M1 | `listVenues` in `venues.service.js` |
 | 3 | Layout and facilities | 01, 02, M1 | `listVenues`, using Postgres array containment |
-| 4 | Narrows, does not assess | 07, M4 | No score or rank in the response; catalogue copy says so |
+| 4 | Narrows, does not assess | 09, M4 | No score or rank in the response; catalogue copy says so |
 
 ### Test cases
 
@@ -140,9 +140,11 @@ accessibility, facilities, layout, and date and slot availability.
 | TC-SCRUM-18-02 | 3 | Boundary | Two facilities requested | The venue must offer both, not either | `[SCRUM-18] Several facilities must all be offered, not just one of them` | 2026-10-05 ✅ |
 | TC-SCRUM-18-03 | 1 | Happy | A date and one slot | Only venues whose slot is still open are kept; a pending request does not exclude a venue | `[SCRUM-18] A date keeps only venues whose requested slots are still open` | 2026-10-05 ✅ |
 | TC-SCRUM-18-04 | 1 | Negative | Blocked period, and a venue closed that day | Both are dropped from the results | `[SCRUM-18] A blocked period and closed hours both remove a venue from the results` | 2026-10-05 ✅ |
-| TC-SCRUM-18-05 | 1 | Boundary | A date with no slots named | Every slot that day must be open | `[SCRUM-18] A date with no slots means free at any point that day` | 2026-10-05 ✅ |
-| TC-SCRUM-18-06 | 1, 2 | Negative | Seven malformed queries | 400 for each, and the catalogue is never queried | `[SCRUM-18] Malformed filters are refused instead of silently returning everything` | 2026-10-05 ✅ |
-| TC-SCRUM-18-07 | 4 | Happy | A search with no date | No score or rank is added, order is the catalogue's own, and the booking tables are not queried | `[SCRUM-18] Searching narrows but does not rank, and never reaches the date tables needlessly` | 2026-10-05 ✅ |
+| TC-SCRUM-18-05 | 1 | Boundary | A date with no slots named | Any one free slot keeps the venue; only a venue booked all day drops out | `[SCRUM-18] A date with no slots keeps a venue that is free for part of the day` | 2026-10-05 ✅ |
+| TC-SCRUM-18-06 | 1 | Boundary | The same venue and day, with and without named slots | Kept for a bare date, dropped once the taken slot is asked for | `[SCRUM-18] Naming slots requires all of them, which a bare date does not` | 2026-10-05 ✅ |
+| TC-SCRUM-18-07 | 2 | Boundary | `minCapacity=0`, the lowest the catalogue's input allows | 200, and no capacity filter is applied | `[SCRUM-18] A minimum capacity of zero means no minimum, matching the catalogue's input` | 2026-10-05 ✅ |
+| TC-SCRUM-18-08 | 1, 2 | Negative | Seven malformed queries | 400 for each, and the catalogue is never queried | `[SCRUM-18] Malformed filters are refused instead of silently returning everything` | 2026-10-05 ✅ |
+| TC-SCRUM-18-09 | 4 | Happy | A search with no date | No score or rank is added, order is the catalogue's own, and the booking tables are not queried | `[SCRUM-18] Searching narrows but does not rank, and never reaches the date tables needlessly` | 2026-10-05 ✅ |
 
 ### Manual cases
 
@@ -163,6 +165,15 @@ accessibility, facilities, layout, and date and slot availability.
   allowed on, because only a confirmed booking takes a slot (SCRUM-21).
 - **All, not any.** Asking for two facilities returns venues offering both. A
   shortlist wider than the requirements is not a shortlist.
+- **Named slots are "all", a bare date is "any"** (changed in review, 5 Oct).
+  The first version required every slot of the day to be free when only a date
+  was given, which contradicted the page's own wording and excluded venues that
+  were genuinely available that evening. The wording was the better behaviour,
+  so the rule changed to match it rather than the other way round.
+- **`minCapacity=0` means no minimum** (changed in review, 5 Oct). The capacity
+  input's lowest allowed value was 0 while validation rejected it, so an input
+  the page permitted produced an error. Zero now behaves exactly like a blank
+  field.
 - **Unknown query parameters are refused**, so a typo surfaces instead of
   silently returning the whole catalogue.
 

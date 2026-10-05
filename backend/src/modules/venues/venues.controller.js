@@ -63,7 +63,7 @@ function createVenuesController(service) {
   // This narrows; it does not decide. No score, no ranking, and the order
   // stays alphabetical, because SCRUM-18 says searching does not replace the
   // separate suitability assessment.
-  async function filterByAvailability(venues, date, slots) {
+  async function filterByAvailability(venues, date, slots, slotMatch) {
     const venueIds = venues.map((venue) => venue.id);
     const [bookings, unavailability] = await Promise.all([
       listBookingsForVenuesOnDate(venueIds, date),
@@ -82,11 +82,11 @@ function createVenuesController(service) {
         to: date,
       });
 
-      // Every slot asked for has to be open. A pending request does not take a
-      // slot, so it stays a candidate (SCRUM-21).
-      return slots.every((slot) =>
-        REQUESTABLE_STATUSES.includes(day.slots[slot].status)
-      );
+      // Named slots were asked for, so all of them must be open. A bare date
+      // asks for that day, so one open slot is enough. Either way a pending
+      // request does not take a slot, so it stays a candidate (SCRUM-21).
+      const isOpen = (slot) => REQUESTABLE_STATUSES.includes(day.slots[slot].status);
+      return slotMatch === "all" ? slots.every(isOpen) : slots.some(isOpen);
     });
   }
 
@@ -102,7 +102,7 @@ function createVenuesController(service) {
       // Nothing matched the stored filters, so there is no day to look at.
       const data =
         value.date && venues.length > 0
-          ? await filterByAvailability(venues, value.date, value.slots)
+          ? await filterByAvailability(venues, value.date, value.slots, value.slotMatch)
           : venues;
 
       res.status(200).json({ data });
