@@ -22,6 +22,9 @@ module.exports = function createVenuesRoutes(service) {
   router.get("/", requirePermission("venues.read"), available, controller.getVenues);
   router.get("/:id", requirePermission("venues.read"), available, controller.getVenue);
   router.get("/:id/availability", requirePermission("venues.read"), available, controller.getVenueAvailability);
+  // SCRUM-19: assessing a venue is part of deciding whether to request it, so it
+  // sits behind bookings.request like the rest of the coordinator's booking flow.
+  router.get("/:id/suitability", requirePermission("bookings.request"), available, controller.getVenueSuitability);
   router.patch("/:id", requirePermission("venues.update"), available, controller.patchVenue);
   router.post("/:id/booking-requests", requirePermission("bookings.request"), available, controller.postBookingRequest);
   // SCRUM-22: Venue Staff decide a request. bookingScope is applied so the

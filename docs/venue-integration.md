@@ -124,6 +124,105 @@ Its slot rows leave the calendar, because only pending and confirmed bookings
 are drawn. That is the intended split: rejecting frees the slot without erasing
 the record of what was asked for and why it was refused.
 
+## Searching and filtering the catalogue (SCRUM-18)
+
+`GET /api/venues` accepts seven filters, and refuses any other query parameter
+with 400 rather than ignoring it, so a typo surfaces instead of quietly
+returning the whole catalogue.
+
+| Filter | Meaning |
+| --- | --- |
+| `city` | Case-insensitive match on the venue's city |
+| `minCapacity` | A whole number of zero or more; zero means no minimum, as a blank field does |
+| `facilities` | Comma separated; the venue offers **all** of them |
+| `accessibility` | Comma separated; the venue offers **all** of them |
+| `roomLayout` | The venue supports this layout |
+| `date` | `YYYY-MM-DD`; the venue is free that day |
+| `slots` | Comma separated `am`, `pm`, `night`; needs a `date` |
+
+Everything stored on the venue row is filtered by Postgres. `facilities`,
+`accessibility` and `roomLayout` use array containment, so asking for a
+projector and a stage returns venues with both, not either.
+
+Date availability cannot be a column filter, because it depends on
+`venue_bookings` and `venue_unavailability`. The controller applies it after
+the shortlist comes back: one query for that day's bookings and one for its
+blocked periods across every candidate, then `buildAvailabilityCalendar` from
+SCRUM-17 decides each venue. A slot counts as free when it is `available` or
+`pending`, which is the same list a booking request is allowed on, so "free"
+means one thing across the lane. A pending request therefore leaves a venue in
+the results: only a confirmed booking takes a slot.
+
+Naming slots and giving a bare date ask different questions. Named slots were
+asked for, so **all** of them must be free. A date on its own asks about the
+day, so **any** one free slot keeps the venue: a hall booked in the morning is
+still a candidate for the evening. Only a venue with nothing left that day drops
+out. The catalogue page says the same above the slot chips.
+
+Two queries cover the whole shortlist however many venues match, rather than a
+round trip per venue.
+
+SCRUM-18 says searching identifies potential venues but does not replace the
+separate suitability assessment, so the response carries no score and no
+ranking, and the order is the catalogue's own. The catalogue page says the same
+in words above the results.
+
+## Assessing a shortlisted venue (SCRUM-19)
+
+`GET /api/venues/:id/suitability?event_id=<uuid>` compares one of the
+coordinator's own events with a venue, before any booking request exists. It
+sits behind `bookings.request`, the same permission as the rest of the booking
+flow, and the event is read through the coordinator-scoped lookup, so somebody
+else's event is a 404 rather than an assessment.
+
+The response carries a `verdict`, counts, and a `checks` array with one row per
+requirement: what the event needs, what the venue offers, and whether it is met.
+Every requirement is listed, met or not, so the coordinator sees the whole
+comparison rather than only the failures.
+
+A venue is `unsuitable` when any recognised requirement is unmet:
+
+- expected attendance above the venue's capacity (AC3)
+- a required facility the venue does not offer (AC4)
+- an accessibility need the venue cannot meet
+
+The third goes slightly beyond the literal wording of AC3 and AC4, which name
+only capacity and facilities. It is included because AC2 asks for the event's
+current requirements to be compared, and a recorded accessibility need is one
+of them.
+
+### Reading free text
+
+`events.venue_requirements` and `events.accessibility_needs` are **free text**,
+not lists. [Event requests](event-requests.md) states that converting them to
+structured fields is a schema change belonging to the consuming feature, so the
+venue lane reads them as prose.
+
+A term is recognised only when the catalogue itself uses that name, meaning
+some active venue offers a facility or accessibility feature called that. Those
+names are the vocabulary. Matching is case-insensitive and on whole words, so
+"Stage" in a requirement matches the facility `Stage` while "backstage" does
+not.
+
+Requirement text that matches nothing in the vocabulary is reported with
+`met: null` and `"Could not be matched automatically"`, so the coordinator sees
+the sentence the event actually recorded and knows it was not compared. The
+same applies to an expected attendance the event never recorded. Neither is
+counted as met: silence would otherwise read as a pass.
+
+The limit is worth stating plainly. A requirement naming something no venue in
+the catalogue offers cannot be recognised as a requirement at all, so it is
+reported as unmatched rather than failed. Structured event requirements would
+remove that limit, and the event lane's guide already names it as their schema
+change.
+
+The verdict is advice, not a gate. Nothing stops a coordinator requesting a
+venue the assessment calls unsuitable; `validateAgainstVenue` at submission is
+what refuses a request. Both read the same venue fields, so a venue assessed
+suitable here cannot then be refused for a reason the assessment never
+mentioned. The result is shown in a Check suitability panel on the venue page,
+which AC5 leaves to the solution team to propose.
+
 ## Database deployment
 
 The root `.env` must contain the existing `SUPABASE_URL`,

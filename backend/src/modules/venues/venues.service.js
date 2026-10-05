@@ -10,7 +10,13 @@ const VENUE_FIELDS = [
   "turnaround_minutes", "notes", "is_active",
 ].join(", ");
 
-async function listVenues({ city, minCapacity } = {}) {
+// SCRUM-18: every filter here narrows the catalogue by something stored on the
+// venue itself. Date and slot availability is not one of those, because it
+// depends on other tables; the controller applies it afterwards.
+//
+// `contains` is Postgres array containment, so a venue must offer *all* the
+// requested facilities or accessibility features, not merely one of them.
+async function listVenues({ city, minCapacity, facilities, accessibility, roomLayout } = {}) {
   let query = getSupabase()
     .from("venues")
     .select(VENUE_FIELDS)
@@ -19,9 +25,39 @@ async function listVenues({ city, minCapacity } = {}) {
 
   if (city) query = query.ilike("city", city);
   if (Number.isFinite(minCapacity)) query = query.gte("capacity", minCapacity);
+  if (facilities?.length) query = query.contains("facilities", facilities);
+  if (accessibility?.length) query = query.contains("accessibility_features", accessibility);
+  if (roomLayout) query = query.contains("room_layouts", [roomLayout]);
 
   const { data, error } = await query;
   if (error) throw new Error(`Failed to list venues: ${error.message}`);
+  return data;
+}
+
+// SCRUM-18: one query for the whole shortlist rather than a round trip per
+// venue, so adding a date filter costs two queries however many venues match.
+async function listBookingsForVenuesOnDate(venueIds, date) {
+  const { data, error } = await getSupabase()
+    .from("venue_bookings")
+    .select("venue_id, booking_date, slot, status, event_name")
+    .in("venue_id", venueIds)
+    .eq("booking_date", date)
+    .in("status", ["pending", "confirmed"]);
+
+  if (error) throw new Error(`Failed to list bookings: ${error.message}`);
+  return data;
+}
+
+async function listUnavailabilityForVenuesOnDate(venueIds, date) {
+  const { data, error } = await getSupabase()
+    .from("venue_unavailability")
+    .select("venue_id, unavailable_date, slot, reason")
+    .in("venue_id", venueIds)
+    .eq("unavailable_date", date);
+
+  if (error) {
+    throw new Error(`Failed to list unavailable periods: ${error.message}`);
+  }
   return data;
 }
 
@@ -238,6 +274,8 @@ async function decideBookingRequest(requestId, decision, note, decidedBy) {
 
 module.exports = {
   listVenues,
+  listBookingsForVenuesOnDate,
+  listUnavailabilityForVenuesOnDate,
   getVenueById,
   updateVenue,
   listBookingsInRange,

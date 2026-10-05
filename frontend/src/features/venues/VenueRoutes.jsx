@@ -60,7 +60,8 @@ function VenueRecordPage({ mode = "detail" }) {
     onDone={() => navigate(availabilityPath)} onCancel={() => navigate(availabilityPath)} />;
   return <VenueDetail venue={venue} onBack={() => navigate("/venues")}
     onEdit={hasPermission("venues.update") ? () => navigate(`${detailPath}/edit`) : undefined}
-    onViewAvailability={() => navigate(availabilityPath)} />;
+    onViewAvailability={() => navigate(availabilityPath)}
+    canAssess={hasPermission("bookings.request")} />;
 }
 
 export default function VenueRoutes() {
