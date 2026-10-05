@@ -83,7 +83,10 @@ test('[EVENT-API-101] SCRUM-100: Untrusted profile company does not grant access
   const outsiderView = await request.get('/api/event-workspace/organiser', { headers: headers.outsider });
   expect((await outsiderView.json()).events.map(event => event.id)).toEqual([events.outsider.id]);
   const me = await request.get('/api/auth/me', { headers: headers.organiser });
-  expect((await me.json()).permissions).toEqual(['events.own.read', 'events.own.update', 'events.submit']);
+  expect((await me.json()).permissions).toEqual([
+    'events.own.read', 'events.own.update', 'events.submit',
+    'events.managed.read', 'events.registrations.read', 'events.registration-window.update',
+  ]);
   await accounts.update(organiser, { appMetadata: {} });
   expect((await request.get(`/api/event-workspace/organiser/${events.colleague.id}`, { headers: headers.organiser })).status()).toBe(404);
   expect((await request.get(`/api/event-workspace/organiser/${events.organiser.id}`, { headers: headers.organiser })).status()).toBe(200);

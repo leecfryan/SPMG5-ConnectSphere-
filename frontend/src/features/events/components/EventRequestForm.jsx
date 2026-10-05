@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
 import { EVENT_LIMITS, submitEventRequest, updateEventRequest } from "../eventsService";
-import { EVENT_LIMITS, submitEventRequest } from "../eventsService";
 import {
   registrationEndsAfterEventStarts,
   registrationWindowValidationError,
