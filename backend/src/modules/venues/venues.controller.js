@@ -10,6 +10,7 @@ const {
   deriveRequestStatus,
   validateDecision,
   REQUESTABLE_STATUSES,
+  assessVenueSuitability,
 } = require("./venues.bookingRequests.validation");
 const {
   SLOTS,
@@ -25,6 +26,14 @@ const UUID_PATTERN =
 
 // SCRUM-18: rows for many venues come back in one list, so they are bucketed
 // by venue before the calendar runs over each one.
+// SCRUM-19: the distinct values one field holds across the catalogue, longest
+// first so "AV system" is tried before a shorter name it contains.
+function uniqueValues(rows, key) {
+  return [...new Set((rows || []).flatMap((row) => row[key] || []))].sort(
+    (a, b) => b.length - a.length
+  );
+}
+
 function groupBy(rows, key) {
   const grouped = new Map();
   for (const row of rows || []) {
@@ -224,6 +233,56 @@ function createVenuesController(service) {
           to,
           slots: SLOTS,
           days,
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // SCRUM-19: assess a shortlisted venue against one of the coordinator's own
+  // events, before any request exists. The event is fetched through the same
+  // coordinator-scoped lookup the booking flow uses, so an event that is not
+  // theirs is a 404 rather than an assessment of someone else's requirements.
+  async function getVenueSuitability(req, res, next) {
+    try {
+      const { id } = req.params;
+      const eventId = req.query.event_id;
+
+      if (!UUID_PATTERN.test(id)) {
+        return res.status(400).json({ error: "Invalid venue id" });
+      }
+      if (eventId === undefined || !UUID_PATTERN.test(eventId)) {
+        return validationFailed(res, "event_id must be the id of one of your events");
+      }
+
+      // The catalogue supplies the vocabulary: a requirement is recognised only
+      // if some venue actually offers it by that name. Without this the free
+      // text on an event cannot be compared to anything.
+      const [venue, event, catalogue] = await Promise.all([
+        getVenueById(id),
+        getEventById(eventId, req.user.id),
+        listVenues({}),
+      ]);
+      if (!venue || !venue.is_active) {
+        return res.status(404).json({ error: "Venue not found" });
+      }
+      if (!event) {
+        return res.status(404).json({ error: "Event not found" });
+      }
+
+      const vocabulary = {
+        facilities: uniqueValues(catalogue, "facilities"),
+        accessibility: uniqueValues(catalogue, "accessibility_features"),
+      };
+
+      res.status(200).json({
+        data: {
+          venue_id: venue.id,
+          venue_name: venue.name,
+          event_id: event.id,
+          event_name: event.name,
+          ...assessVenueSuitability(venue, event, vocabulary),
         },
       });
     } catch (err) {
@@ -470,6 +529,7 @@ function createVenuesController(service) {
     getVenue,
     patchVenue,
     getVenueAvailability,
+    getVenueSuitability,
     getBookableEvents,
     postBookingRequest,
     getBookingRequests,

@@ -234,6 +234,85 @@ test("[SCRUM-18] Searching narrows but does not rank, and never reaches the date
   expect(data.every((row) => !("score" in row) && !("rank" in row))).toBe(true);
   expect(service.listBookingsForVenuesOnDate).not.toHaveBeenCalled();
 });
+// SCRUM-19: assess a shortlisted venue against the coordinator's own event.
+const suitability = (query, role = "event_coordinator") => send(`/${venueId}/suitability?${query}`, role);
+test("[SCRUM-19] A venue meeting every recorded requirement is assessed suitable", async () => {
+  service.getEventById.mockResolvedValue({ ...event, expected_attendance: 150, venue_requirements: "Projector and a raised platform", accessibility_needs: "Lift access required" });
+  const response = await suitability(`event_id=${eventId}`);
+  expect(response.status).toBe(200);
+  const { data } = await response.json();
+  expect(data).toMatchObject({ venue_id: venueId, event_id: eventId, verdict: "suitable", unmet_count: 0 });
+  expect(data.checks).toHaveLength(3);
+  expect(data.checks.every((check) => check.met === true)).toBe(true);
+  // The event is read through the coordinator-scoped lookup, never by id alone.
+  expect(service.getEventById).toHaveBeenCalledWith(eventId, "verified-user");
+});
+test("[SCRUM-19] Attendance above capacity makes a venue unsuitable", async () => {
+  service.getEventById.mockResolvedValue({ ...event, expected_attendance: 201, venue_requirements: null, accessibility_needs: null });
+  const { data } = await (await suitability(`event_id=${eventId}`)).json();
+  expect(data).toMatchObject({ verdict: "unsuitable", unmet_count: 1 });
+  expect(data.checks[0]).toMatchObject({ requirement: "Expected attendance", needed: "201 people", available: "Capacity 200", met: false });
+});
+test("[SCRUM-19] A required facility the venue lacks makes it unsuitable and is named", async () => {
+  // The vocabulary is what the catalogue offers, so "Ice rink" is recognised
+  // as a facility because some other venue has one, and this venue does not.
+  service.listVenues.mockResolvedValue([venue, { ...venue, id: otherVenue.id, facilities: ["Ice rink"] }]);
+  service.getEventById.mockResolvedValue({ ...event, expected_attendance: 10, venue_requirements: "Projector, and an Ice rink for the finale", accessibility_needs: null });
+  const { data } = await (await suitability(`event_id=${eventId}`)).json();
+  expect(data).toMatchObject({ verdict: "unsuitable", unmet_count: 1 });
+  // The met requirement is still listed, so the coordinator sees the whole
+  // comparison rather than only what failed.
+  expect(data.checks.map((check) => [check.needed, check.met])).toEqual([
+    ["10 people", true], ["Projector", true], ["Ice rink", false],
+  ]);
+});
+test("[SCRUM-19] An accessibility need the venue cannot meet also makes it unsuitable", async () => {
+  service.listVenues.mockResolvedValue([venue, { ...venue, id: otherVenue.id, accessibility_features: ["Hearing loop"] }]);
+  service.getEventById.mockResolvedValue({ ...event, expected_attendance: 10, venue_requirements: null, accessibility_needs: "Hearing loop needed" });
+  const { data } = await (await suitability(`event_id=${eventId}`)).json();
+  expect(data).toMatchObject({ verdict: "unsuitable", unmet_count: 1 });
+});
+test("[SCRUM-19] Requirements are read from free text, not treated as a list of characters", async () => {
+  // The events lane stores venue_requirements and accessibility_needs as free
+  // text (docs/event-requests.md). Reading them as an array produced one check
+  // per character, which is how this was caught in the browser.
+  service.getEventById.mockResolvedValue({ ...event, expected_attendance: 10, venue_requirements: "Projector, plus a stage", accessibility_needs: null });
+  const { data } = await (await suitability(`event_id=${eventId}`)).json();
+  expect(data.checks).toHaveLength(2);
+  expect(data.checks[1]).toMatchObject({ requirement: "Facility", needed: "Projector", met: true });
+});
+test("[SCRUM-19] Only whole words count as a requirement, and unknown wording is reported", async () => {
+  service.getEventById.mockResolvedValue({ ...event, expected_attendance: 10, venue_requirements: "Somewhere backstage for the choir", accessibility_needs: null });
+  const { data } = await (await suitability(`event_id=${eventId}`)).json();
+  // "backstage" contains "stage" but is not a request for the Stage facility,
+  // and nothing else in the text is a name the catalogue knows, so the text is
+  // reported as unmatched rather than passed or failed.
+  expect(data).toMatchObject({ verdict: "suitable", unmet_count: 0, unknown_count: 1 });
+  expect(data.checks[1]).toMatchObject({ needed: "Somewhere backstage for the choir", available: "Could not be matched automatically", met: null });
+});
+test("[SCRUM-19] A requirement the event never recorded is reported, not counted as met", async () => {
+  service.getEventById.mockResolvedValue({ ...event, expected_attendance: null, venue_requirements: null, accessibility_needs: null });
+  const { data } = await (await suitability(`event_id=${eventId}`)).json();
+  // Nothing recorded cannot fail, but staying silent would imply it passed.
+  expect(data).toMatchObject({ verdict: "suitable", unmet_count: 0, unknown_count: 1 });
+  expect(data.checks[0]).toMatchObject({ needed: "Not recorded on this event", met: null });
+});
+test("[SCRUM-19] An event that is not the coordinator's own cannot be assessed", async () => {
+  service.getEventById.mockResolvedValue(null);
+  expect((await suitability(`event_id=${eventId}`)).status).toBe(404);
+});
+test("[SCRUM-19] A missing or malformed id is refused before any lookup", async () => {
+  expect((await suitability("")).status).toBe(400);
+  expect((await suitability("event_id=not-a-uuid")).status).toBe(400);
+  expect((await send(`/not-a-uuid/suitability?event_id=${eventId}`, "event_coordinator")).status).toBe(400);
+  expect(service.getEventById).not.toHaveBeenCalled();
+});
+test.each(["", "invalid", "venue_staff", "attendee", "event_organiser", "technical_support_staff", "event_ops_manager"])(
+  "[SCRUM-19] %s cannot assess a venue against someone's event", async (role) => {
+    expect((await suitability(`event_id=${eventId}`, role)).status).toBe(!role || role === "invalid" ? 401 : 403);
+    expect(service.getEventById).not.toHaveBeenCalled();
+  }
+);
 test("[VENUE-CONFIG-001] Missing venue storage leaves sign-in intact and returns a controlled error", async () => {
   const unconfigured = createApp({ authClient }).listen(0, "127.0.0.1");
   await once(unconfigured, "listening");

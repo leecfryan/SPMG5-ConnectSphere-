@@ -167,6 +167,62 @@ separate suitability assessment, so the response carries no score and no
 ranking, and the order is the catalogue's own. The catalogue page says the same
 in words above the results.
 
+## Assessing a shortlisted venue (SCRUM-19)
+
+`GET /api/venues/:id/suitability?event_id=<uuid>` compares one of the
+coordinator's own events with a venue, before any booking request exists. It
+sits behind `bookings.request`, the same permission as the rest of the booking
+flow, and the event is read through the coordinator-scoped lookup, so somebody
+else's event is a 404 rather than an assessment.
+
+The response carries a `verdict`, counts, and a `checks` array with one row per
+requirement: what the event needs, what the venue offers, and whether it is met.
+Every requirement is listed, met or not, so the coordinator sees the whole
+comparison rather than only the failures.
+
+A venue is `unsuitable` when any recognised requirement is unmet:
+
+- expected attendance above the venue's capacity (AC3)
+- a required facility the venue does not offer (AC4)
+- an accessibility need the venue cannot meet
+
+The third goes slightly beyond the literal wording of AC3 and AC4, which name
+only capacity and facilities. It is included because AC2 asks for the event's
+current requirements to be compared, and a recorded accessibility need is one
+of them.
+
+### Reading free text
+
+`events.venue_requirements` and `events.accessibility_needs` are **free text**,
+not lists. [Event requests](event-requests.md) states that converting them to
+structured fields is a schema change belonging to the consuming feature, so the
+venue lane reads them as prose.
+
+A term is recognised only when the catalogue itself uses that name, meaning
+some active venue offers a facility or accessibility feature called that. Those
+names are the vocabulary. Matching is case-insensitive and on whole words, so
+"Stage" in a requirement matches the facility `Stage` while "backstage" does
+not.
+
+Requirement text that matches nothing in the vocabulary is reported with
+`met: null` and `"Could not be matched automatically"`, so the coordinator sees
+the sentence the event actually recorded and knows it was not compared. The
+same applies to an expected attendance the event never recorded. Neither is
+counted as met: silence would otherwise read as a pass.
+
+The limit is worth stating plainly. A requirement naming something no venue in
+the catalogue offers cannot be recognised as a requirement at all, so it is
+reported as unmatched rather than failed. Structured event requirements would
+remove that limit, and the event lane's guide already names it as their schema
+change.
+
+The verdict is advice, not a gate. Nothing stops a coordinator requesting a
+venue the assessment calls unsuitable; `validateAgainstVenue` at submission is
+what refuses a request. Both read the same venue fields, so a venue assessed
+suitable here cannot then be refused for a reason the assessment never
+mentioned. The result is shown in a Check suitability panel on the venue page,
+which AC5 leaves to the solution team to propose.
+
 ## Database deployment
 
 The root `.env` must contain the existing `SUPABASE_URL`,
