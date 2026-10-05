@@ -63,23 +63,6 @@ These come first.
 - **Task notes, roadmaps and other working Markdown go in [.agent/docs/other/](.agent/docs/other/), never in
   [.agent/tasks/](.agent/tasks/).** Durable reference goes in [.agent/docs/](.agent/docs/). Check both before
   starting work.
-- **File discipline.** Before creating any file, search for an existing one that fits and extend it.
-  - Docs: per feature, the lane's one guide in `docs/` (scope, API, *Schema reference*) and one test guide,
-    `docs/<feature>-tests.md`, with `TC-SCRUM-<n>-NN` test case IDs. Extend the lane's existing files, whatever
-    their name. No new `-integration.md`, PR-named, summary or report Markdown, and no new files in `docs/testing/`.
-  - Working notes go only in `.agent/docs/other/` (gitignored), never in the committed tree.
-  - Code and test names (full table: *Testing* in [.agent/docs/conventions.md](.agent/docs/conventions.md)):
-    - Backend: `backend/src/modules/<feature>/<thing>.<layer>.js` (`controller`, `service`, `validation`,
-      `repository`). Unit tests in `backend/tests/unit/<feature>/<same name>.test.js`; integration tests in
-      `backend/tests/integration/<feature>.<what>.test.js`.
-    - Frontend: `frontend/src/features/<feature>/{pages,components,hooks}/`, API calls in
-      `features/<feature>/<thing>Service.js`. Each test sits next to its file as `<File>.test.jsx` (or `.test.js`).
-    - Playwright: `tests/playwright/<feature>.api.spec.cjs` and `<feature>.browser.spec.cjs`; helpers in
-      `tests/playwright/support/`.
-    - Nothing loose. Existing files that don't match predate this rule; leave them unless the story touches them.
-  - No new `package.json`, config, top-level folder or test harness without team approval (a stop point, §3).
-  - Never commit scratch scripts, backup copies or unreferenced assets.
-  - List every new file and why in the hand-off and the PR description.
 - **Keep the docs current as part of the work, not after it.** A change that alters anything described in
   `.agent/docs/`, `docs/`, `README.md` or this file isn't finished until those files match the
   code, in the same task and the same commit. That covers endpoints, permissions, route paths, schema, status
@@ -205,8 +188,7 @@ The full checklist with templates is in [.agent/tasks/README.md](.agent/tasks/RE
 - [ ] Test case specs written for every AC: happy, negative, boundary, conflict and failure where they apply; each
       linked to its automated test IDs, with the latest execution date and result
 - [ ] Every new test passes the five review questions; expected values come from the AC, not the code
-- [ ] Coverage run: 100% of the story's own lines and branches, or each gap listed with its reason (`test:cov` is
-      Vitest only; code tested only by the `node:test` suites shows as uncovered, so say so)
+- [ ] Coverage run: 100% of the story's own lines and branches, or each gap listed with its reason
 - [ ] Anything beyond the AC has been pointed out to the user with its justification
 - [ ] Backend: permission guard + record check on every new endpoint; 401 / 403 / 400 / 404 / 409 paths tested
 - [ ] Frontend: route behind `RequireAuth` + `RequirePermission`, nav link behind the same permission, loading /
@@ -246,11 +228,8 @@ Details: [.agent/docs/architecture.md](.agent/docs/architecture.md) (stack, laye
   policy in `auth/permissions.js`; `record: true` permissions must have a server-side relationship check.
   Frontend guards are UX, not security.
 - **Database**: Supabase Postgres. Schema changes are made by hand in the dashboard; no migration files.
-- **Tests**: Vitest (unit + integration, backend and frontend); backend `npm test` also runs the older `node:test`
-  suites (`test:auth`, `test:equipment`). Playwright in `tests/playwright/` (browser + API against a local Auth
-  simulator; no cloud). Exception: `backend/tests/integration/equipment.availability.test.js` hits the real dev
-  Supabase (CI passes the secrets). `tests/e2e/` is a separate real-Supabase Playwright package run by hand, not in
-  CI; new end-to-end specs go in `tests/playwright/` only.
+- **Tests**: Vitest (unit + integration, backend and frontend), Playwright (browser + API against a local Auth
+  simulator; no cloud needed).
 - **External APIs**: none yet.
 - **Deployment**: not planned yet. Don't add hosting config.
 

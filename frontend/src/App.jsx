@@ -10,6 +10,7 @@ import ResponsibilitiesPage from "./routes/ResponsibilitiesPage";
 import WorkspaceLayout from "./routes/WorkspaceLayout";
 import EquipmentRequestPage from "./features/equipment/pages/EquipmentRequestPage";
 import EquipmentCataloguePage from "./features/equipment/pages/EquipmentCataloguePage";
+import EquipmentFormPage from "./features/equipment/pages/EquipmentFormPage";
 import TechnicalSupportDashboardPage from "./features/equipment/pages/TechnicalSupportDashboardPage";
 import VenueRoutes from "./features/venues/VenueRoutes";
 import EventRequestPage from "./features/events/pages/EventRequestPage";
@@ -79,8 +80,16 @@ export default function App() {
                   <Route element={<RequirePermission permission="equipment.request" />}>
                     <Route path="/equipment/requests" element={<EquipmentRequestPage />} />
                   </Route>
-                  <Route element={<RequirePermission permission="equipment.read" />}>
+                  {/* Scrum-30: catalogue page restricted to Technical Support Staff (equipment.review) -
+                      Event Coordinators no longer browse it; they still read equipment data indirectly
+                      through the reserve flow's own GET /api/equipment call, gated by equipment.request. */}
+                  <Route element={<RequirePermission permission="equipment.review" />}>
                     <Route path="/equipment/catalogue" element={<EquipmentCataloguePage />} />
+                  </Route>
+                  {/* Scrum-30 AC1: add/edit a catalogue record - management actions, separate from equipment.review. */}
+                  <Route element={<RequirePermission permission="equipment.manage" />}>
+                    <Route path="/equipment/catalogue/new" element={<EquipmentFormPage mode="create" />} />
+                    <Route path="/equipment/catalogue/:id/edit" element={<EquipmentFormPage mode="edit" />} />
                   </Route>
                   <Route element={<RequirePermission permission="equipment.review" />}>
                     <Route path="/technical-support" element={<TechnicalSupportDashboardPage />} />

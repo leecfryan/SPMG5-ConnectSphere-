@@ -78,11 +78,9 @@ Show the plan **and the test cases** to the user in plain language. Agreeing the
 
 ### 5. Prove it
 
-- **Every** suite passes locally (AGENTS.md §4), not just the story's, so earlier sprints' test cases rerun. That's
-  the regression run.
+- **Every** suite passes locally (AGENTS.md §4), not just the story's. That's the regression run.
 - Coverage: `npm --prefix backend run test:cov` and `npm --prefix frontend run test:cov`. 100% of the story's
-  own lines and branches, or each gap written down with its reason. `test:cov` is Vitest only, so code proven only by
-  a `node:test` suite shows as a gap; say so.
+  own lines and branches, or each gap written down with its reason.
 - Review every new test against the five questions (conventions.md, *Testing* §5); strengthen any that no plausible
   bug would break.
 - Walk every AC in the table and tick it only when its test cases are automated (or justified as manual) and pass.
