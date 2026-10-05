@@ -124,6 +124,49 @@ Its slot rows leave the calendar, because only pending and confirmed bookings
 are drawn. That is the intended split: rejecting frees the slot without erasing
 the record of what was asked for and why it was refused.
 
+## Searching and filtering the catalogue (SCRUM-18)
+
+`GET /api/venues` accepts seven filters, and refuses any other query parameter
+with 400 rather than ignoring it, so a typo surfaces instead of quietly
+returning the whole catalogue.
+
+| Filter | Meaning |
+| --- | --- |
+| `city` | Case-insensitive match on the venue's city |
+| `minCapacity` | A whole number of zero or more; zero means no minimum, as a blank field does |
+| `facilities` | Comma separated; the venue offers **all** of them |
+| `accessibility` | Comma separated; the venue offers **all** of them |
+| `roomLayout` | The venue supports this layout |
+| `date` | `YYYY-MM-DD`; the venue is free that day |
+| `slots` | Comma separated `am`, `pm`, `night`; needs a `date` |
+
+Everything stored on the venue row is filtered by Postgres. `facilities`,
+`accessibility` and `roomLayout` use array containment, so asking for a
+projector and a stage returns venues with both, not either.
+
+Date availability cannot be a column filter, because it depends on
+`venue_bookings` and `venue_unavailability`. The controller applies it after
+the shortlist comes back: one query for that day's bookings and one for its
+blocked periods across every candidate, then `buildAvailabilityCalendar` from
+SCRUM-17 decides each venue. A slot counts as free when it is `available` or
+`pending`, which is the same list a booking request is allowed on, so "free"
+means one thing across the lane. A pending request therefore leaves a venue in
+the results: only a confirmed booking takes a slot.
+
+Naming slots and giving a bare date ask different questions. Named slots were
+asked for, so **all** of them must be free. A date on its own asks about the
+day, so **any** one free slot keeps the venue: a hall booked in the morning is
+still a candidate for the evening. Only a venue with nothing left that day drops
+out. The catalogue page says the same above the slot chips.
+
+Two queries cover the whole shortlist however many venues match, rather than a
+round trip per venue.
+
+SCRUM-18 says searching identifies potential venues but does not replace the
+separate suitability assessment, so the response carries no score and no
+ranking, and the order is the catalogue's own. The catalogue page says the same
+in words above the results.
+
 ## Database deployment
 
 The root `.env` must contain the existing `SUPABASE_URL`,

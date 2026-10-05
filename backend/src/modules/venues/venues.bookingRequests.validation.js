@@ -367,6 +367,10 @@ function validateDecision(payload) {
 module.exports = {
   VENUE_TIME_ZONE,
   ALLOWED_FIELDS,
+  // SCRUM-18 searches for venues a request could still be made on, which is the
+  // same question SCRUM-21 asks of one venue. Exported so both answer it from
+  // one list rather than each keeping its own idea of "free".
+  REQUESTABLE_STATUSES,
   DECISIONS,
   DECISION_NOTE_MAX,
   localDateInTimeZone,

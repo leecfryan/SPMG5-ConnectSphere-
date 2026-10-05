@@ -14,7 +14,7 @@ const event = { id: eventId, name: "Assigned conference", status: "APPROVED", st
 const body = { event_id: eventId, booking_date: bookingDate, slots: ["am"], expected_attendees: 100,
   room_layout: "Theatre", required_facilities: ["Projector"], accessibility_requirements: ["Lift"] };
 const service = Object.fromEntries(["listVenues", "getVenueById", "updateVenue", "listBookingsInRange", "listUnavailabilityInRange",
-  "getEventById", "listBookableEvents", "listSlotRowsForDate", "submitBookingRequest", "getBookingRequestById", "listBookingRequests"].map((name) => [name, vi.fn()]));
+  "listBookingsForVenuesOnDate", "listUnavailabilityForVenuesOnDate", "getEventById", "listBookableEvents", "listSlotRowsForDate", "submitBookingRequest", "getBookingRequestById", "listBookingRequests"].map((name) => [name, vi.fn()]));
 const authClient = { auth: { getUser: async (token) => ({ data: { user: token === "invalid" ? null : {
   id: "verified-user", app_metadata: { roles: token.split(",") }, user_metadata: { roles: ["venue_staff"] },
 } }, error: null }) } };
@@ -32,7 +32,7 @@ beforeEach(() => {
   service.updateVenue.mockImplementation(async (_id, changes) => ({ ...venue, ...changes }));
   service.getEventById.mockResolvedValue(event);
   service.listBookableEvents.mockResolvedValue([event]);
-  for (const name of ["listBookingsInRange", "listUnavailabilityInRange", "listSlotRowsForDate", "listBookingRequests"]) service[name].mockResolvedValue([]);
+  for (const name of ["listBookingsInRange", "listUnavailabilityInRange", "listSlotRowsForDate", "listBookingRequests", "listBookingsForVenuesOnDate", "listUnavailabilityForVenuesOnDate"]) service[name].mockResolvedValue([]);
   service.submitBookingRequest.mockResolvedValue(requestId);
   service.getBookingRequestById.mockResolvedValue({ id: requestId, event, venue, slots: [{ slot: "am", status: "pending" }] });
 });
@@ -149,6 +149,90 @@ test("[SCRUM-102] A rejected request stays in the booking history with its reaso
   // listed above, but only pending and confirmed bookings reach the calendar.
   const calendar = await send(`/${venueId}/availability?from=${bookingDate}&to=${bookingDate}`);
   expect((await calendar.json()).data.days[0].slots.am.status).toBe("available");
+});
+// SCRUM-18: search and filter potential venues. The stored filters are the
+// database's job; the date filter runs the SCRUM-17 calendar over the shortlist.
+const otherVenue = { ...venue, id: "44444444-4444-4444-8444-444444444444", name: "Second venue" };
+test("[SCRUM-18] Capacity, location, accessibility, facilities and layout all narrow the catalogue", async () => {
+  const response = await send("/?city=Singapore&minCapacity=50&facilities=Projector&accessibility=Lift&roomLayout=Theatre", "event_coordinator");
+  expect(response.status).toBe(200);
+  expect(service.listVenues).toHaveBeenCalledWith({
+    city: "Singapore", minCapacity: 50, facilities: ["Projector"], accessibility: ["Lift"], roomLayout: "Theatre",
+  });
+});
+test("[SCRUM-18] Several facilities must all be offered, not just one of them", async () => {
+  expect((await send("/?facilities=Projector,Stage", "event_coordinator")).status).toBe(200);
+  expect(service.listVenues).toHaveBeenCalledWith({ facilities: ["Projector", "Stage"] });
+});
+test("[SCRUM-18] A date keeps only venues whose requested slots are still open", async () => {
+  service.listVenues.mockResolvedValue([venue, otherVenue]);
+  service.listBookingsForVenuesOnDate.mockResolvedValue([
+    { venue_id: venueId, booking_date: bookingDate, slot: "am", status: "confirmed", event_name: "Taken" },
+    { venue_id: otherVenue.id, booking_date: bookingDate, slot: "am", status: "pending", event_name: "Requested" },
+  ]);
+  service.listUnavailabilityForVenuesOnDate.mockResolvedValue([]);
+  const response = await send(`/?date=${bookingDate}&slots=am`, "event_coordinator");
+  expect(response.status).toBe(200);
+  // A confirmed booking takes the slot; a pending request does not (SCRUM-21).
+  expect((await response.json()).data.map((row) => row.id)).toEqual([otherVenue.id]);
+  expect(service.listBookingsForVenuesOnDate).toHaveBeenCalledWith([venueId, otherVenue.id], bookingDate);
+});
+test("[SCRUM-18] A blocked period and closed hours both remove a venue from the results", async () => {
+  const closedOnThatDay = { ...otherVenue, operating_hours: { ...venue.operating_hours, sat: { closed: true } } };
+  service.listVenues.mockResolvedValue([venue, closedOnThatDay]);
+  service.listBookingsForVenuesOnDate.mockResolvedValue([]);
+  service.listUnavailabilityForVenuesOnDate.mockResolvedValue([
+    { venue_id: venueId, unavailable_date: bookingDate, slot: "pm", reason: "Maintenance" },
+  ]);
+  // 2099-10-10 is a Saturday, so the second venue is closed all day.
+  const response = await send(`/?date=${bookingDate}&slots=pm`, "event_coordinator");
+  expect((await response.json()).data).toEqual([]);
+});
+test("[SCRUM-18] A date with no slots keeps a venue that is free for part of the day", async () => {
+  service.listVenues.mockResolvedValue([venue, otherVenue]);
+  service.listBookingsForVenuesOnDate.mockResolvedValue([
+    { venue_id: venueId, booking_date: bookingDate, slot: "am", status: "confirmed", event_name: "Taken" },
+    ...["am", "pm", "night"].map((slot) => ({ venue_id: otherVenue.id, booking_date: bookingDate, slot, status: "confirmed", event_name: "Full day" })),
+  ]);
+  service.listUnavailabilityForVenuesOnDate.mockResolvedValue([]);
+  // A bare date asks about the day, so one open slot is enough: a venue booked
+  // in the morning is still a candidate for the evening. Only a venue with
+  // nothing left drops out.
+  const { data } = await (await send(`/?date=${bookingDate}`, "event_coordinator")).json();
+  expect(data.map((row) => row.id)).toEqual([venueId]);
+});
+test("[SCRUM-18] Naming slots requires all of them, which a bare date does not", async () => {
+  service.listVenues.mockResolvedValue([venue]);
+  service.listBookingsForVenuesOnDate.mockResolvedValue([
+    { venue_id: venueId, booking_date: bookingDate, slot: "am", status: "confirmed", event_name: "Taken" },
+  ]);
+  service.listUnavailabilityForVenuesOnDate.mockResolvedValue([]);
+  // The same venue and the same day: kept for a bare date, dropped once the
+  // taken slot is actually asked for.
+  expect((await (await send(`/?date=${bookingDate}`, "event_coordinator")).json()).data).toHaveLength(1);
+  expect((await (await send(`/?date=${bookingDate}&slots=am,pm`, "event_coordinator")).json()).data).toEqual([]);
+});
+test("[SCRUM-18] A minimum capacity of zero means no minimum, matching the catalogue's input", async () => {
+  const response = await send("/?minCapacity=0", "event_coordinator");
+  expect(response.status).toBe(200);
+  // Zero is what the capacity input allows at its lowest, so it must not be an
+  // error. It simply does not filter.
+  expect(service.listVenues).toHaveBeenCalledWith({});
+});
+test("[SCRUM-18] Malformed filters are refused instead of silently returning everything", async () => {
+  for (const query of ["?minCapacity=lots", "?minCapacity=-5", "?date=2099-02-31", "?date=10-10-2099", "?slots=am&", "?slots=breakfast&date=2099-10-10", "?sortBy=price"]) {
+    expect((await send("/" + query, "event_coordinator")).status).toBe(400);
+  }
+  expect(service.listVenues).not.toHaveBeenCalled();
+});
+test("[SCRUM-18] Searching narrows but does not rank, and never reaches the date tables needlessly", async () => {
+  service.listVenues.mockResolvedValue([otherVenue, venue]);
+  const { data } = await (await send("/?city=Singapore", "event_coordinator")).json();
+  // Order is whatever the catalogue returns, and no score or rank is added:
+  // searching identifies candidates, it does not assess them.
+  expect(data.map((row) => row.id)).toEqual([otherVenue.id, venueId]);
+  expect(data.every((row) => !("score" in row) && !("rank" in row))).toBe(true);
+  expect(service.listBookingsForVenuesOnDate).not.toHaveBeenCalled();
 });
 test("[VENUE-CONFIG-001] Missing venue storage leaves sign-in intact and returns a controlled error", async () => {
   const unconfigured = createApp({ authClient }).listen(0, "127.0.0.1");
