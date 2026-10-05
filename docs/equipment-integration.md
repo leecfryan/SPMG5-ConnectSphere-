@@ -133,6 +133,32 @@ alone, with no stored status write needed - so this remains a read-only
 check. If the team still wants an explicit status write on approval (target
 value undecided) plus a scheduled/triggered revert, that needs its own story.
 
+## Releasing reservations on event cancellation (SCRUM-104)
+
+There is no cancellation action in the app - `events.status = 'CANCELLED'` is set directly in Supabase, outside
+this story's scope. `equipment.service.js`'s `releaseReservationsForCancelledEvent(eventId, actingUserId)` is the
+reaction: every `APPROVED` `equipment_requests` row for that event moves to a new status, `RELEASED` (added to the
+status check constraint alongside `PENDING`/`APPROVED`/`REJECTED`). Unlike SCRUM-103's retire-flagging, this is not
+scoped to "today" - a cancelled event's future-dated `APPROVED` requests are released too, since the event will
+never happen. `RELEASED` is excluded from `BLOCKING_REQUEST_STATUSES`, so the existing availability check counts
+the unit again immediately, with no change to the predicate itself.
+
+For each equipment unit that lost a reservation this way, `equipment.status` reverts `IN_USE -> AVAILABLE` only if
+it is still `IN_USE` and no other active (`PENDING`/`APPROVED`) reservation still covers today - a unit a
+technician has deliberately set to `DAMAGED`/`MAINTENANCE`/`UNDER_MAINTENANCE`/`UNAVAILABLE` is left alone.
+`updated_by` is `null` on this write (there is no authenticated caller without a cancellation endpoint).
+
+There is no HTTP route for this, so there are two ways it runs:
+
+- **Equipment reads self-heal automatically.** `GET /equipment` and `GET /equipment/availability` both call
+  `releaseCancelledEventReservations` (`equipment.controller.js`) before computing their response: it lists every
+  `CANCELLED` event (`listCancelledEventIds`, a new dependency alongside `findEventById`/`findEventsByIds`) and
+  releases each one's reservations. So cancelling an event directly in the database is enough on its own - the
+  next time anyone checks the catalogue or availability, it reflects the release, with no extra step. Calling this
+  on every read is safe and cheap: once an event's requests are `RELEASED`, re-processing it is a no-op.
+- **`backend/scripts/releaseCancelledEvents.js`** does the same thing on demand, for scripting/ops use
+  (`node scripts/releaseCancelledEvents.js <eventId>` or `--all`), without waiting for the next read.
+
 ## Database and deployment prerequisites
 
 This branch assumes existing Supabase tables; it did not include Equipment SQL
@@ -147,7 +173,8 @@ The existing application contracts require:
   status-changing write, server-side only).
 - `equipment_requests`: `id`, `event_id`, `equipment_id`, `requested_by`,
   `quantity_requested`, `technical_requirement`, `borrow_start`, `borrow_end`,
-  `status`, `created_at`; generated IDs/timestamps and appropriate foreign keys.
+  `status` (`PENDING`, `APPROVED`, `REJECTED`, and `RELEASED` - SCRUM-104, added to the check constraint by hand),
+  `created_at`; generated IDs/timestamps and appropriate foreign keys.
 - `messages`: `id`, `equipment_request_id`, `author_id`, `author_role`, `body`,
   `created_at`, `updated_at`, `deleted_at`; the existing timestamp trigger is used
   for edits. The author-role constraint must accept `tech_support` and
@@ -194,6 +221,16 @@ repo-wide change to live testing.
   multi-event fan-out, zero-reservation no-op). AC1/AC2 are not retested here -
   this story added no new code for either; the file's header comment points to
   the existing SCRUM-30/SCRUM-29 coverage that still proves them.
+- SCRUM-104's backend tests are `backend/tests/integration/equipment-release-cancelled-event.test.js`
+  (live-DB Vitest, same pattern as above, with its own throwaway events - never
+  a shared demo event, since these tests set `status = CANCELLED`): releasing
+  every `APPROVED` request regardless of date, `PENDING`/`REJECTED` left
+  untouched, the availability check counting a released unit again, a second
+  still-active reservation still blocking it, the `IN_USE -> AVAILABLE` guard
+  and its DAMAGED/still-in-use exceptions, re-running the release safely, a
+  reservation-free event, and the read-time self-heal itself (cancelling an
+  event and going straight to `GET /equipment/availability`, with no call to
+  the release function or the script at all).
 - `tests/playwright/equipment.api.spec.cjs` / `equipment.browser.spec.cjs`
   (the fake in-memory Auth+backend simulator's equipment coverage) are
   retired on staging. Their scenarios moved to `tests/e2e/` below. The small
@@ -230,6 +267,13 @@ it writes to a real development database:
   browser UI (Scrum-30). SCRUM-103 added one case: restoring a retired unit
   back to `AVAILABLE` through the catalogue page's "Restore to available"
   control, confirmed on a page reload.
+- `equipment-release-cancelled-event.spec.js` (SCRUM-104): two scenarios against
+  a cancelled throwaway event - running `scripts/releaseCancelledEvents.js` as a
+  real child process, and cancelling the event with no script run at all, relying
+  only on the next `GET /equipment`/`GET /equipment/availability` call to self-heal.
+  Both confirm through the real running backend that the request reads
+  `RELEASED`, the equipment reads `AVAILABLE`, and availability counts the unit
+  again.
 - `technical-support-review.spec.js`: dashboard review/status update and
   clarification-thread visibility using the real `coordinator.demo`/
   `technical.demo` seed accounts (requires `SEED_USER_PASSWORD` and

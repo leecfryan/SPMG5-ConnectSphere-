@@ -57,6 +57,7 @@ function createEquipmentController({
   findEventById,
   findEventsByIds,
   getUserDisplayName,
+  listCancelledEventIds,
 }) {
   const {
     listEquipment,
@@ -75,8 +76,24 @@ function createEquipmentController({
     listApprovedRequestsForEquipmentIds,
     createRequest,
     updateStatus,
+    releaseReservationsForCancelledEvent,
   } = equipmentService;
   const { create: createMessage } = messagesService;
+
+  // SCRUM-104: there is no cancellation endpoint (events.status is set
+  // directly in the database - see docs/equipment-integration.md), so
+  // nothing writes RELEASED/AVAILABLE at the moment an event is cancelled.
+  // Equipment reads self-heal instead: before computing a catalogue or
+  // availability response, sweep every CANCELLED event for still-APPROVED
+  // requests and release them. Safe to call on every read -
+  // releaseReservationsForCancelledEvent is a no-op once a given event's
+  // requests are already RELEASED (see its own comment in equipment.service.js).
+  async function releaseCancelledEventReservations() {
+    const cancelledEventIds = await listCancelledEventIds();
+    for (const eventId of cancelledEventIds) {
+      await releaseReservationsForCancelledEvent(eventId);
+    }
+  }
 
   // SCRUM-103 AC3: equipment just went UNAVAILABLE - every APPROVED request
   // whose reservation covers today is now at risk. "Covers the day" reuses
@@ -126,6 +143,7 @@ function createEquipmentController({
   // can stop offering equipment that would just be rejected on submit.
   async function getEquipmentCatalogue(req, res, next) {
     try {
+      await releaseCancelledEventReservations();
       const equipment = await listEquipment();
       if (req.query.start === undefined && req.query.end === undefined) {
         const approvedRequests = await listApprovedRequestsForEquipmentIds(equipment.map((unit) => unit.id));
@@ -245,6 +263,7 @@ function createEquipmentController({
         return res.status(400).json({ error: "Validation failed", details: errors });
       }
 
+      await releaseCancelledEventReservations();
       const equipmentUnits = await listEquipmentByType(value.type);
       const requests = await listActiveRequestsForEquipment(equipmentUnits.map((unit) => unit.id));
 
