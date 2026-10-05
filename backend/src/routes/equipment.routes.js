@@ -10,7 +10,7 @@ module.exports = function equipmentRoutes({ authenticate, equipmentService, mess
   findEventById, findEventsByIds, getUserDisplayName, listAssignedEvents }) {
   const router = express.Router();
   const controller = createEquipmentController({ equipmentService: equipmentService || {},
-    findEventById, findEventsByIds, getUserDisplayName });
+    messagesService: messagesService || {}, findEventById, findEventsByIds, getUserDisplayName });
   const messages = createMessagesController({ messagesService: messagesService || {},
     equipmentService: equipmentService || {}, findEventById, retention });
   const guards = (permission, configured = equipmentService) => [authenticate,

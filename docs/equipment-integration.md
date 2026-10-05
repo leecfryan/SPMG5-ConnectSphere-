@@ -14,6 +14,7 @@ and sign-in/session handling remain available together on frontend port 5173.
 | `GET /api/equipment` (backend endpoint) | `equipment.read`: coordinators and technical staff - coordinators still use this indirectly via the reserve flow's own fetch |
 | `GET /api/equipment/availability` | `internal.access` + `equipment.read`: coordinators and technical staff |
 | Add / update / retire a catalogue record | `equipment.manage`: technical staff only (Scrum-30) |
+| Restore a retired unit back to `AVAILABLE` | `equipment.review`: technical staff only (SCRUM-103) - the same quick-status endpoint used for day-to-day condition changes, since `AVAILABLE` is already one of its accepted targets |
 | Assigned-event picker | Coordinators; backend filters by `events.coordinator_id` |
 | Read an event's equipment requests | Technical staff across events; coordinator only for assigned events |
 | Submit equipment request | Coordinator assigned to the event |
@@ -89,6 +90,40 @@ through that endpoint either. The prior Rule A query is commented out in
 `equipment.service.js` for reference, not deleted, in case the team revisits
 this.
 
+## Operational status changes, audit, and retire-flagging (SCRUM-103)
+
+Every write to `equipment.status` (the quick-status `PATCH /equipment/:id/status`,
+the full `PATCH /equipment/:id`, and `PATCH /equipment/:id/retire`) now also sets
+`updated_by` (the server-verified caller's id, never taken from the request body)
+and `updated_at`. Both columns already existed live; no schema change was needed.
+This is the last change only - no history table.
+
+Retiring equipment (the only action that sets `UNAVAILABLE`) also flags every
+event with an `APPROVED` equipment request for that unit whose borrow window
+covers *today* (UTC calendar day, reusing `isBlockingOverlap`'s day-truncation
+rule with today passed as both the requested start and end - there is no query
+window at retire time, only "now"). One `messages` row is inserted per affected
+request (`author_role: "tech_support"`, `author_id` the retiring user), reaching
+the event via the existing `equipment_request_id -> event_id` relationship - no
+new table. `PENDING` and `REJECTED` requests are not flagged; a future-dated
+`APPROVED` request (starting after today) is also not flagged - only today's
+commitments are affected by an equipment going unavailable *now*. Each affected
+request also moves `APPROVED` -> `REJECTED` (the same transition
+`PATCH /equipment-requests/:id/status` already allows), so the Technical Support
+dashboard's "Assigned" line for it reads "Issues" instead. This reuses
+`messagesService`, which `equipment.routes.js` now also injects into
+`createEquipmentController` alongside `equipmentService`.
+
+The plain catalogue read (`GET /equipment`, no window) also shows an `AVAILABLE`
+unit as `IN_USE` when it has an `APPROVED` request covering today - computed on
+each read from the same data, never written to the row.
+
+**Restoring a retired unit.** `AVAILABLE` was already a valid target on the
+quick-status endpoint (`OPERATIONAL_STATUSES` includes it), so no backend change
+was needed for Technical Support Staff to bring a retired unit back - only a
+"Restore to available" control on the catalogue page's retired rows (shown once
+"Show retired equipment" reveals them), calling that existing endpoint.
+
 **Deferred, not built this story:** marking `equipment.status` away from
 `AVAILABLE` on request approval, and any automatic revert of that status (or
 `current_location`) after the event ends. The availability check above
@@ -108,7 +143,8 @@ The existing application contracts require:
   `IN_USE`, `MAINTENANCE`, and after the team's planned constraint update,
   `UNAVAILABLE`, `DAMAGED`, `UNDER_MAINTENANCE` - the availability check
   treats anything not `AVAILABLE` as excluded, so it works before and after
-  that update).
+  that update), `updated_by`, `updated_at` (SCRUM-103 AC4 - set on every
+  status-changing write, server-side only).
 - `equipment_requests`: `id`, `event_id`, `equipment_id`, `requested_by`,
   `quantity_requested`, `technical_requirement`, `borrow_start`, `borrow_end`,
   `status`, `created_at`; generated IDs/timestamps and appropriate foreign keys.
@@ -151,6 +187,13 @@ repo-wide change to live testing.
   `type` and cleans them up in `afterEach`). Both are placed outside
   `tests/unit/equipment/` so they run under `npm --prefix backend run
   test:events` (Vitest) rather than the legacy Node glob.
+- SCRUM-103's backend tests are `backend/tests/integration/equipment-status-change.test.js`
+  (live-DB Vitest, same pattern as above): AC4's audit columns on both the
+  quick-status PATCH and retire, the restore-to-available action, and AC3's
+  retire-flagging (today-only APPROVED requests, PENDING/REJECTED excluded,
+  multi-event fan-out, zero-reservation no-op). AC1/AC2 are not retested here -
+  this story added no new code for either; the file's header comment points to
+  the existing SCRUM-30/SCRUM-29 coverage that still proves them.
 - `tests/playwright/equipment.api.spec.cjs` / `equipment.browser.spec.cjs`
   (the fake in-memory Auth+backend simulator's equipment coverage) are
   retired on staging. Their scenarios moved to `tests/e2e/` below. The small
@@ -180,6 +223,13 @@ it writes to a real development database:
   clarification-message relationships/authorship, the 30-day retention
   cutoff, and role revocation taking effect on the very next request with an
   already-issued token. Also self-contained via the same fixture helper.
+  SCRUM-103 added one case: retiring equipment with a same-day `APPROVED`
+  reservation flags the event's thread, proven through the real running
+  backend (not a fake).
+- `equipment-catalogue-manage.spec.js`: add/edit/retire through the real
+  browser UI (Scrum-30). SCRUM-103 added one case: restoring a retired unit
+  back to `AVAILABLE` through the catalogue page's "Restore to available"
+  control, confirmed on a page reload.
 - `technical-support-review.spec.js`: dashboard review/status update and
   clarification-thread visibility using the real `coordinator.demo`/
   `technical.demo` seed accounts (requires `SEED_USER_PASSWORD` and

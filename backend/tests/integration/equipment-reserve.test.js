@@ -3,7 +3,7 @@
 // pattern as equipment.availability.test.js: real createEquipmentService(supabase)
 // wired into the real Express app, real network calls to the dev Supabase
 // project, throwaway rows under a fresh `type` per test, cleaned up in afterEach.
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeAll, describe, expect, test } from "vitest";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -15,6 +15,22 @@ const createApp = require("../../src/app");
 const { createEquipmentService } = require("../../src/modules/equipment/equipment.service");
 const supabase = require("../../src/supabase");
 const { once } = require("node:events");
+
+// SCRUM-103 AC4: equipment.updated_by is a uuid column, so the acting user's
+// id in these tests must be a real value, not the placeholder string
+// "tester" this file used before that column existed - same resolution
+// pattern as equipment.availability.test.js's anchorUserId.
+let technicalUserId;
+
+beforeAll(async () => {
+  const { data, error } = await supabase.auth.admin.listUsers({ page: 1, perPage: 200 });
+  if (error) throw error;
+  const technical = data.users.find((u) => u.email === "technical.demo@example.com");
+  if (!technical) {
+    throw new Error("Seed user technical.demo@example.com not found - run `npm run seed:users` first.");
+  }
+  technicalUserId = technical.id;
+});
 
 let createdEquipmentIds = [];
 
@@ -40,7 +56,7 @@ function freshType() {
 const authClient = {
   auth: {
     getUser: async (token) => ({
-      data: { user: token === "invalid" ? null : { id: "tester", app_metadata: { roles: token.split(",") } } },
+      data: { user: token === "invalid" ? null : { id: technicalUserId, app_metadata: { roles: token.split(",") } } },
       error: null,
     }),
   },

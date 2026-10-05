@@ -9,6 +9,7 @@ const {
   checkAvailability,
   findAvailableUnits,
   isStatusAvailable,
+  isBlockingOverlap,
 } = require("./equipment.validation");
 const { PLANNING_STATUSES } = require("../events/lifecycle");
 
@@ -27,6 +28,23 @@ function groupRequestsByEquipmentId(requests) {
   return requestsByEquipmentId;
 }
 
+// SCRUM-103 (added scope): display-only - never written to the equipment row
+// (see equipment.service.js's listApprovedRequestsForEquipmentIds). An
+// AVAILABLE unit covered by an APPROVED request today reads as IN_USE on
+// this response; the stored status is untouched, so this self-corrects on
+// the next read once today no longer falls in the request's window, with no
+// revert code needed. A unit already in a non-AVAILABLE condition (DAMAGED,
+// etc.) is left alone - that's a more specific problem than "booked today".
+function withLiveInUseToday(equipmentUnits, approvedRequestsByEquipmentId) {
+  const now = new Date().toISOString();
+  return equipmentUnits.map((unit) => {
+    if (unit.status !== "AVAILABLE") return unit;
+    const requests = approvedRequestsByEquipmentId.get(unit.id) || [];
+    const inUseToday = requests.some((request) => isBlockingOverlap(request, now, now));
+    return inUseToday ? { ...unit, status: "IN_USE" } : unit;
+  });
+}
+
 // Takes its data-access dependencies rather than importing them, so tests
 // can supply fakes (see equipment.functional.test.js) instead of hitting the
 // live database or a specific event owner's data. equipment.routes.js is the
@@ -35,6 +53,7 @@ function groupRequestsByEquipmentId(requests) {
 // getUserDisplayName).
 function createEquipmentController({
   equipmentService,
+  messagesService,
   findEventById,
   findEventsByIds,
   getUserDisplayName,
@@ -52,9 +71,51 @@ function createEquipmentController({
     hasOverlappingRequest,
     listEquipmentByType,
     listActiveRequestsForEquipment,
+    listApprovedRequestsForEquipment,
+    listApprovedRequestsForEquipmentIds,
     createRequest,
     updateStatus,
   } = equipmentService;
+  const { create: createMessage } = messagesService;
+
+  // SCRUM-103 AC3: equipment just went UNAVAILABLE - every APPROVED request
+  // whose reservation covers today is now at risk. "Covers the day" reuses
+  // isBlockingOverlap with today as both the requested start and end, which
+  // collapses its day-truncated overlap rule to a single-day check - retire
+  // has no query window to compare against, only "now" (see the task note's
+  // Decisions for why this is today-only, not future-inclusive).
+  // PENDING/REJECTED requests are excluded by construction -
+  // listApprovedRequestsForEquipment only reads APPROVED rows, unlike
+  // listActiveRequestsForEquipment above.
+  //
+  // Each affected request moves APPROVED -> REJECTED (dashboard label:
+  // Assigned -> Issues - see getTechSupportDashboard's comment), the same
+  // transition patchRequestStatus already allows, since the equipment it was
+  // assigned to is no longer actually available to fulfil it. The attention
+  // message explains why, on the event's own thread.
+  async function flagApprovedReservationsOnRetire(equipmentId, actingUserId) {
+    const requests = await listApprovedRequestsForEquipment(equipmentId);
+    const now = new Date().toISOString();
+    const affected = requests.filter((request) => isBlockingOverlap(request, now, now));
+    if (affected.length === 0) return;
+
+    const eventIds = [...new Set(affected.map((request) => request.event_id))];
+    const events = await findEventsByIds(eventIds);
+    const eventById = new Map(events.map((event) => [event.id, event]));
+
+    for (const request of affected) {
+      const eventName = eventById.get(request.event_id)?.name || "this event";
+      await updateStatus(request.id, "REJECTED");
+      await createMessage(
+        {
+          equipment_request_id: request.id,
+          body: `This equipment has been marked unavailable while reserved for "${eventName}". Please arrange alternative equipment.`,
+        },
+        actingUserId,
+        "tech_support",
+      );
+    }
+  }
 
   // The request form's equipment dropdown. With no start/end query params,
   // this is the full catalogue (unchanged behaviour, used e.g. for the
@@ -67,7 +128,8 @@ function createEquipmentController({
     try {
       const equipment = await listEquipment();
       if (req.query.start === undefined && req.query.end === undefined) {
-        return res.status(200).json({ data: equipment });
+        const approvedRequests = await listApprovedRequestsForEquipmentIds(equipment.map((unit) => unit.id));
+        return res.status(200).json({ data: withLiveInUseToday(equipment, groupRequestsByEquipmentId(approvedRequests)) });
       }
 
       const { ok, errors, value } = validateAvailabilityWindow(req.query);
@@ -103,7 +165,7 @@ function createEquipmentController({
         return res.status(400).json({ error: "Validation failed", details: errors });
       }
 
-      const updated = await updateEquipmentStatus(id, value.status);
+      const updated = await updateEquipmentStatus(id, value.status, req.user.id);
       if (!updated) {
         return res.status(404).json({ error: "Equipment not found" });
       }
@@ -141,7 +203,7 @@ function createEquipmentController({
         return res.status(400).json({ error: "Validation failed", details: errors });
       }
 
-      const updated = await updateEquipment(id, value);
+      const updated = await updateEquipment(id, value, req.user.id);
       if (!updated) {
         return res.status(404).json({ error: "Equipment not found" });
       }
@@ -160,10 +222,12 @@ function createEquipmentController({
         return res.status(400).json({ error: "Invalid equipment id" });
       }
 
-      const updated = await retireEquipment(id);
+      const updated = await retireEquipment(id, req.user.id);
       if (!updated) {
         return res.status(404).json({ error: "Equipment not found" });
       }
+
+      await flagApprovedReservationsOnRetire(id, req.user.id);
       res.status(200).json({ data: updated });
     } catch (err) {
       next(err);
