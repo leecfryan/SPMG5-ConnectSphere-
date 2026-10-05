@@ -26,7 +26,7 @@ auth.post('/__test/accounts', (req, res) => {
   const id = randomUUID();
   const account = {
     id, email: id + '@example.test', password: 'Local-fixture-only-42!',
-    roles: req.body.roles ?? ['venue_staff'], metadata: req.body.metadata ?? {},
+    roles: req.body.roles ?? ['venue_staff'], metadata: req.body.metadata ?? {}, appMetadata: req.body.appMetadata ?? {},
     revoked: false, providerStatus: 200, loginStatus: 200,
     events: [], submissionFailure: false,
     counts: { login: 0, verification: 0, refresh: 0, logout: 0, record: 0, handler: 0 },
@@ -37,7 +37,7 @@ auth.post('/__test/accounts', (req, res) => {
 auth.patch('/__test/accounts/:id', (req, res) => {
   const account = accounts.get(req.params.id);
   if (!account) return res.sendStatus(404);
-  for (const key of ['roles', 'revoked', 'providerStatus', 'loginStatus', 'submissionFailure']) {
+  for (const key of ['roles', 'revoked', 'providerStatus', 'loginStatus', 'submissionFailure', 'appMetadata']) {
     if (Object.hasOwn(req.body, key)) account[key] = req.body[key];
   }
   res.sendStatus(204);
@@ -63,7 +63,7 @@ auth.get('/__test/accounts/:id', (req, res) => {
 function user(account) {
   return {
     id: account.id, email: account.email, aud: 'authenticated', role: 'authenticated',
-    app_metadata: { provider: 'email', providers: ['email'], roles: account.roles },
+    app_metadata: { ...account.appMetadata, provider: 'email', providers: ['email'], roles: account.roles },
     user_metadata: { full_name: 'Playwright Staff', ...account.metadata },
     email_confirmed_at: '2026-01-01T00:00:00.000Z', created_at: '2026-01-01T00:00:00.000Z',
   };

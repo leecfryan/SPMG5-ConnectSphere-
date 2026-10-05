@@ -27,7 +27,7 @@ Venue writes use separate capabilities: `venues.update` for Venue Staff and
 Event Coordinators, and `bookings.request` for Event Coordinators. They do not
 change the read responsibilities listed below or grant external roles access.
 
-Event writes use `events.submit` (Event Organisers, external),
+Event writes use `events.submit` and `events.own.update` (Event Organisers, external),
 `events.assign_coordinator` (Event Operations Managers) and `events.decide`
 (the event's assigned Event Coordinator). None appears in the
 read matrix below, which lists read permissions only.
@@ -37,6 +37,7 @@ read matrix below, which lists read permissions only.
 | `venues.update` | Venue Staff, Event Coordinators | Venue editing |
 | `bookings.request` | Event Coordinators | Booking requests |
 | `events.submit` | Event Organisers | `POST /api/events`, `/events/new` |
+| `events.own.update` | Event Organisers | `PATCH /api/event-workspace/organiser/:id`; owner check in lookup and write; colleague events remain view only |
 | `events.assign_coordinator` | Event Operations Managers | The assignment queue: `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` |
 | `events.decide` | Event Coordinators, **assigned event only** (record check on `coordinator_id`) | `POST /api/internal/events/:eventId/{start-review,approve,reject}` |
 
@@ -64,7 +65,7 @@ specification.
 All four internal roles, including `event_ops_manager`, have `internal.access`.
 Managers have `events.review` and `events.assign`, not venue/equipment booking
 permissions. Coordinators have `events.assigned.read`; organisers have
-`events.own.read` and `events.submit`. Only attendee responsibility grants
+`events.own.read`, `events.own.update` and `events.submit`. Only attendee responsibility grants
 `events.browse` and `registrations.manage`. Unknown roles grant nothing.
 Multiple trusted roles combine capabilities while retaining each record scope.
 

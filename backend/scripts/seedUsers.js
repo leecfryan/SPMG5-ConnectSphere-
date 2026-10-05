@@ -33,6 +33,21 @@ const users = [
     name: "Demo Event Organiser",
     roles: ["event_organiser"],
     type: "external",
+    organisationId: "demo-client-alpha",
+  },
+  {
+    email: "organiser2.demo@example.com",
+    name: "Demo Client Alpha Colleague",
+    roles: ["event_organiser"],
+    type: "external",
+    organisationId: "demo-client-alpha",
+  },
+  {
+    email: "organiser3.demo@example.com",
+    name: "Demo Client Beta Organiser",
+    roles: ["event_organiser"],
+    type: "external",
+    organisationId: "demo-client-beta",
   },
   {
     email: "attendee1.demo@example.com",
@@ -89,6 +104,8 @@ async function seedUsers() {
         JSON.stringify([...(account.app_metadata.roles || [])].sort()) !==
           JSON.stringify([...user.roles].sort()) ||
         account.app_metadata.user_type !== user.type ||
+        (user.organisationId && account.app_metadata.organisation_id != null &&
+          account.app_metadata.organisation_id !== user.organisationId) ||
         !account.email_confirmed_at)
     ) {
       throw new Error(
@@ -115,6 +132,7 @@ async function seedUsers() {
         seed_id: SEED_ID,
         roles: user.roles,
         user_type: user.type,
+        ...(user.organisationId ? { organisation_id: user.organisationId } : {}),
       },
       user_metadata: { full_name: user.name },
     });
@@ -128,7 +146,8 @@ async function seedUsers() {
       !saved.user.email_confirmed_at ||
       saved.user.app_metadata.seed_id !== SEED_ID ||
       JSON.stringify([...(saved.user.app_metadata.roles || [])].sort()) !== JSON.stringify([...user.roles].sort()) ||
-      saved.user.app_metadata.user_type !== user.type
+      saved.user.app_metadata.user_type !== user.type ||
+      (user.organisationId && saved.user.app_metadata.organisation_id !== user.organisationId)
     ) {
       throw new Error("Verification failed for " + user.email);
     }

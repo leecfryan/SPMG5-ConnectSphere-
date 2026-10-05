@@ -35,7 +35,8 @@ row is ever written here.
 
 ## Role-scoped review and planning
 
-Organisers see their own requests; coordinators see only their assigned active
+Organisers see their own requests and view-only requests from their client organisation
+(SCRUM-100); they can edit only their own event details. Coordinators see only their assigned active
 events and the requests they rejected. Managers assign and reassign coordinators but do not decide: the assigned
 coordinator approves or rejects (SCRUM-98/99). Venue and equipment arrangements
 need an approved event. Only attendees can browse the registration catalogue.
@@ -213,9 +214,10 @@ review begins when the coordinator clicks *Start review* (#95).
 **Decision shown to users (SCRUM-99 AC3).** The event workspace detail read
 (`GET /api/event-workspace/{organiser,coordinator,manager}/:id`, see
 [event access](event-access.md)) returns `approved_rejected_by`, `approved_rejected_at`,
-`approval_rejection_remark` and `approved_rejected_by_name`. Only the responsible organiser, the
-assigned coordinator and the manager can load the event at all (#125); anyone
-else gets 404. `approved_rejected_by_name` is the approver's trimmed full name, else their
+`approval_rejection_remark` and `approved_rejected_by_name`. The responsible organiser, the
+assigned coordinator and the manager can load the event (#125), and so can view-only colleagues
+in the organiser's client organisation (SCRUM-100). Those colleagues see the full decision,
+including the remark; the team agreed this on 2026-10-05. Anyone else gets 404. `approved_rejected_by_name` is the approver's trimmed full name, else their
 email. It is `null` when nothing is decided yet, and also when the approver's
 account no longer exists or the lookup fails: the event still loads. List reads
 do not include the name. The coordinator's scope includes their `REJECTED`

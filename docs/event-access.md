@@ -7,7 +7,7 @@ event. A role name, URL parameter, or submitted user ID never proves ownership.
 | Account responsibility | Event access |
 | --- | --- |
 | Attendee | Browse events open for registration; manage only their own registrations |
-| Event organiser | Submit requests and see their own requests and requirements |
+| Event organiser (external client) | Submit requests; view and edit responsible events; view other events in the same client organisation only |
 | Event operations manager | See requests and assign or reassign a verified coordinator account |
 | Event coordinator | See requirements and arrange bookings only for assigned events |
 | Venue staff | Venue catalogue and booking requests across all venues |
@@ -22,7 +22,7 @@ from attendee browsing. Unknown roles grant nothing.
 
 ## Implementation contract
 
-The `/api/event-workspace` endpoints expose organiser-owned requests,
+The `/api/event-workspace` endpoints expose organisation-scoped organiser requests,
 coordinator-assigned events, and manager assignment. Database filters use
 the authenticated account ID, including direct detail requests. Coordinator
 choices come from admin-controlled Auth roles, not browser-supplied role claims.
@@ -67,7 +67,8 @@ assignment to an individual technician.
 
 | API | Capability and scope |
 | --- | --- |
-| `GET /api/event-workspace/organiser[/<id>]` | `events.own.read`; organiser_id = authenticated ID |
+| `GET /api/event-workspace/organiser[/<id>]` | `events.own.read`; own events plus owners sharing trusted organisation metadata |
+| `PATCH /api/event-workspace/organiser/<id>` | `events.own.update`; authenticated ID must equal organiser_id in both lookup and UPDATE |
 | `GET /api/event-workspace/coordinator[/<id>]` | `events.assigned.read`; coordinator_id = authenticated ID, active and rejected events |
 | `GET /api/event-workspace/manager[/<id>]` | `events.review`; active and rejected requests |
 | `GET /api/event-workspace/coordinators` | `events.assign`; only IDs, names and emails of active coordinator accounts |
@@ -172,3 +173,69 @@ the PR's pre-merge commit `efa6505` (Git history), then run setup, that historic
 SQL, the retained 007 reference, and assertions using `psql -v ON_ERROR_STOP=1`.
 The assertions roll back their changes. This historical procedure does not
 validate staging's newer booking-decision SQL or the live database.
+
+## SCRUM-100: external client organiser scope
+
+Event Organisers are the clients submitting event requests. Responsibility is
+the existing `events.organiser_id`, not the coordinator's internal assignment.
+An organiser may edit event details at any lifecycle status; the supplied AC
+does not impose a status restriction. Saving preserves status, responsibility,
+coordinator assignment and submission time. It does not reopen review or change bookings.
+
+Each client organiser has one admin-controlled `app_metadata.organisation_id`
+alongside their existing `roles: ["event_organiser"]`. Colleagues receive the
+same nonblank identifier; unrelated clients receive different identifiers.
+These identifiers describe client organisations, not staff departments. Email
+identifies the account; neither its domain nor the organiser role establishes
+organisation membership. Missing, blank or non-string membership grants only
+own-event access. Do not group all organisers under one identifier.
+
+On every organiser request the backend reads current Auth admin metadata and
+paginates the directory to find fellow organisation members, then filters
+`events.organiser_id` in the database. It returns no Auth directory or company
+metadata. Lookup failures return safe 503 responses without widening scope.
+User-editable `user_metadata`, URL parameters and request bodies cannot grant
+membership. Trusted membership changes take effect on the next API request.
+The event's organisation follows its submitting owner's current membership;
+organisation transfers and historical membership are outside this story.
+
+The `/my-event-requests` list groups own and colleague events under “Other organisers’
+event requests”, with a same-company view-only explanation. Search filters
+only the server-scoped list. Detail pages permit editing only with the verified
+owner ID and update capability; the server independently enforces both.
+A visible colleague edit returns 403. An invisible or missing record returns
+the same 404 body. A changed owner between lookup and save returns 409 because
+the UPDATE includes the owner predicate. Validation failures return 400 and
+Auth/storage failures return 503; denied mutations do not alter any event field.
+
+PATCH accepts a nonempty object containing only existing event-detail fields:
+name, purpose, description, start_time, end_time, expected_attendance,
+venue_requirements, accessibility_needs, equipment_needs and other_comments.
+Protected or unknown fields reject the whole request. Partial edits reuse the
+submission limits; unchanged past schedules do not block other edits. A changed
+start must be future and the resulting end must follow start. The form sends
+only changed fields, retaining original timestamps, including milliseconds,
+when schedule fields are not changed. Failed edits retain input for correction.
+
+### Schema reference and Auth setup (2026-10-05)
+
+No new table, column, constraint or migration is needed for SCRUM-100. The
+existing Auth metadata needs organisation identifiers, configured manually by
+an administrator. This task has not modified the live database or Auth accounts.
+See [seed users](seed-users.md#scrum-100-client-organisations) for exact demo setup.
+For real accounts use their verified client membership, preserving existing roles.
+Use the server-only [Auth admin update API](https://supabase.com/docs/reference/javascript/auth-admin-updateuserbyid)
+or the administrator's SQL editor; never the profile update API.
+
+Use dedicated `event_organiser` accounts for the client lane. The user's intended
+model separates client and staff accounts. Existing global multi-role policy is
+unchanged by this story; combining organiser with attendee/staff roles would
+grant those roles' independent permissions and is not this story's account setup.
+Direct browser database access must remain blocked by existing RLS; isolated
+API tests do not certify live RLS. Organisation lookup currently scans Auth users
+per request, matching the existing admin-directory approach; this is adequate
+for the course app, but larger deployments would need measured follow-up work.
+
+### SCRUM-100 test evidence
+
+See the existing [Access test guide](testing/frontend-acceptance.md#scrum-100-organiser-event-scope-2026-10-05) for the agreed cases, unit/integration/API/browser boundaries, standalone commands, full-row denied-write checks, latest regression results and measured coverage gaps. All new automated tests use isolated Auth/storage fixtures; live Supabase/RLS verification remains separate.

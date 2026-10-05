@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url);
 const {
   validateDraft,
   validateForSubmission,
+  validateUpdate,
 } = require("../../../src/modules/events/events.validation");
 
 const fieldsOf = (result) => result.errors.map((e) => e.field).sort();
@@ -369,4 +370,23 @@ test("US-13 (deferred) boundary: draft optional text at 2000 / 2001 characters",
     expect(over.ok, `${field} 2001 must fail`).toBe(false);
     expect(fieldsOf(over)).toEqual([field]);
   }
+});
+
+test("[SCRUM-100-VAL-001] Valid edits at existing field limits and attendance one are accepted", () => {
+  const current = { start_time: "2099-01-01T01:00:00Z", end_time: "2099-01-01T02:00:00Z" };
+  expect(validateUpdate({ name: "n".repeat(200), purpose: "p".repeat(2000), description: "d".repeat(2000),
+    other_comments: "c".repeat(2000), expected_attendance: 1, accessibility_needs: null }, current)).toEqual({ ok: true, errors: [] });
+});
+
+test("[SCRUM-100-VAL-002] A changed future schedule needs an end strictly after the start", () => {
+  const current = { start_time: "2099-01-01T01:00:00Z", end_time: "2099-01-01T02:00:00Z" };
+  expect(validateUpdate({ start_time: "2099-01-02T01:00:00Z", end_time: "2099-01-02T01:00:00.001Z" }, current).ok).toBe(true);
+  expect(validateUpdate({ end_time: current.start_time }, current)).toEqual({ ok: false, errors: [{ field: "end_time", message: "must be after start_time" }] });
+  expect(validateUpdate({ start_time: null }, current)).toEqual({ ok: false, errors: [{ field: "start_time", message: "required" }] });
+});
+
+test("[SCRUM-100-VAL-003] Unchanged past timing does not prevent editing an existing event, but a new past start is refused", () => {
+  const current = { start_time: "2020-01-01T01:00:00Z", end_time: "2020-01-01T02:00:00Z" };
+  expect(validateUpdate({ name: "Historical correction", ...current }, current)).toEqual({ ok: true, errors: [] });
+  expect(validateUpdate({ start_time: "2020-01-01T01:30:00Z" }, current)).toEqual({ ok: false, errors: [{ field: "start_time", message: "must be in the future" }] });
 });
