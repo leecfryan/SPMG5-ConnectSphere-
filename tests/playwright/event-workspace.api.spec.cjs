@@ -74,8 +74,8 @@ test('[REVIEW-E2E-API-001] SCRUM-98/99 review actions: assigned coordinator only
   expect((await status()).status).toBe('UNDER_REVIEW');
   expect((await act('approve', headers.first, { note: 'Ready for planning' })).status()).toBe(200);
   const approved = await status();
-  expect(approved).toMatchObject({ status: 'APPROVED', decided_by: first.id, decision_note: 'Ready for planning', decided_by_name: 'Coordinator One' });
-  expect(Date.parse(approved.decided_at)).not.toBeNaN();
+  expect(approved).toMatchObject({ status: 'APPROVED', approved_rejected_by: first.id, approval_rejection_remark: 'Ready for planning', approved_rejected_by_name: 'Coordinator One' });
+  expect(Date.parse(approved.approved_rejected_at)).not.toBeNaN();
   expect((await act('reject', headers.first, { note: 'Too late' })).status()).toBe(409);
   expect((await status()).status).toBe('APPROVED');
 });

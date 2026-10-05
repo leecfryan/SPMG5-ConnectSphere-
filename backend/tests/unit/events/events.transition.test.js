@@ -37,11 +37,11 @@ test("SCRUM-97 AC2: extra columns are written alongside the status, but cannot o
   const { calls } = recorder({ id: "evt-1" });
 
   await loadRepository().transitionStatus("evt-1", "UNDER_REVIEW", "APPROVED", {
-    decided_by: "coord-1",
+    approved_rejected_by: "coord-1",
     status: "CONFIRMED",
   });
 
-  expect(calls).toContainEqual(["update", { decided_by: "coord-1", status: "APPROVED" }]);
+  expect(calls).toContainEqual(["update", { approved_rejected_by: "coord-1", status: "APPROVED" }]);
 });
 
 test("SCRUM-97 conflict: zero rows matched returns null so the caller can answer 409", async () => {

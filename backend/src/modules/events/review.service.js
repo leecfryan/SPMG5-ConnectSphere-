@@ -14,10 +14,10 @@ function createReviewService({ repository }) {
     return { ok: false, reason: existing ? "conflict" : "not_found" };
   }
 
-  // SCRUM-98 AC3: the decision records who made it and when. decided_by is kept
+  // SCRUM-98 AC3: the decision records who made it and when. approved_rejected_by is kept
   // apart from coordinator_id so a later reassignment can't rewrite it (#94).
   function outcome(coordinatorId, note) {
-    return { decided_by: coordinatorId, decided_at: new Date().toISOString(), decision_note: note };
+    return { approved_rejected_by: coordinatorId, approved_rejected_at: new Date().toISOString(), approval_rejection_remark: note };
   }
 
   // SCRUM-98 AC2: review begins on the coordinator's own action; assignment

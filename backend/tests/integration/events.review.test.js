@@ -114,8 +114,8 @@ test("SCRUM-99 AC1/SCRUM-98 AC3: approving records APPROVED, the approver and th
 
   expect(response.status).toBe(200);
   const { event } = await response.json();
-  expect(event).toMatchObject({ status: "APPROVED", decided_by: ASSIGNED, decision_note: "All details supplied" });
-  expect(Date.parse(event.decided_at)).toBeGreaterThanOrEqual(before - 1000);
+  expect(event).toMatchObject({ status: "APPROVED", approved_rejected_by: ASSIGNED, approval_rejection_remark: "All details supplied" });
+  expect(Date.parse(event.approved_rejected_at)).toBeGreaterThanOrEqual(before - 1000);
 });
 
 test("SCRUM-99 AC1 conflict: an event that is not under review cannot be approved", async () => {
@@ -141,7 +141,7 @@ test("SCRUM-98 AC3: rejecting with a reason records REJECTED, the reviewer and t
 
   expect(response.status).toBe(200);
   expect((await response.json()).event).toMatchObject({
-    status: "REJECTED", decided_by: ASSIGNED, decision_note: "Attendance numbers are missing",
+    status: "REJECTED", approved_rejected_by: ASSIGNED, approval_rejection_remark: "Attendance numbers are missing",
   });
 });
 
@@ -163,17 +163,17 @@ test("SCRUM-99 boundary: an approval note that is not text is a 400", async () =
   expect(stored.status).toBe("UNDER_REVIEW");
 });
 
-test("SCRUM-98: status, decided_by and decided_at in the body are ignored; the server's values win", async () => {
+test("SCRUM-98: status, approved_rejected_by and approved_rejected_at in the body are ignored; the server's values win", async () => {
   await post("start-review");
 
   const response = await post("approve", undefined, {
-    status: "CONFIRMED", decided_by: OTHER, decided_at: "2000-01-01T00:00:00Z", coordinator_id: OTHER,
+    status: "CONFIRMED", approved_rejected_by: OTHER, approved_rejected_at: "2000-01-01T00:00:00Z", coordinator_id: OTHER,
   });
 
   const { event } = await response.json();
   expect(event.status).toBe("APPROVED");
-  expect(event.decided_by).toBe(ASSIGNED);
-  expect(event.decided_at).not.toBe("2000-01-01T00:00:00Z");
+  expect(event.approved_rejected_by).toBe(ASSIGNED);
+  expect(event.approved_rejected_at).not.toBe("2000-01-01T00:00:00Z");
   expect(event.coordinator_id).toBe(ASSIGNED);
 });
 
@@ -190,7 +190,7 @@ test("SCRUM-98 AC4 conflict: an event reassigned after the access check records 
 
   expect(response.status).toBe(409);
   expect(stored).toMatchObject({ status: "UNDER_REVIEW", coordinator_id: OTHER });
-  expect(stored.decided_by).toBeUndefined();
+  expect(stored.approved_rejected_by).toBeUndefined();
 });
 
 test("SCRUM-98: an event deleted after the access check is a 404", async () => {

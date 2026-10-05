@@ -30,7 +30,7 @@ test("SCRUM-99 AC1/SCRUM-98 AC3: approving records the approver, the time and no
   const result = await review.approve("evt-1", "coord-1");
 
   expect(repository.transitionStatus).toHaveBeenCalledWith("evt-1", "UNDER_REVIEW", "APPROVED",
-    { decided_by: "coord-1", decided_at: NOW, decision_note: null }, "coord-1");
+    { approved_rejected_by: "coord-1", approved_rejected_at: NOW, approval_rejection_remark: null }, "coord-1");
   expect(result.ok).toBe(true);
 });
 
@@ -38,15 +38,15 @@ test("SCRUM-99 AC2: approval writes only the decision columns", async () => {
   await review.approve("evt-1", "coord-1", "Looks complete");
 
   const [, , , extra] = repository.transitionStatus.mock.calls[0];
-  expect(Object.keys(extra).sort()).toEqual(["decided_at", "decided_by", "decision_note"]);
+  expect(Object.keys(extra).sort()).toEqual(["approval_rejection_remark", "approved_rejected_at", "approved_rejected_by"]);
 });
 
 test("SCRUM-99: an approval note is trimmed, and a blank one is stored as none", async () => {
   await review.approve("evt-1", "coord-1", "  Looks complete  ");
   await review.approve("evt-2", "coord-1", "   ");
 
-  expect(repository.transitionStatus.mock.calls[0][3].decision_note).toBe("Looks complete");
-  expect(repository.transitionStatus.mock.calls[1][3].decision_note).toBeNull();
+  expect(repository.transitionStatus.mock.calls[0][3].approval_rejection_remark).toBe("Looks complete");
+  expect(repository.transitionStatus.mock.calls[1][3].approval_rejection_remark).toBeNull();
 });
 
 test.each([42, true, { text: "x" }, ["x"]])(
@@ -59,7 +59,7 @@ test("SCRUM-98 AC3: rejecting records the reviewer, the time and the trimmed rea
   await review.reject("evt-1", "coord-1", "  Missing attendance numbers ");
 
   expect(repository.transitionStatus).toHaveBeenCalledWith("evt-1", "UNDER_REVIEW", "REJECTED",
-    { decided_by: "coord-1", decided_at: NOW, decision_note: "Missing attendance numbers" }, "coord-1");
+    { approved_rejected_by: "coord-1", approved_rejected_at: NOW, approval_rejection_remark: "Missing attendance numbers" }, "coord-1");
 });
 
 test.each([undefined, null, "", "   ", 42])(

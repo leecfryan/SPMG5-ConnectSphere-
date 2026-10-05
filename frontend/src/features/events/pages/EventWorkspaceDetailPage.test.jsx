@@ -24,13 +24,13 @@ const EVENT_ID = "aaaaaaaa-0098-4000-8000-000000000002";
 const ROLES = { coordinator: ["event_coordinator"], organiser: ["event_organiser"], manager: ["event_ops_manager"] };
 const PATHS = { coordinator: "/assigned-events", organiser: "/my-event-requests", manager: "/event-management" };
 // 2099-10-05T02:30:00Z is 10:30 am on 5 Oct in Asia/Singapore (vitest.config TZ).
-const DECISION = { decided_by: "coord-1", decided_by_name: "Ada Tan", decided_at: "2099-10-05T02:30:00Z", decision_note: "Ready for planning." };
+const DECISION = { approved_rejected_by: "coord-1", approved_rejected_by_name: "Ada Tan", approved_rejected_at: "2099-10-05T02:30:00Z", approval_rejection_remark: "Ready for planning." };
 
 const ok = (body) => ({ status: 200, ok: true, json: async () => body });
 
 function setup(scope, initial, { userId = "coord-1", events } = {}) {
   let event = { id: EVENT_ID, name: "Digital Literacy for Seniors", coordinator_id: "coord-1", organiser_id: "org-1",
-    purpose: "Teach basic digital skills", decided_at: null, decided_by_name: null, ...initial };
+    purpose: "Teach basic digital skills", approved_rejected_at: null, approved_rejected_by_name: null, ...initial };
   getAuthClient.mockResolvedValue({ auth: {
     onAuthStateChange: vi.fn((callback) => {
       queueMicrotask(() => callback("INITIAL_SESSION", { access_token: "token", user: { id: "sdk" } }));
@@ -49,7 +49,7 @@ function setup(scope, initial, { userId = "coord-1", events } = {}) {
     if (url === "/api/event-workspace/coordinators") return ok({ coordinators: [] });
     if (options.method === "POST" && url.endsWith("/start-review")) event = { ...event, status: "UNDER_REVIEW" };
     else if (options.method === "POST" && url.endsWith("/approve")) event = { ...event, status: "APPROVED", ...DECISION };
-    else if (options.method === "POST" && url.endsWith("/reject")) event = { ...event, status: "REJECTED", ...DECISION, decision_note: JSON.parse(options.body).note };
+    else if (options.method === "POST" && url.endsWith("/reject")) event = { ...event, status: "REJECTED", ...DECISION, approval_rejection_remark: JSON.parse(options.body).note };
     else throw new Error("Unexpected test request: " + url);
     return ok({ event });
   });

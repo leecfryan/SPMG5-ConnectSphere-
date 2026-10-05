@@ -67,9 +67,9 @@ create table events (
   organiser_id        uuid not null,
   coordinator_id      uuid,        -- set by coordinator assignment
   submitted_at        timestamptz,
-  decided_by          uuid,        -- SCRUM-98/99: coordinator who approved or rejected
-  decided_at          timestamptz, -- SCRUM-98/99: when
-  decision_note       text,        -- SCRUM-98/99: required on reject, optional on approve
+  approved_rejected_by      uuid,        -- SCRUM-98/99: coordinator who approved or rejected
+  approved_rejected_at      timestamptz, -- SCRUM-98/99: when
+  approval_rejection_remark text,        -- SCRUM-98/99: required on reject, optional on approve
   created_at          timestamptz not null default now()
 );
 ```
@@ -145,7 +145,7 @@ one in.
 | `submitted_at` | `createSubmitted`, server clock |
 | `organiser_id` | the controller, from the verified session |
 | `coordinator_id` | coordinator assignment — see [Coordinator assignment](event-assignment.md) |
-| `decided_by`, `decided_at`, `decision_note` | the review actions (§Review and approval), from the verified session and server clock |
+| `approved_rejected_by`, `approved_rejected_at`, `approval_rejection_remark` | the review actions (§Review and approval), from the verified session and server clock |
 | `created_at` | database default |
 | `registration_fields` | the registration feature |
 
@@ -202,8 +202,8 @@ review begins when the coordinator clicks *Start review* (#95).
 - Each action is one conditional update through `transitionStatus`, filtered on
   the expected status **and** `coordinator_id`. If the event moved on or was
   reassigned in between, nothing is written and the answer is 409.
-- Approve and reject record `decided_by` (the caller), `decided_at` (server
-  clock) and `decision_note` (trimmed; blank is stored as `null`). `decided_by`
+- Approve and reject record `approved_rejected_by` (the caller), `approved_rejected_at` (server
+  clock) and `approval_rejection_remark` (trimmed; blank is stored as `null`). `approved_rejected_by`
   is kept apart from `coordinator_id` so a later reassignment does not rewrite
   who decided (#94).
 - Approval writes nothing else: no venue booking, equipment request or
@@ -212,10 +212,10 @@ review begins when the coordinator clicks *Start review* (#95).
 
 **Decision shown to users (SCRUM-99 AC3).** The event workspace detail read
 (`GET /api/event-workspace/{organiser,coordinator,manager}/:id`, see
-[event access](event-access.md)) returns `decided_by`, `decided_at`,
-`decision_note` and `decided_by_name`. Only the responsible organiser, the
+[event access](event-access.md)) returns `approved_rejected_by`, `approved_rejected_at`,
+`approval_rejection_remark` and `approved_rejected_by_name`. Only the responsible organiser, the
 assigned coordinator and the manager can load the event at all (#125); anyone
-else gets 404. `decided_by_name` is the approver's trimmed full name, else their
+else gets 404. `approved_rejected_by_name` is the approver's trimmed full name, else their
 email. It is `null` when nothing is decided yet, and also when the approver's
 account no longer exists or the lookup fails: the event still loads. List reads
 do not include the name. The coordinator's scope includes their `REJECTED`
@@ -249,9 +249,9 @@ Supabase SQL editor (no migration file):
 
 ```sql
 alter table public.events
-  add column if not exists decided_by uuid,
-  add column if not exists decided_at timestamptz,
-  add column if not exists decision_note text;
+  add column if not exists approved_rejected_by uuid,
+  add column if not exists approved_rejected_at timestamptz,
+  add column if not exists approval_rejection_remark text;
 ```
 
 ### Request
@@ -371,7 +371,7 @@ Feature folder at `frontend/src/features/events/`.
 | `components/EventRequestForm.jsx` | EventRequestPage | The request form. Displays every server-side error against its own input. |
 | `components/StatusBadge.jsx` | Event request, assignment and workspace screens | Displays the stored status value as words ("Approved – planning" for `APPROVED`) |
 | `components/EventDecisionControls.jsx` | EventWorkspaceDetailPage (assigned coordinator only) | *Start review* on `SUBMITTED`; note + *Approve* / *Reject* on `UNDER_REVIEW`; nothing otherwise |
-| `components/EventDecisionSummary.jsx` | EventWorkspaceDetailPage (every scope) | Outcome, approver ("Not recorded" when unknown), time, and note or reason; hidden until `decided_at` is set |
+| `components/EventDecisionSummary.jsx` | EventWorkspaceDetailPage (every scope) | Outcome, approver ("Not recorded" when unknown), time, and note or reason; hidden until `approved_rejected_at` is set |
 
 ### Services
 
@@ -443,7 +443,7 @@ several.
 | --- | --- |
 | 23 | A signed-in Event Organiser can enter event name, purpose, description, proposed start and end time, optional registration opening and closing times, expected attendance, venue requirements, accessibility needs, equipment needs and other comments. Required fields are validated in the browser and again on the server. Optional fields may be left blank and are stored as null. |
 | 25 | Submitting stores one complete row with `status = 'SUBMITTED'` and `submitted_at` set by the server, owned by the signed-in Organiser. The request is then visible to coordinator assignment. An invalid submission returns every problem at once, each against its own field, and creates no row. |
-| 98 | The assigned coordinator opens a submitted request and sees everything the organiser supplied; *Start review* moves it to `UNDER_REVIEW`; approve or reject records `decided_by`, `decided_at` and the note or reason; any other coordinator or role is refused (403 on actions, 404 on reads) and nothing is written. |
+| 98 | The assigned coordinator opens a submitted request and sees everything the organiser supplied; *Start review* moves it to `UNDER_REVIEW`; approve or reject records `approved_rejected_by`, `approved_rejected_at` and the note or reason; any other coordinator or role is refused (403 on actions, 404 on reads) and nothing is written. |
 | 99 | Approval moves `UNDER_REVIEW → APPROVED`, after which venue and equipment arrangements accept the event (`APPROVED`/`CONFIRMED` only); approval writes only the decision columns; the outcome, approver and time are shown to the organiser, the assigned coordinator and the manager. |
 
 ---
@@ -532,7 +532,7 @@ the Week 12 release and is not part of this sprint.
 - Start review, approve and reject move an event past `SUBMITTED` (SCRUM-98/99).
   Confirm, cancel and complete have no action yet; they arrive with their own
   stories.
-- The decision columns (`decided_by`, `decided_at`, `decision_note`) must exist
+- The decision columns (`approved_rejected_by`, `approved_rejected_at`, `approval_rejection_remark`) must exist
   in the shared database (SQL under *Schema reference*) before review works
   outside the tests.
 - US-13 has no Jira issue, so `US-13` remains the label in code and tests.

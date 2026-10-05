@@ -196,7 +196,7 @@ async function decidedSetup(t) {
   const { records, users } = context;
   users.first.user_metadata = { full_name: "  Ada Tan  " };
   const event = addEvent(records, { status: "APPROVED", coordinator_id: users.first.id, organiser_id: users.organiser.id,
-    decided_by: users.first.id, decided_at: "2099-09-05T02:30:00.000Z", decision_note: "Ready for planning." });
+    approved_rejected_by: users.first.id, approved_rejected_at: "2099-09-05T02:30:00.000Z", approval_rejection_remark: "Ready for planning." });
   return { ...context, event };
 }
 
@@ -205,8 +205,8 @@ test("[SCRUM-99] AC3: the organiser, the assigned coordinator and the manager se
   for (const [scope, user] of [["organiser", "organiser"], ["coordinator", "first"], ["manager", "manager"]]) {
     const response = await send(`/event-workspace/${scope}/${event.id}`, user);
     expect(response.status, scope).toBe(200);
-    expect((await response.json()).event, scope).toMatchObject({ status: "APPROVED", decided_by: users.first.id,
-      decided_at: "2099-09-05T02:30:00.000Z", decision_note: "Ready for planning.", decided_by_name: "Ada Tan" });
+    expect((await response.json()).event, scope).toMatchObject({ status: "APPROVED", approved_rejected_by: users.first.id,
+      approved_rejected_at: "2099-09-05T02:30:00.000Z", approval_rejection_remark: "Ready for planning.", approved_rejected_by_name: "Ada Tan" });
   }
 });
 
@@ -222,7 +222,7 @@ test("[SCRUM-99] AC3: another organiser and an unassigned coordinator cannot see
 test("[SCRUM-99] boundary: an approver without a full name is shown by email", async t => {
   const { send, event, users } = await decidedSetup(t);
   users.first.user_metadata = { full_name: "   " };
-  expect((await (await send(`/event-workspace/manager/${event.id}`)).json()).event.decided_by_name).toBe("first@example.test");
+  expect((await (await send(`/event-workspace/manager/${event.id}`)).json()).event.approved_rejected_by_name).toBe("first@example.test");
 });
 
 for (const [situation, reply] of [
@@ -235,7 +235,7 @@ for (const [situation, reply] of [
 
     const response = await send(`/event-workspace/organiser/${event.id}`, "organiser");
     expect(response.status).toBe(200);
-    expect((await response.json()).event).toMatchObject({ decided_at: "2099-09-05T02:30:00.000Z", decided_by_name: null });
+    expect((await response.json()).event).toMatchObject({ approved_rejected_at: "2099-09-05T02:30:00.000Z", approved_rejected_by_name: null });
   });
 }
 
@@ -245,19 +245,19 @@ test("[SCRUM-99] AC3: an undecided event has no approver and no account is looke
   const lookup = vi.spyOn(client.auth.admin, "getUserById");
 
   const event = (await (await send(`/event-workspace/manager/${submitted.id}`)).json()).event;
-  expect(event).toMatchObject({ status: "SUBMITTED", decided_by_name: null });
+  expect(event).toMatchObject({ status: "SUBMITTED", approved_rejected_by_name: null });
   expect(lookup).not.toHaveBeenCalled();
 });
 
 test("[SCRUM-98] AC3: the coordinator who rejected a request still sees it and the reason they recorded", async t => {
   const { send, records, users } = await setup(t);
   const event = addEvent(records, { status: "REJECTED", coordinator_id: users.first.id, organiser_id: users.organiser.id,
-    decided_by: users.first.id, decided_at: "2099-09-05T02:30:00.000Z", decision_note: "Dates clash with exams." });
+    approved_rejected_by: users.first.id, approved_rejected_at: "2099-09-05T02:30:00.000Z", approval_rejection_remark: "Dates clash with exams." });
 
   const listed = (await (await send("/event-workspace/coordinator", "first")).json()).events.map(item => item.id);
   expect(listed).toContain(event.id);
   const response = await send(`/event-workspace/coordinator/${event.id}`, "first");
   expect(response.status).toBe(200);
-  expect((await response.json()).event).toMatchObject({ status: "REJECTED", decision_note: "Dates clash with exams." });
+  expect((await response.json()).event).toMatchObject({ status: "REJECTED", approval_rejection_remark: "Dates clash with exams." });
   expect((await send(`/event-workspace/coordinator/${event.id}`, "second")).status).toBe(404);
 });

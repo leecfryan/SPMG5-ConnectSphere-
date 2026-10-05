@@ -4,7 +4,7 @@ const FIELDS = [
   "id", "name", "purpose", "description", "start_time", "end_time",
   "expected_attendance", "venue_requirements", "accessibility_needs",
   "equipment_needs", "other_comments", "status", "organiser_id",
-  "coordinator_id", "submitted_at", "decided_by", "decided_at", "decision_note",
+  "coordinator_id", "submitted_at", "approved_rejected_by", "approved_rejected_at", "approval_rejection_remark",
 ].join(",");
 
 function isCoordinator(user) {
@@ -42,7 +42,7 @@ function createEventWorkspaceService(client) {
     list: (scope, userId) => unwrap(scopedQuery(scope, userId).order("submitted_at", { ascending: false })),
     async find(scope, userId, id) {
       const event = await unwrap(scopedQuery(scope, userId).eq("id", id).maybeSingle());
-      return event && { ...event, decided_by_name: await approverName(event.decided_by) };
+      return event && { ...event, approved_rejected_by_name: await approverName(event.approved_rejected_by) };
     },
     async coordinators() {
       const choices = [];
