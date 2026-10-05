@@ -15,12 +15,12 @@ installs it, not the agent.
 | Routing | React Router 7 (`react-router`), declarative `<Routes>` in `App.jsx` | `BrowserRouter` is mounted once in `main.jsx` |
 | Backend | Node 22 + Express 5, CommonJS (`require` / `module.exports`) | `cors`, `dotenv`; `nodemon` for dev |
 | Auth | Supabase Auth, email + password (`@supabase/supabase-js`) | Browser SDK signs in; Express verifies each token with `auth.getUser` |
-| Database | Supabase Postgres (cloud) | Accessed only from the backend. Schema changed by hand in the dashboard; no migration files |
+| Database | Supabase Postgres (cloud) | Accessed only from the backend. Schema changed by hand in the dashboard; SQL recorded in each lane guide's *Schema reference*, no migration files |
 | Unit / integration tests | Vitest 5 (backend and frontend), React Testing Library + user-event + jsdom on the frontend | A few older backend suites (`auth`, `permissions`, `equipment`) still run on `node:test`. Leave them; new tests use Vitest |
-| End-to-end tests | Playwright (root `package.json`), Chromium + direct HTTP API projects | Runs against a local Auth simulator; no cloud, no `.env` needed |
+| End-to-end tests | Playwright (root `package.json`), Chromium + direct HTTP API projects | `tests/playwright/` runs against a local Auth simulator; no cloud, no `.env` needed. `tests/e2e/` is a separate real-Supabase package, run by hand and not in CI; add new specs to `tests/playwright/` only |
 | Lint | ESLint (`backend/eslint.config.mjs`, `frontend/eslint.config.js`) | No Prettier. Match surrounding formatting by hand |
 | Local runtime | npm scripts, or Docker Compose (frontend :5173, backend :3000) | Supabase is never run locally |
-| CI | GitHub Actions on push / PR to `Staging` | Frontend, backend, Docker build, Playwright |
+| CI | GitHub Actions on push / PR to `staging` | Frontend, backend (including live equipment integration), Docker build, Playwright |
 | External APIs | None | See *External integrations* below |
 | Deployment | None planned | Don't add hosting, build pipelines or production config |
 
@@ -94,7 +94,7 @@ swallows them. Inside any router, declare static paths before parameter paths.
 - `backend/src/auth/permissions.js` is the single policy table: `"<area>.<action>": { roles: [...], label?, record? }`.
   - `*.read` permissions are refused for anything but GET/HEAD. A write needs its own action permission
     (`events.submit`, `bookings.decide`, `equipment.review`, …). Never reuse a read permission for a write.
-  - `label` puts it in the staff Responsibilities list. Only read permissions get one.
+  - `label` puts it in the staff Responsibilities list; `events.review` also labels the manager's review workspace.
   - `record: true` makes `requirePermission` **throw at startup** unless the route supplies
     `authorizeRecord(req)`, which must load the real relationship from the database and return exactly `true`.
     Missing record → `false` → 403. Lookup error → 503.
@@ -136,7 +136,8 @@ swallows them. Inside any router, declare static paths before parameter paths.
 | Staff | `GET /api/internal/access` | `internal.access` |
 | Event requests | `POST /api/events` | `events.submit` |
 | Assignment | `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` | `internal.access` + `events.assign_coordinator` |
-| Registration | `GET /api/events`, `GET /api/events/:eventId` (APPROVED only); `POST /api/registrations`, `GET /api/registrations/me`, `GET /api/registrations/me/:registrationId`, `PATCH /api/registrations/:registrationId/withdraw` | authenticated, scoped to `req.user.id` |
+| Event workspaces | `GET /api/event-workspace/organiser[/<id>]`, `GET /api/event-workspace/coordinator[/<id>]`, `GET /api/event-workspace/manager[/<id>]`, `GET /api/event-workspace/coordinators`; `PATCH /api/event-workspace/<id>/decision`, `/<id>/coordinator`, `/<id>/publication` | `events.own.read` / `events.assigned.read` / `events.review` / `events.assign`, with ownership and state checks |
+| Registration | `GET /api/events`, `GET /api/events/:eventId` (APPROVED only); `POST /api/registrations`, `GET /api/registrations/me`, `GET /api/registrations/me/:registrationId`, `PATCH /api/registrations/:registrationId/withdraw` | authenticated, `events.browse` / `registrations.manage`, scoped to `req.user.id` |
 | Venues | `GET /api/venues`, `GET /api/venues/:id`, `GET /api/venues/:id/availability`, `PATCH /api/venues/:id`, `GET /api/venues/booking-events`, `POST /api/venues/:id/booking-requests`, `GET /api/venues/booking-requests[/:requestId]`, `PATCH /api/venues/booking-requests/:requestId/decision` | `internal.access` + `venues.read` / `venues.update` / `bookings.request` / `bookings.read` / `bookings.decide` |
 | Equipment | `GET /api/equipment`, `GET /api/equipment/events`, `GET|POST /api/events/:eventId/equipment-requests`, `GET /api/technical-support/equipment-requests`, `PATCH /api/equipment-requests/:id/status`, `GET|POST /api/events/:eventId/messages`, `PATCH /api/messages/:id` | `internal.access` + `equipment.*` with an event relationship check |
 
@@ -206,6 +207,11 @@ shares the database.
 - Relationships used for record checks: `events.organiser_id`, `events.coordinator_id`,
   `registrations.attendee_id` / `registrations.event_id`, `venue_booking_requests.event_id`,
   `equipment_requests.event_id`.
+  already read it. The permitted moves between them are in `backend/src/modules/events/lifecycle.js` (SCRUM-97), and
+  `events.repository.js#transitionStatus` is the only post-submission writer. The code currently writes only
+  `SUBMITTED` (organisers) and `APPROVED` (seed data); the actions that move events through the rest are not
+  built yet. Status is written only by the lifecycle code, never
+  through `WRITABLE_COLS`.
 
 Keep this section current: when a manual schema change is made, update this section and remove whatever it resolved.
 

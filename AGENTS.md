@@ -49,11 +49,13 @@ These come first.
   [.agent/docs/architecture.md](.agent/docs/architecture.md).
 - **No migration files.** Never create a migration file, and never suggest writing one. Instead, tell the user
   every SQL change the story needs (new columns, tables, constraints), with the exact SQL, so they can make it by
-  hand in the Supabase dashboard. Record the same SQL in the task note. Remind the user to tell teammates **before**
+  hand in the Supabase dashboard. Record the same SQL in the task note and, in the same commit as the code, in a
+  *Schema reference* section of the lane's existing guide in `docs/` (as `docs/venue-integration.md` does). No
+  `supabase/` folder or migration `.sql` file is committed; the isolated `tests/sql/` harness builds its own
+  fixtures and must not depend on one. Remind the user to tell teammates **before**
   the change (what will change) and **after** it (that it's done), because the database is shared and their tests
-  may depend on it. Read-only queries against the live Supabase project (checking table/column names, whether a
-  table has rows) are fine when verifying the brief before writing code — never DDL, never a write/insert/update/
-  delete, and never print or store the secret key.
+  may depend on it. Never run SQL against the Supabase project
+  or use the secret key from the agent.
 - **Code comments cite the Jira work ID only.** Write `SCRUM-<n>`, never the backlog user story ID (`US-<n>`), in any
   code or test comment, test name or *Deliberately absent* block.
 - **Never touch secrets.** Don't read `.env` aloud, print keys, commit `.env`, or put the secret key anywhere in
@@ -103,8 +105,8 @@ Stop, explain, and wait for the user before:
 - installing anything (they run the command you give)
 - `git commit`, `git push`, opening a PR, merging, deleting a branch, `reset --hard`, force-push
 - changing a shared file another lane depends on in a way beyond a one-line addition
-- creating a new top-level folder, file type or config the repo doesn't already use (the user checks with the team
-  first)
+- creating a new top-level folder, file type, `package.json`, config or test harness the repo doesn't already use
+  (the user checks with the team first)
 - interpreting an ambiguous AC, or anything that would widen scope
 
 ### Talking to a non-technical user
@@ -136,25 +138,28 @@ Run from the repository root. Node 22.
 | Playwright report | `npm run test:playwright:report` |
 | Seed demo users (user runs) | `npm --prefix backend run seed:users`. Accounts are in [docs/seed-users.md](docs/seed-users.md) |
 
-**CI** ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on push and PR to `Staging` and runs all four
+**CI** ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on push and PR to `staging` and runs all four
 suites: frontend lint + test + build, backend check + test, Docker build, and Playwright. Every one of them must
-be green locally before you call a story done.
+be green locally before you call a story done. Backend `npm test` needs `SUPABASE_URL` and `SUPABASE_SECRET_KEY` in
+the root `.env` (see §6, *Tests*).
 
 ## 5. How a story is built
 
 The full checklist with templates is in [.agent/tasks/README.md](.agent/tasks/README.md). In short:
 
-1. **Load the story.** Ask the user for the story: its key, title, user story sentence and AC. Copy it word for
-   word into a new task note `.agent/docs/other/SCRUM-<n>-<slug>.md` from [the template](.agent/tasks/_template.md).
+1. **Load the story.** Ask the user for the story: its key, title, user story sentence ("As a <role>, I want
+   <goal>, so that <benefit>") and AC (a checklist or Given / When / Then). Copy it word for word into a new task
+   note `.agent/docs/other/SCRUM-<n>-<slug>.md` from [the template](.agent/tasks/_template.md).
 2. **Read before planning.** Read `.agent/docs/`, the lane's `docs/<feature>*.md`, and the code the story touches.
-   Check `git log` on Staging for related work.
+   Check `git log origin/staging` for related work.
 3. **Plan against the AC.** Fill in the task note's AC table: each criterion gets a *how it's built* and a *how
    it's proven*. Then write the **test case specifications** for every AC (happy, negative, boundary, conflict,
    failure; see *Testing* in [.agent/docs/conventions.md](.agent/docs/conventions.md)). List *Deliberately
    absent* items and open questions. Show the plan and the test cases to the user, agree them, and ask for a go-ahead
    and the mode.
-4. **Branch.** `feature/<threeWordSummary>` (or `fix/…`) off the latest `origin/Staging`, summarising the 1–3
-   related user stories in three words. Never work on `main` or `Staging`.
+4. **Branch.** `feature/<threeWordSummary>` (or `fix/…`, `chore/…`) off the latest `origin/staging`, summarising
+   the 1–3 related user stories in three words (§7). Never work on `main` or `staging`. Remind the user to move the
+   Jira card to *In Progress*.
 5. **Build in vertical slices, with tests.** Each slice's tests are written alongside its code and pass before the
    PR. Test-first (red → green → refactor) is recommended but not required; the dev chooses. A slice
    covers manual schema change → repository/service → controller/route + permission → frontend service → page/component →
@@ -164,12 +169,18 @@ The full checklist with templates is in [.agent/tasks/README.md](.agent/tasks/RE
    hidden button. Run coverage for the story's files, and put every new test through the five review questions.
 7. **Docs in the same change.** Update the lane's `docs/` guide; the test guide (test case specs with latest
    execution, traceability, coverage notes); the README if user-visible behaviour changed;
-   `docs/frontend-routing.md` / `docs/staff-access.md` for new routes or permissions; the C4 model or an ADR if the
-   change is architectural (see *Documentation* in [.agent/docs/conventions.md](.agent/docs/conventions.md)); and
+   `docs/frontend-routing.md` / `docs/staff-access.md` for new routes or permissions; the C4 model if the change is
+   architectural (`docs/design/` doesn't exist yet: create it on first need, per *Documentation* in
+   [.agent/docs/conventions.md](.agent/docs/conventions.md)). ADRs live in the team's Google Drive, not the repo:
+   if a decision is expensive to change later, or you're unsure how an earlier one applies, ask the dev to check
+   the ADRs there; and
    any `.agent/docs/` file the change contradicts.
 8. **Definition of Done check** (below). Report what passed, what didn't, and what wasn't run.
-9. **Hand-off.** Give the explain-back (§3). Propose the commit message and the PR description, then wait for
-   approval. The story is only *Done* after a teammate has reviewed the PR and CI is green.
+9. **Hand-off.** Give the explain-back (§3) and the list of new files with their reasons. Propose the commit
+   message and the PR description, then wait for approval. When the PR opens, the Jira card moves to *In Review*;
+   it moves to *Done* only after a teammate has reviewed the PR, CI is green and the author has merged (Jira
+   history feeds the sprint charts). A story not done by sprint end goes back to the backlog; never merge it
+   half-done.
 
 ### Definition of Done
 
@@ -182,19 +193,21 @@ The full checklist with templates is in [.agent/tasks/README.md](.agent/tasks/RE
 - [ ] Backend: permission guard + record check on every new endpoint; 401 / 403 / 400 / 404 / 409 paths tested
 - [ ] Frontend: route behind `RequireAuth` + `RequirePermission`, nav link behind the same permission, loading /
       empty / error states handled
-- [ ] Vitest (backend and frontend) and Playwright (API and browser) cover the story; **all** suites green
-      locally (the regression run), then green in CI on the PR
+- [ ] Backend and frontend Vitest and Playwright (API and browser) cover the story; **all** suites green
+      locally, including earlier sprints' test cases (the regression run), then green in CI on the PR
 - [ ] Cross-cutting bar: works at 375px wide, keyboard-usable, errors are safe sentences, access checked on the server
-- [ ] Lint and build green; no `console.log` left behind; no skipped or deleted tests
+- [ ] Lint and build green; no `console.log` left behind (the startup scripts `server.js` and `checkSupabase.js`
+      excepted); no skipped or deleted tests
+- [ ] File discipline (§2): every new file listed with its reason; no duplicate docs, scratch or backup files
 - [ ] Any new test script or npm test command is added to [.github/workflows/ci.yml](.github/workflows/ci.yml) so CI
       runs it (a shared file: tell the team)
-- [ ] Schema changes (if any) written as SQL in the task note and added **manually by the user**; no migration
-      file; seed updated if demos need new data
-- [ ] Docs updated (lane guide, test guide, routing/permissions, C4 / ADR if architectural, `.agent/docs/` if
-      affected)
+- [ ] Schema changes (if any) written as SQL in the task note and the lane guide's *Schema reference*, and added
+      **manually by the user**; no migration file; seed updated if demos need new data
+- [ ] Docs updated (lane guide, test guide, routing/permissions, C4 if architectural, ADR flagged to the dev for the
+      team Drive, `.agent/docs/` if affected)
 - [ ] Explain-back written in the task note; the user can walk AC → test → code unaided
 - [ ] PR reviewed and approved by a teammate
-- [ ] Task note *Status* and *Log* current; *Found, not built* items passed to the user
+- [ ] Task note *Status* and *Log* and the Jira card status current; *Found, not built* items passed to the user
 - [ ] Manual walkthrough steps written for the demo, with the seeded accounts to use
 
 ## 6. Architecture in one page
@@ -203,11 +216,13 @@ Details: [.agent/docs/architecture.md](.agent/docs/architecture.md) (stack, laye
 [.agent/docs/ui.md](.agent/docs/ui.md), and the team guides in [docs/](docs/).
 
 - **Frontend**: React 19 + Vite (JavaScript, JSX, no TypeScript), React Router 7 in declarative mode. Code goes in
-  `frontend/src/features/<feature>/{pages,components,hooks}`, and API helpers in `features/<feature>/<x>Service.js`
+  `frontend/src/features/<feature>/{pages,components,hooks}` (`features/auth` predates this and stays flat), and API helpers in `features/<feature>/<x>Service.js`
   or `lib/api.js`. Identity and permissions come only from `useAuth()`, which is backed by `GET /api/auth/me`.
-- **Backend**: Express 5 on Node 22, CommonJS. The request path is `app.js` → `routes/<feature>.routes.js`
-  (guards) → `modules/<feature>/<x>.controller.js` (HTTP mapping) → `<x>.service.js` (rules) →
-  `<x>.repository.js` (Supabase). Dependencies are injected through `createApp({...})` so tests pass fakes.
+- **Backend**: Express 5 on Node 22, CommonJS. The target path for new code, with `modules/events` as the
+  reference, is `app.js` → `routes/<feature>.routes.js` (guards) → `modules/<feature>/<x>.controller.js` (HTTP
+  mapping) → `<x>.service.js` (rules) → `<x>.repository.js` (Supabase). Not every lane has every layer yet (e.g.
+  registrations mounts handler files straight from `app.js`); extend a lane's existing shape, don't restructure it.
+  Dependencies are injected through `createApp({...})` so tests pass fakes.
 - **Auth and RBAC**: Supabase email/password. `requireAuth` verifies the bearer token with Supabase on every
   request; roles come only from `app_metadata.roles`. `requirePermission(name, authorizeRecord?)` checks the
   policy in `auth/permissions.js`; `record: true` permissions must have a server-side relationship check.
@@ -220,7 +235,9 @@ Details: [.agent/docs/architecture.md](.agent/docs/architecture.md) (stack, laye
 
 ## 7. Git
 
-- Branch: `feature/` or `fix/` plus a three-word camelCase summary of the 1–3 related user stories (e.g. `feature/eventLifecycleStatus`, `fix/coordinatorWorkloadCount`); no Jira or story IDs in branch names. Branch off `origin/Staging`; PRs target `Staging`.
+- Branch: `feature/`, `fix/` or `chore/` plus a three-word camelCase summary of the 1–3 related user stories (e.g. `feature/eventLifecycleStatus`, `fix/coordinatorWorkloadCount`); no Jira or story IDs in branch names. Older branches (`feature/RBAC`, …) predate this rule. Branch off `origin/staging` (lowercase); PRs target `staging`.
+- One PR per branch, covering its 1–3 stories. Keep the branch current by merging or rebasing from `origin/staging`.
+  Never reuse a merged branch; delete it after merge (with approval).
 - Commit: `feat: SCRUM-<n> <what changed, at feature level>`. Types are `feat`, `fix`, `test`, `docs`,
   `refactor`, `chore`. Short subject, detail in the body.
 - **Never commit, push, open or merge a PR without explicit approval.** Show the summary and file list, then wait.
@@ -228,6 +245,8 @@ Details: [.agent/docs/architecture.md](.agent/docs/architecture.md) (stack, laye
 - Keep PRs small and merge often. Every lane touches `app.js`, `permissions.js`, `App.jsx` and
   `WorkspaceLayout.jsx`.
 - Reviews: every PR needs at least **one** reviewer (two for a bigger feature), preferably a dev, picked at random
-  from the team. A failing CI run blocks the merge. Once approved, the **author** merges, not the reviewer.
-- PR description: the story key and title, what the PR delivers per AC, the test commands run and their results,
-  schema changes to make by hand, and manual demo steps.
+  from the team. A failing CI run blocks the merge. Once approved, the **author** merges, not the reviewer. The
+  author and reviewer, not the agent, are accountable for AI-written code and tests.
+- PR description: the story key and title, what the PR delivers per AC, the test case IDs (`TC-SCRUM-<n>-NN`)
+  that prove each AC, the test commands run and their results, new files added and why, schema changes to make by
+  hand, and manual demo steps.

@@ -1,5 +1,6 @@
 // Importing the application/validation must not require administrative credentials.
 const getSupabase = () => require("../../supabase");
+const { canTransition, ACTIVE_STATUSES } = require("./lifecycle");
 
 const TABLE = "events";
 
@@ -91,6 +92,22 @@ async function markSubmitted(id, submittedAt = new Date().toISOString()) {
   );
 }
 
+async function transitionStatus(id, from, to, extra = {}) {
+  if (!canTransition(from, to)) {
+    throw new Error(`events.repository: ${from} -> ${to} is not a permitted transition`);
+  }
+  return unwrap(
+    await getSupabase()
+      .from(TABLE)
+      .update({ ...extra, status: to })
+      .eq("id", id)
+      .eq("status", from)
+      .select()
+      .maybeSingle(),
+    "transitionStatus",
+  );
+}
+
 async function assignCoordinator(id, coordinatorId) {
   return unwrap(
     await getSupabase()
@@ -118,8 +135,6 @@ async function findSubmittedUnassigned() {
   );
 }
 
-const ACTIVE_STATUSES = ["SUBMITTED", "APPROVED"];
-
 async function findActiveAssignments() {
   return unwrap(
     await getSupabase()
@@ -139,6 +154,7 @@ module.exports = {
   findByIds,
   update,
   markSubmitted,
+  transitionStatus,
   assignCoordinator,
   findSubmittedUnassigned,
   findActiveAssignments,

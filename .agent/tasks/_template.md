@@ -70,7 +70,8 @@ Interpretations of the AC and design choices, with the reason and who agreed.
 
 Plain-language walkthrough for the user and the Week 13 Q&A.
 
-- **AC → test → code:** <for each AC, which test proves it and where the code lives>
+- **AC → test → code:** <for each AC, which test case IDs (`TC-SCRUM-<n>-NN`) and tests prove it, and where the
+  code lives>
 - **Key decisions and tradeoffs:** <what was chosen, what else was considered, why>
 - **Likely instructor questions:** <three questions, each with a short answer>
 
