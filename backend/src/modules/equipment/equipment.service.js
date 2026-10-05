@@ -250,6 +250,54 @@ function createEquipmentService(client) {
     );
   }
 
+  // SCRUM-104 AC1/AC2: every APPROVED request tied to a cancelled event is
+  // released, regardless of its borrow window - unlike SCRUM-103's
+  // retire-flagging (which is "today only" because retire has no date
+  // context beyond "now"), a cancelled event has a real start/end, so a
+  // future-dated APPROVED request is just as moot as one covering today.
+  // Re-running this for the same event is safe without an explicit
+  // "already RELEASED" guard: the APPROVED filter below simply matches
+  // nothing the second time.
+  //
+  // AC3: for each unit that lost a reservation, only revert
+  // equipment.status to AVAILABLE when it is actually IN_USE and no other
+  // PENDING/APPROVED request still covers today - a unit a technician has
+  // deliberately set to DAMAGED/MAINTENANCE/UNDER_MAINTENANCE/UNAVAILABLE is
+  // left alone (that is a more specific problem than "this reservation
+  // ended"). There is no cancellation endpoint in this story (events.status
+  // is set directly in the database - see docs/equipment-integration.md) so
+  // actingUserId has no real caller; equipment.updated_by is nullable and is
+  // left null rather than inventing a system user.
+  async function releaseReservationsForCancelledEvent(eventId, actingUserId = null) {
+    const requests = await listRequestsByEvent(eventId);
+    const approved = requests.filter((request) => request.status === "APPROVED");
+
+    const released = [];
+    for (const request of approved) {
+      await updateStatus(request.id, "RELEASED");
+      released.push(request.id);
+    }
+
+    const now = new Date().toISOString();
+    const equipmentReverted = [];
+    const equipmentSkipped = [];
+    for (const equipmentId of new Set(approved.map((request) => request.equipment_id))) {
+      const unit = await findEquipmentById(equipmentId);
+      if (!unit || unit.status !== "IN_USE") continue;
+
+      const stillActive = await listActiveRequestsForEquipment([equipmentId]);
+      if (stillActive.some((request) => isBlockingOverlap(request, now, now))) {
+        equipmentSkipped.push(equipmentId);
+        continue;
+      }
+
+      await updateEquipmentStatus(equipmentId, "AVAILABLE", actingUserId);
+      equipmentReverted.push(equipmentId);
+    }
+
+    return { released, equipmentReverted, equipmentSkipped };
+  }
+
   return {
     listEquipment,
     findEquipmentById,
@@ -267,6 +315,7 @@ function createEquipmentService(client) {
     listApprovedRequestsForEquipmentIds,
     createRequest,
     updateStatus,
+    releaseReservationsForCancelledEvent,
   };
 }
 

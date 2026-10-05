@@ -4,8 +4,10 @@ import ClarificationThread from "./ClarificationThread";
 // Scrum-28-Scrum64 (AC2): the API only ever accepts APPROVED/REJECTED as a
 // target (PENDING is a starting state, never selectable - see
 // equipment.validation.js's REVIEW_STATUSES), so "Unattended" stays a
-// disabled option: it can be the current value, never a choice.
-const STATUS_LABEL = { PENDING: "Unattended", APPROVED: "Assigned", REJECTED: "Issues" };
+// disabled option: it can be the current value, never a choice. SCRUM-104:
+// RELEASED is the same - a request only ever reaches it when its event is
+// cancelled, never through this selector.
+const STATUS_LABEL = { PENDING: "Unattended", APPROVED: "Assigned", REJECTED: "Issues", RELEASED: "Released" };
 
 function formatWindow(startIso, endIso) {
   const fmt = (iso) =>
@@ -77,6 +79,7 @@ function EventEquipmentCard({
                     <option value="PENDING" disabled>Unattended</option>
                     <option value="APPROVED">Assigned</option>
                     <option value="REJECTED">Issues</option>
+                    <option value="RELEASED" disabled>Released</option>
                   </select>
                   <svg className="eq-field-icon" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
                     <path d="M5 7l5 5 5-5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
