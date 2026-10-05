@@ -107,10 +107,12 @@ swallows them. Inside any router, declare static paths before parameter paths.
 
 ### Role-specific event workspaces
 
-The role-specific event workspaces filter organiser/coordinator records by
-verified user ID. Multiple coordinators are distinct accounts sharing
-`event_coordinator`; assignment uses `events.coordinator_id`. Managers review,
-assign and explicitly publish events. Attendees use registration routes; venue
+The organiser workspace includes responsible events and same-client events via
+admin-controlled `app_metadata.organisation_id`; only the responsible organiser
+can edit. Missing membership grants own-event access only. Coordinator records
+are filtered by verified user ID. Multiple coordinators are distinct accounts
+sharing `event_coordinator`; assignment uses `events.coordinator_id`. Managers
+assign/reassign; the assigned coordinator reviews and approves or rejects. Attendees use registration routes; venue
 and technical staff retain their booking workspaces, including Venue Staff's
 `bookings.decide` permission. See [event access](../../docs/event-access.md).
 
@@ -148,7 +150,7 @@ session, route or refresh revision changes.
 | Staff | `GET /api/internal/access` | `internal.access` |
 | Event requests | `POST /api/events` | `events.submit` |
 | Assignment | `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` | `internal.access` + `events.assign_coordinator` |
-| Event workspaces | `GET /api/event-workspace/organiser[/<id>]`, `GET /api/event-workspace/coordinator[/<id>]`, `GET /api/event-workspace/manager[/<id>]`, `GET /api/event-workspace/coordinators`; `PATCH /api/event-workspace/<id>/decision`, `/<id>/coordinator`, `/<id>/publication` | `events.own.read` / `events.assigned.read` / `events.review` / `events.assign`, with ownership and state checks |
+| Event workspaces | `GET /api/event-workspace/organiser[/<id>]`, `GET /api/event-workspace/coordinator[/<id>]`, `GET /api/event-workspace/manager[/<id>]`, `GET /api/event-workspace/coordinators`; `PATCH /api/event-workspace/organiser/<id>`, `/<id>/coordinator` | `events.own.read` / `events.own.update` / `events.assigned.read` / `events.review` / `events.assign`, with organisation, ownership and state checks |
 | Registration | `GET /api/events`, `GET /api/events/:eventId` (APPROVED only); `POST /api/registrations`, `GET /api/registrations/me`, `GET /api/registrations/me/:registrationId`, `PATCH /api/registrations/:registrationId/withdraw` | authenticated, `events.browse` / `registrations.manage`, scoped to `req.user.id` |
 | Venues | `GET /api/venues`, `GET /api/venues/:id`, `GET /api/venues/:id/availability`, `PATCH /api/venues/:id`, `GET /api/venues/booking-events`, `POST /api/venues/:id/booking-requests`, `GET /api/venues/booking-requests[/:requestId]`, `PATCH /api/venues/booking-requests/:requestId/decision` | `internal.access` + `venues.read` / `venues.update` / `bookings.request` / `bookings.read` / `bookings.decide` |
 | Equipment | `GET /api/equipment`, `GET /api/equipment/events`, `GET|POST /api/events/:eventId/equipment-requests`, `GET /api/technical-support/equipment-requests`, `PATCH /api/equipment-requests/:id/status`, `GET|POST /api/events/:eventId/messages`, `PATCH /api/messages/:id` | `internal.access` + `equipment.*` with an event relationship check |

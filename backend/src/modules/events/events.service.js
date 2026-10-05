@@ -81,4 +81,4 @@ async function submitRequest(input, organiserId, eventRepository = repository) {
   return { ok: true, event };
 }
 
-module.exports = { submitRequest };
+module.exports = { submitRequest, normalise };

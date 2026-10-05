@@ -86,7 +86,11 @@ the agreed matrix, integration examples, tests and remaining work.
 
 Event Organisers can open `/events/new` through the workspace navigation. The
 frontend and backend both enforce `events.submit`; the API obtains ownership
-from the verified user. See [event-request integration](docs/event-request-integration.md)
+from the verified user. At `/my-event-requests`, organisers can edit responsible
+events and view colleagues’ events in their client organisation. Unrelated clients
+are hidden. Configure trusted organisation metadata using
+[the event access guide](docs/event-access.md#scrum-100-external-client-organiser-scope).
+See [event-request integration](docs/event-request-integration.md)
 for setup, preserved functionality and combined test commands.
 
 ## Venue catalogue and booking requests

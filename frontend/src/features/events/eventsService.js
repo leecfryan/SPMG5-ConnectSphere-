@@ -1,3 +1,5 @@
+import { apiFetch } from "../../lib/api";
+
 // Field limits are input safeguards that mirror events.validation.js on the
 // backend. They shorten the round trip; they are not the rule. The server
 // validates every submission regardless of what the browser allowed.
@@ -60,6 +62,22 @@ export async function submitEventRequest(fields, token) {
       event: null,
       errors: [],
       message: "Unable to connect. Check your connection and try again.",
+    };
+  }
+}
+
+export async function updateEventRequest(eventId, fields, token) {
+  if (!token) return { event: null, errors: [], message: "Please sign in to update an event." };
+  try {
+    const payload = await apiFetch(`/api/event-workspace/organiser/${encodeURIComponent(eventId)}`, token, {
+      method: "PATCH", body: withZonedTimes(fields),
+    });
+    if (!payload.event) return { event: null, errors: [], message: "Unable to update the event. Please refresh and try again." };
+    return { event: payload.event, errors: [], message: "" };
+  } catch (error) {
+    return {
+      event: null, errors: error.errors || [],
+      message: error.errors?.length ? "" : error.status ? error.message : "Unable to connect. Check your connection and try again.",
     };
   }
 }

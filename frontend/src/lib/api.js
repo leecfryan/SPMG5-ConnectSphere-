@@ -12,6 +12,7 @@ async function requestBody(path, token, options = {}) {
       ? ": " + body.details.map((d) => typeof d === "string" ? d : `${d.field} ${d.message}`).join(", ") : "";
     const error = new Error((body.error || body.message || "Request failed") + detail);
     error.status = response.status;
+    error.errors = Array.isArray(body.errors) ? body.errors : [];
     throw error;
   }
   return body;
