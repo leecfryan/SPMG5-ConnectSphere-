@@ -286,6 +286,99 @@ function findConfirmedSlotConflicts(requestedSlots, slotRows, eventId) {
   return conflicts;
 }
 
+// ---------------------------------------------------------------------------
+// SCRUM-19: assess whether a shortlisted venue suits an event
+// ---------------------------------------------------------------------------
+
+// What makes a venue unsuitable. Capacity and facilities come straight from
+// SCRUM-19 AC3 and AC4. Accessibility is included because AC2 asks for the
+// event's current requirements to be compared, and a recorded accessibility
+// need the venue cannot meet is one of them.
+//
+// This answers the same question validateAgainstVenue asks at submission time,
+// but from the event's own requirements and before a request exists. Both read
+// the same venue fields, so a venue assessed suitable here is not then refused
+// for a reason this check never mentioned.
+// An event's venue_requirements and accessibility_needs are free text, not
+// lists: the event lane's guide states that converting them to structured
+// fields is a schema change belonging to the consuming feature. So a term is
+// recognised only when it appears in the catalogue's own vocabulary, which is
+// the set of facility and accessibility names the venues actually use.
+//
+// Matching is case-insensitive and on whole words, so "Stage" in a requirement
+// matches the facility "Stage" but "backstage" does not.
+function mentions(text, term) {
+  if (typeof text !== "string" || text.trim() === "") return false;
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i").test(text);
+}
+
+function assessVenueSuitability(venue, event, vocabulary = {}) {
+  const checks = [];
+
+  const capacity = venue.capacity;
+  const attendance = event.expected_attendance;
+  if (typeof attendance === "number" && attendance > 0) {
+    checks.push({
+      requirement: "Expected attendance",
+      needed: `${attendance} people`,
+      available: `Capacity ${capacity}`,
+      met: attendance <= capacity,
+    });
+  } else {
+    // Nothing recorded is not the same as a requirement that is met.
+    checks.push({
+      requirement: "Expected attendance",
+      needed: "Not recorded on this event",
+      available: `Capacity ${capacity}`,
+      met: null,
+    });
+  }
+
+  // Each recognised term the event's text asks for becomes one check against
+  // what this venue offers. Terms the catalogue has never heard of cannot be
+  // checked, so the raw text is reported instead of being treated as met.
+  const compare = (label, text, known, offered) => {
+    const asked = (known || []).filter((term) => mentions(text, term));
+
+    for (const term of asked) {
+      checks.push({
+        requirement: label,
+        needed: term,
+        available: (offered || []).includes(term) ? "Offered here" : "Not offered here",
+        met: (offered || []).includes(term),
+      });
+    }
+
+    const hasText = typeof text === "string" && text.trim() !== "";
+    if (hasText && asked.length === 0) {
+      checks.push({
+        requirement: label,
+        needed: text.trim(),
+        available: "Could not be matched automatically",
+        met: null,
+      });
+    }
+  };
+
+  compare("Facility", event.venue_requirements, vocabulary.facilities, venue.facilities);
+  compare("Accessibility", event.accessibility_needs, vocabulary.accessibility, venue.accessibility_features);
+
+  // "Should not normally be considered suitable" (AC3, AC4): one unmet
+  // requirement is enough. A check with nothing recorded, or text that could
+  // not be matched, cannot fail, but it is reported so the coordinator can see
+  // what was never compared.
+  const unmet = checks.filter((check) => check.met === false);
+  const unknown = checks.filter((check) => check.met === null);
+
+  return {
+    verdict: unmet.length > 0 ? "unsuitable" : "suitable",
+    unmet_count: unmet.length,
+    unknown_count: unknown.length,
+    checks,
+  };
+}
+
 // A request spans one or more slot rows, and Venue Staff will eventually decide
 // on them. Until then they share a status. "mixed" exists so a partial decision
 // later is shown honestly instead of being flattened to one word.
@@ -379,6 +472,7 @@ module.exports = {
   validateAgainstEvent,
   findSlotProblems,
   findConfirmedSlotConflicts,
+  assessVenueSuitability,
   deriveRequestStatus,
   validateDecision,
 };

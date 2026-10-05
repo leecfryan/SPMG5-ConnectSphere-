@@ -34,6 +34,15 @@ export function apiFetch(path, token, options = {}) {
 // SCRUM-18: list filters are sent comma separated, which is what the backend
 // splits them on. An empty filter is left out rather than sent empty, so the
 // server never has to tell "not filtering" from "filtering by nothing".
+// SCRUM-19: how well a shortlisted venue matches one of the coordinator's own
+// events, before any booking request exists.
+export function fetchVenueSuitability(venueId, eventId, token) {
+  return request(
+    `/api/venues/${venueId}/suitability?event_id=${encodeURIComponent(eventId)}`,
+    token
+  );
+}
+
 export function fetchVenues(
   { city, minCapacity, facilities, accessibility, roomLayout, date, slots } = {},
   token
