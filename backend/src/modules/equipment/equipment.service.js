@@ -8,6 +8,7 @@ const { WRITABLE_COLS, BLOCKING_REQUEST_STATUSES, isBlockingOverlap } = require(
 
 const REQUESTS_TABLE = "equipment_requests";
 const EQUIPMENT_TABLE = "equipment";
+const EQUIPMENT_WRITABLE_COLS = ["type", "description", "current_location", "status"];
 
 function pickCol(input, cols) {
   const source = input && typeof input === "object" ? input : {};
@@ -48,6 +49,36 @@ function createEquipmentService(client) {
     return unwrap(
       await client.from(EQUIPMENT_TABLE).update({ status }).eq("id", id).select().maybeSingle(),
       "updateEquipmentStatus",
+    );
+  }
+
+  // Scrum-30 AC1/AC2: add a new catalogue record - one row is one physical
+  // item (see equipment.validation.js's validateCreateEquipment for the
+  // field rules this relies on already having been checked).
+  async function createEquipment(fields) {
+    return unwrap(
+      await client.from(EQUIPMENT_TABLE).insert(pickCol(fields, EQUIPMENT_WRITABLE_COLS)).select().single(),
+      "createEquipment",
+    );
+  }
+
+  // Scrum-30 AC1/AC2: edit an existing record's type, description, location
+  // or status. Returns null only when the row does not exist.
+  async function updateEquipment(id, fields) {
+    return unwrap(
+      await client.from(EQUIPMENT_TABLE).update(pickCol(fields, EQUIPMENT_WRITABLE_COLS)).eq("id", id).select().maybeSingle(),
+      "updateEquipment",
+    );
+  }
+
+  // Scrum-30 AC1: retire is a deliberate lifecycle action, not a status
+  // choice - it always sets UNAVAILABLE and nothing else, and never deletes
+  // the row (history and any past requests still reference it). Returns
+  // null only when the row does not exist.
+  async function retireEquipment(id) {
+    return unwrap(
+      await client.from(EQUIPMENT_TABLE).update({ status: "UNAVAILABLE" }).eq("id", id).select().maybeSingle(),
+      "retireEquipment",
     );
   }
 
@@ -184,6 +215,9 @@ function createEquipmentService(client) {
     listEquipment,
     findEquipmentById,
     updateEquipmentStatus,
+    createEquipment,
+    updateEquipment,
+    retireEquipment,
     listRequestsByEvent,
     findRequestById,
     listAllRequests,
