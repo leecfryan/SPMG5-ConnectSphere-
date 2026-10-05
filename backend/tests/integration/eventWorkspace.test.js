@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 const { once } = require("node:events");
 const { randomUUID } = require("node:crypto");
 const createApp = require("../../src/app");
@@ -155,4 +155,109 @@ test("[ACCESS-005] Missing sessions and role removal fail closed on the next req
   expect((await send("/event-workspace/coordinator", "first")).status).toBe(200);
   users.first.app_metadata.roles = ["attendee"];
   expect((await send("/event-workspace/coordinator", "first")).status).toBe(403);
+});
+
+// Every field the organiser supplies on the request form (SCRUM-23).
+const ORGANISER_FIELDS = {
+  purpose: "Teach basic digital skills", description: "Six weekly sessions.",
+  start_time: "2099-10-10T01:00:00.000Z", end_time: "2099-10-10T05:00:00.000Z", expected_attendance: 30,
+  venue_requirements: "Step-free room", accessibility_needs: "Hearing loop", equipment_needs: "Laptops",
+  other_comments: "Seniors may need help signing in", submitted_at: "2099-09-01T00:00:00.000Z",
+};
+
+function addEvent(records, fields) {
+  const event = { id: randomUUID(), name: "Digital Literacy for Seniors", ...fields };
+  records.push(event);
+  return event;
+}
+
+test("[SCRUM-98] AC1: the assigned coordinator opens a submitted request and sees everything the organiser supplied", async t => {
+  const { send, records, users } = await setup(t);
+  const event = addEvent(records, { ...ORGANISER_FIELDS, status: "SUBMITTED", coordinator_id: users.first.id, organiser_id: users.organiser.id });
+
+  const response = await send(`/event-workspace/coordinator/${event.id}`, "first");
+  expect(response.status).toBe(200);
+  expect((await response.json()).event).toMatchObject({ name: event.name, status: "SUBMITTED", ...ORGANISER_FIELDS });
+});
+
+test("[SCRUM-98] AC1: another coordinator cannot open the request, and its details are not revealed", async t => {
+  const { send, records, users } = await setup(t);
+  const event = addEvent(records, { ...ORGANISER_FIELDS, status: "SUBMITTED", coordinator_id: users.first.id, organiser_id: users.organiser.id });
+
+  const response = await send(`/event-workspace/coordinator/${event.id}`, "second");
+  expect(response.status).toBe(404);
+  expect(await response.text()).not.toContain(ORGANISER_FIELDS.purpose);
+});
+
+// SCRUM-99 AC3: the decision, approver and time go to the responsible organiser,
+// the assigned coordinator and the manager (discussion #125).
+async function decidedSetup(t) {
+  const context = await setup(t);
+  const { records, users } = context;
+  users.first.user_metadata = { full_name: "  Ada Tan  " };
+  const event = addEvent(records, { status: "APPROVED", coordinator_id: users.first.id, organiser_id: users.organiser.id,
+    decided_by: users.first.id, decided_at: "2099-09-05T02:30:00.000Z", decision_note: "Ready for planning." });
+  return { ...context, event };
+}
+
+test("[SCRUM-99] AC3: the organiser, the assigned coordinator and the manager see the decision, the approver and the time", async t => {
+  const { send, event, users } = await decidedSetup(t);
+  for (const [scope, user] of [["organiser", "organiser"], ["coordinator", "first"], ["manager", "manager"]]) {
+    const response = await send(`/event-workspace/${scope}/${event.id}`, user);
+    expect(response.status, scope).toBe(200);
+    expect((await response.json()).event, scope).toMatchObject({ status: "APPROVED", decided_by: users.first.id,
+      decided_at: "2099-09-05T02:30:00.000Z", decision_note: "Ready for planning.", decided_by_name: "Ada Tan" });
+  }
+});
+
+test("[SCRUM-99] AC3: another organiser and an unassigned coordinator cannot see the decision", async t => {
+  const { send, event } = await decidedSetup(t);
+  for (const [scope, user] of [["organiser", "otherOrganiser"], ["coordinator", "second"]]) {
+    const response = await send(`/event-workspace/${scope}/${event.id}`, user);
+    expect(response.status, user).toBe(404);
+    expect(await response.text(), user).not.toContain("Ready for planning.");
+  }
+});
+
+test("[SCRUM-99] boundary: an approver without a full name is shown by email", async t => {
+  const { send, event, users } = await decidedSetup(t);
+  users.first.user_metadata = { full_name: "   " };
+  expect((await (await send(`/event-workspace/manager/${event.id}`)).json()).event.decided_by_name).toBe("first@example.test");
+});
+
+for (const [situation, reply] of [
+  ["no longer exists", { data: { user: null }, error: null }],
+  ["cannot be looked up", { data: null, error: { status: 500, message: "Auth unavailable" } }],
+]) {
+  test(`[SCRUM-99] boundary: when the approver's account ${situation} the event still loads with no approver name`, async t => {
+    const { send, event, client } = await decidedSetup(t);
+    client.auth.admin.getUserById = async () => reply;
+
+    const response = await send(`/event-workspace/organiser/${event.id}`, "organiser");
+    expect(response.status).toBe(200);
+    expect((await response.json()).event).toMatchObject({ decided_at: "2099-09-05T02:30:00.000Z", decided_by_name: null });
+  });
+}
+
+test("[SCRUM-99] AC3: an undecided event has no approver and no account is looked up", async t => {
+  const { send, records, users, client } = await setup(t);
+  const submitted = addEvent(records, { status: "SUBMITTED", coordinator_id: null, organiser_id: users.organiser.id });
+  const lookup = vi.spyOn(client.auth.admin, "getUserById");
+
+  const event = (await (await send(`/event-workspace/manager/${submitted.id}`)).json()).event;
+  expect(event).toMatchObject({ status: "SUBMITTED", decided_by_name: null });
+  expect(lookup).not.toHaveBeenCalled();
+});
+
+test("[SCRUM-98] AC3: the coordinator who rejected a request still sees it and the reason they recorded", async t => {
+  const { send, records, users } = await setup(t);
+  const event = addEvent(records, { status: "REJECTED", coordinator_id: users.first.id, organiser_id: users.organiser.id,
+    decided_by: users.first.id, decided_at: "2099-09-05T02:30:00.000Z", decision_note: "Dates clash with exams." });
+
+  const listed = (await (await send("/event-workspace/coordinator", "first")).json()).events.map(item => item.id);
+  expect(listed).toContain(event.id);
+  const response = await send(`/event-workspace/coordinator/${event.id}`, "first");
+  expect(response.status).toBe(200);
+  expect((await response.json()).event).toMatchObject({ status: "REJECTED", decision_note: "Dates clash with exams." });
+  expect((await send(`/event-workspace/coordinator/${event.id}`, "second")).status).toBe(404);
 });

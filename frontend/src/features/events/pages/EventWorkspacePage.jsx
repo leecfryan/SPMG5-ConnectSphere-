@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import { useApiResource } from "../../../hooks/useApiResource";
 import { workspaces } from "../workspaces";
+import StatusBadge from "../components/StatusBadge";
 import "../workspace.css";
 
 export default function EventWorkspacePage({ scope }) {
@@ -16,7 +17,7 @@ export default function EventWorkspacePage({ scope }) {
     <ul className="event-workspace-list">
       {data?.events.map(event => <li key={event.id}>
         <Link to={`${workspace.path}/${event.id}`}>{event.name}</Link>
-        <span>{event.status} · {event.coordinator_id ? "Coordinator assigned" : "Awaiting coordinator"}</span>
+        <span><StatusBadge status={event.status} /> · {event.coordinator_id ? "Coordinator assigned" : "Awaiting coordinator"}</span>
       </li>)}
     </ul>
     {scope === "organiser" && <Link to="/events/new">Submit an event request</Link>}

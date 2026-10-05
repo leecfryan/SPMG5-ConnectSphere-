@@ -4,7 +4,7 @@ const FIELDS = [
   "id", "name", "purpose", "description", "start_time", "end_time",
   "expected_attendance", "venue_requirements", "accessibility_needs",
   "equipment_needs", "other_comments", "status", "organiser_id",
-  "coordinator_id", "submitted_at",
+  "coordinator_id", "submitted_at", "decided_by", "decided_at", "decision_note",
 ].join(",");
 
 function isCoordinator(user) {
@@ -22,14 +22,28 @@ function createEventWorkspaceService(client) {
   function scopedQuery(scope, userId) {
     let query = client.from("events").select(FIELDS);
     if (scope === "organiser") query = query.eq("organiser_id", userId);
-    else if (scope === "coordinator") query = query.eq("coordinator_id", userId).in("status", ACTIVE_STATUSES);
+    // SCRUM-98 AC3: a coordinator keeps seeing the requests they rejected, with the outcome they recorded.
+    else if (scope === "coordinator") query = query.eq("coordinator_id", userId).in("status", [...ACTIVE_STATUSES, "REJECTED"]);
     else if (scope === "manager") query = query.in("status", [...ACTIVE_STATUSES, "REJECTED"]);
     else throw new Error("Unknown event scope");
     return query;
   }
+  // SCRUM-99 AC3: the approver's name is shown with the decision. A deleted
+  // approver account or a failed lookup leaves the name unknown instead of
+  // hiding the event itself.
+  async function approverName(id) {
+    if (!id) return null;
+    const { data, error } = await client.auth.admin.getUserById(id);
+    if (error || !data?.user) return null;
+    const name = data.user.user_metadata?.full_name;
+    return typeof name === "string" && name.trim() ? name.trim() : data.user.email;
+  }
   return {
     list: (scope, userId) => unwrap(scopedQuery(scope, userId).order("submitted_at", { ascending: false })),
-    find: (scope, userId, id) => unwrap(scopedQuery(scope, userId).eq("id", id).maybeSingle()),
+    async find(scope, userId, id) {
+      const event = await unwrap(scopedQuery(scope, userId).eq("id", id).maybeSingle());
+      return event && { ...event, decided_by_name: await approverName(event.decided_by) };
+    },
     async coordinators() {
       const choices = [];
       for (let page = 1; ; page += 1) {
