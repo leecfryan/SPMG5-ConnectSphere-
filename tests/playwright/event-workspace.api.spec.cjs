@@ -49,3 +49,33 @@ test('[ACCESS-E2E-API-002] Assignment alone neither approves an event nor opens 
   expect((await update('decision', { decision: 'accept' })).status()).toBe(404);
   expect((await update('publication', { openRegistration: true })).status()).toBe(404);
 });
+
+// SCRUM-98 AC4: only the assigned coordinator can start, approve or reject a review.
+test('[REVIEW-E2E-API-001] SCRUM-98/99 review actions: assigned coordinator only, in lifecycle order', async ({ accounts, request }) => {
+  const { event, first, headers, update } = await setupWorkflow(accounts, request);
+  for (const role of ['venue_staff', 'technical_support_staff']) {
+    headers[role] = { Authorization: 'Bearer ' + (await accounts.session(await accounts.create([role]))).access_token };
+  }
+  expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
+  const act = (action, as, data) => request.post(`/api/internal/events/${event.id}/${action}`, { headers: as, data });
+  const status = async () => (await (await request.get(`/api/event-workspace/manager/${event.id}`, { headers: headers.manager })).json()).event;
+
+  for (const action of ['start-review', 'approve', 'reject']) {
+    for (const role of ['second', 'organiser', 'manager', 'venue_staff', 'technical_support_staff', 'attendee']) {
+      expect((await act(action, headers[role], { note: 'Not allowed' })).status(), `${role} ${action}`).toBe(403);
+    }
+    expect((await act(action, undefined, { note: 'No session' })).status(), `anonymous ${action}`).toBe(401);
+  }
+  expect((await status()).status).toBe('SUBMITTED');
+
+  // SCRUM-99 AC1: approval only follows a started review.
+  expect((await act('approve', headers.first)).status()).toBe(409);
+  expect((await act('start-review', headers.first)).status()).toBe(200);
+  expect((await status()).status).toBe('UNDER_REVIEW');
+  expect((await act('approve', headers.first, { note: 'Ready for planning' })).status()).toBe(200);
+  const approved = await status();
+  expect(approved).toMatchObject({ status: 'APPROVED', decided_by: first.id, decision_note: 'Ready for planning', decided_by_name: 'Coordinator One' });
+  expect(Date.parse(approved.decided_at)).not.toBeNaN();
+  expect((await act('reject', headers.first, { note: 'Too late' })).status()).toBe(409);
+  expect((await status()).status).toBe('APPROVED');
+});
