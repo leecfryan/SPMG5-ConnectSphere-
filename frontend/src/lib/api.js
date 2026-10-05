@@ -31,10 +31,21 @@ export function apiFetch(path, token, options = {}) {
   });
 }
 
-export function fetchVenues({ city, minCapacity } = {}, token) {
+// SCRUM-18: list filters are sent comma separated, which is what the backend
+// splits them on. An empty filter is left out rather than sent empty, so the
+// server never has to tell "not filtering" from "filtering by nothing".
+export function fetchVenues(
+  { city, minCapacity, facilities, accessibility, roomLayout, date, slots } = {},
+  token
+) {
   const params = new URLSearchParams();
   if (city) params.set("city", city);
   if (minCapacity) params.set("minCapacity", minCapacity);
+  if (facilities?.length) params.set("facilities", facilities.join(","));
+  if (accessibility?.length) params.set("accessibility", accessibility.join(","));
+  if (roomLayout) params.set("roomLayout", roomLayout);
+  if (date) params.set("date", date);
+  if (date && slots?.length) params.set("slots", slots.join(","));
 
   const query = params.toString();
   return request(`/api/venues${query ? `?${query}` : ""}`, token);

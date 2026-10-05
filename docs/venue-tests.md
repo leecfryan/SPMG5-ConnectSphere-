@@ -42,6 +42,7 @@ Test names lead with a bracketed tag, so the runner's output is the traceability
 | SCRUM-22 | Decide a venue booking request | `[SCRUM-22]`, `[VENUE-DECIDE-001]` to `[VENUE-DECIDE-004]` | TC-131 to TC-140 |
 | SCRUM-20 | Block conflicting venue booking | `[SCRUM-20]` | TC-167 to TC-175 |
 | SCRUM-102 | Reject with a reason and suggested alternative | `[SCRUM-102]` | TC-220 to TC-229 |
+| SCRUM-18 | Search and filter potential venues | `[SCRUM-18]` | TC-230 to TC-239 |
 
 Cross-cutting guards that apply to every story: `[VENUE-AUTH-001]` (seven identities against eight endpoints),
 `[VENUE-AUTH-002]`, `[VENUE-INPUT-001]` (forged ownership and role fields), `[VENUE-CONFIG-001]` (missing venue
@@ -110,7 +111,71 @@ asks for a message; reversing a decision after the fact.
 
 ---
 
-## 3. Coverage note
+## 3. SCRUM-18 — Search and filter potential venues
+
+**Acceptance criteria, word for word**
+
+1. Venues can be filtered using relevant date and time requirements.
+2. Expected attendance/capacity, location and accessibility can be considered.
+3. Supported layout and required facilities can be considered.
+4. Searching and filtering identifies potential venues but does not replace the separate suitability assessment.
+
+City and minimum capacity already existed from SCRUM-15. This story adds
+accessibility, facilities, layout, and date and slot availability.
+
+### Traceability
+
+| AC | Criterion | Test cases | Where the rule lives |
+| --- | --- | --- | --- |
+| 1 | Date and time requirements | 03, 04, 05, 06, M2, M3 | `filterByAvailability` in `venues.controller.js`, over `buildAvailabilityCalendar` |
+| 2 | Capacity, location, accessibility | 01, 06, M1 | `listVenues` in `venues.service.js` |
+| 3 | Layout and facilities | 01, 02, M1 | `listVenues`, using Postgres array containment |
+| 4 | Narrows, does not assess | 07, M4 | No score or rank in the response; catalogue copy says so |
+
+### Test cases
+
+| ID | AC | Type | Scenario | Expected result | Automated by | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-18-01 | 2, 3 | Happy | All five stored filters at once | Every filter reaches the query unchanged | `[SCRUM-18] Capacity, location, accessibility, facilities and layout all narrow the catalogue` | 2026-10-05 ✅ |
+| TC-SCRUM-18-02 | 3 | Boundary | Two facilities requested | The venue must offer both, not either | `[SCRUM-18] Several facilities must all be offered, not just one of them` | 2026-10-05 ✅ |
+| TC-SCRUM-18-03 | 1 | Happy | A date and one slot | Only venues whose slot is still open are kept; a pending request does not exclude a venue | `[SCRUM-18] A date keeps only venues whose requested slots are still open` | 2026-10-05 ✅ |
+| TC-SCRUM-18-04 | 1 | Negative | Blocked period, and a venue closed that day | Both are dropped from the results | `[SCRUM-18] A blocked period and closed hours both remove a venue from the results` | 2026-10-05 ✅ |
+| TC-SCRUM-18-05 | 1 | Boundary | A date with no slots named | Every slot that day must be open | `[SCRUM-18] A date with no slots means free at any point that day` | 2026-10-05 ✅ |
+| TC-SCRUM-18-06 | 1, 2 | Negative | Seven malformed queries | 400 for each, and the catalogue is never queried | `[SCRUM-18] Malformed filters are refused instead of silently returning everything` | 2026-10-05 ✅ |
+| TC-SCRUM-18-07 | 4 | Happy | A search with no date | No score or rank is added, order is the catalogue's own, and the booking tables are not queried | `[SCRUM-18] Searching narrows but does not rank, and never reaches the date tables needlessly` | 2026-10-05 ✅ |
+
+### Manual cases
+
+| ID | AC | Scenario | Expected result |
+| --- | --- | --- | --- |
+| TC-SCRUM-18-M1 | 2, 3 | Filter by facility, accessibility and layout in the browser | Options come from the catalogue itself; results narrow as each is ticked |
+| TC-SCRUM-18-M2 | 1 | Filter by a date with a confirmed booking | The booked venue disappears for that slot and returns when the slot changes |
+| TC-SCRUM-18-M3 | 1 | Slots without a date | The slot chips are replaced by "Pick a date first" |
+| TC-SCRUM-18-M4 | 4 | Read the results page | The copy says these are potential venues to check, and nothing is scored or ranked |
+
+### Decisions
+
+- **The date filter reuses `buildAvailabilityCalendar`** rather than a new
+  Postgres function. No schema change on a shared database, and one definition
+  of what a free slot means. A database function would be faster on a catalogue
+  far larger than this one.
+- **"Free" means `available` or `pending`**, the same list a booking request is
+  allowed on, because only a confirmed booking takes a slot (SCRUM-21).
+- **All, not any.** Asking for two facilities returns venues offering both. A
+  shortlist wider than the requirements is not a shortlist.
+- **Unknown query parameters are refused**, so a typo surfaces instead of
+  silently returning the whole catalogue.
+
+### Deliberately absent
+
+Scoring, ranking or a "best match"; a suitability verdict, which AC4 puts
+outside this story; filtering by setup, teardown or turnaround time, which
+nothing yet enforces; saved searches; and paging, since the catalogue is small
+and `listVenues` has no limit.
+
+---
+
+## 4. Coverage note
 
 `npm --prefix backend run test:cov` reports the whole backend. The venue modules are exercised through the three
 integration suites above rather than by unit tests of their own, so coverage of
