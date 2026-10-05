@@ -124,6 +124,27 @@ export function fetchEquipmentRequests(eventId, token) {
   return request(`/api/events/${eventId}/equipment-requests`, token);
 }
 
+// Scrum-30 AC1: add, update and retire a catalogue record.
+export function createEquipment(fields, token) {
+  return request("/api/equipment", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+}
+
+export function updateEquipment(id, fields, token) {
+  return request(`/api/equipment/${id}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+}
+
+export function retireEquipment(id, token) {
+  return request(`/api/equipment/${id}/retire`, token, { method: "PATCH" });
+}
+
 export function createEquipmentRequest(eventId, fields, token) {
   return request(`/api/events/${eventId}/equipment-requests`, token, {
     method: "POST",

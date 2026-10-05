@@ -10,10 +10,13 @@ import ResponsibilitiesPage from "./routes/ResponsibilitiesPage";
 import WorkspaceLayout from "./routes/WorkspaceLayout";
 import EquipmentRequestPage from "./features/equipment/pages/EquipmentRequestPage";
 import EquipmentCataloguePage from "./features/equipment/pages/EquipmentCataloguePage";
+import EquipmentFormPage from "./features/equipment/pages/EquipmentFormPage";
 import TechnicalSupportDashboardPage from "./features/equipment/pages/TechnicalSupportDashboardPage";
 import VenueRoutes from "./features/venues/VenueRoutes";
 import EventRequestPage from "./features/events/pages/EventRequestPage";
 import AssignmentQueuePage from "./features/events/pages/AssignmentQueuePage";
+import ManagedEventsPage from "./features/managedEvents/pages/ManagedEventsPage";
+import ManagedEventDetailPage from "./features/managedEvents/pages/ManagedEventDetailPage";
 import EventWorkspacePage from "./features/events/pages/EventWorkspacePage";
 import EventWorkspaceDetailPage from "./features/events/pages/EventWorkspaceDetailPage";
 import EventListPage from "./features/registrations/pages/EventListPage";
@@ -69,6 +72,13 @@ export default function App() {
                   </Route>
                 ))}
                 <Route path="/account" element={<AccountPage />} />
+                {/* Organisers hold no internal.access, so this sits beside the other
+                    open routes rather than inside that group. The static "managed"
+                    segment outranks /events/:eventId, as /events/new already does. */}
+                <Route element={<RequirePermission permission="events.managed.read" />}>
+                  <Route path="/events/managed" element={<ManagedEventsPage />} />
+                  <Route path="/events/managed/:eventId" element={<ManagedEventDetailPage />} />
+                </Route>
                 <Route element={<RequirePermission permission="events.submit" />}>
                   <Route path="/events/new" element={<EventRequestPage />} />
                 </Route>
@@ -79,8 +89,16 @@ export default function App() {
                   <Route element={<RequirePermission permission="equipment.request" />}>
                     <Route path="/equipment/requests" element={<EquipmentRequestPage />} />
                   </Route>
-                  <Route element={<RequirePermission permission="equipment.read" />}>
+                  {/* Scrum-30: catalogue page restricted to Technical Support Staff (equipment.review) -
+                      Event Coordinators no longer browse it; they still read equipment data indirectly
+                      through the reserve flow's own GET /api/equipment call, gated by equipment.request. */}
+                  <Route element={<RequirePermission permission="equipment.review" />}>
                     <Route path="/equipment/catalogue" element={<EquipmentCataloguePage />} />
+                  </Route>
+                  {/* Scrum-30 AC1: add/edit a catalogue record - management actions, separate from equipment.review. */}
+                  <Route element={<RequirePermission permission="equipment.manage" />}>
+                    <Route path="/equipment/catalogue/new" element={<EquipmentFormPage mode="create" />} />
+                    <Route path="/equipment/catalogue/:id/edit" element={<EquipmentFormPage mode="edit" />} />
                   </Route>
                   <Route element={<RequirePermission permission="equipment.review" />}>
                     <Route path="/technical-support" element={<TechnicalSupportDashboardPage />} />

@@ -105,20 +105,6 @@ swallows them. Inside any router, declare static paths before parameter paths.
   UX. The API check is the security boundary, and every AC about "cannot see / cannot change" needs an API-level
   test.
 
-### Role-specific event workspaces
-
-The organiser workspace includes responsible events and same-client events via
-admin-controlled `app_metadata.organisation_id`; only the responsible organiser
-can edit. Missing membership grants own-event access only. Coordinator records
-are filtered by verified user ID. Multiple coordinators are distinct accounts
-sharing `event_coordinator`; assignment uses `events.coordinator_id`. Managers
-assign/reassign; the assigned coordinator reviews and approves or rejects. Attendees use registration routes; venue
-and technical staff retain their booking workspaces, including Venue Staff's
-`bookings.decide` permission. See [event access](../../docs/event-access.md).
-
-The shared `frontend/src/hooks/useApiResource.js` hides stale data when the
-session, route or refresh revision changes.
-
 ### Adding a permission
 
 1. Add the entry to `permissions.js`, next to related entries, with a *why* comment if the role choice came from a
@@ -195,18 +181,14 @@ only.
 
 ### Schema changes
 
-Do not create migration files. No `supabase/` folder or migration `.sql` file is committed: hand-applied SQL is
-recorded in a *Schema reference* section of the lane's guide in `docs/` (precedent: the venue SQL in
-`docs/venue-integration.md`). The isolated `tests/sql/` harness builds its own fixtures and must not depend on a
-migration file. Tell the user every SQL change the
-story needs, with the exact SQL, and record it in the task note and the lane guide; the user makes it by hand in the Supabase dashboard.
+The project has no migration files. Don't create one or suggest writing one. Tell the user every SQL change the
+story needs, with the exact SQL, and record it in the task note; the user makes it by hand in the Supabase dashboard.
 The agent never runs it. The user tells teammates before the change and again once it's made, because everyone
 shares the database.
 
 ### Known state
 
-- The live `events_status_check` constraint accepts all eight statuses below (widened by hand for SCRUM-97,
-  2026-09-27), and `seedData.js`
+- The live `events.status` check was edited by hand, and `seedData.js`
   writes `APPROVED` rows directly. Before a story changes a table, have the user run this in the SQL
   Editor and paste the result back, then write the SQL against what is actually live:
 
@@ -218,6 +200,13 @@ shares the database.
 - Event statuses (confirmed by the team; don't add, rename or drop one without the team agreeing):
   `DRAFT` · `SUBMITTED` · `UNDER_REVIEW` · `APPROVED` · `CONFIRMED` · `COMPLETED` · `CANCELLED` · `REJECTED`.
   `APPROVED` is the stored value for "approved / planning". Registration's event list and Venue's bookable events
+  already read it. The code currently writes only `SUBMITTED` (organisers) and `APPROVED` (seed data); the lifecycle
+  code that moves events through the rest is not built yet. Status is written only by the lifecycle code, never
+  through `WRITABLE_COLS`.
+- Roles are not in a table. They're in Supabase Auth `app_metadata.roles`, set by `backend/scripts/seedUsers.js`.
+- Relationships used for record checks: `events.organiser_id`, `events.coordinator_id`,
+  `registrations.attendee_id` / `registrations.event_id`, `venue_booking_requests.event_id`,
+  `equipment_requests.event_id`.
   already read it. The permitted moves between them are in `backend/src/modules/events/lifecycle.js` (SCRUM-97), and
   `events.repository.js#transitionStatus` is the only post-submission writer. The code currently writes only
   `SUBMITTED` (organisers) and `APPROVED` (seed data); the actions that move events through the rest are not

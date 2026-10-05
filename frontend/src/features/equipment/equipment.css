@@ -426,6 +426,105 @@
   gap: 12px;
 }
 
+/* --- Scrum-30: two-step reserve flow's review summary --- */
+
+.eq-available-items {
+  margin-top: 20px;
+}
+
+.eq-reserve-summary {
+  font-size: 14px;
+  font-weight: 600;
+  color: #185c4b;
+  background: #f4f9f6;
+  border: 1px solid #cbd7d0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0;
+}
+
+/* --- Scrum-30: catalogue header "Add equipment" entry point --- */
+
+.eq-header-action {
+  margin-top: 0;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* --- Scrum-30: add/edit equipment form actions --- */
+
+.eq-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.eq-form-actions .eq-primary,
+.eq-form-actions .eq-secondary {
+  margin-top: 0;
+}
+
+/* --- Scrum-30: catalogue row actions, retire confirm, retired-row state --- */
+
+.eq-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.eq-retire-confirm {
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: #fff8f7;
+  border: 1px solid #ecd5d0;
+  border-radius: 9px;
+}
+
+.eq-retire-confirm p {
+  font-size: 13px;
+  color: #4a5568;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.eq-retire-confirm-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.eq-retire-confirm-actions button {
+  flex: 1;
+  margin-top: 0;
+}
+
+.eq-request-row-retired {
+  opacity: 0.55;
+}
+
+.eq-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #4a5568;
+  margin-top: 4px;
+}
+
+/* App.css sets a global `input { width: 100%; min-height: 48px; ... }` meant
+   for text fields - without this override it also stretches/inflates this
+   checkbox, which then pushes its label far away inside the flex row. */
+.eq-toggle-row input[type="checkbox"] {
+  width: 16px;
+  min-height: 0;
+  height: 16px;
+  padding: 0;
+  flex: 0 0 auto;
+}
+
 @media (max-width: 900px) {
   .eq-form-grid { grid-template-columns: repeat(2, 1fr); }
 }

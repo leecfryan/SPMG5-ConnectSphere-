@@ -3,6 +3,7 @@ name: CI
 on:
   pull_request:
     branches:
+      - main
       - staging
 
   push:
@@ -121,4 +122,55 @@ jobs:
           path: |
             playwright-report/
             test-results/
+          retention-days: 14
+
+  playwright-live:
+    name: Live-DB E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # tests/e2e hits the real shared dev Supabase project (not a fake/mocked
+    # backend). Two of these jobs running at once - e.g. two PRs open at the
+    # same time - could collide on shared state, so only one run proceeds at
+    # a time; a second one queues instead of racing the first.
+    concurrency:
+      group: playwright-live-db
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            tests/e2e/package-lock.json
+            frontend/package-lock.json
+            backend/package-lock.json
+      # playwright.config.js's webServer starts the real backend (npm run
+      # dev -> nodemon) and real frontend (npm run dev -> vite) dev servers -
+      # both need their own dependencies installed, not just tests/e2e's.
+      - name: Install test and application dependencies
+        run: |
+          npm --prefix tests/e2e ci
+          npm --prefix frontend ci
+          npm --prefix backend ci
+      - name: Install Chromium
+        working-directory: tests/e2e
+        run: npx playwright install --with-deps chromium
+      - name: Run live-DB E2E tests
+        working-directory: tests/e2e
+        # backend/src/server.js throws at startup without SUPABASE_PUBLISHABLE_KEY
+        # too, not just the two secrets the other jobs use.
+        run: npx playwright test
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+      - name: Save report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-live-results
+          path: tests/e2e/test-results/
           retention-days: 14

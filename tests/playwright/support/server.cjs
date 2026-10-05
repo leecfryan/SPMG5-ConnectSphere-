@@ -117,7 +117,7 @@ const eventsRepository = {
   async createSubmitted(fields, organiserId) {
     const account = accounts.get(organiserId);
     if (!account || account.submissionFailure) throw new Error('Fixture event storage unavailable');
-    const event = { ...fields, id: randomUUID(), organiser_id: organiserId, status: 'SUBMITTED', submitted_at: new Date().toISOString() };
+    const event = { ...fields, id: randomUUID(), organiser_id: organiserId, enrolled_attendees: 0, status: 'SUBMITTED', submitted_at: new Date().toISOString() };
     account.events.push(event);
     return event;
   },

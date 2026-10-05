@@ -114,24 +114,30 @@ becomes at least one test case.
 
 ### 2. Write the test case specification
 
-The Week 4 template, one row per case, kept in the lane's `docs/` test guide (the Deliverable 3 document) and
-drafted in the task note first:
+As of 2026-10-02 the team uses one standard test case register format, kept in the lane's `docs/` test guide (the
+Deliverable 3 document) and drafted in the task note first:
 
 | Field | Content |
 |---|---|
-| Test case ID | `TC-SCRUM-<n>-NN` (unique, never reused) |
-| AC | The AC number(s) it is evidence for |
-| Scenario | One-line objective, e.g. "Unassigned coordinator cannot approve" |
+| Epic | The epic name (e.g. Equipment) |
+| Scrum-# | `SCRUM-<n>` |
+| AC # | The AC number(s) this case is evidence for |
 | Type | Happy · Negative · Boundary · Conflict · Failure · Cross-cutting |
+| Test Case ID | `TC-SCRUM-<n>-NN` (unique, never reused) |
+| Test Scenario | One-line objective, e.g. "Unassigned coordinator cannot approve" |
 | Pre-conditions | Data and state needed, e.g. "Event E1 `UNDER_REVIEW`, assigned to coordinator.demo; signed in as coordinator2.demo" |
-| Steps | Exact actions a person could follow, e.g. "1. Open `/events/E1/review` 2. Click *Approve*" |
-| Test data | Exact inputs (accounts, IDs, values). Not "a valid event" |
-| Expected result | Specific observable outcome, e.g. "403 *You do not have permission…*; event status still `UNDER_REVIEW`" |
-| Automated by | The test ID(s) that execute this case, or **Manual** with the reason |
-| Latest execution | Date · pass/fail · where (local / CI run link) |
+| Test Steps | Exact actions a person could follow, e.g. "1. Open `/events/E1/review` 2. Click *Approve*" |
+| Test Data | Exact inputs (accounts, IDs, values). Not "a valid event" |
+| Expected Result | Specific observable outcome, e.g. "403 *You do not have permission…*; event status still `UNDER_REVIEW`" |
+| Created By* / Date of Creation* | Who wrote the case and when. Required fields (hence the `*`) |
+| Actual Result | What actually happened on the most recent run |
+| Pass / Fail / Not Executed / Blocked | The case's current status |
+| Remarks | Free text — this is also where the automated test ID(s) that execute the case go (e.g. "Automated: `tests/integration/equipment-reserve.test.js`"), or **Manual** with the reason, since the register has no dedicated *Automated by* column |
+| Executed By / Date of Execution | Who ran it and when, for the result recorded above |
 
-The specification is written once and changes only when the requirement changes. The *Latest execution* column is
-updated each time the story's tests are run for a PR, because a pass only holds for that build.
+The specification is written once and changes only when the requirement changes. *Actual Result*, the status
+column, *Executed By* and *Date of Execution* are updated each time the story's tests are run for a PR, because a
+pass only holds for that build.
 
 Expected results come from the **AC and customer clarifications, never from what the code currently does**. If you
 can't justify an expected value without reading the implementation, ask the user.
@@ -142,9 +148,9 @@ The testing pyramid: many fast unit tests, fewer integration tests, a few end-to
 
 | Layer | Runner | Lives in | What it proves | Fakes |
 |---|---|---|---|---|
-| Backend unit | Vitest | `backend/tests/unit/<feature>/<thing>.<layer>.test.js` (same name as the file under test) | Validation, service rules, status transitions, repository query shape | Repository / Supabase client (`tests/helpers/stubSupabase.js`) |
-| Backend integration | Vitest | `backend/tests/integration/<feature>.<what>.test.js` (e.g. `events.submit.test.js`) | Real `createApp` over HTTP: auth, permission and record guards, status codes, response shape | `authClient.getUser` and the injected service/repository |
-| Frontend component / flow | Vitest + React Testing Library + user-event (jsdom) | Next to the file under test: `features/<f>/{pages,components,hooks}/X.test.jsx` | Real `App` + `AuthProvider` + router + guards: what each role sees, loading/empty/error states, form behaviour | `lib/supabase` (`vi.mock`) and `fetch` (`vi.stubGlobal`) |
+| Backend unit | Vitest | `backend/tests/unit/<feature>/*.test.js` | Validation, service rules, status transitions, repository query shape | Repository / Supabase client (`tests/helpers/stubSupabase.js`) |
+| Backend integration | Vitest | `backend/tests/integration/<feature>.<story>.test.js` | Real `createApp` over HTTP: auth, permission and record guards, status codes, response shape | `authClient.getUser` and the injected service/repository |
+| Frontend component / flow | Vitest + React Testing Library + user-event (jsdom) | Next to the code: `features/<f>/**/X.test.jsx` | Real `App` + `AuthProvider` + router + guards: what each role sees, loading/empty/error states, form behaviour | `lib/supabase` (`vi.mock`) and `fetch` (`vi.stubGlobal`) |
 | API acceptance | Playwright `api` project | `tests/playwright/<feature>.api.spec.cjs` | The real Express app over HTTP with real Supabase SDKs against the local Auth simulator; role × endpoint matrices | Storage only (`tests/playwright/support/<f>-storage.cjs`) |
 | End-to-end | Playwright `chromium` project | `tests/playwright/<feature>.browser.spec.cjs` | A user's journey through the real UI, Vite proxy and backend | Storage only |
 
@@ -171,8 +177,7 @@ tests use Vitest or Playwright.
 - **Assert the full outcome**: the response *and* the state afterwards ("403 **and** the event is unchanged",
   "409 **and** no booking row was written").
 - **No real Supabase, network or secrets.** Fakes only at the boundary (Auth transport, storage). Guards,
-  controllers and validation stay real. The existing live exceptions (`equipment.availability.test.js`, the manual
-  `tests/e2e/` package) aren't a pattern to copy.
+  controllers and validation stay real.
 
 ### 5. Review every test before trusting it
 
@@ -192,8 +197,7 @@ any fixes in the task note:
 ### 6. Coverage
 
 - Run `npm --prefix backend run test:cov` and `npm --prefix frontend run test:cov` for the story and report
-  statement and branch coverage for the files it touched. `test:cov` runs Vitest only: code exercised only by the
-  `node:test` suites isn't measured, so list it as a gap with that reason.
+  statement and branch coverage for the files it touched.
 - Target: **100% of the story's own code**, lines and branches. Anything uncovered is either covered by a new test
   or listed with the reason in the lane's test guide (unreachable, wiring only, third-party). The backend
   `vitest.config.mjs` `exclude` list, with its reasons, is the pattern.
@@ -243,15 +247,15 @@ and legible to humans and agents. Four kinds exist. Update each in the same chan
 
 | Document | Lives in | Updated when | Graded as |
 |---|---|---|---|
-| Lane guide (one per lane, extend the existing one; no new `-integration.md`): routes, endpoints, permissions, statuses, setup, *Schema reference* (hand-applied SQL) | `docs/` | Any behaviour, route, endpoint, permission or schema change | Evidence for *Working software* and the Q&A |
-| Test guide: test case specs + AC → test traceability + coverage notes | `docs/<feature>-tests.md`, one per lane (`docs/testing/` predates this; extend, don't add to it) | Every story (§2 above) | **Deliverable 3** |
+| Lane guide (`<feature>-integration.md`, `<feature>.md`): routes, endpoints, permissions, statuses, setup | `docs/` | Any behaviour, route, endpoint, permission or schema change | Evidence for *Working software* and the Q&A |
+| Test guide: test case specs + AC → test traceability + coverage notes | `docs/<feature>-tests.md` or `docs/testing/` | Every story (§2 above) | **Deliverable 3** |
 | C4 model (C1 context, C2 containers; C3 only if a container needs explaining) as **Structurizr DSL text** | `docs/design/` | A change adds or removes a user role, an external system, a container (app, API, database) or a relationship between them | **Deliverable 2** |
-| Architecture Decision Record: context, decision, alternatives considered, consequences; one short file per decision | The team's Google Drive, not the repo. The agent never creates ADR files; it asks the dev to refer to the Drive ADRs when unsure | A story makes a decision that is expensive to change later (a status model, a permission model, where a rule is enforced, a data-ownership choice) | *System design* rubric: "well-justified trade-offs" |
+| Architecture Decision Record: context, decision, alternatives considered, consequences; one short file per decision | `docs/adr/NNNN-<title>.md` | A story makes a decision that is expensive to change later (a status model, a permission model, where a rule is enforced, a data-ownership choice) | *System design* rubric: "well-justified trade-offs" |
 
 - **Diagrams are text** (Structurizr DSL for C4; Mermaid inside Markdown for state and sequence diagrams) so they
   diff and review in PRs. Draw one only when it says something more clearly than the code, e.g. a status lifecycle
   as a Mermaid state diagram, or a multi-step flow with a failure branch as a sequence diagram.
-- `docs/design/` doesn't exist yet. Create it the first time a story needs it, not before, and
+- `docs/design/` and `docs/adr/` don't exist yet. Create them the first time a story needs them, not before, and
   tell the user, since the C4 model is a team deliverable.
 - The README keeps a correct *how to run* and *how to test* section (Deliverable 6) and the repository link
   (Deliverable 7).
