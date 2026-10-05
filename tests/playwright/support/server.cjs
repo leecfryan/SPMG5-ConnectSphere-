@@ -7,6 +7,7 @@ const cors = require('../../../backend/node_modules/cors');
 const { createClient } = require('../../../backend/node_modules/@supabase/supabase-js');
 const createApp = require('../../../backend/src/app');
 const requirePermission = require('../../../backend/src/middleware/requirePermission');
+const { canTransition } = require('../../../backend/src/modules/events/lifecycle');
 const { frontendURL, backendPort, authPort, authURL, publicKey } = require('./settings.cjs');
 
 if (!process.env.PW_CONTROL_KEY) throw new Error('Start using Playwright; control key is required.');
@@ -111,9 +112,20 @@ auth.post('/auth/v1/logout', (req, res) => {
 });
 
 const client = createClient(authURL, publicKey, { auth: { persistSession: false, autoRefreshToken: false } });
+const findEvent = (id) => [...accounts.values()].flatMap(account => account.events).find(event => event.id === id) || null;
 // Only storage is substituted; event routing, validation, normalization and
 // verified ownership are the production implementations.
 const eventsRepository = {
+  async findById(id) { return findEvent(id); },
+  // SCRUM-98/99: same guards as the real write: a permitted move, the expected
+  // current status and, when given, the coordinator still holding the event.
+  async transitionStatus(id, from, to, extra = {}, coordinatorId) {
+    if (!canTransition(from, to)) throw new Error(`Fixture: ${from} -> ${to} is not a permitted transition`);
+    const event = findEvent(id);
+    if (!event || event.status !== from || (coordinatorId && event.coordinator_id !== coordinatorId)) return null;
+    Object.assign(event, extra, { status: to });
+    return { ...event };
+  },
   async createSubmitted(fields, organiserId) {
     const account = accounts.get(organiserId);
     if (!account || account.submissionFailure) throw new Error('Fixture event storage unavailable');

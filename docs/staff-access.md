@@ -27,8 +27,9 @@ Venue writes use separate capabilities: `venues.update` for Venue Staff and
 Event Coordinators, and `bookings.request` for Event Coordinators. They do not
 change the read responsibilities listed below or grant external roles access.
 
-Event writes use `events.submit` and `events.own.update` (Event Organisers, external) and
-`events.assign_coordinator` (Event Operations Managers). Neither appears in the
+Event writes use `events.submit` and `events.own.update` (Event Organisers, external),
+`events.assign_coordinator` (Event Operations Managers) and `events.decide`
+(the event's assigned Event Coordinator). None appears in the
 read matrix below, which lists read permissions only.
 
 | Write capability | Holder | Guards |
@@ -38,6 +39,7 @@ read matrix below, which lists read permissions only.
 | `events.submit` | Event Organisers | `POST /api/events`, `/events/new` |
 | `events.own.update` | Event Organisers | `PATCH /api/event-workspace/organiser/:id`; owner check in lookup and write; colleague events remain view only |
 | `events.assign_coordinator` | Event Operations Managers | The assignment queue: `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` |
+| `events.decide` | Event Coordinators, **assigned event only** (record check on `coordinator_id`) | `POST /api/internal/events/:eventId/{start-review,approve,reject}` |
 
 A capability name ending in `.read` is refused for every non-GET by
 `requirePermission`, which is why the assignment capability is not named

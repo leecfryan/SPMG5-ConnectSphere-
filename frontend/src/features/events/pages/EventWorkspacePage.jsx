@@ -3,13 +3,14 @@ import { Link } from "react-router";
 import { useAuth } from "../../auth/useAuth";
 import { useApiResource } from "../../../hooks/useApiResource";
 import { workspaces } from "../workspaces";
+import StatusBadge from "../components/StatusBadge";
 import "../workspace.css";
 
 function EventList({ events, workspace, userId }) {
   return <ul className="event-workspace-list">
     {events.map(event => <li key={event.id}>
       <Link to={`${workspace.path}/${event.id}`}>{event.name}</Link>
-      <span>{event.status} · {event.coordinator_id ? "Coordinator assigned" : "Awaiting coordinator"}
+      <span><StatusBadge status={event.status} /> · {event.coordinator_id ? "Coordinator assigned" : "Awaiting coordinator"}
         {userId && (event.organiser_id === userId ? " · You are responsible" : " · View only")}</span>
     </li>)}
   </ul>;

@@ -58,7 +58,7 @@ The statuses are the eight in `backend/src/modules/events/lifecycle.js`
 5. When registration opens is the Registration lane's registration start time
    (US-60), not a manager action and not approval on its own.
 
-Rejected requests remain visible to their organiser and manager. Reopening rejected requests remains outside this change. Venue
+Rejected requests remain visible to their organiser, the coordinator who rejected them, and the manager. Reopening rejected requests remains outside this change. Venue
 booking confirmation is provided by staging's Venue Staff decision workflow;
 it does not publish the event. Technical review is shared across technical staff, not
 assignment to an individual technician.
@@ -69,7 +69,7 @@ assignment to an individual technician.
 | --- | --- |
 | `GET /api/event-workspace/organiser[/<id>]` | `events.own.read`; own events plus owners sharing trusted organisation metadata |
 | `PATCH /api/event-workspace/organiser/<id>` | `events.own.update`; authenticated ID must equal organiser_id in both lookup and UPDATE |
-| `GET /api/event-workspace/coordinator[/<id>]` | `events.assigned.read`; coordinator_id = authenticated ID, active events |
+| `GET /api/event-workspace/coordinator[/<id>]` | `events.assigned.read`; coordinator_id = authenticated ID, active and rejected events |
 | `GET /api/event-workspace/manager[/<id>]` | `events.review`; active and rejected requests |
 | `GET /api/event-workspace/coordinators` | `events.assign`; only IDs, names and emails of active coordinator accounts |
 | `PATCH /api/event-workspace/<id>/coordinator` | Manager; `{coordinatorId, expectedCoordinatorId}`; active events only |

@@ -7,7 +7,7 @@ const FIELDS = [
   "id", "name", "purpose", "description", "start_time", "end_time",
   "expected_attendance", "venue_requirements", "accessibility_needs",
   "equipment_needs", "other_comments", "status", "organiser_id",
-  "coordinator_id", "submitted_at",
+  "coordinator_id", "submitted_at", "approved_rejected_by", "approved_rejected_at", "approval_rejection_remark",
 ].join(",");
 
 function isCoordinator(user) {
@@ -42,10 +42,21 @@ function createEventWorkspaceService(client) {
   function scopedQuery(scope, userId, organiserIds) {
     let query = client.from("events").select(FIELDS);
     if (scope === "organiser") query = query.in("organiser_id", organiserIds);
-    else if (scope === "coordinator") query = query.eq("coordinator_id", userId).in("status", ACTIVE_STATUSES);
+    // SCRUM-98 AC3: a coordinator keeps seeing the requests they rejected, with the outcome they recorded.
+    else if (scope === "coordinator") query = query.eq("coordinator_id", userId).in("status", [...ACTIVE_STATUSES, "REJECTED"]);
     else if (scope === "manager") query = query.in("status", [...ACTIVE_STATUSES, "REJECTED"]);
     else throw new Error("Unknown event scope");
     return query;
+  }
+  // SCRUM-99 AC3: the approver's name is shown with the decision. A deleted
+  // approver account or a failed lookup leaves the name unknown instead of
+  // hiding the event itself.
+  async function approverName(id) {
+    if (!id) return null;
+    const { data, error } = await client.auth.admin.getUserById(id);
+    if (error || !data?.user) return null;
+    const name = data.user.user_metadata?.full_name;
+    return typeof name === "string" && name.trim() ? name.trim() : data.user.email;
   }
   async function read(scope, userId, id) {
     const organiserIds = scope === "organiser" ? await organiserIdsFor(userId) : undefined;
@@ -54,7 +65,10 @@ function createEventWorkspaceService(client) {
   }
   return {
     list: (scope, userId) => read(scope, userId),
-    find: (scope, userId, id) => read(scope, userId, id),
+    async find(scope, userId, id) {
+      const event = await read(scope, userId, id);
+      return event && { ...event, approved_rejected_by_name: await approverName(event.approved_rejected_by) };
+    },
     async updateOrganiserEvent(userId, id, input) {
       const current = await read("organiser", userId, id);
       if (!current) return { ok: false, reason: "not_found" };
