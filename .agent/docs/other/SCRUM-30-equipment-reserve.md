@@ -1,8 +1,11 @@
 # SCRUM-30 — Reserve Available Equipment for an Event
 
 **Backlog ID:** US-30 · **Epic:** Equipment · **Lane:** Equipment · **Points:** TBD · **Assignee:** ky
-**Branch:** `feature/equipmentReserveFlow` (proposed) · **Mode:** build
-**State:** 🔧 in progress (2026-10-02)
+**Branch:** `feature/eq2_catalogue_avail` (pre-existing branch, reused rather than the originally-proposed
+`feature/equipmentReserveFlow`) · **Mode:** build
+**State:** 🧪 in review — feature code done and merged (all 5 ACs built and tested, see table below). PR #23 open
+`feature/eq2_catalogue_avail` → `staging`. CI was fully red as of 2026-10-04; root causes found and fixed
+ — awaiting confirmation of a full green run.
 
 ## Contract (word for word, as given by the user on 2026-10-02)
 
@@ -35,7 +38,7 @@ rather than repeated here in full.
 Written and agreed **before** code. Expected results come from the AC and clarifications, never from the code.
 Column set is the team's standard test case register format (2026-10-02; see `.agent/docs/conventions.md` §Testing
 and `.agent/tasks/_template.md`). All cases below were executed once already as part of building the story — see
-*Actual Result*/*Remarks* for what each one found.
+*Actual Result*/*Remarks* for what each one found. 
 
 | Epic | Scrum-# | AC # | Type | Test Case ID | Test Scenario | Pre-conditions | Test Steps | Test Data | Expected Result | Created By* | Date of Creation* | Actual Result | Pass / Fail / Not Executed / Blocked | Remarks | Executed By | Date of Execution |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -69,13 +72,11 @@ Neighbouring behaviour this story does **not** build, and the story that owns it
 
 | Behaviour | Belongs to |
 |---|---|
-| Multi-quantity reserve ("reserve 3 projectors"), `request_group_id`, junction tables, multi-row requests | Scrum-31 |
 | "X available" modal / requested-quantity validation UI, partial approval | Scrum-31 |
 | Location-based availability filtering | Not yet scoped |
 | Timestamp-level return handling (sub-day granularity) | Not yet scoped |
 | Notifications, audit logs, history tables | Not yet scoped |
-| Auto-revert `equipment.status` on approval / return | Flagged in Scrum-29 notes as a future story; still not built |
-| ~~Normalising messy `type` values~~ — user will standardise formatting directly in Supabase (2026-10-02) | Resolved, not this story |
+| ~~Normalising messy `type` values~~ — user will standardise formatting directly in Supabase 
 
 ## Decisions
 
@@ -93,9 +94,6 @@ Neighbouring behaviour this story does **not** build, and the story that owns it
   permission, which only ever allowed a status PATCH).
 - **E2E test location:** new live-DB E2E specs for this story go into `tests/e2e/` (self-contained, live Supabase),
   matching the Scrum-29 precedent — not the fake-simulator `tests/playwright/`.
-- **CI wiring for `tests/e2e/` is on hold** (2026-10-02) — user is raising a `playwright-live` CI job proposal with
-  the team separately; not blocking this story's build, but this story's new E2E specs won't run in CI until that
-  lands.
 - **Reserve flow UI (resolved 2026-10-02):** `EquipmentRequestForm.jsx` rebuilt entirely into the two-step flow
   (type dropdown → window → available-items list with read-only location → pick one). Quantity field removed from
   the UI; `quantity_requested` is always sent as `1`. Scrum-29's multi-unit `checkAvailability`/`findAvailableUnits`
@@ -133,21 +131,6 @@ Neighbouring behaviour this story does **not** build, and the story that owns it
 3. Frontend: catalogue page Add/Edit/Retire UI
 4. Frontend: reserve flow UI (type dropdown → available-items list → pick one) — pending the open decision above
 5. Live-DB E2E specs in `tests/e2e/` covering the full reserve path
-
-## Manual demo steps
-
-TBD once built.
-
-## Explain-back
-
-TBD at hand-off.
-
-## Found, not built
-
-- Live `equipment.type` values are inconsistent (`"PROJECTOR"` vs `"Projector"`, `"MICROPHONE"` vs
-  `"Wireless Microphone"`) — the type dropdown (distinct `type`) will surface near-duplicates. Not a Scrum-30 fix;
-  flagging for the Product Owner / backlog.
-- `tests/e2e/` is not wired into CI (user raising separately with the team, 2026-10-02).
 
 ## Log
 
@@ -231,3 +214,32 @@ TBD at hand-off.
   `equipment-request.spec.js` (2 more loop entries) rather than duplicating the sign-in/account setup in a new
   test. New Scrum-30 test count: 47 (27 backend: 14 unit + 13 integration; 16 frontend; 4 E2E: 2 new
   catalogue-manage + 2 role-gating loop entries). All still green after the cuts.
+- 2026-10-04 — `playwright-live` CI job added to run `tests/e2e/` for real. Two startup problems found and fixed:
+  the job only ran `npm ci` in `tests/e2e`, never installing `backend`/`frontend`'s own deps that `playwright.config.js`'s
+  `webServer` needs to boot the real dev servers; and `backend/src/server.js` throws at startup without
+  `SUPABASE_PUBLISHABLE_KEY`, a third secret the other CI jobs never needed — added to the job's `env:` (a repo
+  admin registered the new GitHub secret). Separately, `tests/playwright/api.spec.cjs`'s `API-RBAC-049` — the same
+  shape of exhaustive combined-permissions assertion already fixed in `auth.test.js` on 2026-10-02 — needed the
+  identical fix for `equipment.manage`.
+- 2026-10-04/05 — with the backend now booting, every *browser*-driven live-DB test (not the API-only ones) still
+  failed at sign-in with a generic "Unable to sign in" message. Root cause found by extracting the CI run's
+  `trace.zip` and reading the actual network request/response (not guesswork): the browser's `signInWithPassword`
+  call carried the project's **secret** key (`sb_secret_…`) as its `apikey`/`Authorization` header, byte-identical
+  to `SUPABASE_SECRET_KEY` — Supabase correctly rejected it with `401 UNAUTHORIZED_INVALID_API_KEY_TYPE`, since a
+  secret key must never be usable from a browser (it bypasses row-level security). Traced to the GitHub Actions
+  secret `SUPABASE_PUBLISHABLE_KEY` itself holding the wrong value — not a code bug; `server.js`/`app.js`/`ci.yml`
+  all read/wire the right variable name, the stored value was just wrong. Flagged to the repo admin to correct
+  from the Supabase dashboard's actual publishable key. Also found and fixed in passing:
+  `tests/e2e/technical-support-review.spec.js` is an intentionally manual suite (predates the throwaway-fixture
+  helper by 9 days, points at hand-seeded demo data instead) that was hard-failing in CI instead of skipping —
+  changed to `test.skip()` when its required env vars are absent.
+- 2026-10-05 — `ci.yml`'s `pull_request`/`push` triggers filtered on branch `Staging` (capital S), but the real
+  branch is `staging` (lowercase) — GitHub Actions branch filters are case-sensitive, so no run was ever queued
+  for PR #23 at all. Confirmed by diffing this branch's `ci.yml` against `origin/staging`'s own copy, which
+  already had the correct casing. Fixed. Separately, merged `staging` into this branch via GitHub's web UI to
+  pick up concurrent teammates' work (Registration, Venue, Event Workspace — 88 files); conflict resolution left
+  two exhaustive permission-list tests (`auth.test.js`, `api.spec.cjs`) with both sides' array literals still
+  present as dangling leftover syntax instead of one resolved expression, breaking lint/parsing. Fixed both as the
+  union of this story's `equipment.manage` and staging's new `events.browse`/`registrations.manage`/`bookings.decide`
+  permissions, in `permissions.js`'s declared order — deliberately not re-pinning to every permission every role
+  happens to have today, since that exact fragility is what caused this conflict.
