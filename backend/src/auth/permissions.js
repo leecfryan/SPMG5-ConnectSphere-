@@ -41,6 +41,7 @@ const policies = Object.freeze({
   },
   "equipment.request": { roles: ["event_coordinator"] },
   "equipment.review": { roles: ["technical_support_staff"] },
+  "equipment.manage": { roles: ["technical_support_staff"] },
   "equipment.messages": {
     roles: ["technical_support_staff", "event_coordinator"],
   },
