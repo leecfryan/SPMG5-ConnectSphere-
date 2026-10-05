@@ -42,7 +42,7 @@ Test names lead with a bracketed tag, so the runner's output is the traceability
 | SCRUM-22 | Decide a venue booking request | `[SCRUM-22]`, `[VENUE-DECIDE-001]` to `[VENUE-DECIDE-004]` | TC-131 to TC-140 |
 | SCRUM-20 | Block conflicting venue booking | `[SCRUM-20]` | TC-167 to TC-175 |
 | SCRUM-102 | Reject with a reason and suggested alternative | `[SCRUM-102]` | TC-220 to TC-229 |
-| SCRUM-18 | Search and filter potential venues | `[SCRUM-18]` | TC-230 to TC-239 |
+| SCRUM-18 | Search and filter potential venues | `[SCRUM-18]` | TC-260 to TC-270 |
 
 Cross-cutting guards that apply to every story: `[VENUE-AUTH-001]` (seven identities against eight endpoints),
 `[VENUE-AUTH-002]`, `[VENUE-INPUT-001]` (forged ownership and role fields), `[VENUE-CONFIG-001]` (missing venue
