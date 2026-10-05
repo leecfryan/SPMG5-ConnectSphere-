@@ -106,4 +106,33 @@ test.describe("Equipment API: role-scoped requests, technical review, clarificat
     await updateAccountRoles(setup.technical.id, ["attendee"]);
     expect((await request.get("/api/technical-support/equipment-requests", { headers: authHeader(tokens.technical) })).status()).toBe(403);
   });
+
+  test("[SCRUM-103 AC3 / TC-103-12] retiring equipment with an APPROVED reservation covering today flags the event's thread", async ({ request }) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const created = await request.post(`/api/events/${setup.eventId}/equipment-requests`, {
+      headers: authHeader(tokens.coordinator),
+      data: requestFields(setup, { borrow_start: today + "T00:00:00Z", borrow_end: today + "T23:59:59Z" }),
+    });
+    const { data: row } = await created.json();
+
+    const approved = await request.patch(`/api/equipment-requests/${row.id}/status`, {
+      headers: authHeader(tokens.technical), data: { status: "APPROVED" },
+    });
+    expect(approved.status()).toBe(200);
+
+    const retired = await request.patch(`/api/equipment/${setup.equipmentId}/retire`, { headers: authHeader(tokens.technical) });
+    expect(retired.status(), await retired.text()).toBe(200);
+    expect((await retired.json()).data.status).toBe("UNAVAILABLE");
+
+    const messages = await request.get(`/api/events/${setup.eventId}/messages`, { headers: authHeader(tokens.technical) });
+    const { data } = await messages.json();
+    const flagged = data.find((m) => m.equipment_request_id === row.id);
+    expect(flagged).toBeTruthy();
+    expect(flagged.author_id).toBe(setup.technical.id);
+    expect(flagged.author_role).toBe("tech_support");
+
+    const dashboard = await request.get("/api/technical-support/equipment-requests", { headers: authHeader(tokens.technical) });
+    const line = (await dashboard.json()).data.find((item) => item.id === row.id);
+    expect(line.status).toBe("REJECTED");
+  });
 });

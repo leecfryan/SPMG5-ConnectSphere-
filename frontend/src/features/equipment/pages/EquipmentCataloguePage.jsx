@@ -110,7 +110,7 @@ function EquipmentCataloguePage() {
                 )}
               </div>
               <span className="eq-row-actions">
-                {canChangeStatus && item.status !== "UNAVAILABLE" ? (
+                {canChangeStatus && item.status !== "UNAVAILABLE" && (
                   <span className="eq-line-status">
                     <span className={`eq-status eq-status-equipment-${item.status.toLowerCase()}`}>
                       {item.status}
@@ -131,7 +131,28 @@ function EquipmentCataloguePage() {
                       </svg>
                     </span>
                   </span>
-                ) : (
+                )}
+                {item.status === "UNAVAILABLE" && (
+                  <span className="eq-line-status">
+                    <span className={`eq-status eq-status-equipment-${item.status.toLowerCase()}`}>
+                      {item.status}
+                    </span>
+                    {canChangeStatus && (
+                      // SCRUM-103 (added scope): the only way back from retired -
+                      // reuses the existing status endpoint (AVAILABLE is already
+                      // a valid target there), no new route needed.
+                      <button
+                        type="button"
+                        className="eq-secondary"
+                        disabled={savingId === item.id}
+                        onClick={() => handleStatusChange(item.id, "AVAILABLE")}
+                      >
+                        {savingId === item.id ? "Restoring…" : "Restore to available"}
+                      </button>
+                    )}
+                  </span>
+                )}
+                {!canChangeStatus && item.status !== "UNAVAILABLE" && (
                   <span className={`eq-status eq-status-equipment-${item.status.toLowerCase()}`}>
                     {item.status}
                   </span>
