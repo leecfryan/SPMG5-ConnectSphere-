@@ -87,7 +87,7 @@ function Stat({ icon, label, value, unit }) {
   );
 }
 
-function VenueDetail({ venue, onBack, onEdit, onViewAvailability }) {
+function VenueDetail({ venue, onBack, onEdit, onViewAvailability, onManageUnavailability }) {
   return (
     <div className="venue-detail">
       <button type="button" className="v-back" onClick={onBack}>
@@ -111,6 +111,13 @@ function VenueDetail({ venue, onBack, onEdit, onViewAvailability }) {
             <IconPencil />
             Edit operating information
           </button>}
+
+          {/* SCRUM-133: Venue Staff manage unavailability periods */}
+          {onManageUnavailability && (
+            <button type="button" className="v-btn v-btn-secondary" onClick={onManageUnavailability}>
+              Manage unavailability
+            </button>
+          )}
 
           {/* SCRUM-17: view venue availability calendar */}
           <button
