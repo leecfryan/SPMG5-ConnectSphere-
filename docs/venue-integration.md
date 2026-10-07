@@ -21,6 +21,7 @@ middleware and hardcoded development roles have been removed.
 | `/venues/:id/booking-request` | `bookings.request` | Event Coordinator |
 | `/venues/booking-requests` | `bookings.read` | Venue Staff, Event Coordinator |
 | `/venues/booking-requests` decide controls | `bookings.decide` | Venue Staff |
+| `/venues/:id/unavailability` | `venues.unavailability` | Venue Staff |
 
 These are React Router pages with direct links and browser Back/refresh support.
 Shared navigation and sign-out stay available. All calls use relative `/api/venues`
@@ -99,6 +100,22 @@ information or a suggested alternative; SCRUM-102 will make a reason mandatory
 for rejections, which is a change to `validateDecision` alone, not a new column.
 A rejection records the decision and nothing else: any resulting booking change
 is made by the Event Coordinator, so no counter-offer is applied automatically.
+
+## Venue unavailability periods (SCRUM-133)
+
+Venue Staff can block a venue from accepting new bookings for a defined date range and a subset of slots (am, pm, night). New booking requests that overlap an unavailable slot are rejected with 409; existing confirmed bookings are unaffected.
+
+`POST /api/venues/:id/unavailability` — body: `{ start_date, end_date, slots[], reason }`. `start_date` and `end_date` are `YYYY-MM-DD`; `end_date` must not be before `start_date`. `slots` must be a non-empty subset of `["am", "pm", "night"]`. Returns 201 with the created period record.
+
+`GET /api/venues/:id/unavailability` — returns 200 with the array of all period records for the venue, ordered by start date.
+
+`PATCH /api/venues/:id/unavailability/:periodId` — any subset of `{ start_date, end_date, slots, reason }`. At least one field is required. The effective end_date (after merging with the existing record) must not be before the effective start_date. Returns 200 with the updated period.
+
+`DELETE /api/venues/:id/unavailability/:periodId` — removes the period entirely. Returns 204. Returns 404 when the period does not exist or belongs to a different venue.
+
+All four endpoints require `venues.unavailability`, held by Venue Staff only. The `created_by` field is set server-side from the verified session; it cannot be supplied in the request body.
+
+**How blocking works.** `listUnavailabilityInRange` reads from both `venue_unavailability` (legacy per-slot seed rows) and `venue_unavailability_periods` (new period records). Period records are expanded into per-slot rows matching the shape the availability calendar already reads. The calendar marks those slots `unavailable`, and `findSlotProblems` rejects any booking request that targets a non-`available`/`pending` slot.
 
 ## Database deployment
 
@@ -310,6 +327,41 @@ create trigger venue_bookings_set_updated_at
 -- blocks browser access, the backend uses the secret key and bypasses this
 alter table public.venue_bookings enable row level security;
 alter table public.venue_unavailability enable row level security;
+```
+
+### Unavailability periods (SCRUM-133)
+
+```sql
+-- SCRUM-133: venue unavailability periods
+-- New table. The existing venue_unavailability table (per-slot rows used for seed
+-- data and the calendar display) is left untouched. This table records periods as
+-- units so Venue Staff can edit and end them. listUnavailabilityInRange expands
+-- periods into the same row shape the calendar already reads.
+
+create table if not exists public.venue_unavailability_periods (
+  id          uuid primary key default gen_random_uuid(),
+  venue_id    uuid not null references public.venues(id) on delete cascade,
+  start_date  date not null,
+  end_date    date not null,
+  slots       text[] not null,
+  reason      text not null,
+  created_by  uuid references auth.users(id),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  constraint unavailability_period_dates_valid check (end_date >= start_date),
+  constraint unavailability_period_slots_nonempty check (array_length(slots, 1) > 0)
+);
+
+create index if not exists venue_unavailability_periods_venue_date
+  on public.venue_unavailability_periods (venue_id, start_date, end_date);
+
+drop trigger if exists venue_unavailability_periods_set_updated_at
+  on public.venue_unavailability_periods;
+create trigger venue_unavailability_periods_set_updated_at
+  before update on public.venue_unavailability_periods
+  for each row execute function public.set_updated_at();
+
+alter table public.venue_unavailability_periods enable row level security;
 ```
 
 ### Booking requests and the atomic submit function

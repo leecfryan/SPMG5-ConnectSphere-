@@ -34,6 +34,7 @@ read matrix below, which lists read permissions only.
 | Write capability | Holder | Guards |
 | --- | --- | --- |
 | `venues.update` | Venue Staff, Event Coordinators | Venue editing |
+| `venues.unavailability` | Venue Staff | Mark and manage venue unavailability periods (SCRUM-133) |
 | `bookings.request` | Event Coordinators | Booking requests |
 | `events.submit` | Event Organisers | `POST /api/events`, `/events/new` |
 | `events.assign_coordinator` | Event Operations Managers | The assignment queue: `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` |
