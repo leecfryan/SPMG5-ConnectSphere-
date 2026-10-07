@@ -220,9 +220,9 @@ test("Staff access endpoint returns only the current user's responsibilities", a
   const data = await response.json();
   assert.deepEqual(
     data.responsibilities.map((r) => r.permission),
-    ["venues.read", "bookings.read"],
+    ["venues.unavailability", "venues.read", "bookings.read"],
   );
-  assert.equal(data.responsibilities[1].requiresRecordCheck, true);
+  assert.equal(data.responsibilities[2].requiresRecordCheck, true);
 });
 test("Event-specific permissions require an explicit record-access resolver", () => {
   assert.throws(
