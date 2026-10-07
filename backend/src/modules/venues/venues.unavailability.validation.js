@@ -8,23 +8,23 @@ function validateUnavailabilityCreate(body) {
   }
   const { start_date, end_date, slots, reason } = body;
 
-  if (!isValidDateString(start_date)) errors.push("start_date must be a date in YYYY-MM-DD format");
-  if (!isValidDateString(end_date)) errors.push("end_date must be a date in YYYY-MM-DD format");
+  if (!isValidDateString(start_date)) errors.push("Valid start date is required (YYYY-MM-DD)");
+  if (!isValidDateString(end_date)) errors.push("Valid end date is required (YYYY-MM-DD)");
   if (isValidDateString(start_date) && isValidDateString(end_date) && end_date < start_date) {
-    errors.push("end_date must not be before start_date");
+    errors.push("End date must not be before start date");
   }
 
   if (!Array.isArray(slots) || slots.length === 0) {
-    errors.push("slots must be a non-empty array");
+    errors.push("At least one time slot must be selected");
   } else {
     const invalid = slots.filter((s) => !SLOTS.includes(s));
     if (invalid.length > 0) {
-      errors.push(`slots contains invalid values: ${invalid.join(", ")}. Must be one of: ${SLOTS.join(", ")}`);
+      errors.push(`Invalid time slots: ${invalid.join(", ")}. Choose from: ${SLOTS.join(", ")}`);
     }
   }
 
   if (typeof reason !== "string" || reason.trim() === "") {
-    errors.push("reason must be a non-empty string");
+    errors.push("Reason is required");
   }
 
   if (errors.length > 0) return { errors, value: null };
@@ -49,32 +49,32 @@ function validateUnavailabilityUpdate(body) {
   }
 
   if ("start_date" in body && !isValidDateString(body.start_date)) {
-    errors.push("start_date must be a date in YYYY-MM-DD format");
+    errors.push("Valid start date is required (YYYY-MM-DD)");
   }
   if ("end_date" in body && !isValidDateString(body.end_date)) {
-    errors.push("end_date must be a date in YYYY-MM-DD format");
+    errors.push("Valid end date is required (YYYY-MM-DD)");
   }
   // Cross-field check when both are submitted; when only one is submitted the
   // controller checks against the existing record after fetching it.
   if ("start_date" in body && "end_date" in body &&
       isValidDateString(body.start_date) && isValidDateString(body.end_date) &&
       body.end_date < body.start_date) {
-    errors.push("end_date must not be before start_date");
+    errors.push("End date must not be before start date");
   }
 
   if ("slots" in body) {
     if (!Array.isArray(body.slots) || body.slots.length === 0) {
-      errors.push("slots must be a non-empty array");
+      errors.push("At least one time slot must be selected");
     } else {
       const invalid = body.slots.filter((s) => !SLOTS.includes(s));
       if (invalid.length > 0) {
-        errors.push(`slots contains invalid values: ${invalid.join(", ")}. Must be one of: ${SLOTS.join(", ")}`);
+        errors.push(`Invalid time slots: ${invalid.join(", ")}. Choose from: ${SLOTS.join(", ")}`);
       }
     }
   }
 
   if ("reason" in body && (typeof body.reason !== "string" || body.reason.trim() === "")) {
-    errors.push("reason must be a non-empty string");
+    errors.push("Reason is required");
   }
 
   if (errors.length > 0) return { errors, value: null };
