@@ -21,7 +21,7 @@ installs it, not the agent.
 | Lint | ESLint (`backend/eslint.config.mjs`, `frontend/eslint.config.js`) | No Prettier. Match surrounding formatting by hand |
 | Local runtime | npm scripts, or Docker Compose (frontend :5173, backend :3000) | Supabase is never run locally |
 | CI | GitHub Actions on push / PR to `staging` | Frontend, backend (including live equipment integration), Docker build, Playwright |
-| External APIs | None | See *External integrations* below |
+| External APIs | Novu Cloud selected for SCRUM-143 | Iteration 1 signs inbox identity locally; no Novu call yet. See *External integrations* below |
 | Deployment | None planned | Don't add hosting, build pipelines or production config |
 
 ### Before suggesting a new package
@@ -133,6 +133,7 @@ swallows them. Inside any router, declare static paths before parameter paths.
 |---|---|---|
 | Health / config | `GET /api/health`, `GET /api/auth/config` | public (config returns the URL and publishable key only) |
 | Identity | `GET /api/auth/me` | authenticated |
+| Notification inbox identity | `GET /api/notifications/inbox-config` | authenticated; caller ID only, no role requirement |
 | Staff | `GET /api/internal/access` | `internal.access` |
 | Event requests | `POST /api/events` | `events.submit` |
 | Assignment | `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` | `internal.access` + `events.assign_coordinator` |
@@ -217,7 +218,22 @@ Keep this section current: when a manual schema change is made, update this sect
 
 ## External integrations
 
-None. ConnectSphere calls no external API besides Supabase (Auth and Postgres), covered above.
+Novu Cloud is selected for the notification centre (SCRUM-143). Iteration 1 only
+prepares own inbox identity locally using Node crypto: no Novu network call,
+SDK, inbox UI or event notification exists yet. See [notification setup and tests](../../docs/notifications.md).
+
+server.js reads NOVU_APPLICATION_IDENTIFIER and NOVU_SECRET_KEY from the private
+root .env and injects the signing service. Empty placeholders are in .env.example.
+GET /api/notifications/inbox-config verifies the caller through requireAuth and
+returns the public application identifier, req.user.id as subscriberId and its
+HMAC-SHA256 subscriberHash. No browser-provided recipient is accepted, no secret
+is returned, and all signed-in accounts have access regardless of role. Novu
+configuration is optional; missing settings return a safe 503 without disabling
+sign-in. Tests use dummy configuration and fake Auth over real local HTTP.
+
+Before later inbox integration, the user must create the Novu environment and
+enable its HMAC security setting. Account changes must reset the frontend inbox.
+Novu's enforcement and delivery are not verified by local identity tests.
 
 When a story's acceptance criteria require an outside service (email, calendar, payments, maps, …), record it here:
 the service, the story that needs it, where the key lives (backend `.env` only, added to `.env.example` without a

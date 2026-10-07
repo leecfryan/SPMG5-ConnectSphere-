@@ -14,6 +14,10 @@ const authClient = createClient(supabaseUrl, publishableKey, {
 });
 const app = createApp({
   authClient, supabaseUrl, publishableKey,
+  notificationsService: require("./modules/notifications/notifications.service").createNotificationsService({
+    applicationIdentifier: process.env.NOVU_APPLICATION_IDENTIFIER,
+    secretKey: process.env.NOVU_SECRET_KEY,
+  }),
   dataClient: process.env.SUPABASE_SECRET_KEY ? require("./supabase") : undefined,
   // Missing data configuration disables submission without breaking sign-in.
   eventsRepository: process.env.SUPABASE_SECRET_KEY ? require("./modules/events/events.repository") : undefined,

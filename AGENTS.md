@@ -230,7 +230,7 @@ Details: [.agent/docs/architecture.md](.agent/docs/architecture.md) (stack, laye
 - **Database**: Supabase Postgres. Schema changes are made by hand in the dashboard; no migration files.
 - **Tests**: Vitest (unit + integration, backend and frontend), Playwright (browser + API against a local Auth
   simulator; no cloud needed).
-- **External APIs**: none yet.
+- **External APIs**: Novu Cloud selected for SCRUM-143 notifications. Iteration 1 signs own inbox identity locally; the inbox UI and delivery are not built yet. Setup is in [docs/notifications.md](docs/notifications.md).
 - **Deployment**: not planned yet. Don't add hosting config.
 
 ## 7. Git
