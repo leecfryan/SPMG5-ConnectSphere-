@@ -264,6 +264,43 @@ test("[SCRUM-98] AC3: the coordinator who rejected a request still sees it and t
   expect((await send(`/event-workspace/coordinator/${event.id}`, "second")).status).toBe(404);
 });
 
+// SCRUM-148 AC4: the eventWorkspace scopedQuery only included ACTIVE_STATUSES
+// and REJECTED before this story - a cancelled event would otherwise vanish
+// from the coordinator's and manager's own lists the moment it was cancelled.
+test("[TC-148-16] the assigned coordinator and the manager both still see a cancelled event in their own lists", async t => {
+  const { send, records, users } = await setup(t);
+  const event = addEvent(records, { status: "CANCELLED", coordinator_id: users.first.id, organiser_id: users.organiser.id,
+    cancelled_by: users.first.id, cancelled_at: "2099-09-06T00:00:00.000Z", cancellation_reason: "Venue flooded." });
+
+  for (const [scope, user] of [["coordinator", "first"], ["manager", "manager"]]) {
+    const listed = (await (await send(`/event-workspace/${scope}`, user)).json()).events.map(item => item.id);
+    expect(listed, scope).toContain(event.id);
+    const response = await send(`/event-workspace/${scope}/${event.id}`, user);
+    expect(response.status, scope).toBe(200);
+    expect((await response.json()).event, scope).toMatchObject({ status: "CANCELLED", cancellation_reason: "Venue flooded." });
+  }
+  // A coordinator not assigned to it still sees nothing, same as any other status.
+  expect((await send(`/event-workspace/coordinator/${event.id}`, "second")).status).toBe(404);
+});
+
+// SCRUM-148 AC4: history (a prior approval) and the cancellation are both
+// visible together, not one replacing the other.
+test("[TC-148-17] a previously APPROVED event's decision history is still visible after cancellation", async t => {
+  const { send, event, users } = await decidedSetup(t);
+  Object.assign(event, { status: "CANCELLED", cancelled_by: users.first.id,
+    cancelled_at: "2099-09-06T00:00:00.000Z", cancellation_reason: "Venue flooded." });
+
+  const response = await send(`/event-workspace/manager/${event.id}`, "manager");
+
+  expect(response.status).toBe(200);
+  expect((await response.json()).event).toMatchObject({
+    status: "CANCELLED",
+    approved_rejected_by: users.first.id, approved_rejected_at: "2099-09-05T02:30:00.000Z",
+    approval_rejection_remark: "Ready for planning.", approved_rejected_by_name: "Ada Tan",
+    cancelled_by: users.first.id, cancellation_reason: "Venue flooded.", cancelled_by_name: "Ada Tan",
+  });
+});
+
 test("[SCRUM-100 AC1] A responsible organiser persists valid event edits without changing protected fields", async t => {
   const { send, records } = await setup(t);
   const before = structuredClone(records[0]);
