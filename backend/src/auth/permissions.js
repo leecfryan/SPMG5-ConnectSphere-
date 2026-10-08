@@ -35,7 +35,6 @@ const policies = Object.freeze({
   // SCRUM-133: marking and managing unavailable periods is Venue Staff work only.
   "venues.unavailability": {
     roles: ["venue_staff"],
-    label: "Mark and manage venue unavailability periods",
   },
   "bookings.request": {
     roles: ["event_coordinator"],

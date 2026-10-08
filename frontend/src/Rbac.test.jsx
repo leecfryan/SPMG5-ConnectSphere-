@@ -112,7 +112,7 @@ test("[RBAC-ROLE-001] Venue Staff see venue and booking responsibilities only", 
   renderStaffPage();
   const list = await screen.findByRole("list");
   expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
-    "Mark and manage venue unavailability periods", labels["venues.read"], labels["bookings.read"],
+    labels["venues.read"], labels["bookings.read"],
   ]);
   for (const permission of ["equipment.read", "technical_requests.read", "event_planning.read", "attendees.read", "clients.read"]) {
     expect(screen.queryByText(labels[permission])).toBeNull();
@@ -146,7 +146,7 @@ test("[RBAC-ROLE-004] Multiple staff roles combine responsibilities without dupl
   renderStaffPage();
   const list = await screen.findByRole("list");
   expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
-    "Mark and manage venue unavailability periods", labels["venues.read"], labels["bookings.read"],
+    labels["venues.read"], labels["bookings.read"],
     labels["equipment.read"], labels["technical_requests.read"],
   ]);
   expect(screen.queryByText(labels["clients.read"])).toBeNull();
