@@ -35,8 +35,8 @@ The seed password is SEED_USER_PASSWORD in your private root .env.
 
 The backend now provides a verified user's own Novu inbox configuration at
 GET /api/notifications/inbox-config. Novu setup is optional; without it the endpoint
-returns 503 and sign-in continues to work. The inbox UI and event notifications
-are later iterations. See [notification setup and tests](docs/notifications.md).
+returns 503 and sign-in continues to work. Signed-in users can open /notifications for their own
+inbox and unread count. Approval/rejection delivery is a later iteration. See [notification setup and tests](docs/notifications.md).
 
 ## Sign in securely
 

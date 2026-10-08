@@ -21,7 +21,7 @@ installs it, not the agent.
 | Lint | ESLint (`backend/eslint.config.mjs`, `frontend/eslint.config.js`) | No Prettier. Match surrounding formatting by hand |
 | Local runtime | npm scripts, or Docker Compose (frontend :5173, backend :3000) | Supabase is never run locally |
 | CI | GitHub Actions on push / PR to `staging` | Frontend, backend (including live equipment integration), Docker build, Playwright |
-| External APIs | Novu Cloud selected for SCRUM-143 | Iteration 1 signs inbox identity locally; no Novu call yet. See *External integrations* below |
+| External APIs | Novu Cloud selected for SCRUM-143 | Backend signs inbox identity locally; @novu/react connects to the US cloud inbox. See *External integrations* below |
 | Deployment | None planned | Don't add hosting, build pipelines or production config |
 
 ### Before suggesting a new package
@@ -218,9 +218,10 @@ Keep this section current: when a manual schema change is made, update this sect
 
 ## External integrations
 
-Novu Cloud is selected for the notification centre (SCRUM-143). Iteration 1 only
-prepares own inbox identity locally using Node crypto: no Novu network call,
-SDK, inbox UI or event notification exists yet. See [notification setup and tests](../../docs/notifications.md).
+Novu Cloud is selected for the notification centre (SCRUM-143). The backend
+prepares own inbox identity locally using Node crypto. Iteration 2 adds @novu/react
+on /notifications: the browser connects to the US cloud inbox using that signed
+identity. Approval/rejection delivery is not built yet. See [notification setup and tests](../../docs/notifications.md).
 
 server.js reads NOVU_APPLICATION_IDENTIFIER and NOVU_SECRET_KEY from the private
 root .env and injects the signing service. Empty placeholders are in .env.example.
@@ -231,9 +232,12 @@ is returned, and all signed-in accounts have access regardless of role. Novu
 configuration is optional; missing settings return a safe 503 without disabling
 sign-in. Tests use dummy configuration and fake Auth over real local HTTP.
 
-Before later inbox integration, the user must create the Novu environment and
+Before using the inbox, the user must create the Novu environment and
 enable its HMAC security setting. Account changes must reset the frontend inbox.
-Novu's enforcement and delivery are not verified by local identity tests.
+Novu's cloud enforcement and delivery are not verified by local tests.
+The page mounts only inside RequireAuth. It uses the verified caller's config and
+remounts on account/token changes; pending config requests are cancelled and
+Novu cache/socket state is disposed on unmount. No role capability is required.
 
 When a story's acceptance criteria require an outside service (email, calendar, payments, maps, …), record it here:
 the service, the story that needs it, where the key lives (backend `.env` only, added to `.env.example` without a

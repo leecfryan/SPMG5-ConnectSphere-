@@ -1,10 +1,11 @@
 # Notification centre — SCRUM-143
 
-## Current scope: iteration 1
+## Current scope: iteration 2
 
-The secure inbox identity API is implemented. The React inbox, unread badge and
-approval/rejection notifications are later iterations. This is a foundation,
-not a completed notification centre. No package or database change is needed yet.
+The secure inbox identity API and authenticated /notifications page are
+implemented. The page shows the unread count and Novu inbox history.
+Approval/rejection notifications are iteration 3; the full story is not complete.
+Iteration 2 requires @novu/react (installed by the user), with no database change.
 
 Novu Cloud is the selected inbox provider. The first agreed business event is an
 event approval or rejection, notifying its organiser. Assignment/reassignment
@@ -28,15 +29,16 @@ with a safe sentence, while existing sign-in and account APIs continue to work.
 
 The browser receives a caller-bound signature, never NOVU_SECRET_KEY. Treat
 that signature as sensitive authentication material: do not log it or reuse it
-across accounts. Later UI must unmount/reset when the account changes.
+across accounts. The UI cancels obsolete configuration requests and unmounts the
+inbox on account/token changes; cache and socket state are disposed on unmount.
 
 The signature only protects actual Novu feeds after HMAC enforcement is enabled
 in the correct Novu environment. That is not verified by these local tests.
 
-## User setup before the inbox iteration
+## Novu setup
 
 1. Create a Novu Cloud account and select a development environment. Note its
-   US or EU region; the later frontend/API configuration must match that region.
+   US or EU region; inbox configuration must match that region.
 2. In the Novu environment's Novu In-App integration, enable Security HMAC
    encryption. Keep it enabled; a browser-supplied subscriber ID alone is unsafe.
 3. Add NOVU_APPLICATION_IDENTIFIER and NOVU_SECRET_KEY to the existing private
@@ -47,8 +49,11 @@ in the correct Novu environment. That is not verified by these local tests.
    npm --prefix backend run dev. If using Docker, restart the backend container.
    With valid configuration, the signed-in caller's inbox-config request should
    return 200. With missing configuration it should return the safe 503 above.
-5. The later inbox iteration needs @novu/react, installed by the user under the
-   repository rules. It is not needed or installed for this backend-only slice.
+5. Install the React inbox from the repository root:
+   npm --prefix frontend install @novu/react. Start the frontend with
+   npm --prefix frontend run dev and open Notifications after signing in.
+   This iteration uses the US cloud endpoints. EU environments need matching
+   backendUrl/socketUrl settings before use.
 
 Setup references: [Novu production security](https://docs.novu.co/platform/inbox/prepare-for-production)
 and [React inbox setup](https://docs.novu.co/platform/inbox/setup-inbox).
@@ -63,6 +68,45 @@ and [React inbox setup](https://docs.novu.co/platform/inbox/setup-inbox).
 - notifications.routes.js attaches requireAuth before the controller.
 - app.js mounts /api/notifications; server.js supplies the service from the
   optional environment values. Tests inject a service with dummy settings.
+
+## React inbox — iteration 2
+
+/notifications sits inside RequireAuth and WorkspaceLayout, alongside /account,
+with no staff-only permission. WorkspaceLayout adds one Notifications link;
+App.jsx adds one page import and one route. Other pages do not fetch inbox data.
+
+NotificationCentrePage reuses useApiResource and apiFetch for the signed config.
+Only config matching the verified user mounts Novu; the secret stays on the server.
+The Inbox is keyed by account and token. Loading and safe retry states hide stale
+content, including late responses from an obsolete request.
+
+NotificationInbox uses Novu's count/history hooks to surface failures safely,
+then renders InboxContent with its header hidden. A labelled Mark as read button
+replaces the SDK's unnamed icon actions; pending clicks are disabled. A failed
+read hides the SDK's optimistic view and asks the user to reload the inbox so the
+stored unread state is restored. Read items display Read. The unread count
+excludes archived items. Novu manages live updates and paging; ConnectSphere adds
+no notification table. Unmount clears the Novu cache and disconnects its socket.
+Retry creates fresh signed configuration and a fresh inbox session.
+
+From the repository root, the focused checks are:
+
+- npm --prefix frontend test -- --run src/features/notifications/NotificationCentre.test.jsx --reporter=default --pool=threads --maxWorkers=1
+- node node_modules/@playwright/test/cli.js test tests/playwright/notifications.browser.spec.cjs --project=chromium --reporter=list
+- npm --prefix frontend run lint
+- npm --prefix frontend run build
+
+UI tests cover signed config, loading, counts, safe errors/retry, account/token
+changes, mismatched subscribers and read actions. Browser tests use the actual
+Novu SDK with local transport fixtures for history, read/count updates,
+empty/error recovery, 375px width, keyboard access, sign-out and a second account.
+No live Novu or Supabase project is contacted by these fixtures. Manual UAT and
+recorded evidence stay outside the application repository under Ryan's reporting
+preferences. Live HMAC enforcement still requires manual testing.
+
+Iteration 2 adds a page, inbox component, read-action component, one frontend test
+file, one browser test file and the user-installed dependency/lockfile. Routing
+and existing setup docs receive matching updates. No commits are made by the agent.
 
 ## Acceptance tests — iteration 1
 
@@ -94,7 +138,7 @@ event HTTP regression passed. Full frontend, browser, live Supabase and live Nov
 verification were not run for this backend foundation; the story remains open.
 Machine-bound check evidence is in the local SCRUM-143 iteration gate ledger.
 
-## Files in this atomic iteration
+## Files in iteration 1
 
 | File | Reason |
 | --- | --- |
@@ -110,12 +154,13 @@ Machine-bound check evidence is in the local SCRUM-143 iteration gate ledger.
 | .agent/docs/architecture.md | Record the new endpoint and local signing contract. |
 | AGENTS.md | Keep the existing external-service architecture summary accurate. |
 
-The local task note and gate ledger under .agent/docs/other/ are ignored by the
-existing .gitignore; they are not automatically part of a commit. No file has
-been staged or committed.
+The local task note under .agent/docs/other/ is ignored by the existing
+.gitignore. Iteration 2 gate evidence and manual steps stay outside the application
+checkout. Ryan committed iteration 1; the agent leaves iteration 2 unstaged and
+uncommitted for Ryan to test and commit.
 
 ## Schema reference
 
-Iteration 1 requires no SQL, table, policy, trigger or migration. Novu will store
+Iterations 1 and 2 require no SQL, table, policy, trigger or migration. Novu stores
 the inbox. Reliable delivery of later business events still needs its own design
 and tests before the complete story can be marked done.

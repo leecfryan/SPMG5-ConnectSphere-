@@ -19,6 +19,7 @@ same frontend port (Docker: 5173); routing does not start another Vite process.
 | `/technical-support` | Technical dashboard; requires `equipment.review`. |
 | `/events/assignments` | Requires `events.assign_coordinator`; the Event Operations Manager's queue for routing submitted requests to coordinators. See [Coordinator assignment](event-assignment.md). |
 | `/account` | Backend-verified identity for every signed-in role. |
+| `/notifications` | Own Novu inbox and unread count for every signed-in account, including accounts without roles; no role capability required. |
 | `/staff/responsibilities` | Requires `internal.access`; lists responsibilities from the protected staff API. |
 | `/forbidden` | Signed-in access-denied page. |
 | Other URLs | Not-found page with a home link. |
