@@ -179,6 +179,9 @@ Module at `backend/src/modules/events/`.
 | POST | /api/internal/events/:eventId/start-review | requireAuth + internal.access + events.decide (assigned coordinator) | `SUBMITTED → UNDER_REVIEW` |
 | POST | /api/internal/events/:eventId/approve | same | `UNDER_REVIEW → APPROVED`; body `{ "note"?: string }` |
 | POST | /api/internal/events/:eventId/reject | same | `UNDER_REVIEW → REJECTED`; body `{ "note": string }` (required) |
+| GET | /api/internal/events/:eventId/safety-readiness | requireAuth + internal.access + events.safety.submit (assigned coordinator) | `{ ready, missing[] }` |
+| POST | /api/internal/events/:eventId/submit-safety-check | same | `APPROVED → SAFETY_REVIEW` when nothing is missing |
+| POST | /api/internal/events/:eventId/withdraw-safety-check | same | `SAFETY_REVIEW → APPROVED` |
 
 ### Rules enforced server-side
 
@@ -260,6 +263,40 @@ alter table public.events
   add column if not exists approved_rejected_at timestamptz,
   add column if not exists approval_rejection_remark text;
 ```
+
+### Submit for the Operational Safety Check (SCRUM-139)
+
+`safetyReadiness.js` (the rule), `safetyCheck.service.js`, `safetyCheck.controller.js`,
+`routes/safetyCheck.routes.js`, `events.repository.js#findArrangements`. Like review, only the
+event's **assigned coordinator** may act: `events.safety.submit` is a `record: true` permission and
+reuses `review.routes.js#assignedToCaller`.
+
+- **Ready** means nothing is missing. Every arrangement is essential until SCRUM-144.
+  - Venue: at least one booking request is booked, meaning every slot that isn't `cancelled` is
+    `confirmed`. A request with a `pending` slot is missing ("Waiting for Venue Staff to decide.").
+    Fully rejected or cancelled requests are ignored. With nothing booked and nothing pending, the
+    item is "No venue booking has been approved yet."
+  - Equipment: every request must be `APPROVED`. `PENDING` and `REJECTED` are missing; `RELEASED`
+    is ignored. No equipment requests at all is ready.
+- `findArrangements` only reads `venue_booking_requests` (+ `venues`, `venue_bookings`) and
+  `equipment_requests` (+ `equipment`). It never writes to another lane's tables.
+- Submit re-runs the rule on the server. Not ready: 409 with `missing`, nothing written. Ready:
+  one conditional `transitionStatus` filtered on `APPROVED` and the caller, so a race is a 409.
+- AC4: `SAFETY_REVIEW` is not in `PLANNING_STATUSES`, so the venue and equipment lanes' existing
+  checks refuse new requests until the coordinator withdraws (`SAFETY_REVIEW → APPROVED`).
+- No activity history is written; SCRUM-141 adds it (discussion #33: history is optional in
+  Release 1).
+
+| Status | When | Message |
+| --- | --- | --- |
+| 200 | Done | readiness `{ ready, missing }`; submit / withdraw `{ event }` |
+| 401 | No or invalid session | "Please sign in to continue." |
+| 403 | Not a coordinator, or not this event's coordinator | "You do not have permission to access this information." |
+| 404 | Event deleted after the access check | "That event no longer exists." |
+| 409 | Arrangements missing | "This event is not ready for the safety check. Finish the arrangements listed." plus `missing: [{ kind, label, reason }]` |
+| 409 | Wrong status, or reassigned meanwhile | "This event has changed since you opened it. Refresh to see its current status." |
+| 500 | Reading arrangements failed | "Something went wrong. Please try again." |
+| 503 | The access check could not reach storage | "Unable to check access. Please try again." |
 
 ### Request
 

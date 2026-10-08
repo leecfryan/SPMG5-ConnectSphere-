@@ -28,8 +28,8 @@ Event Coordinators, and `bookings.request` for Event Coordinators. They do not
 change the read responsibilities listed below or grant external roles access.
 
 Event writes use `events.submit` and `events.own.update` (Event Organisers, external),
-`events.assign_coordinator` (Event Operations Managers) and `events.decide`
-(the event's assigned Event Coordinator). None appears in the
+`events.assign_coordinator` (Event Operations Managers), and `events.decide` and
+`events.safety.submit` (the event's assigned Event Coordinator). None appears in the
 read matrix below, which lists read permissions only.
 
 | Write capability | Holder | Guards |
@@ -40,6 +40,7 @@ read matrix below, which lists read permissions only.
 | `events.own.update` | Event Organisers | `PATCH /api/event-workspace/organiser/:id`; owner check in lookup and write; colleague events remain view only |
 | `events.assign_coordinator` | Event Operations Managers | The assignment queue: `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` |
 | `events.decide` | Event Coordinators, **assigned event only** (record check on `coordinator_id`) | `POST /api/internal/events/:eventId/{start-review,approve,reject}` |
+| `events.safety.submit` | Event Coordinators, **assigned event only** (same record check) | `GET /api/internal/events/:eventId/safety-readiness`, `POST /api/internal/events/:eventId/{submit-safety-check,withdraw-safety-check}` |
 
 A capability name ending in `.read` is refused for every non-GET by
 `requirePermission`, which is why the assignment capability is not named
