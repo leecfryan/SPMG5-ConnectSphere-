@@ -287,3 +287,51 @@ test("[TC-SCRUM-133-19] PATCH on a non-existent or wrong-venue period returns 40
   expect(res.status).toBe(404);
   expect(service.updateUnavailabilityPeriod).not.toHaveBeenCalled();
 });
+
+const bookingBody = {
+  event_id: eventId,
+  booking_date: "2099-10-10",
+  slots: ["am"],
+  expected_attendees: 50,
+  room_layout: "Theatre",
+};
+
+test("[TC-SCRUM-133-20] Create period blocks booking, shorten period restores availability", async () => {
+  // Step 1: slot is unavailable — booking request is refused
+  service.listUnavailabilityInRange.mockResolvedValue([
+    { unavailable_date: "2099-10-10", slot: "am", reason: "Maintenance" },
+  ]);
+  const blocked = await send(`/${venueId}/booking-requests`, "event_coordinator", "POST", bookingBody);
+  expect(blocked.status).toBe(409);
+
+  // Step 2: period is shortened so it no longer covers the booking date — slot is free again
+  service.listUnavailabilityInRange.mockResolvedValue([]);
+  service.submitBookingRequest.mockResolvedValue("new-request-id");
+  service.getBookingRequestById.mockResolvedValue({
+    id: "new-request-id", venue: venue, event: event,
+    booking_date: "2099-10-10", slots: [{ slot: "am", status: "pending" }],
+    submitted_at: "2026-10-08T00:00:00Z", decided_at: null, decision_note: null,
+  });
+  const allowed = await send(`/${venueId}/booking-requests`, "event_coordinator", "POST", bookingBody);
+  expect(allowed.status).toBe(201);
+});
+
+test("[TC-SCRUM-133-21] Create period blocks booking, delete period restores availability", async () => {
+  // Step 1: slot is unavailable — booking request is refused
+  service.listUnavailabilityInRange.mockResolvedValue([
+    { unavailable_date: "2099-10-10", slot: "am", reason: "Maintenance" },
+  ]);
+  const blocked = await send(`/${venueId}/booking-requests`, "event_coordinator", "POST", bookingBody);
+  expect(blocked.status).toBe(409);
+
+  // Step 2: period is deleted — slot is free again
+  service.listUnavailabilityInRange.mockResolvedValue([]);
+  service.submitBookingRequest.mockResolvedValue("new-request-id");
+  service.getBookingRequestById.mockResolvedValue({
+    id: "new-request-id", venue: venue, event: event,
+    booking_date: "2099-10-10", slots: [{ slot: "am", status: "pending" }],
+    submitted_at: "2026-10-08T00:00:00Z", decided_at: null, decision_note: null,
+  });
+  const allowed = await send(`/${venueId}/booking-requests`, "event_coordinator", "POST", bookingBody);
+  expect(allowed.status).toBe(201);
+});

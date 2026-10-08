@@ -469,6 +469,7 @@ function createVenuesController(service) {
       }
 
       const updated = await updateUnavailabilityPeriod(periodId, id, value);
+      if (!updated) return res.status(404).json({ error: "Unavailability period not found" });
       res.status(200).json({ data: updated });
     } catch (err) {
       next(err);
