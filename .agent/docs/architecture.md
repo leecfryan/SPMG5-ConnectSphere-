@@ -198,8 +198,9 @@ shares the database.
     from information_schema.columns where table_schema = 'public' and table_name = 'events';
   ```
 - Event statuses (confirmed by the team; don't add, rename or drop one without the team agreeing):
-  `DRAFT` · `SUBMITTED` · `UNDER_REVIEW` · `APPROVED` · `CONFIRMED` · `COMPLETED` · `CANCELLED` · `REJECTED`.
-  `APPROVED` is the stored value for "approved / planning". Registration's event list and Venue's bookable events
+  `DRAFT` · `SUBMITTED` · `UNDER_REVIEW` · `APPROVED` · `SAFETY_REVIEW` · `CONFIRMED` · `COMPLETED` · `CANCELLED` ·
+  `REJECTED`. `APPROVED` is the stored value for "approved / planning". `SAFETY_REVIEW` (SCRUM-139) is active but
+  not a planning status, so venue and equipment requests are refused while it holds. Registration's event list and Venue's bookable events
   already read it. The code currently writes only `SUBMITTED` (organisers) and `APPROVED` (seed data); the lifecycle
   code that moves events through the rest is not built yet. Status is written only by the lifecycle code, never
   through `WRITABLE_COLS`.
