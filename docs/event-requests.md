@@ -77,16 +77,17 @@ create table events (
 
 ### Status values
 
-SCRUM-97 defines the eight statuses and the permitted moves between them in
-`backend/src/modules/events/lifecycle.js`. The live `events_status_check`
-constraint accepts all eight; it was changed by hand in the Supabase dashboard
-on 2026-09-27 (no migration file) with:
+SCRUM-97 defines the statuses and the permitted moves between them in
+`backend/src/modules/events/lifecycle.js`; SCRUM-139 adds `SAFETY_REVIEW`. The
+live `events_status_check` constraint was changed by hand in the Supabase
+dashboard (no migration file): the eight SCRUM-97 statuses on 2026-09-27, and
+`SAFETY_REVIEW` on 2026-10-08 with:
 
 ```sql
 alter table public.events drop constraint if exists events_status_check;
 alter table public.events
   add constraint events_status_check check (status in (
-    'DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'APPROVED',
+    'DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'SAFETY_REVIEW',
     'CONFIRMED', 'COMPLETED', 'CANCELLED', 'REJECTED'
   ));
 ```
@@ -98,11 +99,14 @@ stateDiagram-v2
     SUBMITTED --> UNDER_REVIEW
     UNDER_REVIEW --> APPROVED
     UNDER_REVIEW --> REJECTED
+    APPROVED --> SAFETY_REVIEW
+    SAFETY_REVIEW --> APPROVED
     APPROVED --> CONFIRMED
     CONFIRMED --> COMPLETED
     SUBMITTED --> CANCELLED
     UNDER_REVIEW --> CANCELLED
     APPROVED --> CANCELLED
+    SAFETY_REVIEW --> CANCELLED
     CONFIRMED --> CANCELLED
 ```
 
@@ -111,7 +115,8 @@ stateDiagram-v2
 | `DRAFT` | Draft | nothing (column default; US-13) |
 | `SUBMITTED` | Submitted | `createSubmitted`, at insert |
 | `UNDER_REVIEW` | Under review | the assigned coordinator's *Start review* (SCRUM-98) |
-| `APPROVED` | Approved – planning | the assigned coordinator's *Approve* (SCRUM-99); read by registration and venue |
+| `APPROVED` | Approved – planning | the assigned coordinator's *Approve* (SCRUM-99), or *Withdraw from safety check* (SCRUM-139); read by registration and venue |
+| `SAFETY_REVIEW` | Safety review | the assigned coordinator's *Submit for safety check* (SCRUM-139); not open to new venue or equipment requests |
 | `CONFIRMED` | Confirmed | not yet (confirm story) |
 | `COMPLETED` | Completed | not yet (complete story) |
 | `CANCELLED` | Cancelled | not yet (cancel story) |
