@@ -8,6 +8,7 @@ const { WRITABLE_COLS, BLOCKING_REQUEST_STATUSES, isBlockingOverlap } = require(
 
 const REQUESTS_TABLE = "equipment_requests";
 const EQUIPMENT_TABLE = "equipment";
+const EQUIPMENT_WRITABLE_COLS = ["type", "description", "current_location", "status"];
 
 function pickCol(input, cols) {
   const source = input && typeof input === "object" ? input : {};
@@ -43,11 +44,50 @@ function createEquipmentService(client) {
 
   // Technical Support Staff manually record a status
   // change (e.g. AVAILABLE -> MAINTENANCE). Returns null only when the row
-  // does not exist.
-  async function updateEquipmentStatus(id, status) {
+  // does not exist. SCRUM-103 AC4: actingUserId is always the server-verified
+  // caller, never taken from the request body.
+  async function updateEquipmentStatus(id, status, actingUserId) {
     return unwrap(
-      await client.from(EQUIPMENT_TABLE).update({ status }).eq("id", id).select().maybeSingle(),
+      await client.from(EQUIPMENT_TABLE)
+        .update({ status, updated_by: actingUserId, updated_at: new Date().toISOString() })
+        .eq("id", id).select().maybeSingle(),
       "updateEquipmentStatus",
+    );
+  }
+
+  // Scrum-30 AC1/AC2: add a new catalogue record - one row is one physical
+  // item (see equipment.validation.js's validateCreateEquipment for the
+  // field rules this relies on already having been checked).
+  async function createEquipment(fields) {
+    return unwrap(
+      await client.from(EQUIPMENT_TABLE).insert(pickCol(fields, EQUIPMENT_WRITABLE_COLS)).select().single(),
+      "createEquipment",
+    );
+  }
+
+  // Scrum-30 AC1/AC2: edit an existing record's type, description, location
+  // or status. Returns null only when the row does not exist. SCRUM-103 AC4:
+  // actingUserId is always the server-verified caller, never the body.
+  async function updateEquipment(id, fields, actingUserId) {
+    return unwrap(
+      await client.from(EQUIPMENT_TABLE)
+        .update({ ...pickCol(fields, EQUIPMENT_WRITABLE_COLS), updated_by: actingUserId, updated_at: new Date().toISOString() })
+        .eq("id", id).select().maybeSingle(),
+      "updateEquipment",
+    );
+  }
+
+  // Scrum-30 AC1: retire is a deliberate lifecycle action, not a status
+  // choice - it always sets UNAVAILABLE and nothing else, and never deletes
+  // the row (history and any past requests still reference it). Returns
+  // null only when the row does not exist. SCRUM-103 AC4: actingUserId is
+  // always the server-verified caller, never the body.
+  async function retireEquipment(id, actingUserId) {
+    return unwrap(
+      await client.from(EQUIPMENT_TABLE)
+        .update({ status: "UNAVAILABLE", updated_by: actingUserId, updated_at: new Date().toISOString() })
+        .eq("id", id).select().maybeSingle(),
+      "retireEquipment",
     );
   }
 
@@ -130,6 +170,36 @@ function createEquipmentService(client) {
     );
   }
 
+  // SCRUM-103 AC3: APPROVED-only, unlike listActiveRequestsForEquipment below
+  // (which also includes PENDING, for the availability check). Only an
+  // APPROVED request counts as "reserved" for the retire-flagging rule - a
+  // PENDING one is not yet a commitment to anyone.
+  async function listApprovedRequestsForEquipment(equipmentId) {
+    return unwrap(
+      await client
+        .from(REQUESTS_TABLE)
+        .select("id, event_id, borrow_start, borrow_end")
+        .eq("equipment_id", equipmentId)
+        .eq("status", "APPROVED"),
+      "listApprovedRequestsForEquipment",
+    );
+  }
+
+  // SCRUM-103 (added scope): same APPROVED-only reasoning as
+  // listApprovedRequestsForEquipment above, batched across many units - for
+  // the catalogue's live "in use today" display, not a single retire action.
+  async function listApprovedRequestsForEquipmentIds(equipmentIds) {
+    if (equipmentIds.length === 0) return [];
+    return unwrap(
+      await client
+        .from(REQUESTS_TABLE)
+        .select("equipment_id, borrow_start, borrow_end")
+        .in("equipment_id", equipmentIds)
+        .eq("status", "APPROVED"),
+      "listApprovedRequestsForEquipmentIds",
+    );
+  }
+
   // Scrum-29 AC2/AC4: the PENDING/APPROVED requests for a set of equipment
   // units, so the availability check can apply isBlockingOverlap per unit.
   async function listActiveRequestsForEquipment(equipmentIds) {
@@ -180,18 +250,72 @@ function createEquipmentService(client) {
     );
   }
 
+  // SCRUM-104 AC1/AC2: every APPROVED request tied to a cancelled event is
+  // released, regardless of its borrow window - unlike SCRUM-103's
+  // retire-flagging (which is "today only" because retire has no date
+  // context beyond "now"), a cancelled event has a real start/end, so a
+  // future-dated APPROVED request is just as moot as one covering today.
+  // Re-running this for the same event is safe without an explicit
+  // "already RELEASED" guard: the APPROVED filter below simply matches
+  // nothing the second time.
+  //
+  // AC3: for each unit that lost a reservation, only revert
+  // equipment.status to AVAILABLE when it is actually IN_USE and no other
+  // PENDING/APPROVED request still covers today - a unit a technician has
+  // deliberately set to DAMAGED/MAINTENANCE/UNDER_MAINTENANCE/UNAVAILABLE is
+  // left alone (that is a more specific problem than "this reservation
+  // ended"). There is no cancellation endpoint in this story (events.status
+  // is set directly in the database - see docs/equipment-integration.md) so
+  // actingUserId has no real caller; equipment.updated_by is nullable and is
+  // left null rather than inventing a system user.
+  async function releaseReservationsForCancelledEvent(eventId, actingUserId = null) {
+    const requests = await listRequestsByEvent(eventId);
+    const approved = requests.filter((request) => request.status === "APPROVED");
+
+    const released = [];
+    for (const request of approved) {
+      await updateStatus(request.id, "RELEASED");
+      released.push(request.id);
+    }
+
+    const now = new Date().toISOString();
+    const equipmentReverted = [];
+    const equipmentSkipped = [];
+    for (const equipmentId of new Set(approved.map((request) => request.equipment_id))) {
+      const unit = await findEquipmentById(equipmentId);
+      if (!unit || unit.status !== "IN_USE") continue;
+
+      const stillActive = await listActiveRequestsForEquipment([equipmentId]);
+      if (stillActive.some((request) => isBlockingOverlap(request, now, now))) {
+        equipmentSkipped.push(equipmentId);
+        continue;
+      }
+
+      await updateEquipmentStatus(equipmentId, "AVAILABLE", actingUserId);
+      equipmentReverted.push(equipmentId);
+    }
+
+    return { released, equipmentReverted, equipmentSkipped };
+  }
+
   return {
     listEquipment,
     findEquipmentById,
     updateEquipmentStatus,
+    createEquipment,
+    updateEquipment,
+    retireEquipment,
     listRequestsByEvent,
     findRequestById,
     listAllRequests,
     hasOverlappingRequest,
     listEquipmentByType,
     listActiveRequestsForEquipment,
+    listApprovedRequestsForEquipment,
+    listApprovedRequestsForEquipmentIds,
     createRequest,
     updateStatus,
+    releaseReservationsForCancelledEvent,
   };
 }
 

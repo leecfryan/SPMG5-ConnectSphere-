@@ -1,4 +1,6 @@
 // Constructed only when the server-side data key is configured.
+const { PLANNING_STATUSES } = require("../events/lifecycle");
+
 module.exports = function createEquipmentDependencies() {
   const client = require("../../supabase");
   const { createEquipmentService } = require("./equipment.service");
@@ -14,7 +16,11 @@ module.exports = function createEquipmentDependencies() {
     messagesService: createMessagesService(client),
     findEventById: (id) => unwrap(client.from("events").select(fields).eq("id", id).maybeSingle()),
     findEventsByIds: (ids) => ids.length ? unwrap(client.from("events").select("id, name").in("id", ids)) : Promise.resolve([]),
-    listAssignedEvents: (id) => unwrap(client.from("events").select(fields).eq("coordinator_id", id).in("status", ["ACCEPTED", "APPROVED"]).order("start_time", { ascending: true })),
+    // SCRUM-104: there is no cancellation endpoint (events.status is set
+    // directly in the database), so equipment reads self-heal instead -
+    // see releaseCancelledEventReservations in equipment.controller.js.
+    listCancelledEventIds: async () => (await unwrap(client.from("events").select("id").eq("status", "CANCELLED"))).map((event) => event.id),
+    listAssignedEvents: (id) => unwrap(client.from("events").select(fields).eq("coordinator_id", id).in("status", PLANNING_STATUSES).order("start_time", { ascending: true })),
     async getUserDisplayName(id) {
       const { data, error } = await client.auth.admin.getUserById(id);
       if (error || !data?.user) return null;

@@ -42,6 +42,13 @@ function fakeEquipmentService({ equipmentById = {}, requestsByEvent = {}, reques
     async listAllRequests() {
       return allRequests;
     },
+    // SCRUM-103 (added scope): the catalogue's live "in use today" overlay -
+    // no test in this file exercises that logic itself (covered live in
+    // equipment-status-change.test.js), so reusing the existing allRequests
+    // fixture (default []) keeps every other test here unaffected.
+    async listApprovedRequestsForEquipmentIds(equipmentIds) {
+      return allRequests.filter((request) => equipmentIds.includes(request.equipment_id) && request.status === "APPROVED");
+    },
     async hasOverlappingRequest(equipmentId, borrowStart, borrowEnd) {
       calls.hasOverlappingRequest.push({ equipmentId, borrowStart, borrowEnd });
       return overlapping;
@@ -68,9 +75,12 @@ function fakeEquipmentService({ equipmentById = {}, requestsByEvent = {}, reques
 async function setup(t, {
   roleAssignments = { "anyone-authenticated": ["technical_support_staff"] },
   equipmentService,
-  findEventById = async () => ({ id: VALID_EVENT_ID, coordinator_id: "coord-1", status: "ACCEPTED" }),
+  findEventById = async () => ({ id: VALID_EVENT_ID, coordinator_id: "coord-1", status: "APPROVED" }),
   findEventsByIds = async (ids) => ids.map((id) => ({ id, name: "Event " + id })),
   getUserDisplayName = async (id) => "User " + id,
+  // SCRUM-104: equipment reads sweep for cancelled events first - no test in
+  // this file exercises that sweep, so an empty list is the correct no-op fake.
+  listCancelledEventIds = async () => [],
 }) {
   const app = express();
   app.use(express.json());
@@ -80,7 +90,7 @@ async function setup(t, {
     next();
   });
 
-  app.use("/api", equipmentRoutes({ authenticate: (req, res, next) => next(), equipmentService, findEventById, findEventsByIds, getUserDisplayName }));
+  app.use("/api", equipmentRoutes({ authenticate: (req, res, next) => next(), equipmentService, findEventById, findEventsByIds, getUserDisplayName, listCancelledEventIds }));
 
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -106,6 +116,27 @@ test("Scrum-27 AC1: a request created with a valid equipment_id resolves to that
   assert.equal(data.equipment_id, VALID_EQUIPMENT_ID);
   assert.equal(equipmentService.calls.createRequest.length, 1);
 });
+
+for (const status of ["SUBMITTED", "UNDER_REVIEW", "REJECTED"]) {
+  test(`SCRUM-99 AC1: equipment cannot be requested for a ${status} event, only after approval`, async (t) => {
+    const equipmentService = fakeEquipmentService({
+      equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID, type: "PROJECTOR", status: "AVAILABLE" } },
+    });
+    const base = await setup(t, {
+      roleAssignments: { "coord-1": ["event_coordinator"] }, equipmentService,
+      findEventById: async () => ({ id: VALID_EVENT_ID, coordinator_id: "coord-1", status }),
+    });
+
+    const response = await fetch(base + `/api/events/${VALID_EVENT_ID}/equipment-requests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-test-user-id": "coord-1" },
+      body: JSON.stringify(validCreatePayload()),
+    });
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), { error: "The event must be approved before requesting equipment." });
+    assert.equal(equipmentService.calls.createRequest.length, 0);
+  });
+}
 
 test("Scrum-27 AC1: an equipment_id that does not exist is rejected", async (t) => {
   const equipmentService = fakeEquipmentService({ equipmentById: {} });

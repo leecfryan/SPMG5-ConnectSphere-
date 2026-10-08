@@ -12,6 +12,7 @@ async function requestBody(path, token, options = {}) {
       ? ": " + body.details.map((d) => typeof d === "string" ? d : `${d.field} ${d.message}`).join(", ") : "";
     const error = new Error((body.error || body.message || "Request failed") + detail);
     error.status = response.status;
+    error.errors = Array.isArray(body.errors) ? body.errors : [];
     throw error;
   }
   return body;
@@ -30,10 +31,30 @@ export function apiFetch(path, token, options = {}) {
   });
 }
 
-export function fetchVenues({ city, minCapacity } = {}, token) {
+// SCRUM-18: list filters are sent comma separated, which is what the backend
+// splits them on. An empty filter is left out rather than sent empty, so the
+// server never has to tell "not filtering" from "filtering by nothing".
+// SCRUM-19: how well a shortlisted venue matches one of the coordinator's own
+// events, before any booking request exists.
+export function fetchVenueSuitability(venueId, eventId, token) {
+  return request(
+    `/api/venues/${venueId}/suitability?event_id=${encodeURIComponent(eventId)}`,
+    token
+  );
+}
+
+export function fetchVenues(
+  { city, minCapacity, facilities, accessibility, roomLayout, date, slots } = {},
+  token
+) {
   const params = new URLSearchParams();
   if (city) params.set("city", city);
   if (minCapacity) params.set("minCapacity", minCapacity);
+  if (facilities?.length) params.set("facilities", facilities.join(","));
+  if (accessibility?.length) params.set("accessibility", accessibility.join(","));
+  if (roomLayout) params.set("roomLayout", roomLayout);
+  if (date) params.set("date", date);
+  if (date && slots?.length) params.set("slots", slots.join(","));
 
   const query = params.toString();
   return request(`/api/venues${query ? `?${query}` : ""}`, token);
@@ -121,6 +142,27 @@ export function updateEquipmentStatus(id, status, token) {
 
 export function fetchEquipmentRequests(eventId, token) {
   return request(`/api/events/${eventId}/equipment-requests`, token);
+}
+
+// Scrum-30 AC1: add, update and retire a catalogue record.
+export function createEquipment(fields, token) {
+  return request("/api/equipment", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+}
+
+export function updateEquipment(id, fields, token) {
+  return request(`/api/equipment/${id}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+}
+
+export function retireEquipment(id, token) {
+  return request(`/api/equipment/${id}/retire`, token, { method: "PATCH" });
 }
 
 export function createEquipmentRequest(eventId, fields, token) {

@@ -37,11 +37,11 @@ test("SCRUM-97 AC2: extra columns are written alongside the status, but cannot o
   const { calls } = recorder({ id: "evt-1" });
 
   await loadRepository().transitionStatus("evt-1", "UNDER_REVIEW", "APPROVED", {
-    decided_by: "coord-1",
+    approved_rejected_by: "coord-1",
     status: "CONFIRMED",
   });
 
-  expect(calls).toContainEqual(["update", { decided_by: "coord-1", status: "APPROVED" }]);
+  expect(calls).toContainEqual(["update", { approved_rejected_by: "coord-1", status: "APPROVED" }]);
 });
 
 test("SCRUM-97 conflict: zero rows matched returns null so the caller can answer 409", async () => {
@@ -75,4 +75,20 @@ test("SCRUM-97 AC2: status is not a writable column, so a general update cannot 
 
   expect(repository.WRITABLE_COLS).not.toContain("status");
   expect(calls).toContainEqual(["update", { name: "Gala" }]);
+});
+
+test("SCRUM-98 AC4: with a coordinator given, the write also requires that coordinator to still hold the event", async () => {
+  const { calls } = recorder({ id: "evt-1" });
+
+  await loadRepository().transitionStatus("evt-1", "UNDER_REVIEW", "APPROVED", {}, "coord-1");
+
+  expect(calls).toContainEqual(["eq", "coordinator_id", "coord-1"]);
+});
+
+test("SCRUM-97: without a coordinator, no coordinator filter is added", async () => {
+  const { calls } = recorder({ id: "evt-1" });
+
+  await loadRepository().transitionStatus("evt-1", "SUBMITTED", "UNDER_REVIEW");
+
+  expect(calls.some(([name, column]) => name === "eq" && column === "coordinator_id")).toBe(false);
 });

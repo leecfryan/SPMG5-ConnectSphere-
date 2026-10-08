@@ -7,6 +7,7 @@ const cors = require('../../../backend/node_modules/cors');
 const { createClient } = require('../../../backend/node_modules/@supabase/supabase-js');
 const createApp = require('../../../backend/src/app');
 const requirePermission = require('../../../backend/src/middleware/requirePermission');
+const { canTransition } = require('../../../backend/src/modules/events/lifecycle');
 const { frontendURL, backendPort, authPort, authURL, publicKey } = require('./settings.cjs');
 
 if (!process.env.PW_CONTROL_KEY) throw new Error('Start using Playwright; control key is required.');
@@ -25,7 +26,7 @@ auth.post('/__test/accounts', (req, res) => {
   const id = randomUUID();
   const account = {
     id, email: id + '@example.test', password: 'Local-fixture-only-42!',
-    roles: req.body.roles ?? ['venue_staff'], metadata: req.body.metadata ?? {},
+    roles: req.body.roles ?? ['venue_staff'], metadata: req.body.metadata ?? {}, appMetadata: req.body.appMetadata ?? {},
     revoked: false, providerStatus: 200, loginStatus: 200,
     events: [], submissionFailure: false,
     counts: { login: 0, verification: 0, refresh: 0, logout: 0, record: 0, handler: 0 },
@@ -36,7 +37,7 @@ auth.post('/__test/accounts', (req, res) => {
 auth.patch('/__test/accounts/:id', (req, res) => {
   const account = accounts.get(req.params.id);
   if (!account) return res.sendStatus(404);
-  for (const key of ['roles', 'revoked', 'providerStatus', 'loginStatus', 'submissionFailure']) {
+  for (const key of ['roles', 'revoked', 'providerStatus', 'loginStatus', 'submissionFailure', 'appMetadata']) {
     if (Object.hasOwn(req.body, key)) account[key] = req.body[key];
   }
   res.sendStatus(204);
@@ -62,7 +63,7 @@ auth.get('/__test/accounts/:id', (req, res) => {
 function user(account) {
   return {
     id: account.id, email: account.email, aud: 'authenticated', role: 'authenticated',
-    app_metadata: { provider: 'email', providers: ['email'], roles: account.roles },
+    app_metadata: { ...account.appMetadata, provider: 'email', providers: ['email'], roles: account.roles },
     user_metadata: { full_name: 'Playwright Staff', ...account.metadata },
     email_confirmed_at: '2026-01-01T00:00:00.000Z', created_at: '2026-01-01T00:00:00.000Z',
   };
@@ -111,13 +112,24 @@ auth.post('/auth/v1/logout', (req, res) => {
 });
 
 const client = createClient(authURL, publicKey, { auth: { persistSession: false, autoRefreshToken: false } });
+const findEvent = (id) => [...accounts.values()].flatMap(account => account.events).find(event => event.id === id) || null;
 // Only storage is substituted; event routing, validation, normalization and
 // verified ownership are the production implementations.
 const eventsRepository = {
+  async findById(id) { return findEvent(id); },
+  // SCRUM-98/99: same guards as the real write: a permitted move, the expected
+  // current status and, when given, the coordinator still holding the event.
+  async transitionStatus(id, from, to, extra = {}, coordinatorId) {
+    if (!canTransition(from, to)) throw new Error(`Fixture: ${from} -> ${to} is not a permitted transition`);
+    const event = findEvent(id);
+    if (!event || event.status !== from || (coordinatorId && event.coordinator_id !== coordinatorId)) return null;
+    Object.assign(event, extra, { status: to });
+    return { ...event };
+  },
   async createSubmitted(fields, organiserId) {
     const account = accounts.get(organiserId);
     if (!account || account.submissionFailure) throw new Error('Fixture event storage unavailable');
-    const event = { ...fields, id: randomUUID(), organiser_id: organiserId, status: 'SUBMITTED', submitted_at: new Date().toISOString() };
+    const event = { ...fields, id: randomUUID(), organiser_id: organiserId, enrolled_attendees: 0, status: 'SUBMITTED', submitted_at: new Date().toISOString() };
     account.events.push(event);
     return event;
   },

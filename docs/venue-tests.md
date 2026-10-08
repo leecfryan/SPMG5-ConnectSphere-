@@ -1,54 +1,283 @@
-# Venue lane test guide
+# Venue — Test Documentation
 
-Test case specifications for all SCRUM stories in the Venue lane. IDs follow
-`TC-SCRUM-<n>-<nn>`. Automated test commands are listed at the bottom.
+Test evidence for the Venue lane (epic SCRUM-6). Behaviour, API and the schema reference live in
+[Venue integration](venue-integration.md); this file is the catalogue of what is tested and where.
+
+**73 automated backend tests across four suites, all passing**, plus manual cases run against the shared Supabase
+database and recorded in the team's TESTS sheet.
+
+| Suite | File | Tests |
+| --- | --- | --- |
+| Decisions | `backend/tests/integration/venueDecisions.test.js` | 22 |
+| Catalogue, calendar, requests | `backend/tests/integration/venues.integration.test.js` | 26 |
+| Storage and query scope | `backend/tests/integration/venues.storage.test.js` | 4 |
+| Unavailability periods | `backend/tests/integration/venues.unavailability.test.js` | 21 |
+| Browser journeys | `tests/playwright/venues.browser.spec.cjs` | 6 |
+
+Run everything:
+
+```bash
+npm --prefix backend test                # all three backend suites
+npm run test:playwright                  # browser and API
+npm --prefix backend run check
+npm --prefix frontend run lint
+```
+
+**No backend venue test connects to Supabase.** Each builds the real Express app through `createApp({...})` with a
+stubbed venue service and fake verified identities, so routing, permissions, validation and status codes are
+exercised without a database. The storage suite stubs the Supabase client itself to assert the exact queries sent.
+
+Test names lead with a bracketed tag, so the runner's output is the traceability report. Story tags are
+`[SCRUM-<n>]`; cross-cutting guards that belong to no single story use `[VENUE-…]` and `[ACCESS-VENUE-…]`.
 
 ---
 
-## SCRUM-133 — Mark a venue temporarily unavailable
+## 1. Story coverage
+
+| Story | Title | Automated tags | Sheet rows |
+| --- | --- | --- | --- |
+| SCRUM-15 | Browse the venue catalogue | `[SCRUM-15]` | TC-106 to TC-109, TC-121 |
+| SCRUM-16 | Update operating information | `[SCRUM-16]` | TC-108, TC-122, TC-123 |
+| SCRUM-17 | Availability calendar | `[SCRUM-17]` | TC-110, TC-124 to TC-127 |
+| SCRUM-21 | Submit a booking request | `[SCRUM-21]`, `[VENUE-SCOPE-001/002/003]` | TC-111 to TC-116, TC-128, TC-129 |
+| SCRUM-22 | Decide a venue booking request | `[SCRUM-22]`, `[VENUE-DECIDE-001]` to `[VENUE-DECIDE-004]` | TC-131 to TC-140 |
+| SCRUM-20 | Block conflicting venue booking | `[SCRUM-20]` | TC-167 to TC-175 |
+| SCRUM-102 | Reject with a reason and suggested alternative | `[SCRUM-102]` | TC-220 to TC-229 |
+| SCRUM-18 | Search and filter potential venues | `[SCRUM-18]` | TC-260 to TC-273 |
+| SCRUM-19 | Assess shortlisted venue suitability | `[SCRUM-19]` | TC-274 to TC-286 |
+| SCRUM-133 | Mark a venue temporarily unavailable | `[TC-SCRUM-133-01]` to `[TC-SCRUM-133-21]` | TC-SCRUM-133-01 to TC-SCRUM-133-21 |
+
+Cross-cutting guards that apply to every story: `[VENUE-AUTH-001]` (seven identities against eight endpoints),
+`[VENUE-AUTH-002]`, `[VENUE-INPUT-001]` (forged ownership and role fields), `[VENUE-CONFIG-001]` (missing venue
+storage leaves sign-in working), `[VENUE-DB-001]` to `[VENUE-DB-004]`, and `[ACCESS-VENUE-001/002]` from the RBAC
+lane (event names redacted from coordinators; only accepted or approved events may request a venue).
+
+---
+
+## 2. SCRUM-102 — Reject a booking with a reason and suggested alternative
+
+**Acceptance criteria, word for word**
+
+1. A rejection must carry a reason.
+2. Venue Staff may attach a suggested alternative venue or arrangement to the rejection.
+3. The reason and suggestion are visible to the requesting Event Coordinator, who makes any resulting change.
+4. The rejected request remains visible in the event's booking history.
+
+AC3 and AC4 were built by SCRUM-22 and are re-proven here rather than rebuilt. Only AC1 and AC2 needed new code.
+
+### Traceability
+
+| AC | Criterion | Test cases | Where the rule lives |
+| --- | --- | --- | --- |
+| 1 | A rejection must carry a reason | 01, 02, 03, 07, M1 | `validateDecision` in `venues.bookingRequests.validation.js` |
+| 2 | A suggested alternative may be attached | 04, M1 | The same `decision_note`; no separate column, see *Decisions* below |
+| 3 | Reason and suggestion visible to the requesting Coordinator | 05, M2 | `BOOKING_REQUEST_FIELDS` returns `decision_note`; the Decision block renders it |
+| 4 | The rejected request remains in the booking history | 06, M3 | `listBookingRequests` applies no status filter; only pending and confirmed bookings reach the calendar |
 
 ### Test cases
 
-| ID | AC | Type | Scenario | Pre-conditions | Steps | Test data | Expected result | Automated by | Latest execution |
-|---|---|---|---|---|---|---|---|---|---|
-| TC-SCRUM-133-01 | 1 | Happy | Venue Staff creates a single-day, single-slot unavailability period | Venue Staff signed in, venue exists | POST /api/venues/:id/unavailability with valid body | `{ start_date: "2099-11-01", end_date: "2099-11-01", slots: ["am"], reason: "Maintenance" }` | 201 with period object | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-02 | 2 | Happy | Multi-day, multi-slot period | Venue Staff signed in | POST with start/end 3 days apart and two slots | `{ start_date: "2099-11-01", end_date: "2099-11-03", slots: ["am","pm"], reason: "Renovation" }` | 201; end_date and slots in response | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-03 | 3 | Happy | Booking request blocked by unavailability | listUnavailabilityInRange mocked to return row for slot | Coordinator POSTs booking request for that slot | unavailable_date matching request date | 409 conflict | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-04 | 3 | Happy | Multiple slots blocked when all are covered | Two slot rows mocked | Coordinator tries each slot | am, pm | all return 409 | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-05 | 4 | Happy | Confirmed booking survives period creation | Existing booking in DB | POST period overlapping date | same venue/date/slot | 201; decideBookingRequest not called | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-06 | 5 | Happy | Edit period reason and end date | Period exists | PATCH with new reason and earlier end_date | `{ reason: "Updated reason", end_date: "2099-11-02" }` | 200; period shows updated values | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-07 | 5 | Happy | End period early (shorten end_date) | Period runs 2099-11-01 to 2099-11-05 | PATCH end_date to 2099-11-02 | `{ end_date: "2099-11-02" }` | 200; end_date is 2099-11-02 | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-08 | 1 | Happy | Venue Staff lists periods for a venue | Periods exist | GET /api/venues/:id/unavailability | — | 200 with array of periods | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-09 | 1 | Negative | Event Coordinator cannot create periods | Coordinator signed in | POST /api/venues/:id/unavailability | valid body | 403 | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-10 | 1 | Negative | Unauthenticated request refused | No token | POST | valid body | 401 | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-11 | 1 | Negative | Non-existent venue returns 404 | Venue Staff signed in | POST to unknown venue id | valid body | 404 | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-12 | 2 | Negative | Invalid slots rejected | Venue Staff signed in | POST with `slots: ["noon"]` | `{ slots: ["noon"] }` | 400 | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-13 | 2 | Negative | end_date before start_date rejected | Venue Staff signed in | POST with end before start | `{ start_date: "2099-11-05", end_date: "2099-11-01" }` | 400 | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-14 | 5 | Negative | PATCH with end_date before period start_date rejected | Period exists with start 2099-11-01 | PATCH `{ end_date: "2099-10-01" }` | end before start | 400 | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-15 | 2 | Boundary | Minimum period: one slot, one day | Venue Staff signed in | POST | same start and end date, one slot | 201 | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-16 | 3 | Boundary | Booking blocked when period covers that slot | Unavailability row mocked | Coordinator POSTs booking request | matching slot/date | 409 | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-17 | 5 | Boundary | Edit period to set end_date = start_date (one day) | Multi-day period exists | PATCH end_date to = start_date | — | 200 | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-18 | 4 | Conflict | Confirmed booking in period range is not cancelled | Existing booking | Create period covering its date | same venue/date | 201; booking service not called | `venues.unavailability.test.js` | 2026-10-07 pass |
-| TC-SCRUM-133-19 | 5 | Negative | PATCH on non-existent or wrong-venue period returns 404 | getUnavailabilityPeriodById returns null | PATCH | valid body | 404 | `venues.unavailability.test.js` | 2026-10-07 pass |
+| ID | AC | Type | Scenario | Test data | Expected result | Automated by | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-102-01 | 1 | Negative | Reject with no note field at all | `{ decision: "rejected" }` | 400, details name the missing reason, no decision recorded | `[SCRUM-102] A rejection with no reason is refused and nothing is decided` | 2026-10-02 ✅ |
+| TC-SCRUM-102-02 | 1 | Boundary | Reject with nothing that reads as a reason | `note` = `null`, `""`, `"   "`, `"\n\t "` | 400 for all four, no decision recorded | `[SCRUM-102] An empty or whitespace-only reason does not count as a reason` | 2026-10-02 ✅ |
+| TC-SCRUM-102-03 | 1 | Happy | Reject with a real reason | A reason padded with spaces | 200, status rejected, note stored trimmed | `[SCRUM-102] A rejection carrying a reason and a suggested alternative is recorded` | 2026-10-02 ✅ |
+| TC-SCRUM-102-04 | 2 | Happy | The reason names an alternative venue | "Marina is already held… Orchard Seminar Room 3 is free AM…" | The whole text is stored unchanged apart from trimming | same test as 03 | 2026-10-02 ✅ |
+| TC-SCRUM-102-05 | 3 | Happy | The requesting coordinator reads the decided request | `GET /booking-requests/:id` as `event_coordinator` | 200, `decision_note` carries the reason and the suggestion; scope is the coordinator's own | `[SCRUM-102] The requesting coordinator reads the reason under their own scope` | 2026-10-02 ✅ |
+| TC-SCRUM-102-06 | 4 | Happy | The rejected request stays in the history | `GET /booking-requests?status=rejected` | The request is still listed with its reason, while its slot shows available on the calendar | `[SCRUM-102] A rejected request stays in the booking history with its reason, while its slot is freed` | 2026-10-02 ✅ |
+| TC-SCRUM-102-07 | 1 | Happy | Approving needs no reason | `{ decision: "confirmed" }` | 200, unchanged from SCRUM-22 | `[SCRUM-102] Approving still needs no reason` | 2026-10-02 ✅ |
 
-### Coverage notes
+### Manual cases
 
-All 19 test cases are automated in `backend/tests/integration/venues.unavailability.test.js` (Vitest).
-The tests use a real Express app with a fully stubbed service and fake auth, exercising the routing,
-permission guards, validation and HTTP-layer behaviour without a database.
+Run against the shared Supabase database, because they exercise the browser and the live decision function.
 
-The period expansion logic in `listUnavailabilityInRange` (converting `venue_unavailability_periods`
-rows into the per-slot shape `buildAvailabilityCalendar` reads) is service-level code. It is verified
-via the integration tests that mock the service's expansion output into the booking endpoint (TC-133-03,
-TC-133-04, TC-133-16). A direct unit test of the expansion is not written as the function has no
-complex branching beyond the date range filter and flatMap.
+| ID | AC | Scenario | Expected result |
+| --- | --- | --- | --- |
+| TC-SCRUM-102-M1 | 1, 2 | Reject in the browser | Confirm rejection is disabled while the box is empty and while it holds only spaces, and becomes available once a reason is typed |
+| TC-SCRUM-102-M2 | 3 | The coordinator reads the outcome | The rejection reason and the suggested alternative are shown under Decision, with no decide controls |
+| TC-SCRUM-102-M3 | 4 | History and availability | The rejected request is still listed under Rejected and All, while the slot returns to Available on the calendar |
 
-### Test commands
+### Decisions
 
-```
-npm --prefix backend test           # runs all Vitest + node:test suites (backend)
-npm --prefix frontend test -- --run # runs all Vitest suites (frontend)
-npm --prefix frontend run lint      # ESLint
-npm --prefix frontend run build     # build check
-npm run test:playwright             # Playwright browser + API (requires local server)
-```
+- **The suggested alternative shares `decision_note`.** AC2 says staff *may* attach one, which free text
+  satisfies. A separate column would mean a hand made schema change on a database five lanes share, plus a field
+  in four layers that nothing queries. A new story if reporting on alternatives is ever needed.
+- **Approving still needs no reason.** No acceptance criterion has asked staff to justify a yes, so requiring one
+  would be scope beyond the story.
+- **Whitespace is not a reason.** A space bar press would otherwise satisfy AC1 while telling the coordinator
+  nothing.
+- **No schema change.** `decision_note` already existed, nullable, from SCRUM-22.
+
+### Deliberately absent
+
+A separate `suggested_alternative` column; requiring a reason on approval; notifying the coordinator, since no AC
+asks for a message; reversing a decision after the fact.
+
+---
+
+## 3. SCRUM-18 — Search and filter potential venues
+
+**Acceptance criteria, word for word**
+
+1. Venues can be filtered using relevant date and time requirements.
+2. Expected attendance/capacity, location and accessibility can be considered.
+3. Supported layout and required facilities can be considered.
+4. Searching and filtering identifies potential venues but does not replace the separate suitability assessment.
+
+City and minimum capacity already existed from SCRUM-15. This story adds
+accessibility, facilities, layout, and date and slot availability.
+
+### Traceability
+
+| AC | Criterion | Test cases | Where the rule lives |
+| --- | --- | --- | --- |
+| 1 | Date and time requirements | 03, 04, 05, 06, 08, M2, M3 | `filterByAvailability` in `venues.controller.js`, over `buildAvailabilityCalendar` |
+| 2 | Capacity, location, accessibility | 01, 07, 08, M1 | `listVenues` in `venues.service.js` |
+| 3 | Layout and facilities | 01, 02, M1 | `listVenues`, using Postgres array containment |
+| 4 | Narrows, does not assess | 09, M4 | No score or rank in the response; catalogue copy says so |
+
+### Test cases
+
+| ID | AC | Type | Scenario | Expected result | Automated by | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-18-01 | 2, 3 | Happy | All five stored filters at once | Every filter reaches the query unchanged | `[SCRUM-18] Capacity, location, accessibility, facilities and layout all narrow the catalogue` | 2026-10-05 ✅ |
+| TC-SCRUM-18-02 | 3 | Boundary | Two facilities requested | The venue must offer both, not either | `[SCRUM-18] Several facilities must all be offered, not just one of them` | 2026-10-05 ✅ |
+| TC-SCRUM-18-03 | 1 | Happy | A date and one slot | Only venues whose slot is still open are kept; a pending request does not exclude a venue | `[SCRUM-18] A date keeps only venues whose requested slots are still open` | 2026-10-05 ✅ |
+| TC-SCRUM-18-04 | 1 | Negative | Blocked period, and a venue closed that day | Both are dropped from the results | `[SCRUM-18] A blocked period and closed hours both remove a venue from the results` | 2026-10-05 ✅ |
+| TC-SCRUM-18-05 | 1 | Boundary | A date with no slots named | Any one free slot keeps the venue; only a venue booked all day drops out | `[SCRUM-18] A date with no slots keeps a venue that is free for part of the day` | 2026-10-05 ✅ |
+| TC-SCRUM-18-06 | 1 | Boundary | The same venue and day, with and without named slots | Kept for a bare date, dropped once the taken slot is asked for | `[SCRUM-18] Naming slots requires all of them, which a bare date does not` | 2026-10-05 ✅ |
+| TC-SCRUM-18-07 | 2 | Boundary | `minCapacity=0`, the lowest the catalogue's input allows | 200, and no capacity filter is applied | `[SCRUM-18] A minimum capacity of zero means no minimum, matching the catalogue's input` | 2026-10-05 ✅ |
+| TC-SCRUM-18-08 | 1, 2 | Negative | Seven malformed queries | 400 for each, and the catalogue is never queried | `[SCRUM-18] Malformed filters are refused instead of silently returning everything` | 2026-10-05 ✅ |
+| TC-SCRUM-18-09 | 4 | Happy | A search with no date | No score or rank is added, order is the catalogue's own, and the booking tables are not queried | `[SCRUM-18] Searching narrows but does not rank, and never reaches the date tables needlessly` | 2026-10-05 ✅ |
+
+### Manual cases
+
+| ID | AC | Scenario | Expected result |
+| --- | --- | --- | --- |
+| TC-SCRUM-18-M1 | 2, 3 | Filter by facility, accessibility and layout in the browser | Options come from the catalogue itself; results narrow as each is ticked |
+| TC-SCRUM-18-M2 | 1 | Filter by a date with a confirmed booking | The booked venue disappears for that slot and returns when the slot changes |
+| TC-SCRUM-18-M3 | 1 | Slots without a date | The slot chips are replaced by "Pick a date first" |
+| TC-SCRUM-18-M4 | 4 | Read the results page | The copy says these are potential venues to check, and nothing is scored or ranked |
+
+### Decisions
+
+- **The date filter reuses `buildAvailabilityCalendar`** rather than a new
+  Postgres function. No schema change on a shared database, and one definition
+  of what a free slot means. A database function would be faster on a catalogue
+  far larger than this one.
+- **"Free" means `available` or `pending`**, the same list a booking request is
+  allowed on, because only a confirmed booking takes a slot (SCRUM-21).
+- **All, not any.** Asking for two facilities returns venues offering both. A
+  shortlist wider than the requirements is not a shortlist.
+- **Named slots are "all", a bare date is "any"** (changed in review, 5 Oct).
+  The first version required every slot of the day to be free when only a date
+  was given, which contradicted the page's own wording and excluded venues that
+  were genuinely available that evening. The wording was the better behaviour,
+  so the rule changed to match it rather than the other way round.
+- **`minCapacity=0` means no minimum** (changed in review, 5 Oct). The capacity
+  input's lowest allowed value was 0 while validation rejected it, so an input
+  the page permitted produced an error. Zero now behaves exactly like a blank
+  field.
+- **Unknown query parameters are refused**, so a typo surfaces instead of
+  silently returning the whole catalogue.
+
+### Deliberately absent
+
+Scoring, ranking or a "best match"; a suitability verdict, which AC4 puts
+outside this story; filtering by setup, teardown or turnaround time, which
+nothing yet enforces; saved searches; and paging, since the catalogue is small
+and `listVenues` has no limit.
+
+---
+
+## 4. SCRUM-19 — Assess shortlisted venue suitability
+
+**Acceptance criteria, word for word**
+
+1. Suitability is assessed after a venue has been identified or shortlisted.
+2. The assessment compares current event requirements with available venue information.
+3. A venue should not normally be considered suitable when expected attendance exceeds its capacity.
+4. A venue should not normally be considered suitable when a required facility is unavailable.
+5. The exact presentation of the suitability result may be proposed by the solution team.
+
+### Traceability
+
+| AC | Criterion | Test cases | Where the rule lives |
+| --- | --- | --- | --- |
+| 1 | Assessed after shortlisting | 01, 08, 09, 10, M1 | `GET /api/venues/:id/suitability`, reachable from the venue page before any request exists |
+| 2 | Compares event requirements with venue information | 01, 03, 05, 06, 07, M1, M2 | `assessVenueSuitability` in `venues.bookingRequests.validation.js` |
+| 3 | Attendance above capacity | 02, M2 | Same function, capacity check |
+| 4 | Required facility unavailable | 03, 06, M2 | Same function, facility check |
+| 5 | Presentation proposed by the team | M1, M3 | Check suitability panel on the venue page |
+
+### Test cases
+
+| ID | AC | Type | Scenario | Expected result | Automated by | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-19-01 | 1, 2 | Happy | Every recorded requirement is met | `suitable`, three checks all met, and the event is read with the coordinator's own id | `[SCRUM-19] A venue meeting every recorded requirement is assessed suitable` | 2026-10-06 ✅ |
+| TC-SCRUM-19-02 | 3 | Negative | Attendance 201 against capacity 200 | `unsuitable`, the check names both numbers | `[SCRUM-19] Attendance above capacity makes a venue unsuitable` | 2026-10-06 ✅ |
+| TC-SCRUM-19-03 | 2, 4 | Negative | One facility offered, one not | `unsuitable` with one unmet, and the met facility is still listed | `[SCRUM-19] A required facility the venue lacks makes it unsuitable and is named` | 2026-10-06 ✅ |
+| TC-SCRUM-19-04 | 2 | Negative | An accessibility need the venue lacks | `unsuitable`; see *Decisions* for why this counts | `[SCRUM-19] An accessibility need the venue cannot meet also makes it unsuitable` | 2026-10-06 ✅ |
+| TC-SCRUM-19-05 | 2 | Boundary | Requirements arrive as free text | Two checks, not one per character; `Projector` is recognised from "Projector, plus a stage" | `[SCRUM-19] Requirements are read from free text, not treated as a list of characters` | 2026-10-06 ✅ |
+| TC-SCRUM-19-06 | 2, 4 | Boundary | "Somewhere backstage for the choir" | "backstage" does not match the `Stage` facility, and the unmatched sentence is reported rather than passed or failed | `[SCRUM-19] Only whole words count as a requirement, and unknown wording is reported` | 2026-10-06 ✅ |
+| TC-SCRUM-19-07 | 2 | Boundary | The event records no expected attendance | Reported with `met: null` and counted in `unknown_count`, never as met | `[SCRUM-19] A requirement the event never recorded is reported, not counted as met` | 2026-10-06 ✅ |
+| TC-SCRUM-19-08 | 1 | Negative | An event belonging to another coordinator | 404, no assessment of someone else's requirements | `[SCRUM-19] An event that is not the coordinator's own cannot be assessed` | 2026-10-06 ✅ |
+| TC-SCRUM-19-09 | 1 | Negative | Missing event id, malformed event id, malformed venue id | 400 for each, and no lookup is made | `[SCRUM-19] A missing or malformed id is refused before any lookup` | 2026-10-06 ✅ |
+| TC-SCRUM-19-10 | 1 | Negative | Seven other identities, including Venue Staff | 401 or 403 for each, and no lookup is made | `[SCRUM-19] %s cannot assess a venue against someone's event` | 2026-10-06 ✅ |
+
+### Manual cases
+
+| ID | AC | Scenario | Expected result |
+| --- | --- | --- | --- |
+| TC-SCRUM-19-M1 | 1, 2, 5 | Use the Check suitability panel on the venue page | The panel lists the coordinator's own events; choosing one shows a verdict and a row per requirement |
+| TC-SCRUM-19-M2 | 3, 4 | Assess a venue that is too small or lacks a facility | The verdict reads unsuitable and the failing rows are marked |
+| TC-SCRUM-19-M3 | 5 | Check the panel is not offered to Venue Staff | No Check suitability panel appears, because staff hold no `bookings.request` |
+
+### Decisions
+
+- **Requirements are read as free text against the catalogue's own vocabulary**
+  (changed during manual testing, 6 Oct). The first version treated
+  `venue_requirements` as a list and iterated the string character by
+  character, producing one check per letter. The events lane's guide states
+  these fields are free text and that structuring them is the consuming
+  feature's schema change. A term is now recognised only when some venue offers
+  a facility or accessibility feature by that name, matched case-insensitively
+  on whole words. Text matching nothing is reported as unmatched, never passed.
+  The limit is that a requirement naming something no venue offers cannot be
+  recognised at all.
+- **The backend tests did not catch this**, because they stub the venue service
+  and the stub used arrays. A stubbed test proves the code matches what the
+  author believed about the schema, not the schema itself. Found in the browser
+  during TC-SCRUM-19-M1.
+- **Unmet accessibility counts as unsuitable**, which goes slightly beyond the
+  literal wording of AC3 and AC4. AC2 asks for the event's current requirements
+  to be compared, and a recorded accessibility need is one. Flagged to the user
+  before building.
+- **A requirement the event never recorded is reported, not passed.** Staying
+  silent would read as a pass; `met: null` and `unknown_count` say plainly what
+  could not be compared.
+- **The assessment reuses the fields `validateAgainstVenue` reads**, so a venue
+  assessed suitable cannot then be refused at submission for a reason the
+  assessment never mentioned. This is the same class of mismatch review caught
+  in SCRUM-18 between the slot wording and the slot rule.
+- **The verdict is advice, not a gate.** Nothing prevents requesting a venue the
+  assessment calls unsuitable, because AC3 and AC4 say "should not normally",
+  and SCRUM-21 already refuses a request that genuinely breaks the rules.
+- **Shown on the venue page, not in the booking form** (AC5). AC1 puts the
+  assessment after shortlisting, and the point is to avoid requesting an
+  unsuitable venue, which is a decision made before the form is open.
+
+### Deliberately absent
+
+A score or ranking, which SCRUM-18 already ruled out; an override or
+acknowledgement flow for requesting an unsuitable venue, which no AC asks for;
+assessing against room layout, which events do not record; and assessing a venue
+for several events at once.
+
+---
+
+## 5. Coverage note
+
+`npm --prefix backend run test:cov` reports the whole backend. The venue modules are exercised through the three
+integration suites above rather than by unit tests of their own, so coverage of
+`venues.availability.js`, `venues.validation.js` and `venues.bookingRequests.validation.js` is indirect. Those three
+files import nothing, which is what makes direct unit tests cheap to add; that gap is known and unowned.

@@ -1,6 +1,7 @@
 // Lazy construction keeps sign-in available when venue storage is not configured.
 const getSupabase = () => require("../../supabase");
 const { eachDateInRange } = require("./venues.availability");
+const { PLANNING_STATUSES } = require("../events/lifecycle");
 
 // SCRUM-82, 83, 84: everything a Coordinator needs to assess a venue
 const VENUE_FIELDS = [
@@ -10,7 +11,13 @@ const VENUE_FIELDS = [
   "turnaround_minutes", "notes", "is_active",
 ].join(", ");
 
-async function listVenues({ city, minCapacity } = {}) {
+// SCRUM-18: every filter here narrows the catalogue by something stored on the
+// venue itself. Date and slot availability is not one of those, because it
+// depends on other tables; the controller applies it afterwards.
+//
+// `contains` is Postgres array containment, so a venue must offer *all* the
+// requested facilities or accessibility features, not merely one of them.
+async function listVenues({ city, minCapacity, facilities, accessibility, roomLayout } = {}) {
   let query = getSupabase()
     .from("venues")
     .select(VENUE_FIELDS)
@@ -19,9 +26,39 @@ async function listVenues({ city, minCapacity } = {}) {
 
   if (city) query = query.ilike("city", city);
   if (Number.isFinite(minCapacity)) query = query.gte("capacity", minCapacity);
+  if (facilities?.length) query = query.contains("facilities", facilities);
+  if (accessibility?.length) query = query.contains("accessibility_features", accessibility);
+  if (roomLayout) query = query.contains("room_layouts", [roomLayout]);
 
   const { data, error } = await query;
   if (error) throw new Error(`Failed to list venues: ${error.message}`);
+  return data;
+}
+
+// SCRUM-18: one query for the whole shortlist rather than a round trip per
+// venue, so adding a date filter costs two queries however many venues match.
+async function listBookingsForVenuesOnDate(venueIds, date) {
+  const { data, error } = await getSupabase()
+    .from("venue_bookings")
+    .select("venue_id, booking_date, slot, status, event_name")
+    .in("venue_id", venueIds)
+    .eq("booking_date", date)
+    .in("status", ["pending", "confirmed"]);
+
+  if (error) throw new Error(`Failed to list bookings: ${error.message}`);
+  return data;
+}
+
+async function listUnavailabilityForVenuesOnDate(venueIds, date) {
+  const { data, error } = await getSupabase()
+    .from("venue_unavailability")
+    .select("venue_id, unavailable_date, slot, reason")
+    .in("venue_id", venueIds)
+    .eq("unavailable_date", date);
+
+  if (error) {
+    throw new Error(`Failed to list unavailable periods: ${error.message}`);
+  }
   return data;
 }
 
@@ -140,15 +177,15 @@ async function getEventById(id, coordinatorId) {
   return data;
 }
 
-// SCRUM-85: the events a coordinator can pick from. Drafts are left out
-// because their timing is not final (see validateAgainstEvent), and events
-// that have already ended have nothing left to book.
+// SCRUM-85: the events a coordinator can pick from. Only approved events may be
+// booked (SCRUM-99 AC1, see validateAgainstEvent), and events that have already
+// ended have nothing left to book.
 async function listBookableEvents(coordinatorId) {
   const { data, error } = await getSupabase()
     .from("events")
     .select(EVENT_FIELDS)
     .eq("coordinator_id", coordinatorId)
-      .in("status", ["ACCEPTED", "APPROVED"])
+    .in("status", PLANNING_STATUSES)
     .not("start_time", "is", null)
     .gte("end_time", new Date().toISOString())
     .order("start_time", { ascending: true });
@@ -316,6 +353,8 @@ async function deleteUnavailabilityPeriod(periodId, venueId) {
 
 module.exports = {
   listVenues,
+  listBookingsForVenuesOnDate,
+  listUnavailabilityForVenuesOnDate,
   getVenueById,
   updateVenue,
   listBookingsInRange,

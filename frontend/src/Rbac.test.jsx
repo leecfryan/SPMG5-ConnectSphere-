@@ -44,6 +44,8 @@ function setup(roles, { profile = {}, initialSession = session, permissions } = 
       user: identity, permissions: permissions === undefined ? getPermissions(roles) : permissions,
     });
     if (url === "/api/internal/access") return response({ responsibilities: getResponsibilities(roles) });
+    if (url === "/api/internal/events/unassigned") return response({ events: [] });
+    if (url === "/api/managed-events") return response({ events: [] });
     throw new Error("Unexpected test request: " + url);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -148,6 +150,34 @@ test("[RBAC-ROLE-004] Multiple staff roles combine responsibilities without dupl
     labels["equipment.read"], labels["technical_requests.read"],
   ]);
   expect(screen.queryByText(labels["clients.read"])).toBeNull();
+});
+
+test("[RBAC-ASSIGNMENT-001] Event Operations Managers can open the coordinator assignment queue", async () => {
+  setup(["event_ops_manager"]);
+  render(<MemoryRouter initialEntries={["/events/assignments"]}><App /></MemoryRouter>);
+  expect(await screen.findByRole("heading", { name: "Assign an Event Coordinator" })).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Assign coordinators" })).toBeTruthy();
+});
+
+test("[RBAC-ASSIGNMENT-002] Event Coordinators cannot open the coordinator assignment queue", async () => {
+  setup(["event_coordinator"]);
+  render(<MemoryRouter initialEntries={["/events/assignments"]}><App /></MemoryRouter>);
+  expect(await screen.findByRole("heading", { name: "Access denied" })).toBeTruthy();
+});
+
+test.each(["event_organiser", "event_coordinator"])(
+  "[RBAC-MANAGED-EVENTS-001] %s can open their managed events",
+  async (role) => {
+    setup([role]);
+    render(<MemoryRouter initialEntries={["/events/managed"]}><App /></MemoryRouter>);
+    expect(await screen.findByRole("heading", { name: "My Events" })).toBeTruthy();
+  },
+);
+
+test("[RBAC-MANAGED-EVENTS-002] Event Operations Managers cannot open managed-event pages", async () => {
+  setup(["event_ops_manager"]);
+  render(<MemoryRouter initialEntries={["/events/managed"]}><App /></MemoryRouter>);
+  expect(await screen.findByRole("heading", { name: "Access denied" })).toBeTruthy();
 });
 
 // Real guards with test-only child content. No unfinished business pages are invented.

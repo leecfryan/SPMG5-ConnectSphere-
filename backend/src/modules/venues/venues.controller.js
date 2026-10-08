@@ -1,4 +1,4 @@
-const { validateVenueUpdate } = require("./venues.validation");
+const { validateVenueUpdate, validateVenueSearch } = require("./venues.validation");
 const { validateUnavailabilityCreate, validateUnavailabilityUpdate } = require("./venues.unavailability.validation");
 const {
   VENUE_TIME_ZONE,
@@ -10,6 +10,8 @@ const {
   findConfirmedSlotConflicts,
   deriveRequestStatus,
   validateDecision,
+  REQUESTABLE_STATUSES,
+  assessVenueSuitability,
 } = require("./venues.bookingRequests.validation");
 const {
   SLOTS,
@@ -23,9 +25,31 @@ const {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// SCRUM-18: rows for many venues come back in one list, so they are bucketed
+// by venue before the calendar runs over each one.
+// SCRUM-19: the distinct values one field holds across the catalogue, longest
+// first so "AV system" is tried before a shorter name it contains.
+function uniqueValues(rows, key) {
+  return [...new Set((rows || []).flatMap((row) => row[key] || []))].sort(
+    (a, b) => b.length - a.length
+  );
+}
+
+function groupBy(rows, key) {
+  const grouped = new Map();
+  for (const row of rows || []) {
+    const bucket = grouped.get(row[key]);
+    if (bucket) bucket.push(row);
+    else grouped.set(row[key], [row]);
+  }
+  return grouped;
+}
+
 function createVenuesController(service) {
   const {
     listVenues,
+    listBookingsForVenuesOnDate,
+    listUnavailabilityForVenuesOnDate,
     getVenueById,
     updateVenue,
     listBookingsInRange,
@@ -44,20 +68,59 @@ function createVenuesController(service) {
     deleteUnavailabilityPeriod: removePeriod,
   } = service;
 
-  async function getVenues(req, res, next) {
-    try {
-      const { city, minCapacity } = req.query;
+  // SCRUM-18: narrow the catalogue to potential venues.
+  //
+  // The filters a venue carries on its own row are applied by the database.
+  // Date and slot availability cannot be, because it depends on bookings and
+  // blocked periods, so it is applied here by running the SCRUM-17 calendar
+  // over the shortlist. That keeps one definition of what "free" means.
+  //
+  // This narrows; it does not decide. No score, no ranking, and the order
+  // stays alphabetical, because SCRUM-18 says searching does not replace the
+  // separate suitability assessment.
+  async function filterByAvailability(venues, date, slots, slotMatch) {
+    const venueIds = venues.map((venue) => venue.id);
+    const [bookings, unavailability] = await Promise.all([
+      listBookingsForVenuesOnDate(venueIds, date),
+      listUnavailabilityForVenuesOnDate(venueIds, date),
+    ]);
 
-      if (minCapacity !== undefined && Number.isNaN(Number(minCapacity))) {
-        return res.status(400).json({ error: "minCapacity must be a number" });
-      }
+    const bookingsByVenue = groupBy(bookings, "venue_id");
+    const unavailabilityByVenue = groupBy(unavailability, "venue_id");
 
-      const venues = await listVenues({
-        city,
-        minCapacity: minCapacity === undefined ? undefined : Number(minCapacity),
+    return venues.filter((venue) => {
+      const [day] = buildAvailabilityCalendar({
+        operatingHours: venue.operating_hours,
+        bookings: bookingsByVenue.get(venue.id) || [],
+        unavailability: unavailabilityByVenue.get(venue.id) || [],
+        from: date,
+        to: date,
       });
 
-      res.status(200).json({ data: venues });
+      // Named slots were asked for, so all of them must be open. A bare date
+      // asks for that day, so one open slot is enough. Either way a pending
+      // request does not take a slot, so it stays a candidate (SCRUM-21).
+      const isOpen = (slot) => REQUESTABLE_STATUSES.includes(day.slots[slot].status);
+      return slotMatch === "all" ? slots.every(isOpen) : slots.some(isOpen);
+    });
+  }
+
+  async function getVenues(req, res, next) {
+    try {
+      const { errors, value } = validateVenueSearch(req.query);
+      if (errors.length > 0) {
+        return res.status(400).json({ error: "Validation failed", details: errors });
+      }
+
+      const venues = await listVenues(value);
+
+      // Nothing matched the stored filters, so there is no day to look at.
+      const data =
+        value.date && venues.length > 0
+          ? await filterByAvailability(venues, value.date, value.slots, value.slotMatch)
+          : venues;
+
+      res.status(200).json({ data });
     } catch (err) {
       next(err);
     }
@@ -176,6 +239,56 @@ function createVenuesController(service) {
           to,
           slots: SLOTS,
           days,
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // SCRUM-19: assess a shortlisted venue against one of the coordinator's own
+  // events, before any request exists. The event is fetched through the same
+  // coordinator-scoped lookup the booking flow uses, so an event that is not
+  // theirs is a 404 rather than an assessment of someone else's requirements.
+  async function getVenueSuitability(req, res, next) {
+    try {
+      const { id } = req.params;
+      const eventId = req.query.event_id;
+
+      if (!UUID_PATTERN.test(id)) {
+        return res.status(400).json({ error: "Invalid venue id" });
+      }
+      if (eventId === undefined || !UUID_PATTERN.test(eventId)) {
+        return validationFailed(res, "event_id must be the id of one of your events");
+      }
+
+      // The catalogue supplies the vocabulary: a requirement is recognised only
+      // if some venue actually offers it by that name. Without this the free
+      // text on an event cannot be compared to anything.
+      const [venue, event, catalogue] = await Promise.all([
+        getVenueById(id),
+        getEventById(eventId, req.user.id),
+        listVenues({}),
+      ]);
+      if (!venue || !venue.is_active) {
+        return res.status(404).json({ error: "Venue not found" });
+      }
+      if (!event) {
+        return res.status(404).json({ error: "Event not found" });
+      }
+
+      const vocabulary = {
+        facilities: uniqueValues(catalogue, "facilities"),
+        accessibility: uniqueValues(catalogue, "accessibility_features"),
+      };
+
+      res.status(200).json({
+        data: {
+          venue_id: venue.id,
+          venue_name: venue.name,
+          event_id: event.id,
+          event_name: event.name,
+          ...assessVenueSuitability(venue, event, vocabulary),
         },
       });
     } catch (err) {
@@ -494,6 +607,7 @@ function createVenuesController(service) {
     getVenue,
     patchVenue,
     getVenueAvailability,
+    getVenueSuitability,
     getBookableEvents,
     postBookingRequest,
     getBookingRequests,

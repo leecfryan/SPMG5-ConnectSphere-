@@ -12,6 +12,7 @@ import {
   IconCheck,
   IconClock,
 } from "./VenueIcons";
+import ChipToggleGroup from "./ChipToggleGroup";
 import { formatDate, formatDateTime, localDate } from "../venueFormat";
 
 const SLOTS = ["am", "pm", "night"];
@@ -68,37 +69,6 @@ function StepHeader({ number, title, description }) {
         <p className="v-card-desc">{description}</p>
       </div>
     </div>
-  );
-}
-
-function ChipToggleGroup({ legend, options, selected, onToggle }) {
-  return (
-    <fieldset className="v-fieldset">
-      <legend>{legend}</legend>
-      {options.length === 0 ? (
-        <p className="v-none">None recorded for this venue</p>
-      ) : (
-        <div className="v-chips">
-          {options.map((item) => {
-            const isSelected = selected.includes(item);
-            return (
-              <label
-                key={item}
-                className={`v-chip-toggle ${isSelected ? "is-selected" : ""}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={isSelected}
-                  onChange={() => onToggle(item)}
-                />
-                <IconCheck size={14} />
-                {item}
-              </label>
-            );
-          })}
-        </div>
-      )}
-    </fieldset>
   );
 }
 
@@ -452,12 +422,14 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
               options={venueFacilities}
               selected={facilities}
               onToggle={(item) => setFacilities((current) => toggle(current, item))}
+              emptyLabel="None recorded for this venue"
             />
             <ChipToggleGroup
               legend="Accessibility needed"
               options={venueAccessibility}
               selected={accessibility}
               onToggle={(item) => setAccessibility((current) => toggle(current, item))}
+              emptyLabel="None recorded for this venue"
             />
           </div>
 

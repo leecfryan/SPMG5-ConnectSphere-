@@ -610,6 +610,75 @@
   border: 1px solid var(--v-danger-border);
 }
 
+/* SCRUM-19: a suitable verdict, the counterpart to .v-alert-error */
+.v-alert-ok {
+  color: var(--v-success);
+  background: var(--v-success-soft);
+  border: 1px solid var(--v-success);
+}
+
+/* SCRUM-19: one row per requirement compared against the venue */
+.venues .v-check-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+  background: var(--v-border);
+  border: 1px solid var(--v-border);
+  border-radius: var(--v-radius-md);
+  overflow: hidden;
+}
+
+.venues .v-check-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--v-surface);
+  font-size: 14px;
+}
+
+.venues .v-check-row.is-unmet {
+  background: var(--v-danger-soft);
+  color: var(--v-danger);
+}
+
+.venues .v-check-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--v-success);
+}
+
+.venues .v-check-row.is-unmet .v-check-icon {
+  color: var(--v-danger);
+}
+
+.venues .v-check-have {
+  color: var(--v-text-muted);
+  font-size: 13px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.venues .v-check-row.is-unmet .v-check-have {
+  color: var(--v-danger);
+}
+
+@media (max-width: 520px) {
+  .venues .v-check-row {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+
+  .venues .v-check-have {
+    grid-column: 2;
+    text-align: left;
+    white-space: normal;
+  }
+}
+
 .v-empty {
   padding: 56px 24px;
   text-align: center;

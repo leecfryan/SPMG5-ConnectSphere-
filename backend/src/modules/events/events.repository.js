@@ -1,6 +1,6 @@
 // Importing the application/validation must not require administrative credentials.
 const getSupabase = () => require("../../supabase");
-const { canTransition } = require("./lifecycle");
+const { canTransition, ACTIVE_STATUSES } = require("./lifecycle");
 
 const TABLE = "events";
 
@@ -10,13 +10,14 @@ const WRITABLE_COLS = [
   "description",
   "start_time",
   "end_time",
+  "registration_start",
+  "registration_end",
   "expected_attendance",
   "venue_requirements",
   "accessibility_needs",
   "equipment_needs",
   "other_comments",
 ];
-
 
 function pickCol(input) {
   const source = input && typeof input === "object" ? input : {};
@@ -92,20 +93,19 @@ async function markSubmitted(id, submittedAt = new Date().toISOString()) {
   );
 }
 
-async function transitionStatus(id, from, to, extra = {}) {
+// coordinatorId, when given, must still hold the event at write time, so a
+// reassignment between the access check and the write matches nothing (409).
+async function transitionStatus(id, from, to, extra = {}, coordinatorId) {
   if (!canTransition(from, to)) {
     throw new Error(`events.repository: ${from} -> ${to} is not a permitted transition`);
   }
-  return unwrap(
-    await getSupabase()
-      .from(TABLE)
-      .update({ ...extra, status: to })
-      .eq("id", id)
-      .eq("status", from)
-      .select()
-      .maybeSingle(),
-    "transitionStatus",
-  );
+  let query = getSupabase()
+    .from(TABLE)
+    .update({ ...extra, status: to })
+    .eq("id", id)
+    .eq("status", from);
+  if (coordinatorId) query = query.eq("coordinator_id", coordinatorId);
+  return unwrap(await query.select().maybeSingle(), "transitionStatus");
 }
 
 async function assignCoordinator(id, coordinatorId) {
@@ -134,8 +134,6 @@ async function findSubmittedUnassigned() {
     "findSubmittedUnassigned",
   );
 }
-
-const ACTIVE_STATUSES = ["SUBMITTED", "ACCEPTED", "APPROVED"];
 
 async function findActiveAssignments() {
   return unwrap(

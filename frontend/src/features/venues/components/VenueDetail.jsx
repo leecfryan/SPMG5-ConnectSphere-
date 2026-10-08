@@ -6,6 +6,7 @@ import {
   IconPencil,
   IconUsers,
 } from "./VenueIcons";
+import VenueSuitabilityPanel from "./VenueSuitabilityPanel";
 
 const DAY_ORDER = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const DAY_LABELS = {
@@ -87,7 +88,7 @@ function Stat({ icon, label, value, unit }) {
   );
 }
 
-function VenueDetail({ venue, onBack, onEdit, onViewAvailability, onManageUnavailability }) {
+function VenueDetail({ venue, onBack, onEdit, onViewAvailability, onManageUnavailability, canAssess }) {
   return (
     <div className="venue-detail">
       <button type="button" className="v-back" onClick={onBack}>
@@ -205,6 +206,10 @@ function VenueDetail({ venue, onBack, onEdit, onViewAvailability, onManageUnavai
               <p className="v-notes">{venue.notes}</p>
             </section>
           )}
+
+          {/* SCRUM-19: only a coordinator has events to assess against, so this
+              follows the same permission as requesting a booking. */}
+          {canAssess && <VenueSuitabilityPanel venue={venue} />}
         </div>
       </div>
     </div>

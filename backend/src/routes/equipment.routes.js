@@ -7,10 +7,10 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 
 // Storage stays optional at startup and injectable in integration tests.
 module.exports = function equipmentRoutes({ authenticate, equipmentService, messagesService,
-  findEventById, findEventsByIds, getUserDisplayName, listAssignedEvents }) {
+  findEventById, findEventsByIds, getUserDisplayName, listAssignedEvents, listCancelledEventIds }) {
   const router = express.Router();
   const controller = createEquipmentController({ equipmentService: equipmentService || {},
-    findEventById, findEventsByIds, getUserDisplayName });
+    messagesService: messagesService || {}, findEventById, findEventsByIds, getUserDisplayName, listCancelledEventIds });
   const messages = createMessagesController({ messagesService: messagesService || {},
     equipmentService: equipmentService || {}, findEventById, retention });
   const guards = (permission, configured = equipmentService) => [authenticate,
@@ -33,6 +33,11 @@ module.exports = function equipmentRoutes({ authenticate, equipmentService, mess
   }
 
   router.get("/equipment", ...guards("equipment.read"), controller.getEquipmentCatalogue);
+  // Scrum-30 AC1: add/update/retire a catalogue record - management actions,
+  // separate from equipment.review's quick operational-status PATCH below.
+  router.post("/equipment", ...guards("equipment.manage"), controller.postEquipment);
+  router.patch("/equipment/:id", ...guards("equipment.manage"), controller.patchEquipment);
+  router.patch("/equipment/:id/retire", ...guards("equipment.manage"), controller.patchEquipmentRetire);
   // Scrum-29: catalogue-wide check, not scoped to one event or record - same
   // reasoning as GET /equipment above (see staff-access.md: equipment
   // catalogue access is not limited by assigned venue/equipment/location).

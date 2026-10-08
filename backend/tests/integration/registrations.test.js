@@ -110,6 +110,30 @@ test("GET /api/events: returns approved events", async (t) => {
   assert.equal(events[0].status, "APPROVED");
 });
 
+test("GET /api/events: includes registration count and capacity for slot availability", async (t) => {
+  const base = await setup(t, {
+    tables: {
+      events: (q) => {
+        assert.equal(q.select, "id, name, description, start_time, status, enrolled_attendees, expected_attendance");
+        return {
+          data: [{
+            ...APPROVED_EVENT,
+            enrolled_attendees: 7,
+            expected_attendance: 10,
+          }],
+          error: null,
+        };
+      },
+    },
+  });
+
+  const response = await fetch(base + "/api/events", { headers: AUTH });
+  const { events } = await response.json();
+
+  assert.equal(events[0].enrolled_attendees, 7);
+  assert.equal(events[0].expected_attendance, 10);
+});
+
 test("GET /api/events: returns empty array when no approved events exist", async (t) => {
   const base = await setup(t, {
     tables: { events: () => ({ data: [], error: null }) },
@@ -147,13 +171,27 @@ test("GET /api/events: requires authentication", async (t) => {
 
 test("GET /api/events/:eventId: returns an approved event", async (t) => {
   const base = await setup(t, {
-    tables: { events: () => ({ data: APPROVED_EVENT, error: null }) },
+    tables: {
+      events: (q) => {
+        assert.equal(q.select, "id, name, purpose, description, start_time, end_time, enrolled_attendees, expected_attendance, status, registration_fields");
+        return {
+          data: {
+            ...APPROVED_EVENT,
+            enrolled_attendees: 7,
+            expected_attendance: 10,
+          },
+          error: null,
+        };
+      },
+    },
   });
   const res = await fetch(base + "/api/events/event-approved", { headers: AUTH });
   assert.equal(res.status, 200);
   const { event } = await res.json();
   assert.equal(event.name, "Test Event");
   assert.equal(event.status, "APPROVED");
+  assert.equal(event.enrolled_attendees, 7);
+  assert.equal(event.expected_attendance, 10);
 });
 
 test("GET /api/events/:eventId: returns 404 for a non-existent event", async (t) => {
@@ -632,7 +670,7 @@ test("[REG-BACKEND-047] AC1/AC2: attendee listings query only approved events de
     APPROVED_EVENT,
     { ...DRAFT_EVENT, status: "SUBMITTED" },
     { ...DRAFT_EVENT, id: "rejected-event", status: "REJECTED" },
-    { ...DRAFT_EVENT, id: "accepted-event", status: "ACCEPTED" },
+    { ...DRAFT_EVENT, id: "under-review-event", status: "UNDER_REVIEW" },
   ];
   let query;
   const base = await setup(t, { tables: {
@@ -652,7 +690,7 @@ test("[REG-BACKEND-048] AC2: event detail queries enforce both the requested ID 
     APPROVED_EVENT,
     { ...DRAFT_EVENT, status: "SUBMITTED" },
     { ...DRAFT_EVENT, id: "rejected-event", status: "REJECTED" },
-    { ...DRAFT_EVENT, id: "accepted-event", status: "ACCEPTED" },
+    { ...DRAFT_EVENT, id: "under-review-event", status: "UNDER_REVIEW" },
   ];
   const queries = [];
   const base = await setup(t, { tables: {

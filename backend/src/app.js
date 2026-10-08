@@ -10,9 +10,11 @@ const registrationEventRoutes = require("./modules/registrations/eventHandlers")
 const equipmentRoutes = require("./routes/equipment.routes");
 const createEventsRoutes = require("./routes/events.routes");
 const createAssignmentsRoutes = require("./routes/assignments.routes");
+const createManagedEventsRoutes = require("./routes/managedEvents.routes");
 const createEventWorkspaceRoutes = require("./routes/eventWorkspace.routes");
+const createReviewRoutes = require("./routes/review.routes");
 
-function createApp({ authClient, dataClient, eventsRepository, assignmentDependencies, venuesService, equipmentDependencies, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
+function createApp({ authClient, dataClient, eventsRepository, assignmentDependencies, venuesService, equipmentDependencies, managedEventsService, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
   const app = express();
   const authenticate = requireAuth(authClient);
   app.disable("x-powered-by");
@@ -40,7 +42,12 @@ function createApp({ authClient, dataClient, eventsRepository, assignmentDepende
     res.json({ responsibilities: getResponsibilities(req.user.roles) });
   });
   app.use("/api/internal", createAssignmentsRoutes(assignmentDependencies));
+  app.use("/api/internal", createReviewRoutes(eventsRepository));
   app.use("/api/venues", authenticate, requirePermission("internal.access"), createVenuesRoutes(venuesService));
+  // Event Organisers hold no internal.access, so this cannot live under
+  // /api/internal. Nor under /api/events: the registration router's GET /:eventId
+  // would swallow the detail path, the same reason Venue sits on its own prefix.
+  app.use("/api/managed-events", createManagedEventsRoutes({ authenticate, managedEventsService }));
   app.use(errorHandler);
   return app;
 }

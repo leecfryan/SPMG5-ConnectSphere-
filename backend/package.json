@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:report": "vitest run --reporter=html",
+    "test:registration-live": "vitest run tests/live/registrationCapacity.userStory.test.js",
     "test:auth": "node --test tests/integration/auth.test.js tests/integration/permissions.test.js",
     "test:events": "vitest run",
     "seed:users": "node scripts/seedUsers.js",

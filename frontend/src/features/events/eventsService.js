@@ -1,9 +1,11 @@
+import { apiFetch } from "../../lib/api";
+
 // Field limits are input safeguards that mirror events.validation.js on the
 // backend. They shorten the round trip; they are not the rule. The server
 // validates every submission regardless of what the browser allowed.
 export const EVENT_LIMITS = Object.freeze({ name: 200, text: 2000 });
 
-const TIME_FIELDS = ["start_time", "end_time"];
+const TIME_FIELDS = ["start_time", "end_time", "registration_start", "registration_end"];
 
 async function readJson(response) {
   try {
@@ -17,7 +19,7 @@ async function readJson(response) {
 // would read it in *its* time zone (UTC in Docker), shifting the event by the
 // organiser's offset. Converted here, where the browser knows the organiser's
 // zone. Unreadable values pass through untouched so the server names the field.
-function withZonedTimes(fields) {
+export function withZonedTimes(fields) {
   const out = { ...fields };
   for (const field of TIME_FIELDS) {
     const millis = new Date(out[field]).getTime();
@@ -60,6 +62,22 @@ export async function submitEventRequest(fields, token) {
       event: null,
       errors: [],
       message: "Unable to connect. Check your connection and try again.",
+    };
+  }
+}
+
+export async function updateEventRequest(eventId, fields, token) {
+  if (!token) return { event: null, errors: [], message: "Please sign in to update an event." };
+  try {
+    const payload = await apiFetch(`/api/event-workspace/organiser/${encodeURIComponent(eventId)}`, token, {
+      method: "PATCH", body: withZonedTimes(fields),
+    });
+    if (!payload.event) return { event: null, errors: [], message: "Unable to update the event. Please refresh and try again." };
+    return { event: payload.event, errors: [], message: "" };
+  } catch (error) {
+    return {
+      event: null, errors: error.errors || [],
+      message: error.errors?.length ? "" : error.status ? error.message : "Unable to connect. Check your connection and try again.",
     };
   }
 }

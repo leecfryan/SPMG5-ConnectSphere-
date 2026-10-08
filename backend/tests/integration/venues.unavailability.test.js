@@ -28,7 +28,7 @@ const venue = {
 const event = {
   id: eventId,
   name: "Assigned conference",
-  status: "ACCEPTED",
+  status: "APPROVED",
   start_time: "2099-10-10T00:00:00Z",
   end_time: "2099-10-10T15:00:00Z",
 };
