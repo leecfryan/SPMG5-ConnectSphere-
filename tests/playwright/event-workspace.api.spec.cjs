@@ -80,6 +80,40 @@ test('[REVIEW-E2E-API-001] SCRUM-98/99 review actions: assigned coordinator only
   expect((await status()).status).toBe('APPROVED');
 });
 
+// SCRUM-148: only the assigned coordinator may cancel, and only with a reason.
+test('[REVIEW-E2E-API-002] SCRUM-148: only the assigned coordinator may cancel, and only with a reason', async ({ accounts, request }) => {
+  const { event, first, second, headers, update } = await setupWorkflow(accounts, request);
+  for (const role of ['venue_staff', 'technical_support_staff']) {
+    headers[role] = { Authorization: 'Bearer ' + (await accounts.session(await accounts.create([role]))).access_token };
+  }
+  expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
+  const cancel = (as, data) => request.post(`/api/internal/events/${event.id}/cancel`, { headers: as, data });
+
+  for (const role of ['second', 'organiser', 'venue_staff', 'technical_support_staff', 'attendee']) {
+    expect((await cancel(headers[role], { reason: 'Not allowed' })).status(), role).toBe(403);
+  }
+  expect((await cancel(undefined, { reason: 'No session' })).status()).toBe(401);
+  expect((await cancel(headers.first, {})).status()).toBe(400);
+  expect((await cancel(headers.first, { reason: '   ' })).status()).toBe(400);
+
+  const response = await cancel(headers.first, { reason: 'Venue flooded' });
+  expect(response.status()).toBe(200);
+  expect((await response.json()).event).toMatchObject({ status: 'CANCELLED', cancelled_by: first.id, cancellation_reason: 'Venue flooded' });
+  expect((await cancel(headers.first, { reason: 'Again' })).status()).toBe(409);
+});
+
+// SCRUM-148: the ops manager may cancel any event, not just one assigned to them.
+test('[REVIEW-E2E-API-003] SCRUM-148: the ops manager may cancel any event', async ({ accounts, request }) => {
+  const { event, first, manager, headers, update } = await setupWorkflow(accounts, request);
+  expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
+  const cancel = (as, data) => request.post(`/api/internal/events/${event.id}/cancel`, { headers: as, data });
+
+  const response = await cancel(headers.manager, { reason: 'Duplicate booking' });
+  expect(response.status()).toBe(200);
+  expect((await response.json()).event).toMatchObject({ status: 'CANCELLED', cancelled_by: manager.id });
+  expect((await cancel(headers.manager, { reason: 'Again' })).status()).toBe(409);
+});
+
 test('[EVENT-API-100] SCRUM-100: Client organiser sees own and same-company requests and denied edits leave complete records unchanged', async ({ accounts, request }) => {
   const { organiser, colleague, outsider, headers, events, beta } = await setupOrganiserAccess(accounts, request);
   const visible = await request.get('/api/event-workspace/organiser', { headers: headers.organiser });
