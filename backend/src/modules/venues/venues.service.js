@@ -272,6 +272,20 @@ async function decideBookingRequest(requestId, decision, note, decidedBy) {
   return data;
 }
 
+// SCRUM-148 AC3: cross-lane addition, approved by the Venue owner and kept to
+// this one function. Releases every pending/confirmed venue_bookings row tied
+// to the cancelled event's booking request(s), across however many venues the
+// event used, in one call - see cancel_venue_booking_requests_for_event (SQL
+// in SCRUM-148's task note). Idempotent: an already-cancelled row is excluded,
+// so re-running this for the same event is a no-op.
+async function releaseBookingsForCancelledEvent(eventId) {
+  const { data, error } = await getSupabase().rpc("cancel_venue_booking_requests_for_event", {
+    p_event_id: eventId,
+  });
+  if (error) throw new Error(`Failed to release venue bookings: ${error.message}`);
+  return data;
+}
+
 module.exports = {
   listVenues,
   listBookingsForVenuesOnDate,
@@ -287,4 +301,5 @@ module.exports = {
   getBookingRequestById,
   listBookingRequests,
   decideBookingRequest,
+  releaseBookingsForCancelledEvent,
 };
