@@ -158,19 +158,21 @@ it is still `IN_USE` and no other active (`PENDING`/`APPROVED`) reservation stil
 technician has deliberately set to `DAMAGED`/`MAINTENANCE`/`UNDER_MAINTENANCE`/`UNAVAILABLE` is left alone.
 `updated_by` is `null` on this write (there is no authenticated caller without a cancellation endpoint).
 
-There are now three ways this runs:
+There are two ways this runs:
 
 - **The real cancel action (SCRUM-148).** `POST /api/internal/events/:eventId/cancel` calls this function
   synchronously as part of the same request, so it is true the moment cancellation is saved - see
   `docs/event-requests.md`'s *Cancelling an event* section for the action itself.
-- **Equipment reads self-heal automatically**, for any event cancelled before this action existed, or cancelled
-  directly in the database. `GET /equipment` and `GET /equipment/availability` both call
-  `releaseCancelledEventReservations` (`equipment.controller.js`) before computing their response: it lists every
-  `CANCELLED` event (`listCancelledEventIds`, a dependency alongside `findEventById`/`findEventsByIds`) and
-  releases each one's reservations. Calling this on every read is safe and cheap: once an event's requests are
-  `RELEASED`/`REJECTED`, re-processing it is a no-op.
-- **`backend/scripts/releaseCancelledEvents.js`** does the same thing on demand, for scripting/ops use
-  (`node scripts/releaseCancelledEvents.js <eventId>` or `--all`), without waiting for the next read.
+- **Equipment reads self-heal automatically**, for any event cancelled directly in the database rather than
+  through the action (e.g. historical data from before SCRUM-148 existed). `GET /equipment` and
+  `GET /equipment/availability` both call `releaseCancelledEventReservations` (`equipment.controller.js`) before
+  computing their response: it lists every `CANCELLED` event (`listCancelledEventIds`, a dependency alongside
+  `findEventById`/`findEventsByIds`) and releases each one's reservations. Calling this on every read is safe and
+  cheap: once an event's requests are `RELEASED`, re-processing it is a no-op.
+
+`backend/scripts/releaseCancelledEvents.js` (SCRUM-104's manual on-demand trigger, for use before any cancel
+action existed) was removed once SCRUM-148 made the first path above the normal route to `CANCELLED` - the
+synchronous call and the read-time self-heal between them cover every case the script did.
 
 ## Database and deployment prerequisites
 
@@ -282,13 +284,11 @@ it writes to a real development database:
   browser UI (Scrum-30). SCRUM-103 added one case: restoring a retired unit
   back to `AVAILABLE` through the catalogue page's "Restore to available"
   control, confirmed on a page reload.
-- `equipment-release-cancelled-event.spec.js` (SCRUM-104): two scenarios against
-  a cancelled throwaway event - running `scripts/releaseCancelledEvents.js` as a
-  real child process, and cancelling the event with no script run at all, relying
-  only on the next `GET /equipment`/`GET /equipment/availability` call to self-heal.
-  Both confirm through the real running backend that the request reads
-  `RELEASED`, the equipment reads `AVAILABLE`, and availability counts the unit
-  again.
+- `equipment-release-cancelled-event.spec.js` (SCRUM-104): a cancelled throwaway
+  event, with no script or action run at all, relying only on the next
+  `GET /equipment`/`GET /equipment/availability` call to self-heal. Confirms
+  through the real running backend that the request reads `RELEASED`, the
+  equipment reads `AVAILABLE`, and availability counts the unit again.
 - `technical-support-review.spec.js`: dashboard review/status update and
   clarification-thread visibility using the real `coordinator.demo`/
   `technical.demo` seed accounts (requires `SEED_USER_PASSWORD` and
