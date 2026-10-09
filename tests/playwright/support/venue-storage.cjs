@@ -46,6 +46,8 @@ module.exports = function venueStorage(accounts) {
     },
     async getBookingRequestById(id, scope) { return requests.find(r => r.id === id && visible(r, scope)) || null; },
     async listBookingRequests(scope) { return requests.filter(r => visible(r, scope)); },
+    // Same rule as decide_venue_booking_request: coordinator-cancelled slots stay cancelled.
+    async decideBookingRequest(id, decision) { const r = requests.find(r => r.id === id); if (!r) return null; for (const slot of r.slots) if (slot.status !== 'cancelled') slot.status = decision; return id; },
     // SCRUM-133: unavailability period CRUD
     async createUnavailabilityPeriod(venueId, data, createdBy) {
       const period = { ...data, id: randomUUID(), venue_id: venueId, created_by: createdBy,
@@ -71,6 +73,5 @@ module.exports = function venueStorage(accounts) {
       const [removed] = periods.splice(idx, 1);
       return { id: removed.id };
     },
->>>>>>> 2fd56806caaba746d216f4dfff39dc95bc515e2a
   };
 };
