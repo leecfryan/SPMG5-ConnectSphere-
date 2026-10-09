@@ -1,4 +1,5 @@
 const { validateVenueUpdate, validateVenueSearch } = require("./venues.validation");
+const { validateUnavailabilityCreate, validateUnavailabilityUpdate } = require("./venues.unavailability.validation");
 const {
   VENUE_TIME_ZONE,
   localDateInTimeZone,
@@ -60,6 +61,11 @@ function createVenuesController(service) {
     getBookingRequestById,
     listBookingRequests,
     decideBookingRequest,
+    createUnavailabilityPeriod,
+    listUnavailabilityPeriods,
+    getUnavailabilityPeriodById,
+    updateUnavailabilityPeriod,
+    deleteUnavailabilityPeriod: removePeriod,
   } = service;
 
   // SCRUM-18: narrow the catalogue to potential venues.
@@ -524,6 +530,78 @@ function createVenuesController(service) {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // SCRUM-133: venue unavailability periods
+  // ---------------------------------------------------------------------------
+
+  async function getUnavailabilityPeriods(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+      const venue = await getVenueById(id);
+      if (!venue) return res.status(404).json({ error: "Venue not found" });
+      const periods = await listUnavailabilityPeriods(id);
+      res.status(200).json({ data: periods });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async function postUnavailabilityPeriod(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+      const { errors, value } = validateUnavailabilityCreate(req.body);
+      if (errors.length > 0) return res.status(400).json({ error: "Validation failed", details: errors });
+      const venue = await getVenueById(id);
+      if (!venue) return res.status(404).json({ error: "Venue not found" });
+      const period = await createUnavailabilityPeriod(id, value, req.user.id);
+      res.status(201).json({ data: period });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async function patchUnavailabilityPeriod(req, res, next) {
+    try {
+      const { id, periodId } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+      if (!UUID_PATTERN.test(periodId)) return res.status(400).json({ error: "Invalid period id" });
+      const { errors, value } = validateUnavailabilityUpdate(req.body);
+      if (errors.length > 0) return res.status(400).json({ error: "Validation failed", details: errors });
+
+      // Fetch existing period to validate cross-field date constraint when only
+      // one date is submitted, and to confirm the period belongs to this venue.
+      const existing = await getUnavailabilityPeriodById(periodId, id);
+      if (!existing) return res.status(404).json({ error: "Unavailability period not found" });
+
+      const effectiveStart = value.start_date ?? existing.start_date;
+      const effectiveEnd = value.end_date ?? existing.end_date;
+      if (effectiveEnd < effectiveStart) {
+        return res.status(400).json({ error: "Validation failed", details: ["end_date must not be before start_date"] });
+      }
+
+      const updated = await updateUnavailabilityPeriod(periodId, id, value);
+      if (!updated) return res.status(404).json({ error: "Unavailability period not found" });
+      res.status(200).json({ data: updated });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async function deleteUnavailabilityPeriod(req, res, next) {
+    try {
+      const { id, periodId } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+      if (!UUID_PATTERN.test(periodId)) return res.status(400).json({ error: "Invalid period id" });
+      const deleted = await removePeriod(periodId, id);
+      if (!deleted) return res.status(404).json({ error: "Unavailability period not found" });
+      res.status(204).end();
+    } catch (err) {
+      next(err);
+    }
+  }
+
   return {
     getVenues,
     getVenue,
@@ -535,6 +613,10 @@ function createVenuesController(service) {
     getBookingRequests,
     getBookingRequest,
     patchBookingRequestDecision,
+    getUnavailabilityPeriods,
+    postUnavailabilityPeriod,
+    patchUnavailabilityPeriod,
+    deleteUnavailabilityPeriod,
   };
 
 }
