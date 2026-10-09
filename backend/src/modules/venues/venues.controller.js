@@ -20,6 +20,7 @@ const {
   addDays,
   daysBetween,
   buildAvailabilityCalendar,
+  committedSlots,
 } = require("./venues.availability");
 
 const UUID_PATTERN =
@@ -100,8 +101,20 @@ function createVenuesController(service) {
       // Named slots were asked for, so all of them must be open. A bare date
       // asks for that day, so one open slot is enough. Either way a pending
       // request does not take a slot, so it stays a candidate (SCRUM-21).
+      //
+      // SCRUM-134: for named-slot searches, also check the buffer slots that
+      // the committed period (setup + turnaround) extends into, since those
+      // slots must be free for the booking to fit.
       const isOpen = (slot) => REQUESTABLE_STATUSES.includes(day.slots[slot].status);
-      return slotMatch === "all" ? slots.every(isOpen) : slots.some(isOpen);
+      if (slotMatch === "all") {
+        const slotsToCheck = committedSlots(
+          slots,
+          venue.setup_minutes,
+          venue.turnaround_minutes
+        );
+        return slotsToCheck.every(isOpen);
+      }
+      return slots.some(isOpen);
     });
   }
 
@@ -371,11 +384,13 @@ function createVenuesController(service) {
         to: value.booking_date,
       });
 
+      // SCRUM-134: venue passed so committed period (setup + turnaround) is checked
       const { conflicts, duplicates } = findSlotProblems(
         value,
         calendarDay,
         slotRows,
-        value.event_id
+        value.event_id,
+        venue
       );
       if (conflicts.length > 0 || duplicates.length > 0) {
         return res.status(409).json({

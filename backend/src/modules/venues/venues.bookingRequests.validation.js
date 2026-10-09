@@ -8,7 +8,7 @@
 //   3. validateAgainstEvent         SCRUM-86, the date fits the event timing
 //   4. findSlotProblems             the slots are actually requestable that day
 
-const { SLOTS, isValidDateString } = require("./venues.availability");
+const { SLOTS, isValidDateString, committedSlots } = require("./venues.availability");
 const { PLANNING_STATUSES } = require("../events/lifecycle");
 
 const UUID_PATTERN =
@@ -231,9 +231,13 @@ function validateAgainstEvent(value, event, today) {
 // buildAvailabilityCalendar the SCRUM-17 calendar uses, so the two can never
 // disagree about whether a slot is free.
 //
-//   conflicts   slot is closed, recorded unavailable, or already confirmed
+//   conflicts   slot is closed, recorded unavailable, or already confirmed;
+//               SCRUM-134: also includes buffer slots the committed period covers
 //   duplicates  this same event already has a live request on this slot
-function findSlotProblems(value, calendarDay, existingSlotRows, eventId) {
+//
+// SCRUM-134: venue is used to derive the committed period (setup + turnaround).
+// Pass null/undefined to skip the buffer check (preserves pre-134 call sites).
+function findSlotProblems(value, calendarDay, existingSlotRows, eventId, venue) {
   const conflicts = [];
   const duplicates = [];
 
@@ -252,6 +256,37 @@ function findSlotProblems(value, calendarDay, existingSlotRows, eventId) {
     );
     if (alreadyRequested) {
       duplicates.push(`${slot} is already requested for this event`);
+    }
+  }
+
+  // SCRUM-134: check buffer slots that the committed period (setup + turnaround)
+  // extends into but that are not directly requested. These slots must be
+  // requestable too, because they are occupied by the venue's preparation time.
+  if (venue) {
+    const allCommitted = committedSlots(
+      value.slots,
+      venue.setup_minutes,
+      venue.turnaround_minutes
+    );
+    const bufferSlots = allCommitted.filter((slot) => !value.slots.includes(slot));
+
+    for (const slot of bufferSlots) {
+      const cell = calendarDay.slots[slot];
+      if (!REQUESTABLE_STATUSES.includes(cell.status)) {
+        const slotIndex = SLOTS.indexOf(slot);
+        const firstRequestedIndex = Math.min(
+          ...value.slots.map((s) => SLOTS.indexOf(s))
+        );
+        const bufferType =
+          slotIndex < firstRequestedIndex ? "setup time" : "turnaround time";
+        const reason =
+          cell.status === "closed"
+            ? "outside operating hours"
+            : `${cell.status}: ${cell.label}`;
+        conflicts.push(
+          `${slot} is needed for ${bufferType} but is not available (${reason})`
+        );
+      }
     }
   }
 
