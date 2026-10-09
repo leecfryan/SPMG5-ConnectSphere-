@@ -286,6 +286,12 @@ reuses `review.routes.js#assignedToCaller`.
   checks refuse new requests until the coordinator withdraws (`SAFETY_REVIEW → APPROVED`).
 - No activity history is written; SCRUM-141 adds it (discussion #33: history is optional in
   Release 1).
+- Page: `SafetyCheckControls.jsx` (with `safetyService.js`) on `/assigned-events/:eventId`, shown
+  only to the assigned coordinator. On an `APPROVED` event it lists what is missing, with *Check
+  again*, and enables *Submit for safety check* once nothing is. On a `SAFETY_REVIEW` event it
+  explains the lock and offers *Withdraw from safety check*. The *Arrange venue bookings* and
+  *Arrange equipment* links show only for `APPROVED` and `CONFIRMED`, so they disappear during
+  review.
 
 | Status | When | Message |
 | --- | --- | --- |

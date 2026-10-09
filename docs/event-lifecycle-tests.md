@@ -1,7 +1,7 @@
 # Event Status Lifecycle — Test Documentation
 
 **Deliverable evidence for SCRUM-97 (Progress an event through its status lifecycle), epic Event Lifecycle &
-Approval.** SCRUM-98 (review) and SCRUM-99 (approve) are in §8. Branch: `feature/eventLifecycleStatus` · **15 documented cases, 43 automated tests, all passing**
+Approval.** SCRUM-98 (review) and SCRUM-99 (approve) are in §8; SCRUM-139 (safety check) is in §9. Branch: `feature/eventLifecycleStatus` · **15 documented cases, 43 automated tests, all passing**
 — 34 backend unit, 9 frontend component, plus 1 manual database case.
 
 Story context — the eight statuses, the permitted moves, who sets each status and the schema change — is in
@@ -255,11 +255,88 @@ existing loading and error states, which these tests don't exercise.
 TC-SCRUM-98-13, 98-14, 98-22 to 98-26, 99-10 and 99-15/16 were added during build. They aren't in the original draft, but each is the
 failure or boundary path of an AC above.
 
-## 9. Requirements sources
+## 9. SCRUM-139 — submit for the Operational Safety Check
+
+Readiness rule, the three actions, the page controls and both Playwright journeys are automated. The venue and
+equipment refusals during review (AC4) reuse those lanes' existing "must be approved" checks; `SAFETY_REVIEW` was
+added to their refusal lists.
+
+> **SCRUM-139:** As an Event Coordinator, I want to submit an event for the Operational Safety Check once its venue
+> and technical arrangements are confirmed so that it can be reviewed and move into preparation.
+>
+> 1. An event can only be submitted once its essential venue bookings are approved and its technical arrangements
+>    are reserved.
+> 2. If arrangements are missing, submission is blocked and the missing items are shown.
+> 3. The event moves to a safety review status when submitted.
+> 4. Venue and technical arrangements cannot be changed during safety review unless the submission is withdrawn.
+
+| Layer | File | Pre-conditions |
+| --- | --- | --- |
+| Rule (unit) | `backend/tests/unit/events/safetyReadiness.test.js` | Pure `findMissingArrangements`; arrangements built per test (venue "Hall B", 2099-05-01) |
+| Repository (unit) | `backend/tests/unit/events/events.arrangements.test.js` | `recorder()` as in §2 |
+| Lifecycle (unit) | `backend/tests/unit/events/lifecycle.test.js` | As §2, with `SAFETY_REVIEW` in the typed table |
+| HTTP (integration) | `backend/tests/integration/events.safetyCheck.test.js` | Real `createApp`; `authClient.getUser` faked (token = `<user id>:<roles>`); in-memory event `APPROVED`, assigned to the caller, whose `transitionStatus` honours the status and coordinator filters |
+| Frontend (component) | `frontend/src/features/events/components/SafetyCheckControls.test.jsx` | Real component, `safetyService.js`, `useApiResource` and `apiFetch`; `fetch` stubbed; token `coordinator-token`; event `aaaaaaaa-0139-…` |
+| Frontend (page) | `frontend/src/features/events/pages/EventWorkspaceDetailPage.test.jsx` | As §8, with the in-memory event answering the safety-check POSTs |
+| Playwright | `tests/playwright/safety-check.api.spec.cjs`, `safety-check.browser.spec.cjs` | Real Express app and UI against the local Auth simulator; arrangements made through the venue and equipment lanes' own endpoints on a date 45 days ahead |
+
+| ID | AC | Type | Scenario | Test data | Expected result | Automated test | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-139-01 | 1 | Happy | Everything arranged | 2 confirmed venue requests, 1 `APPROVED` equipment | Nothing missing | `SCRUM-139 AC1: confirmed venues and approved equipment leave nothing missing` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-02 | 1 | Negative | No venue request | none | "No venue booking has been approved yet." | `SCRUM-139 AC1: an event with no venue request is missing a venue` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-03 | 1 | Negative | A venue still pending | 1 confirmed, 1 pending (Hall B · 2099-05-01) | Hall B listed, "Waiting for Venue Staff to decide." | `SCRUM-139 AC1: a pending venue request is missing, even beside a confirmed one` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-04 | 1 | Boundary | Rejected / cancelled beside a confirmed venue | 1 confirmed, 1 rejected, 1 cancelled | Nothing missing | `SCRUM-139 AC1: rejected and cancelled requests do not block when another venue is confirmed` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-05 | 1 | Boundary | Only rejected / cancelled venues | 1 rejected | "No venue booking has been approved yet." | `SCRUM-139 AC1: only rejected or cancelled requests count as no venue` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-06 | 1 | Negative | Equipment unattended or with issues | Projector `PENDING`, Speaker `REJECTED` | Both listed with the UI-label reasons | `SCRUM-139 AC1: unattended and issue equipment requests are missing` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-07 | 1 | Boundary | No equipment, or only released | 0 / 1 `RELEASED` | Nothing missing | `test.each` in `safetyReadiness.test.js` (×2) | 2026-10-09 · pass · local |
+| TC-SCRUM-139-08 | 2 | Happy | Every missing item listed together | no venue, 2 pending equipment | Three items, venue first | `SCRUM-139 AC2: every missing item is listed together, venue first` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-09 | 1, 2 | Negative | Submit with missing items | `APPROVED`, 1 pending venue | 409 with `missing`; still `APPROVED`; no write | `SCRUM-139 AC1/AC2: submitting with missing arrangements is a 409 listing them, and changes nothing`; `[SAFETY-E2E-API-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-10 | 2 | Happy | Readiness endpoint | not ready; ready | `{ ready: false, missing }`; `{ ready: true, missing: [] }` | `SCRUM-139 AC2: readiness lists what is missing…`; `SCRUM-139 AC1: readiness reports a fully arranged event as ready`; `[SAFETY-E2E-API-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-11 | 3 | Happy | Ready event submitted | `APPROVED`, ready | 200, `SAFETY_REVIEW`; write filtered on `APPROVED` and the caller | `SCRUM-139 AC3: a ready approved event moves to SAFETY_REVIEW for the calling coordinator only`; `[SAFETY-E2E-API-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-12 | 3 | Conflict | Wrong status, or changed meanwhile | `SUBMITTED`, `UNDER_REVIEW`, `SAFETY_REVIEW`, `CONFIRMED`, `CANCELLED`; lost race | 409 refresh message; nothing written | `test.each` wrong status (×5); `SCRUM-139 AC3 conflict: an event that changes between the check and the write is a 409` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-13 | 4 | Happy | Withdraw | `SAFETY_REVIEW` | 200, `APPROVED` | `SCRUM-139 AC4: withdrawing moves SAFETY_REVIEW back to APPROVED`; `[SAFETY-E2E-API-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-14 | 4 | Conflict | Withdraw when not in review | `APPROVED` | 409; unchanged | `SCRUM-139 AC4 conflict: an event not under safety review cannot be withdrawn`; `[SAFETY-E2E-API-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-15 | 4 | Negative | New venue request during review | `SAFETY_REVIEW` | Refused; nothing written | `[ACCESS-VENUE-002]` (now ×5); `[SAFETY-E2E-API-001]` (400) | 2026-10-09 · pass · local |
+| TC-SCRUM-139-16 | 4 | Negative | New equipment request during review | `SAFETY_REVIEW` | 409 "The event must be approved before requesting equipment." | `SCRUM-99 AC1: equipment cannot be requested for a SAFETY_REVIEW event…`; `[SAFETY-E2E-API-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-17 | 4 | Happy | Lifecycle table | — | `APPROVED→SAFETY_REVIEW`, `SAFETY_REVIEW→APPROVED/CANCELLED`; active, not planning | `lifecycle.test.js` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-18 | 1–4 | Negative | Access matrix | no token, `invalid`; 6 other roles; unassigned coordinator; unknown / malformed id | 401; 403; event unchanged | `SCRUM-139: an unauthenticated caller…` (×2); role `test.each` (×6); `SCRUM-139: a coordinator not assigned to the event…`; `SCRUM-139: an unknown or malformed event id…`; `[SAFETY-E2E-API-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-19 | 1–3 | Failure | Storage down | record check / arrangements / write throw | 503; 500 safe message, no provider text | `SCRUM-139 failure: …` (×5); `findArrangements throws when storage fails…` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-20 | 2 | Happy | Coordinator sees missing items | `APPROVED`, Hall B and Projector missing | Both listed; Submit disabled; *Check again* refetches | `[SCRUM-139-UI-001]`, `[SCRUM-139-UI-005]`, `[SCRUM-139-UI-011]`; `[E2E-SAFETY-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-21 | 2 | Failure | Readiness fails / submit refused meanwhile | 503; 409 with `missing` | Safe message and *Try again*; on 409 the server's message and the fresh list | `[SCRUM-139-UI-004]`, `[SCRUM-139-UI-003]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-22 | 3 | Happy | Submit from the page | ready `APPROVED` event | Badge "Safety review"; arrangement links gone; *Withdraw* shown | `[SCRUM-139-UI-002]`, `[SCRUM-139-UI-009]`; `[E2E-SAFETY-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-23 | 4 | Happy | Withdraw from the page | `SAFETY_REVIEW` | Badge "Approved – planning"; links back; a refused withdrawal shows the message | `[SCRUM-139-UI-006]`, `[SCRUM-139-UI-007]`, `[SCRUM-139-UI-009]`; `[E2E-SAFETY-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-24 | 1 | Boundary | Confirmed + coordinator-cancelled slots | 2 confirmed, 1 cancelled | Counts as booked | `SCRUM-139 AC1: a request with confirmed and coordinator-cancelled slots counts as booked` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-25 | 2 | Boundary | Pending venue, nothing booked | 1 pending | Listed once, not also "No venue" | `SCRUM-139 AC2: a pending venue with nothing booked is listed once, not twice` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-26 | 3 | Negative | Controls only for the assigned coordinator, in the right status | organiser, manager, other coordinator; 6 other statuses | No section; no safety request sent | `[SCRUM-139-UI-010]` (×3), `[SCRUM-139-UI-008]` (×6) | 2026-10-09 · pass · local |
+| TC-SCRUM-139-27 | 3, 4 | Failure | Double click while in flight | second click on *Submit* / *Withdraw* before the reply | Button "Submitting…" / "Withdrawing…" and disabled; one POST | `[SCRUM-139-UI-012]` (×2) | 2026-10-09 · pass · local |
+
+**Coverage** (2026-10-09, `test:cov`, local): `safetyReadiness.js`, `safetyCheck.service.js`,
+`safetyCheck.controller.js`, `safetyCheck.routes.js`, `lifecycle.js` and `review.routes.js` 100%.
+`events.repository.js` 88% lines; `findArrangements` is fully covered and the uncovered lines (`findById`,
+`findByIds`, `markSubmitted`) predate this story. `safetyService.js` 100%. `SafetyCheckControls.jsx` 100% lines and
+functions; v8 reports 79% branches, the JSX artefact described in §8 (every status, ready / not ready, loading,
+error and in-flight path has a test). The join hints in `findArrangements` (`venues!venue_id`,
+`equipment!equipment_id`) are proven against real Supabase only by the manual demo.
+
+**Test review.** Each case was checked against a plausible wrong implementation:
+
+| Mutation | Test that goes red |
+| --- | --- |
+| Drop the server-side readiness check on submit | TC-139-09 |
+| Drop the record check | the app refuses to start ("requires a server-side record access check") |
+| Count a pending slot as booked | TC-139-03 |
+| Let `REJECTED` equipment through | TC-139-06 |
+| Put `SAFETY_REVIEW` in `PLANNING_STATUSES` | TC-139-15, TC-139-17 (TC-139-16 is guarded by the equipment lane's own status list) |
+| UI: leave Submit enabled while in flight | TC-139-27 |
+
+TC-SCRUM-139-26 and 27 were added during build; each is a negative or failure path of an AC above.
+
+## 10. Requirements sources
 
 | Ref | What it says |
 | --- | --- |
 | **SCRUM-97** (backlog US-40) | Progress an event through its status lifecycle, 3 SP. AC in §1. |
 | Team-agreed lifecycle table | The 8 statuses and 10 permitted moves; recorded in `.agent/docs/architecture.md` §Database. `APPROVED` is the stored value for "approved / planning" because Registration and Venue already query it. |
 | **SCRUM-98**, **SCRUM-99** (backlog US-36, US-38) | Review and approve: the actions that use this lifecycle. See §8. |
+| **SCRUM-139** (backlog US-83) | Submit for the Operational Safety Check, 3 SP. See §9. |
 | Discussions #80, #94, #95, #101, #125 | The assigned coordinator decides; the manager only assigns; assignment doesn't start review; `approved_rejected_by` kept apart from `coordinator_id`; who sees the outcome |

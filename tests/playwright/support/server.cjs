@@ -126,6 +126,15 @@ const eventsRepository = {
     Object.assign(event, extra, { status: to });
     return { ...event };
   },
+  // SCRUM-139: read from the venue and equipment fixtures, in the production row shape.
+  async findArrangements(id) {
+    const { equipmentService } = equipmentDependencies;
+    const venueRequests = (await venuesService.listBookingRequests({ allVenues: true })).filter(r => r.event_id === id)
+      .map(r => ({ id: r.id, booking_date: r.booking_date, venue: { name: r.venue.name }, slots: r.slots }));
+    const equipmentRequests = await Promise.all((await equipmentService.listRequestsByEvent(id))
+      .map(async r => ({ id: r.id, status: r.status, equipment: { type: (await equipmentService.findEquipmentById(r.equipment_id)).type } })));
+    return { venueRequests, equipmentRequests };
+  },
   async createSubmitted(fields, organiserId) {
     const account = accounts.get(organiserId);
     if (!account || account.submissionFailure) throw new Error('Fixture event storage unavailable');
