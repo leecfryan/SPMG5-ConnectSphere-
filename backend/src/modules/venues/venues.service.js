@@ -1,5 +1,6 @@
 // Lazy construction keeps sign-in available when venue storage is not configured.
 const getSupabase = () => require("../../supabase");
+const { eachDateInRange } = require("./venues.availability");
 const { PLANNING_STATUSES } = require("../events/lifecycle");
 
 // SCRUM-82, 83, 84: everything a Coordinator needs to assess a venue
@@ -100,19 +101,35 @@ async function listBookingsInRange(venueId, from, to) {
   return data;
 }
 
-// SCRUM-93: periods Venue Staff recorded as unavailable
+// SCRUM-93: per-slot rows from the seed table. SCRUM-133: period records from the
+// new table, expanded into the same row shape so buildAvailabilityCalendar reads both.
 async function listUnavailabilityInRange(venueId, from, to) {
-  const { data, error } = await getSupabase()
-    .from("venue_unavailability")
-    .select("unavailable_date, slot, reason")
-    .eq("venue_id", venueId)
-    .gte("unavailable_date", from)
-    .lte("unavailable_date", to);
+  const supabase = getSupabase();
+  const [legacyResult, periodsResult] = await Promise.all([
+    supabase
+      .from("venue_unavailability")
+      .select("unavailable_date, slot, reason")
+      .eq("venue_id", venueId)
+      .gte("unavailable_date", from)
+      .lte("unavailable_date", to),
+    supabase
+      .from("venue_unavailability_periods")
+      .select("start_date, end_date, slots, reason")
+      .eq("venue_id", venueId)
+      .lte("start_date", to)
+      .gte("end_date", from),
+  ]);
 
-  if (error) {
-    throw new Error(`Failed to list unavailable periods: ${error.message}`);
-  }
-  return data;
+  if (legacyResult.error) throw new Error(`Failed to list unavailable periods: ${legacyResult.error.message}`);
+  if (periodsResult.error) throw new Error(`Failed to list unavailability periods: ${periodsResult.error.message}`);
+
+  const expanded = periodsResult.data.flatMap((period) =>
+    eachDateInRange(period.start_date, period.end_date)
+      .filter((date) => date >= from && date <= to)
+      .flatMap((date) => period.slots.map((slot) => ({ unavailable_date: date, slot, reason: period.reason })))
+  );
+
+  return [...legacyResult.data, ...expanded];
 }
 
 // ---------------------------------------------------------------------------
@@ -283,6 +300,65 @@ async function releaseBookingsForCancelledEvent(eventId) {
     p_event_id: eventId,
   });
   if (error) throw new Error(`Failed to release venue bookings: ${error.message}`);
+// ---------------------------------------------------------------------------
+// SCRUM-133: venue unavailability periods
+// ---------------------------------------------------------------------------
+
+const PERIOD_FIELDS =
+  "id, venue_id, start_date, end_date, slots, reason, created_by, created_at, updated_at";
+
+async function createUnavailabilityPeriod(venueId, { start_date, end_date, slots, reason }, createdBy) {
+  const { data, error } = await getSupabase()
+    .from("venue_unavailability_periods")
+    .insert({ venue_id: venueId, start_date, end_date, slots, reason, created_by: createdBy })
+    .select(PERIOD_FIELDS)
+    .single();
+  if (error) throw new Error(`Failed to create unavailability period: ${error.message}`);
+  return data;
+}
+
+async function listUnavailabilityPeriods(venueId) {
+  const { data, error } = await getSupabase()
+    .from("venue_unavailability_periods")
+    .select(PERIOD_FIELDS)
+    .eq("venue_id", venueId)
+    .order("start_date", { ascending: true });
+  if (error) throw new Error(`Failed to list unavailability periods: ${error.message}`);
+  return data;
+}
+
+async function getUnavailabilityPeriodById(periodId, venueId) {
+  const { data, error } = await getSupabase()
+    .from("venue_unavailability_periods")
+    .select(PERIOD_FIELDS)
+    .eq("id", periodId)
+    .eq("venue_id", venueId)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to fetch unavailability period: ${error.message}`);
+  return data;
+}
+
+async function updateUnavailabilityPeriod(periodId, venueId, changes) {
+  const { data, error } = await getSupabase()
+    .from("venue_unavailability_periods")
+    .update(changes)
+    .eq("id", periodId)
+    .eq("venue_id", venueId)
+    .select(PERIOD_FIELDS)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to update unavailability period: ${error.message}`);
+  return data;
+}
+
+async function deleteUnavailabilityPeriod(periodId, venueId) {
+  const { data, error } = await getSupabase()
+    .from("venue_unavailability_periods")
+    .delete()
+    .eq("id", periodId)
+    .eq("venue_id", venueId)
+    .select("id")
+    .maybeSingle();
+  if (error) throw new Error(`Failed to delete unavailability period: ${error.message}`);
   return data;
 }
 
@@ -302,4 +378,9 @@ module.exports = {
   listBookingRequests,
   decideBookingRequest,
   releaseBookingsForCancelledEvent,
+  createUnavailabilityPeriod,
+  listUnavailabilityPeriods,
+  getUnavailabilityPeriodById,
+  updateUnavailabilityPeriod,
+  deleteUnavailabilityPeriod,
 };

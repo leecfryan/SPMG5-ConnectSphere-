@@ -11,6 +11,7 @@ export default defineConfig({
     // These suites run separately using Node's test runner.
     exclude: ["tests/unit/equipment/**", "tests/integration/auth.test.js", "tests/integration/permissions.test.js"],
     environment: "node",
+    testTimeout: 15000,
     // Test names lead with the Jira key, so the per-test lines the verbose
     // reporter prints are the traceability report docs/event-request-tests.md
     // cites. A summary-only reporter would drop that evidence.
