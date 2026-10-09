@@ -6,7 +6,6 @@ export default defineConfig({
     // multiple sequential round-trips per test; under load (many test files
     // running in parallel against the same project) the default 5000ms can
     // be too tight for an otherwise-correct test.
-    testTimeout: 15000,
     include: ["tests/**/*.test.js"],
     // These suites run separately using Node's test runner.
     exclude: ["tests/unit/equipment/**", "tests/integration/auth.test.js", "tests/integration/permissions.test.js"],

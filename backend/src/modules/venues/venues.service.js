@@ -300,6 +300,8 @@ async function releaseBookingsForCancelledEvent(eventId) {
     p_event_id: eventId,
   });
   if (error) throw new Error(`Failed to release venue bookings: ${error.message}`);
+  return data;
+}
 // ---------------------------------------------------------------------------
 // SCRUM-133: venue unavailability periods
 // ---------------------------------------------------------------------------
