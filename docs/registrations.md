@@ -157,7 +157,9 @@ New module at `backend/src/modules/registrations/`.
 - PATCH withdraw: verify the row belongs to `req.user.id`. Reject if already withdrawn. Reject if `status = confirmed` (organiser has locked it). Reject if the event has already started. Reject if the event starts within 24 hours.
 - A successful withdrawal of a pending registration attempts a guarded decrement of `events.enrolled_attendees`. A failed decrement is logged and does not undo the withdrawal.
 - Pending and confirmed registrations occupy seats; new registrations begin as pending. Confirmed registrations remain non-withdrawable under the existing rule.
-- No waitlist is implemented. Full registrations are refused; the response notes that waiting-list redirection is pending implementation, but does not redirect or queue the attendee.
+- A full event can be joined through the separate waitlist instead of being refused (SCRUM-151). See
+  *Waitlist (SCRUM-151)* below for the endpoints and rules. Registration itself is unchanged: a full event still
+  returns 409 from `POST /api/registrations`.
 - The approved-event list and event detail API include `enrolled_attendees` and `expected_attendance`; the browser displays remaining slots and marks full events. This is an informational snapshot, not a guarantee that a slot remains available until submission.
 - GET /me routes: always filter by `attendee_id = req.user.id` — never trust a client-supplied attendee ID.
 
@@ -184,6 +186,7 @@ New feature folder at `frontend/src/features/registrations/`.
 | `components/RegistrationStatusBadge.jsx` | MyRegistrationsPage, RegistrationDetailPage | Displays `pending` / `confirmed` / `withdrawn` |
 | `components/WithdrawButton.jsx` | RegistrationDetailPage | Withdraw action with confirmation step. Only rendered when withdrawal is permitted; replaced by an explanatory note otherwise. |
 | `components/RegistrationCard.jsx` | MyRegistrationsPage | Summary card showing event name, date, status |
+| `components/WaitlistPanel.jsx` | EventDetailPage | SCRUM-151. Shown when the event is full: joins the waitlist, shows the caller's position, and withdraws. Handles loading, load-error/retry and per-action errors, with "Checking your waitlist position…", "Your waitlist position: N" and "Leave waitlist" copy. |
 
 ### Hooks
 
@@ -201,6 +204,7 @@ New feature folder at `frontend/src/features/registrations/`.
 | 32 | Signed-in attendee can submit a registration for an APPROVED event. Form fields match the event's `registration_fields` definition. Required fields are validated both client-side (HTML `required`) and server-side. Duplicate submissions are rejected. Registration is persisted linked to the attendee and event. Non-APPROVED events are not accessible. |
 | 33 | Attendee can see all their own registrations with event name and current status. Single registration detail shows status, submitted field values, and date. Cannot access another attendee's registration via URL. |
 | 34 | Attendee can withdraw an eligible registration. Status updates to `withdrawn`. The record is retained (not deleted). Withdrawn registrations no longer appear as active. Withdrawal is blocked (with a message) if: registration is confirmed, event has started, or event starts within 24 hours. |
+| 151 | When an event is full, an attendee can join its waitlist. An attendee cannot join the same waitlist twice. The attendee can view their own position and withdraw at any time. See [Registration test guide](registrations-tests.md) for the cases. |
 
 ---
 
@@ -285,3 +289,78 @@ The demo seed deliberately omits both keys from event upserts: new rows receive
 the nullable default, and existing configured windows survive a reseed. See
 [Registration integration](registration-integration.md) for the endpoint,
 authorization, countdown retry, and timezone details.
+
+## Waitlist (SCRUM-151)
+
+A full event can be joined through a waitlist instead of being refused. The
+waitlist is attendee activity and reuses the `registrations.manage` permission
+(attendee only) — no new permission. When an event is full
+(`availability.isFull`), the event detail page renders `WaitlistPanel` in place of
+the registration form.
+
+### API
+
+| Method | Path | Permission | Response |
+| --- | --- | --- | --- |
+| POST | `/api/waitlist/:eventId` | `registrations.manage` | `201 { entry, position }`; `409` when not full, not open, already joined or already registered; `404` unknown event |
+| GET | `/api/waitlist/:eventId` | `registrations.manage` | `200 { entry, position }`; `404` when the caller is not on the list |
+| DELETE | `/api/waitlist/:eventId` | `registrations.manage` | `204`; `404` when the caller is not on the list |
+
+Route wiring lives in `backend/src/app.js` (mounted after `authenticate` and the
+`registrations.manage` guard, with the shared 503-when-unconfigured check).
+Handlers are in `backend/src/modules/registrations/waitlistHandlers.js`; the
+data access is `backend/src/modules/registrations/waitlistService.js`.
+
+### Rules
+
+- The attendee id is always `req.user.id` from the verified session — a value in
+  the request body is ignored, so a caller cannot join or withdraw on someone
+  else's behalf.
+- Joining is only allowed when the event is `APPROVED`, registration is open,
+  and the event is full (`enrolled_attendees >= expected_attendance`, with a null
+  cap meaning unlimited and `0` meaning full). Otherwise `409`.
+- A `pending` or `confirmed` registration for the same event blocks joining
+  (`409`); a `withdrawn` one does not.
+- Joining is atomic. The check and the insert happen together in the Postgres
+  function `enqueue_waitlist_if_full`, so concurrent duplicate joins leave
+  exactly one active row (the second caller gets `409`).
+- Position is the caller's 1-based place in the active list ordered by
+  `created_at, id`; it is computed on read, so a withdrawal shifts the people
+  behind up by one.
+- Withdrawal deletes the active row (hard delete, no history). A repeat
+  withdrawal is `404`, and rejoining returns to the back of the queue.
+- Storage failures return a generic `500` and never leak the provider message.
+
+### Schema reference (manual, no migration file)
+
+The waitlist needs a new table and function, added by hand in the Supabase
+dashboard — no `supabase/` folder or migration file is committed.
+
+**Not yet recorded.** The exact DDL is not in the repository. The contract the
+code depends on is:
+
+```text
+table event_waitlist_entries
+  id          uuid        primary key default gen_random_uuid()
+  event_id    uuid        not null  references events(id) on delete cascade
+  attendee_id uuid        not null  references auth.users(id) on delete cascade
+  status      text        not null  default 'active'
+  created_at  timestamptz not null  default now()
+  unique (event_id, attendee_id)            -- one active entry per attendee per event
+
+function enqueue_waitlist_if_full(p_event_id uuid, p_attendee_id uuid)
+  returns an object carrying an `outcome` (and `entry` when joined) with outcomes:
+    joined · event_not_found · already_waitlisted · already_registered ·
+    event_not_full · event_not_open · registration_not_open ·
+    registration_closed · invalid_request
+```
+
+> **Action for the owner:** paste the real `\d public.event_waitlist_entries` and
+> `pg_get_functiondef('public.enqueue_waitlist_if_full'::regproc)` output here so
+> this matches the live objects. Tell teammates before and after the dashboard
+> change, because the database is shared.
+
+See [Registration test guide](registrations-tests.md) for the SCRUM-151 test
+cases and traceability, and
+[the task note](../.agent/docs/other/SCRUM-151-join-waitlist.md) for the plan,
+decisions and explain-back.
