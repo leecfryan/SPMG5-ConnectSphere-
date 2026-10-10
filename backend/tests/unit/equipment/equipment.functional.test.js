@@ -117,7 +117,7 @@ test("Scrum-27 AC1: a request created with a valid equipment_id resolves to that
   assert.equal(equipmentService.calls.createRequest.length, 1);
 });
 
-for (const status of ["SUBMITTED", "UNDER_REVIEW", "REJECTED"]) {
+for (const status of ["SUBMITTED", "UNDER_REVIEW", "SAFETY_REVIEW", "REJECTED"]) {
   test(`SCRUM-99 AC1: equipment cannot be requested for a ${status} event, only after approval`, async (t) => {
     const equipmentService = fakeEquipmentService({
       equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID, type: "PROJECTOR", status: "AVAILABLE" } },

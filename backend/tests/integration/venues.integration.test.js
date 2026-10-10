@@ -54,7 +54,7 @@ test("[ACCESS-VENUE-001] Availability hides event names from coordinators but pr
   expect(await staff.text()).toContain("Another coordinator private event");
 });
 
-test.each(["DRAFT", "SUBMITTED", "UNDER_REVIEW", "REJECTED"])("[ACCESS-VENUE-002] %s events cannot request venues", async status => {
+test.each(["DRAFT", "SUBMITTED", "UNDER_REVIEW", "SAFETY_REVIEW", "REJECTED"])("[ACCESS-VENUE-002] %s events cannot request venues", async status => {
   service.getEventById.mockResolvedValue({ ...event, status });
   expect((await send(`/${venueId}/booking-requests`, "event_coordinator", "POST", body)).status).toBe(400);
   expect(service.submitBookingRequest).not.toHaveBeenCalled();

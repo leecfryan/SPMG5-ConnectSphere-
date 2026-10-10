@@ -52,6 +52,8 @@ const policies = Object.freeze({
   },
   // SCRUM-98/99: only the event's assigned coordinator reviews and decides it (discussions #80, #101).
   "events.decide": { roles: ["event_coordinator"], record: true },
+  // SCRUM-139: only the assigned coordinator submits or withdraws the safety check.
+  "events.safety.submit": { roles: ["event_coordinator"], record: true },
   "internal.access": {
     roles: [
       "event_coordinator",
