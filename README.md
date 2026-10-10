@@ -111,12 +111,13 @@ Event Organisers and Event Coordinators can open `/events/managed` from the
 workspace to list the events they own or manage, and open one to see
 "Current Registrations: X/MaxEnrollment" and "Waiting List: Y". Registration
 uses `expected_attendance` as a hard cap and stops when the cap is reached;
-the pages mark full events. Full-event responses mention that waiting-list
-redirection is pending implementation, but there is no waitlist or redirect yet.
-Ownership is checked in the server-side query, and an event belonging to
-someone else is indistinguishable from one that does not exist. Attendee identity
-and submitted registration data are never returned. The Waiting List reads 0
-until the waitlist story adds its status. See
+the pages mark full events. When an event is full, attendees can join its
+waitlist from the event page, see their position and leave at any time
+(SCRUM-151). Ownership is checked in the server-side query, and an event belonging
+to someone else is indistinguishable from one that does not exist. Attendee identity
+and submitted registration data are never returned. The managed-event **Waiting
+List** figure still reads 0 because it counts a `registrations` status the
+waitlist does not use. See
 [managed event registrations](docs/managed-event-registrations.md) for the
 permissions, the columns and the test commands.
 
@@ -169,12 +170,12 @@ Fixed UI copy, HTTP status codes and named input limits are application constant
 credentials, account identity and tokens are supplied at runtime. Role permission
 rules remain server-controlled and must not come from the sign-in form.
 
-| Acceptance criterion | Verification |
-| --- | --- |
-| Valid credentials grant access | Sign in with a seeded account; verify the protected account screen and reload restoration. |
+| Acceptance criterion                                           | Verification                                                                                                                    |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Valid credentials grant access                                 | Sign in with a seeded account; verify the protected account screen and reload restoration.                                      |
 | Invalid credentials leave protected functionality inaccessible | Wrong-password UI check; API tests reject missing, malformed, forged and expired tokens and fail closed during provider errors. |
-| Sign-in establishes identity for subsequent authorisation | API tests verify user ID, trusted roles, internal/external classification and resistance to client-supplied role claims. |
-| Team may choose a secure method | Supabase email/password authentication; server verifies each protected request independently. |
+| Sign-in establishes identity for subsequent authorisation      | API tests verify user ID, trusted roles, internal/external classification and resistance to client-supplied role claims.        |
+| Team may choose a secure method                                | Supabase email/password authentication; server verifies each protected request independently.                                   |
 
 Additional manual checks: sign out and reload; repeat with an internal staff
 account and an external account; try a narrow mobile viewport; stop the backend
@@ -184,12 +185,12 @@ Frontend regression coverage uses unique IDs and descriptive titles. See the
 [frontend acceptance test guide](docs/testing/frontend-acceptance.md) for the
 criterion mapping, full test catalog, commands and remaining acceptance evidence.
 
-| Test group | Evidence |
-| --- | --- |
-| AUTH-FORM / AUTH-SERVICE / AUTH-CONFIG | Form validation, credential forwarding, safe failures, retries and client configuration. |
-| AUTH-FLOW / ROUTE | Verified identity, session changes, sign-out, direct links, return URLs and browser history. |
-| RBAC-ROLE / RBAC-GUARD / RBAC-SCOPE | Current role policy, 48 role/permission guard combinations and responsibility-based guard eligibility. |
-| RBAC-ACCESS / RBAC-DENY / RBAC-DATA | Forbidden navigation, permission revocation, malformed claims and denied staff API responses. |
+| Test group                             | Evidence                                                                                               |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| AUTH-FORM / AUTH-SERVICE / AUTH-CONFIG | Form validation, credential forwarding, safe failures, retries and client configuration.               |
+| AUTH-FLOW / ROUTE                      | Verified identity, session changes, sign-out, direct links, return URLs and browser history.           |
+| RBAC-ROLE / RBAC-GUARD / RBAC-SCOPE    | Current role policy, 48 role/permission guard combinations and responsibility-based guard eligibility. |
+| RBAC-ACCESS / RBAC-DENY / RBAC-DATA    | Forbidden navigation, permission revocation, malformed claims and denied staff API responses.          |
 
 These automated tests simulate Supabase and do not establish that the deployed
 service is configured correctly. Record live internal/external sign-in, wrong
@@ -203,6 +204,7 @@ to http://backend:3000. FRONTEND_ORIGIN optionally configures Express CORS
 the same HTTPS origin; Vite's development/preview proxy is not a production server.
 
 References:
+
 - https://supabase.com/docs/reference/javascript/auth-signinwithpassword
 - https://supabase.com/docs/reference/javascript/auth-getuser
 - https://supabase.com/docs/guides/auth/signout

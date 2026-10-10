@@ -44,8 +44,11 @@ retains `events.submit`. See [event access](event-access.md).
   browser retains the confirmation step and explains restrictions. Withdrawing
   a pending registration also attempts a guarded seat decrement; a counter
   update failure is logged without failing the completed withdrawal.
-- No waitlist is implemented. A full event is refused with a message explaining
-  that waiting-list redirection is pending; no redirect or waitlist entry occurs.
+- A full event can be joined through the separate waitlist (SCRUM-151) instead of
+  being refused. Registration itself is unchanged: `POST /api/registrations` still
+  returns 409 when the event is full, and it does not queue anyone. The waitlist is
+  a distinct table and endpoint — see *Waitlist (SCRUM-151)* in
+  [registrations.md](registrations.md).
 - Registration windows are checked with backend server time after event status
   and required-field checks but before duplicate lookup and capacity claim. Both
   boundaries are inclusive (`registration_start <= now <= registration_end`).

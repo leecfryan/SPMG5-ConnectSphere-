@@ -6,6 +6,7 @@ import { useEventRegistration } from "../hooks/useEventRegistration";
 import { getRegistrationAvailability, registrationAvailabilityLabel } from "../registrationAvailability";
 import { useRegistrationWindow } from "../useRegistrationWindow";
 import RegistrationWindowNotice from "../components/RegistrationWindowNotice";
+import WaitlistPanel from "../components/WaitlistPanel";
 
 function formatDate(iso) {
   if (!iso) return null;
@@ -90,7 +91,7 @@ function EventDetailPage() {
         ) : event.status === "APPROVED" ? (
           <>
             {availability.isFull ? (
-              <p role="status">This event is full. Waiting-list redirection is pending implementation.</p>
+              <WaitlistPanel eventId={event.id} />
             ) : (
               <>
                 <h2>Register for this event</h2>
