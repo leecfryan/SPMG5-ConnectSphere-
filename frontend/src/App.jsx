@@ -8,6 +8,7 @@ import SignInPage from "./routes/SignInPage";
 import AccountPage from "./routes/AccountPage";
 import ResponsibilitiesPage from "./routes/ResponsibilitiesPage";
 import WorkspaceLayout from "./routes/WorkspaceLayout";
+import NotificationCentrePage from "./features/notifications/pages/NotificationCentrePage";
 import EquipmentRequestPage from "./features/equipment/pages/EquipmentRequestPage";
 import EquipmentCataloguePage from "./features/equipment/pages/EquipmentCataloguePage";
 import EquipmentFormPage from "./features/equipment/pages/EquipmentFormPage";
@@ -72,6 +73,7 @@ export default function App() {
                   </Route>
                 ))}
                 <Route path="/account" element={<AccountPage />} />
+                <Route path="/notifications" element={<NotificationCentrePage />} />
                 {/* Organisers hold no internal.access, so this sits beside the other
                     open routes rather than inside that group. The static "managed"
                     segment outranks /events/:eventId, as /events/new already does. */}

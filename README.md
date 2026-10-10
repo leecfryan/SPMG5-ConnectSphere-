@@ -31,6 +31,13 @@ node_modules volumes so newly added dependencies are available.
 See [dummy accounts](docs/seed-users.md) for sign-in emails and the seed command.
 The seed password is SEED_USER_PASSWORD in your private root .env.
 
+## Notification centre (SCRUM-143, in progress)
+
+The backend now provides a verified user's own Novu inbox configuration at
+GET /api/notifications/inbox-config. Novu setup is optional; without it the endpoint
+returns 503 and sign-in continues to work. Signed-in users can open /notifications for their own
+inbox and unread count. Approval/rejection delivery uses a durable pending queue and the Novu event-decision workflow; apply the documented Supabase SQL and activate that workflow before live testing. See [notification setup and tests](docs/notifications.md).
+
 ## Sign in securely
 
 The shared sign-in page uses Supabase Auth email/password authentication.
