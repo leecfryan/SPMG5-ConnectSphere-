@@ -33,7 +33,7 @@ const app = createApp({
   frontendOrigin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
 });
 const port = process.env.PORT || 3000;
-app.listen(port, (error) => {
+const server = app.listen(port, (error) => {
   if (error) {
     console.error("Unable to start server on port " + port + ": " + error.code);
     process.exitCode = 1;
@@ -41,3 +41,10 @@ app.listen(port, (error) => {
   }
   console.log("Server is running on port " + port);
 });
+
+// SCRUM-143: database enqueue is atomic with the decision; startup resumes pending deliveries.
+const delivery = require("./modules/notifications/notificationDelivery.service").createNotificationDeliveryService({
+  secretKey: process.env.NOVU_SECRET_KEY,
+  repository: process.env.SUPABASE_SECRET_KEY ? require("./modules/notifications/notificationOutbox.repository").createNotificationOutboxRepository(require("./supabase")) : undefined,
+});
+if (delivery) server.once("listening", () => { server.once("close", delivery.start()); });

@@ -147,7 +147,8 @@ auth.patch('/__test/registrations/:id', (req, res) => {
   if (Object.hasOwn(req.body, 'status')) registration.status = req.body.status;
   res.sendStatus(204);
 });
-const app = createApp({ dataClient, authClient: client, eventsRepository, venuesService, equipmentDependencies, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
+const notificationFixture = require('./notification-storage.cjs')({ auth, eventsRepository });
+const app = createApp({ notificationsService: notificationFixture.identity, dataClient, authClient: client, eventsRepository, venuesService, equipmentDependencies, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
 // Fixture endpoints exercise real middleware; these are NOT production business endpoints.
 const permissions = ['venues.read', 'equipment.read', 'bookings.read', 'technical_requests.read', 'event_planning.read', 'attendees.read', 'clients.read', 'event_organisers.read'];
 for (const permission of permissions) {

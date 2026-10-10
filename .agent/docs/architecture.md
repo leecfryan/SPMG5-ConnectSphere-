@@ -221,10 +221,16 @@ Keep this section current: when a manual schema change is made, update this sect
 Novu Cloud is selected for the notification centre (SCRUM-143). The backend
 prepares own inbox identity locally using Node crypto. Iteration 2 adds @novu/react
 on /notifications: the browser connects to the US cloud inbox using that signed
-identity. Approval/rejection delivery is not built yet. See [notification setup and tests](../../docs/notifications.md).
+identity. Approval/rejection delivery uses the saved organiser and a transactional
+Supabase outbox. Ryan must apply the documented SQL and activate event-decision
+in Novu before live use. See [notification setup and tests](../../docs/notifications.md).
 
 server.js reads NOVU_APPLICATION_IDENTIFIER and NOVU_SECRET_KEY from the private
-root .env and injects the signing service. Empty placeholders are in .env.example.
+root .env and injects the signing service. With a data client and Novu key, it also
+starts notificationDelivery.service.js: a 15-second poll claims bounded batches
+through notificationOutbox.repository.js, sends the US REST trigger with stable
+IDs, and deletes acknowledged queue rows. Leases and retry delays survive restart.
+No queue endpoint or browser grant is exposed; history/read state stays in Novu. Empty placeholders are in .env.example.
 GET /api/notifications/inbox-config verifies the caller through requireAuth and
 returns the public application identifier, req.user.id as subscriberId and its
 HMAC-SHA256 subscriberHash. No browser-provided recipient is accepted, no secret

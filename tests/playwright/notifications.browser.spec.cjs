@@ -1,8 +1,10 @@
 const { createHmac } = require('node:crypto');
 const { test, expect, signIn } = require('./support/fixtures.cjs');
+const { authURL, backendURL } = require('./support/settings.cjs');
+const { setupWorkflow } = require('./support/event-workspace-fixtures.cjs');
 
 // SCRUM-143: real Novu React UI; only remote transport is replaced, with dummy keys.
-async function inboxTransport(page, account) {
+async function inboxTransport(page, account, delivered) {
   let current = account;
   let failed = false;
   let readFailed = false;
@@ -12,14 +14,14 @@ async function inboxTransport(page, account) {
   function makeNotification() {
     return {
       id: 'fixture-notification-' + current.id, transactionId: 'fixture-transaction',
-      subject: 'Fixture event update for ' + current.email, body: 'An event needs your attention.',
+      subject: delivered?.subject ?? 'Fixture event update for ' + current.email, body: delivered?.body ?? 'An event needs your attention.',
       to: { subscriberId: current.id }, isRead: false, isSeen: false,
       isArchived: false, isSnoozed: false, channelType: 'in_app', severity: 'none',
       createdAt: new Date().toISOString(), tags: [], data: {},
     };
   }
   const hash = id => createHmac('sha256', 'local-novu-fixture-only').update(id).digest('hex');
-  await page.route('**/api/notifications/inbox-config', route => route.fulfill({ json: {
+  if (!delivered) await page.route('**/api/notifications/inbox-config', route => route.fulfill({ json: {
     applicationIdentifier: 'fixture-app', subscriberId: current.id, subscriberHash: hash(current.id),
   } }));
   await page.routeWebSocket('wss://**/*', () => {});
@@ -143,3 +145,32 @@ test('[TC-SCRUM-143-17] Refused read leaves the notification unread and supports
   await expect(page.getByText('Unread notifications: 0', { exact: true })).toBeVisible();
   expect(transport.isRead()).toBe(true);
 });
+
+for (const action of ['approve', 'reject']) {
+  test('[TC-SCRUM-143-32] ' + action + ' creates one organiser notification visible through the real inbox', async ({ page, accounts, request }) => {
+    const f = await setupWorkflow(accounts, request);
+    const control = { 'X-Test-Control': process.env.PW_CONTROL_KEY };
+    const assign = await request.post(authURL + '/__test/events/' + f.event.id + '/assignment', { headers: control, data: { coordinatorId: f.first.id } });
+    expect(assign.status()).toBe(204);
+    const path = backendURL + '/api/internal/events/' + f.event.id;
+    expect((await request.post(path + '/start-review', { headers: f.headers.first })).status()).toBe(200);
+    expect((await request.post(path + '/' + action, { headers: f.headers.first, data: { note: 'Reviewed details' } })).status()).toBe(200);
+    const flush = () => request.post(authURL + '/__test/notification-deliveries/' + f.organiser.id, { headers: control });
+    const feed = await (await flush()).json();
+    expect(feed.pending).toBe(0); expect(feed.notifications).toHaveLength(1);
+    const item = feed.notifications[0];
+    expect(item.to.subscriberId).toBe(f.organiser.id);
+    expect(item.body).toContain(f.event.name);
+    await inboxTransport(page, f.organiser, item);
+    await openInbox(page, f.organiser);
+    await expect(page.getByText('Event ' + (action === 'approve' ? 'approved' : 'rejected'), { exact: true })).toBeVisible();
+    await expect(page.getByText(item.body, { exact: true })).toBeVisible();
+    await expect(page.getByText('Unread notifications: 1', { exact: true })).toBeVisible();
+    expect((await request.post(path + '/' + action, { headers: f.headers.first, data: { note: 'Repeated decision' } })).status()).toBe(409);
+    expect((await (await flush()).json()).notifications).toHaveLength(1);
+    const other = await request.post(authURL + '/__test/notification-deliveries/' + f.attendee.id, { headers: control });
+    expect((await other.json()).notifications).toEqual([]);
+    await page.getByRole('button', { name: 'Mark as read', exact: true }).click();
+    await expect(page.getByText('Unread notifications: 0', { exact: true })).toBeVisible();
+  });
+}
