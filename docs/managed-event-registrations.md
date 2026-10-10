@@ -25,7 +25,7 @@ Waiting List: Y
 | X | `events.enrolled_attendees` | Nullable. Null renders as `0`. |
 | MaxEnrollment | `events.expected_attendance` | Nullable. Null renders as `-`, not `0`. |
 | Registration opens/closes | `events.registration_start` / `events.registration_end` | Nullable UTC instants; null start opens immediately, null end is unbounded. |
-| Y | count of `registrations` where `status = 'waitlisted'` | Always `0` today. See below. |
+| Y | count of `registrations` where `status = 'waitlisted'` | Still `0`: the shipped waitlist (SCRUM-151) uses a separate table, not this status. See below. |
 
 `events.enrolled_attendees`, `events.expected_attendance`,
 `events.registration_start`, and `events.registration_end` are read directly
@@ -41,28 +41,32 @@ current count against this cap and mark a full event.
 
 Registration uses a server-side compare-and-set update of
 `events.enrolled_attendees` before inserting the registration. Concurrent
-attempts retry up to three times. A full event returns 409; its message says
-waiting-list redirection is pending implementation, but no redirect or waitlist
-is currently provided. Both `pending` and `confirmed` registrations occupy a
+attempts retry up to three times. A full event returns 409; the attendee can then
+join the event's waitlist through the separate `/api/waitlist/:eventId` endpoints
+(SCRUM-151). The waitlist is stored in its own table, not as a
+`registrations.status`. Both `pending` and `confirmed` registrations occupy a
 seat; new registrations are inserted as `pending`. Failed inserts attempt a
 guarded counter rollback, and withdrawing a pending registration attempts a
 guarded decrement. Confirmed registrations cannot be withdrawn by the current
 flow.
 
-## The waiting list is 0 until the waitlist story lands
+## The waiting list count does not include the shipped waitlist
 
-There is no waitlist concept in the application yet. Registration writes
-`pending`, while `confirmed` and `withdrawn` are handled by the existing
-workflow; nothing writes `waitlisted`. The service counts rows with that status through
-`.select('id', { count: 'exact', head: true })`, so **the Waiting List reads 0
-for every event until the waitlist story is implemented. Full registrations
-are refused rather than queued. Implementing a waitlist will require a defined
-status and verified database support; this change does not modify Supabase.
+The Waiting List figure counts `registrations` rows with `status = 'waitlisted'`
+through `.select('id', { count: 'exact', head: true })`. Nothing writes that
+status: registration writes `pending`, and `confirmed` / `withdrawn` come from the
+existing workflow.
+
+The shipped waitlist (SCRUM-151) does **not** use this status. It stores entries in
+a separate `event_waitlist_entries` table and serves them through
+`/api/waitlist/:eventId`, so **the Waiting List figure still reads 0 for every
+event** even while attendees are queued. This is a known mismatch, recorded in the
+SCRUM-151 task note under *Found, not built*. Closing it means either counting the
+new table here or moving the waitlist onto `registrations.status`; neither is part
+of SCRUM-151.
 
 The status name is held in one constant, `WAITLIST_STATUS`, at the top of
 `managedEvents.service.js`, precisely so that a rename is a one-line change.
-Confirm the final status name with that story's owner before it ships - if it
-differs, this count silently keeps returning 0.
 
 ## Authorisation
 

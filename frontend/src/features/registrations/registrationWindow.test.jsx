@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { useRegistrationResource } from "./hooks/useRegistrationResource";
 import { useEventRegistration } from "./hooks/useEventRegistration";
+import { AuthContext } from "../auth/useAuth";
 import EventListPage from "./pages/EventListPage";
 import EventDetailPage from "./pages/EventDetailPage";
 
@@ -149,9 +150,22 @@ test("a full event retains the Full state instead of showing a registration form
     enrolled_attendees: 10,
     registration_start: new Date(NOW + 60_000).toISOString(),
   };
-  renderDetail(event);
+  useRegistrationResource.mockReturnValue({
+    data: { event, server_time: new Date(NOW).toISOString() },
+    receivedAt: Date.now(),
+    refresh: vi.fn(),
+  });
+  render(
+    <AuthContext.Provider value={{ token: null }}>
+      <MemoryRouter initialEntries={[`/events/${EVENT_ID}`]}>
+        <Routes>
+          <Route path="/events/:eventId" element={<EventDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthContext.Provider>,
+  );
 
-  expect(screen.getByText(/this event is full/i)).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Event waitlist" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /register for this event/i })).not.toBeInTheDocument();
 });
 

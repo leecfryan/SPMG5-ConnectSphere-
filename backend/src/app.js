@@ -37,6 +37,8 @@ function createApp({ authClient, dataClient, eventsRepository, assignmentDepende
   app.use("/api/events", authenticate, requirePermission("events.browse"), registrationEventRoutes(dataClient));
   app.use("/api/registrations", authenticate, requirePermission("registrations.manage"), (req, res, next) => dataClient ? next() :
     res.status(503).json({ message: "This feature is not yet configured." }), registrationRoutes(dataClient));
+  app.use("/api/waitlist", authenticate, requirePermission("registrations.manage"), (req, res, next) => dataClient ? next() :
+    res.status(503).json({ message: "This feature is not yet configured." }), require("./modules/registrations/waitlistHandlers")(dataClient));
   // All internal routes must be registered after this gate, with their own permission guard.
   app.use("/api/internal", authenticate, requirePermission("internal.access"));
   app.get("/api/internal/access", (req, res) => {
