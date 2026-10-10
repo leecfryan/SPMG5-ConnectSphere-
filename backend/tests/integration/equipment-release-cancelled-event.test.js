@@ -124,7 +124,11 @@ describe("SCRUM-104 AC1: cancelling an event releases its equipment reservations
     expect(await requestStatus(requestId)).toBe("RELEASED");
   });
 
-  test("[TC-SCRUM-104-02] PENDING and REJECTED requests on the same cancelled event are untouched", async () => {
+  // SCRUM-148 changed this: PENDING requests are now released too (see that
+  // story's TC-148-11), not auto-rejected - REJECTED is Technical Support
+  // Staff's own "Issues" status and would misreport why the request stopped
+  // mattering. Already-REJECTED requests are still untouched.
+  test("[TC-SCRUM-104-02] a REJECTED request on the same cancelled event is untouched; PENDING is now released (SCRUM-148)", async () => {
     const eventId = await insertEvent();
     const pendingUnit = await insertEquipment({ type: freshType() });
     const rejectedUnit = await insertEquipment({ type: freshType() });
@@ -133,8 +137,8 @@ describe("SCRUM-104 AC1: cancelling an event releases its equipment reservations
 
     const summary = await equipmentService.releaseReservationsForCancelledEvent(eventId);
 
-    expect(summary.released).toEqual([]);
-    expect(await requestStatus(pendingRequest)).toBe("PENDING");
+    expect(summary.released).toEqual([pendingRequest]);
+    expect(await requestStatus(pendingRequest)).toBe("RELEASED");
     expect(await requestStatus(rejectedRequest)).toBe("REJECTED");
   });
 
@@ -167,6 +171,23 @@ describe("SCRUM-104 AC1: cancelling an event releases its equipment reservations
     const summary = await equipmentService.releaseReservationsForCancelledEvent(eventId);
 
     expect(summary).toEqual({ released: [], equipmentReverted: [], equipmentSkipped: [] });
+  });
+
+  // SCRUM-148 AC3/TC-148-13: releasing one event's reservations must never touch
+  // a different, still-active event's requests, whatever their status.
+  test("[TC-SCRUM-148-13] requests on a different, still-active event are untouched", async () => {
+    const cancelledEventId = await insertEvent({ status: "CANCELLED" });
+    const activeEventId = await insertEvent({ status: "APPROVED" });
+    const pendingUnit = await insertEquipment({ type: freshType() });
+    const approvedUnit = await insertEquipment({ type: freshType() });
+    const otherPending = await insertRequest({ eventId: activeEventId, equipmentId: pendingUnit, status: "PENDING", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
+    const otherApproved = await insertRequest({ eventId: activeEventId, equipmentId: approvedUnit, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
+
+    const summary = await equipmentService.releaseReservationsForCancelledEvent(cancelledEventId);
+
+    expect(summary).toEqual({ released: [], equipmentReverted: [], equipmentSkipped: [] });
+    expect(await requestStatus(otherPending)).toBe("PENDING");
+    expect(await requestStatus(otherApproved)).toBe("APPROVED");
   });
 });
 

@@ -143,7 +143,7 @@ These files appear inside both `frontend/` and `backend/`:
 | `supabase/migrations/`       | Existing event workflow SQL reference (007). |
 
 `backend/tests/integration/auth.test.js` and `permissions.test.js` run with Node's built-in test runner through `npm --prefix backend test` and CI. Event, venue and registration tests use Vitest; equipment tests use the Node runner.
-Browser/API tests use Playwright. `tests/sql/` contains isolated database checks.
+Browser/API tests use Playwright.
 Schema changes are applied by hand in the Supabase dashboard, and each lane's
 guide in `docs/` records its SQL. Staging moved the earlier venue migrations into
 `docs/venue-integration.md`; RBAC's existing 007 SQL reference is retained.

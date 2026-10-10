@@ -256,24 +256,32 @@ function createEquipmentService(client) {
   // context beyond "now"), a cancelled event has a real start/end, so a
   // future-dated APPROVED request is just as moot as one covering today.
   // Re-running this for the same event is safe without an explicit
-  // "already RELEASED" guard: the APPROVED filter below simply matches
-  // nothing the second time.
+  // "already RELEASED" guard: the APPROVED/PENDING filter below simply
+  // matches nothing the second time.
   //
-  // AC3: for each unit that lost a reservation, only revert
-  // equipment.status to AVAILABLE when it is actually IN_USE and no other
-  // PENDING/APPROVED request still covers today - a unit a technician has
-  // deliberately set to DAMAGED/MAINTENANCE/UNDER_MAINTENANCE/UNAVAILABLE is
-  // left alone (that is a more specific problem than "this reservation
-  // ended"). There is no cancellation endpoint in this story (events.status
-  // is set directly in the database - see docs/equipment-integration.md) so
-  // actingUserId has no real caller; equipment.updated_by is nullable and is
-  // left null rather than inventing a system user.
+  // SCRUM-148 AC3: a PENDING request also has nothing left to serve once its
+  // event is cancelled, so it moves to RELEASED too, not REJECTED - REJECTED
+  // is Technical Support Staff's own "can't fulfil this" status (displayed
+  // as "Issues" in EventEquipmentCard.jsx) and would misreport why the
+  // request stopped mattering. AC3's wording ("equipment reservations are
+  // released") applies the same to a reservation that was never approved.
+  //
+  // AC3 (equipment unit): for each unit that lost an APPROVED reservation,
+  // only revert equipment.status to AVAILABLE when it is actually IN_USE and
+  // no other PENDING/APPROVED request still covers today - a unit a
+  // technician has deliberately set to DAMAGED/MAINTENANCE/UNDER_MAINTENANCE/
+  // UNAVAILABLE is left alone (that is a more specific problem than "this
+  // reservation ended"). There is no cancellation endpoint in SCRUM-104
+  // (events.status was set directly in the database there) so actingUserId
+  // defaults to null; equipment.updated_by is nullable and is left null
+  // rather than inventing a system user when called that way.
   async function releaseReservationsForCancelledEvent(eventId, actingUserId = null) {
     const requests = await listRequestsByEvent(eventId);
     const approved = requests.filter((request) => request.status === "APPROVED");
+    const releasable = requests.filter((request) => request.status === "APPROVED" || request.status === "PENDING");
 
     const released = [];
-    for (const request of approved) {
+    for (const request of releasable) {
       await updateStatus(request.id, "RELEASED");
       released.push(request.id);
     }

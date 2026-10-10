@@ -147,9 +147,6 @@ grant execute on function public.submit_authenticated_venue_booking_request(
 ) to service_role;
 ```
 
-`tests/sql/event-review.assertions.sql` still asserts the 007 behaviour
-(`ACCEPTED`, "must be accepted"); it is updated with 007's move.
-
 Before the earlier migration files were removed, this SQL was tested locally on PostgreSQL 17 with migrations 001-006,
 including reapplication, preservation of legacy status values and constraints,
 and denied booking writes. It has since been applied to the live Supabase
@@ -165,14 +162,6 @@ Run `npm test` and `npm run check` in `backend`; run `npm test -- --run`,
 `npm run lint` and `npm run build` in `frontend`; run `npm run test:playwright`
 from the repository root. Browser/API tests use isolated local Auth and storage;
 they do not certify live Supabase policies.
-
-`tests/sql/event-review.setup.sql` and `event-review.assertions.sql` are local
-database test fixtures. Never run the setup script against an existing project.
-For the historical isolated test procedure, retrieve migrations 001–006 from
-the PR's pre-merge commit `efa6505` (Git history), then run setup, that historical
-SQL, the retained 007 reference, and assertions using `psql -v ON_ERROR_STOP=1`.
-The assertions roll back their changes. This historical procedure does not
-validate staging's newer booking-decision SQL or the live database.
 
 ## SCRUM-100: external client organiser scope
 
