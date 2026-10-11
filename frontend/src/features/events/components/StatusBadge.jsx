@@ -11,6 +11,7 @@ const LABELS = Object.freeze({
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",
   REJECTED: "Rejected",
+  POSTPONED: "Postponed",
 });
 
 export default function StatusBadge({ status }) {
