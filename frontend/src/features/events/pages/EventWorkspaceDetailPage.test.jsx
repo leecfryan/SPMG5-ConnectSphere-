@@ -47,7 +47,10 @@ function setup(scope, initial, { userId = "coord-1", events } = {}) {
     if (url === `/api/event-workspace/${scope}`) return ok({ events: events ?? [event] });
     if (url === `/api/event-workspace/${scope}/${EVENT_ID}`) return ok({ event });
     if (url === "/api/event-workspace/coordinators") return ok({ coordinators: [] });
-    if (options.method === "POST" && url.endsWith("/start-review")) event = { ...event, status: "UNDER_REVIEW" };
+    if (url === `/api/internal/events/${EVENT_ID}/safety-readiness`) return ok({ ready: true, missing: [] });
+    if (options.method === "POST" && url.endsWith("/submit-safety-check")) event = { ...event, status: "SAFETY_REVIEW" };
+    else if (options.method === "POST" && url.endsWith("/withdraw-safety-check")) event = { ...event, status: "APPROVED" };
+    else if (options.method === "POST" && url.endsWith("/start-review")) event = { ...event, status: "UNDER_REVIEW" };
     else if (options.method === "POST" && url.endsWith("/approve")) event = { ...event, status: "APPROVED", ...DECISION };
     else if (options.method === "POST" && url.endsWith("/reject")) event = { ...event, status: "REJECTED", ...DECISION, approval_rejection_remark: JSON.parse(options.body).note };
     else throw new Error("Unexpected test request: " + url);
@@ -104,6 +107,35 @@ test("[SCRUM-98-UI-012] AC3: rejecting shows Rejected and the reason on the relo
   expect(posts(fetchMock)).toEqual([`/api/internal/events/${EVENT_ID}/reject`]);
   expect(screen.queryByRole("link", { name: "Arrange venue bookings" })).not.toBeInTheDocument();
 });
+
+test("[SCRUM-139-UI-009] AC3/AC4: submitting shows Safety review and locks arrangements; withdrawing reopens them", async () => {
+  const { fetchMock, user } = setup("coordinator", { status: "APPROVED", ...DECISION });
+  expect(await screen.findByRole("link", { name: "Arrange venue bookings" })).toBeInTheDocument();
+
+  await user.click(await screen.findByRole("button", { name: "Submit for safety check", disabled: false }));
+
+  expect(await screen.findByText("Safety review", { selector: ".status-badge" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Arrange venue bookings" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Arrange equipment and technical support" })).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "Withdraw from safety check" }));
+
+  expect(await screen.findByText("Approved – planning", { selector: ".status-badge" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Arrange venue bookings" })).toBeInTheDocument();
+  expect(posts(fetchMock)).toEqual([
+    `/api/internal/events/${EVENT_ID}/submit-safety-check`,
+    `/api/internal/events/${EVENT_ID}/withdraw-safety-check`,
+  ]);
+});
+
+test.each([["organiser", "org-1"], ["manager", "manager-1"], ["coordinator", "coord-2"]])(
+  "[SCRUM-139-UI-010] AC3: the %s who is not the assigned coordinator sees no safety-check controls", async (scope, userId) => {
+    const { fetchMock } = setup(scope, { status: "APPROVED", ...DECISION }, { userId });
+
+    expect(await screen.findByRole("heading", { name: "Digital Literacy for Seniors" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Operational Safety Check" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => url.includes("safety"))).toBe(false);
+  });
 
 test.each(["organiser", "manager"])("[SCRUM-99-UI-010] AC3: the %s sees the decision, the approver and the time, with no review actions", async (scope) => {
   setup(scope, { status: "APPROVED", ...DECISION }, { userId: scope === "organiser" ? "org-1" : "manager-1" });

@@ -13,6 +13,7 @@ const createAssignmentsRoutes = require("./routes/assignments.routes");
 const createManagedEventsRoutes = require("./routes/managedEvents.routes");
 const createEventWorkspaceRoutes = require("./routes/eventWorkspace.routes");
 const createReviewRoutes = require("./routes/review.routes");
+const createSafetyCheckRoutes = require("./routes/safetyCheck.routes");
 const createNotificationsRoutes = require("./routes/notifications.routes");
 
 function createApp({ authClient, dataClient, eventsRepository, assignmentDependencies, venuesService, equipmentDependencies, managedEventsService, notificationsService, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
@@ -52,6 +53,7 @@ function createApp({ authClient, dataClient, eventsRepository, assignmentDepende
     equipmentService: equipmentDependencies?.equipmentService,
     releaseVenueBookingsForCancelledEvent: venuesService?.releaseBookingsForCancelledEvent,
   }));
+  app.use("/api/internal", createSafetyCheckRoutes(eventsRepository));
   app.use("/api/venues", authenticate, requirePermission("internal.access"), createVenuesRoutes(venuesService));
   // Event Organisers hold no internal.access, so this cannot live under
   // /api/internal. Nor under /api/events: the registration router's GET /:eventId

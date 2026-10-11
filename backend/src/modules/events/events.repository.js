@@ -108,7 +108,7 @@ async function transitionStatus(id, from, to, extra = {}, coordinatorId) {
   return unwrap(await query.select().maybeSingle(), "transitionStatus");
 }
 
-// SCRUM-148: cancel has no single `from` status - any of the four active
+// SCRUM-148: cancel has no single `from` status - any of the five active
 // stages may be cancelled - so it cannot reuse transitionStatus, which checks
 // one exact `canTransition(from, to)` pair. coordinatorId, when given, is the
 // same race guard as transitionStatus: the write also requires that
@@ -163,6 +163,29 @@ async function findActiveAssignments() {
   );
 }
 
+// SCRUM-139: read-only view of the Venue and Equipment lanes' rows for one
+// event, shaped for safetyReadiness.js. The "!" hints name the foreign key, as
+// venues.service.js does, because venue_bookings links to two tables.
+async function findArrangements(eventId) {
+  const supabase = getSupabase();
+  const [venueRequests, equipmentRequests] = await Promise.all([
+    supabase
+      .from("venue_booking_requests")
+      .select("id, booking_date, venue:venues!venue_id(name), slots:venue_bookings!request_id(slot, status)")
+      .eq("event_id", eventId)
+      .order("booking_date", { ascending: true }),
+    supabase
+      .from("equipment_requests")
+      .select("id, status, equipment:equipment!equipment_id(type)")
+      .eq("event_id", eventId)
+      .order("created_at", { ascending: true }),
+  ]);
+  return {
+    venueRequests: unwrap(venueRequests, "findArrangements venue"),
+    equipmentRequests: unwrap(equipmentRequests, "findArrangements equipment"),
+  };
+}
+
 module.exports = {
   WRITABLE_COLS,
   ACTIVE_STATUSES,
@@ -176,4 +199,5 @@ module.exports = {
   assignCoordinator,
   findSubmittedUnassigned,
   findActiveAssignments,
+  findArrangements,
 };

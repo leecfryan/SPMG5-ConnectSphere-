@@ -4,7 +4,7 @@ import { useApiResource } from "../../../hooks/useApiResource";
 import { apiFetch } from "../../../lib/api";
 
 // Matches ACTIVE_STATUSES in backend/src/modules/events/lifecycle.js.
-const ASSIGNABLE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED"];
+const ASSIGNABLE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED"];
 
 export default function EventReviewControls({ event, onUpdated }) {
   const { token } = useAuth();

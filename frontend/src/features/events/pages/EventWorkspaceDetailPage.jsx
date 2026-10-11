@@ -9,6 +9,7 @@ import EventDecisionSummary from "../components/EventDecisionSummary";
 import EventCancelControl from "../components/EventCancelControl";
 import EventCancellationSummary from "../components/EventCancellationSummary";
 import EventRequestForm from "../components/EventRequestForm";
+import SafetyCheckControls from "../components/SafetyCheckControls";
 import StatusBadge from "../components/StatusBadge";
 import "../workspace.css";
 
@@ -47,6 +48,7 @@ function Detail({ scope, eventId }) {
       <EventDecisionSummary event={event} />
       <EventCancellationSummary event={event} />
       {scope === "coordinator" && event.coordinator_id === user.id && <EventDecisionControls event={event} onDecided={reload} />}
+      {scope === "coordinator" && event.coordinator_id === user.id && <SafetyCheckControls key={event.status} event={event} onChanged={reload} />}
       {scope === "manager" && <EventReviewControls key={`${event.id}:${event.status}:${event.coordinator_id}`} event={event} onUpdated={reload} />}
       {scope === "coordinator" && event.coordinator_id === user.id && ["APPROVED", "CONFIRMED"].includes(event.status) && <nav className="event-actions" aria-label="Event arrangements">
         <Link to="/venues">Arrange venue bookings</Link>

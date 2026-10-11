@@ -77,16 +77,17 @@ create table events (
 
 ### Status values
 
-SCRUM-97 defines the eight statuses and the permitted moves between them in
-`backend/src/modules/events/lifecycle.js`. The live `events_status_check`
-constraint accepts all eight; it was changed by hand in the Supabase dashboard
-on 2026-09-27 (no migration file) with:
+SCRUM-97 defines the statuses and the permitted moves between them in
+`backend/src/modules/events/lifecycle.js`; SCRUM-139 adds `SAFETY_REVIEW`. The
+live `events_status_check` constraint was changed by hand in the Supabase
+dashboard (no migration file): the eight SCRUM-97 statuses on 2026-09-27, and
+`SAFETY_REVIEW` on 2026-10-08 with:
 
 ```sql
 alter table public.events drop constraint if exists events_status_check;
 alter table public.events
   add constraint events_status_check check (status in (
-    'DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'APPROVED',
+    'DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'SAFETY_REVIEW',
     'CONFIRMED', 'COMPLETED', 'CANCELLED', 'REJECTED'
   ));
 ```
@@ -98,11 +99,14 @@ stateDiagram-v2
     SUBMITTED --> UNDER_REVIEW
     UNDER_REVIEW --> APPROVED
     UNDER_REVIEW --> REJECTED
+    APPROVED --> SAFETY_REVIEW
+    SAFETY_REVIEW --> APPROVED
     APPROVED --> CONFIRMED
     CONFIRMED --> COMPLETED
     SUBMITTED --> CANCELLED
     UNDER_REVIEW --> CANCELLED
     APPROVED --> CANCELLED
+    SAFETY_REVIEW --> CANCELLED
     CONFIRMED --> CANCELLED
 ```
 
@@ -111,7 +115,8 @@ stateDiagram-v2
 | `DRAFT` | Draft | nothing (column default; US-13) |
 | `SUBMITTED` | Submitted | `createSubmitted`, at insert |
 | `UNDER_REVIEW` | Under review | the assigned coordinator's *Start review* (SCRUM-98) |
-| `APPROVED` | Approved – planning | the assigned coordinator's *Approve* (SCRUM-99); read by registration and venue |
+| `APPROVED` | Approved – planning | the assigned coordinator's *Approve* (SCRUM-99), or *Withdraw from safety check* (SCRUM-139); read by registration and venue |
+| `SAFETY_REVIEW` | Safety review | the assigned coordinator's *Submit for safety check* (SCRUM-139); not open to new venue or equipment requests |
 | `CONFIRMED` | Confirmed | not yet (confirm story) |
 | `COMPLETED` | Completed | not yet (complete story) |
 | `CANCELLED` | Cancelled | the assigned coordinator's or the ops manager's *Cancel event* (SCRUM-148) |
@@ -175,6 +180,9 @@ Module at `backend/src/modules/events/`.
 | POST | /api/internal/events/:eventId/start-review | requireAuth + internal.access + events.decide (assigned coordinator) | `SUBMITTED → UNDER_REVIEW` |
 | POST | /api/internal/events/:eventId/approve | same | `UNDER_REVIEW → APPROVED`; body `{ "note"?: string }` |
 | POST | /api/internal/events/:eventId/reject | same | `UNDER_REVIEW → REJECTED`; body `{ "note": string }` (required) |
+| GET | /api/internal/events/:eventId/safety-readiness | requireAuth + internal.access + events.safety.submit (assigned coordinator) | `{ ready, missing[] }` |
+| POST | /api/internal/events/:eventId/submit-safety-check | same | `APPROVED → SAFETY_REVIEW` when nothing is missing |
+| POST | /api/internal/events/:eventId/withdraw-safety-check | same | `SAFETY_REVIEW → APPROVED` |
 | POST | /api/internal/events/:eventId/cancel | requireAuth + internal.access + events.cancel (assigned coordinator or ops manager) | any active status `→ CANCELLED`; body `{ "reason": string }` (required) |
 
 ### Rules enforced server-side
@@ -258,6 +266,48 @@ alter table public.events
   add column if not exists approval_rejection_remark text;
 ```
 
+<<<<<<< HEAD
+### Submit for the Operational Safety Check (SCRUM-139)
+
+`safetyReadiness.js` (the rule), `safetyCheck.service.js`, `safetyCheck.controller.js`,
+`routes/safetyCheck.routes.js`, `events.repository.js#findArrangements`. Like review, only the
+event's **assigned coordinator** may act: `events.safety.submit` is a `record: true` permission and
+reuses `review.routes.js#assignedToCaller`.
+
+- **Ready** means nothing is missing. Every arrangement is essential until SCRUM-144.
+  - Venue: at least one booking request is booked, meaning every slot that isn't `cancelled` is
+    `confirmed`. A request with a `pending` slot is missing ("Waiting for Venue Staff to decide.").
+    Fully rejected or cancelled requests are ignored. With nothing booked and nothing pending, the
+    item is "No venue booking has been approved yet."
+  - Equipment: every request must be `APPROVED`. `PENDING` and `REJECTED` are missing; `RELEASED`
+    is ignored. No equipment requests at all is ready.
+- `findArrangements` only reads `venue_booking_requests` (+ `venues`, `venue_bookings`) and
+  `equipment_requests` (+ `equipment`). It never writes to another lane's tables.
+- Submit re-runs the rule on the server. Not ready: 409 with `missing`, nothing written. Ready:
+  one conditional `transitionStatus` filtered on `APPROVED` and the caller, so a race is a 409.
+- AC4: `SAFETY_REVIEW` is not in `PLANNING_STATUSES`, so the venue and equipment lanes' existing
+  checks refuse new requests until the coordinator withdraws (`SAFETY_REVIEW → APPROVED`).
+- No activity history is written; SCRUM-141 adds it (discussion #33: history is optional in
+  Release 1).
+- Page: `SafetyCheckControls.jsx` (with `safetyService.js`) on `/assigned-events/:eventId`, shown
+  only to the assigned coordinator. On an `APPROVED` event it lists what is missing, with *Check
+  again*, and enables *Submit for safety check* once nothing is. On a `SAFETY_REVIEW` event it
+  explains the lock and offers *Withdraw from safety check*. The *Arrange venue bookings* and
+  *Arrange equipment* links show only for `APPROVED` and `CONFIRMED`, so they disappear during
+  review.
+
+| Status | When | Message |
+| --- | --- | --- |
+| 200 | Done | readiness `{ ready, missing }`; submit / withdraw `{ event }` |
+| 401 | No or invalid session | "Please sign in to continue." |
+| 403 | Not a coordinator, or not this event's coordinator | "You do not have permission to access this information." |
+| 404 | Event deleted after the access check | "That event no longer exists." |
+| 409 | Arrangements missing | "This event is not ready for the safety check. Finish the arrangements listed." plus `missing: [{ kind, label, reason }]` |
+| 409 | Wrong status, or reassigned meanwhile | "This event has changed since you opened it. Refresh to see its current status." |
+| 500 | Reading arrangements failed | "Something went wrong. Please try again." |
+| 503 | The access check could not reach storage | "Unable to check access. Please try again." |
+
+=======
 ### Cancelling an event (SCRUM-148)
 
 `review.service.js#cancel`, `review.controller.js`, `routes/review.routes.js` (same router as review/approval,
@@ -269,8 +319,8 @@ clarification; narrow this if the answer comes back differently.
 - `events.cancel` is a `record: true` permission. The ops manager passes the record check unconditionally; a
   coordinator must still be `coordinator_id` on the event. Someone else's event, an unknown id and a malformed id
   all get the same 403.
-- Cancel has no single "from" status — it is permitted from any of the four active stages (`SUBMITTED`,
-  `UNDER_REVIEW`, `APPROVED`, `CONFIRMED`; see [Status values](#status-values)), so it uses
+- Cancel has no single "from" status — it is permitted from any of the five active stages (`SUBMITTED`,
+  `UNDER_REVIEW`, `APPROVED`, `SAFETY_REVIEW`, `CONFIRMED`; see [Status values](#status-values)), so it uses
   `events.repository.js#cancel(id, extra, coordinatorId?)` rather than `transitionStatus`. The write still filters
   on `.in("status", ACTIVE_STATUSES)` and, when the caller is the coordinator, `coordinator_id`, so a stage change
   or reassignment in between means nothing is written and the answer is 409.
@@ -290,7 +340,7 @@ clarification; narrow this if the answer comes back differently.
 `approved_rejected_by_name`). The coordinator's and manager's own list scopes now include `CANCELLED`, alongside
 `REJECTED` and the active statuses, so a cancelled event does not vanish from either list.
 
-**In the browser.** On an event in any of the four active stages, the assigned coordinator (coordinator scope) or
+**In the browser.** On an event in any of the five active stages, the assigned coordinator (coordinator scope) or
 the Operations Manager (manager scope) sees a *Cancel event* control with a required reason field. After
 cancelling, the page shows a *Cancellation* summary (cancelled by, cancelled on, reason) alongside the existing
 *Review decision* summary, if there is one.
@@ -315,6 +365,7 @@ alter table public.events
   add column if not exists cancellation_reason text;
 ```
 
+>>>>>>> ea2c70fa9494255a4ae01b18626c880d1da8ccda
 ### Request
 
 Unknown keys are ignored. Send timestamps as ISO 8601 with a zone — a browser
