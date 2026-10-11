@@ -104,6 +104,18 @@ test("[WORKFLOW-002] Reassignment revokes the previous coordinator and stale ass
   expect((await send(`/event-workspace/coordinator/${records[0].id}`, "second")).status).toBe(200);
 });
 
+// SCRUM-149: a postponed event is still the coordinator's responsibility,
+// so ACTIVE_STATUSES (which assign()'s query filters on) includes POSTPONED -
+// reassignment must keep working on it, same as any other active-stage event.
+test("[WORKFLOW-002b / TC-149-17] A postponed event can still be reassigned to a different coordinator", async t => {
+  const { send, records, users } = await setup(t);
+  records[0].status = "POSTPONED";
+  const path = `/event-workspace/${records[0].id}/coordinator`;
+  const body = { coordinatorId: users.second.id, expectedCoordinatorId: users.first.id };
+  expect((await send(path, "manager", "PATCH", body)).status).toBe(200);
+  expect(records[0]).toMatchObject({ status: "POSTPONED", coordinator_id: users.second.id });
+});
+
 test("[WORKFLOW-003] A rejected request is unavailable for assignment and attendees", async t => {
   const { send, records, users } = await setup(t);
   const id = records[2].id;
@@ -299,6 +311,29 @@ test("[TC-148-17] a previously APPROVED event's decision history is still visibl
     approval_rejection_remark: "Ready for planning.", approved_rejected_by_name: "Ada Tan",
     cancelled_by: users.first.id, cancellation_reason: "Venue flooded.", cancelled_by_name: "Ada Tan",
   });
+});
+
+// SCRUM-149 AC2/TC-149-06: POSTPONED is already in ACTIVE_STATUSES, so the
+// coordinator's and manager's lists need no code change to keep showing a
+// postponed event - this proves that claim, plus postponed_by_name's
+// resolution, the same "name, else unknown" treatment as cancelled_by_name.
+test("[TC-149-06] the assigned coordinator and the manager both still see a postponed event, with every field intact", async t => {
+  const { send, event, users } = await decidedSetup(t);
+  Object.assign(event, { status: "POSTPONED", postponed_by: users.first.id,
+    postponed_at: "2099-09-06T00:00:00.000Z", postponement_reason: "New date not yet known." });
+
+  for (const [scope, user] of [["coordinator", "first"], ["manager", "manager"]]) {
+    const listed = (await (await send(`/event-workspace/${scope}`, user)).json()).events.map(item => item.id);
+    expect(listed, scope).toContain(event.id);
+    const response = await send(`/event-workspace/${scope}/${event.id}`, user);
+    expect(response.status, scope).toBe(200);
+    expect((await response.json()).event, scope).toMatchObject({
+      status: "POSTPONED", postponement_reason: "New date not yet known.", postponed_by_name: "Ada Tan",
+      // The earlier APPROVED decision stays visible too, not overwritten.
+      approved_rejected_by: users.first.id, approval_rejection_remark: "Ready for planning.",
+    });
+  }
+  expect((await send(`/event-workspace/coordinator/${event.id}`, "second")).status).toBe(404);
 });
 
 test("[SCRUM-100 AC1] A responsible organiser persists valid event edits without changing protected fields", async t => {

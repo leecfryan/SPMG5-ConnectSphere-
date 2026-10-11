@@ -7,7 +7,7 @@ const cors = require('../../../backend/node_modules/cors');
 const { createClient } = require('../../../backend/node_modules/@supabase/supabase-js');
 const createApp = require('../../../backend/src/app');
 const requirePermission = require('../../../backend/src/middleware/requirePermission');
-const { canTransition, ACTIVE_STATUSES } = require('../../../backend/src/modules/events/lifecycle');
+const { canTransition, ACTIVE_STATUSES, POSTPONABLE_STATUSES } = require('../../../backend/src/modules/events/lifecycle');
 const { frontendURL, backendPort, authPort, authURL, publicKey } = require('./settings.cjs');
 
 if (!process.env.PW_CONTROL_KEY) throw new Error('Start using Playwright; control key is required.');
@@ -132,6 +132,13 @@ const eventsRepository = {
     const event = findEvent(id);
     if (!event || !ACTIVE_STATUSES.includes(event.status) || (coordinatorId && event.coordinator_id !== coordinatorId)) return null;
     Object.assign(event, extra, { status: 'CANCELLED' });
+    return { ...event };
+  },
+  // SCRUM-149: same guard shape as cancel, gated on POSTPONABLE_STATUSES.
+  async postpone(id, extra = {}, coordinatorId) {
+    const event = findEvent(id);
+    if (!event || !POSTPONABLE_STATUSES.includes(event.status) || (coordinatorId && event.coordinator_id !== coordinatorId)) return null;
+    Object.assign(event, extra, { status: 'POSTPONED' });
     return { ...event };
   },
   async createSubmitted(fields, organiserId) {

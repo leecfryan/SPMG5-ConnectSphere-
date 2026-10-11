@@ -57,6 +57,8 @@ const policies = Object.freeze({
   // record check is the same "still assigned" resolver events.decide uses. Provisional pending the
   // customer's confirmation of who "Event Coordinator Lead" is - see SCRUM-148's task note.
   "events.cancel": { roles: ["event_coordinator", "event_ops_manager"], record: true },
+  // SCRUM-149: same shape and the same provisional role as events.cancel.
+  "events.postpone": { roles: ["event_coordinator", "event_ops_manager"], record: true },
   "internal.access": {
     roles: [
       "event_coordinator",
