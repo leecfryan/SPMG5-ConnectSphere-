@@ -108,6 +108,23 @@ async function transitionStatus(id, from, to, extra = {}, coordinatorId) {
   return unwrap(await query.select().maybeSingle(), "transitionStatus");
 }
 
+// SCRUM-148: cancel has no single `from` status - any of the four active
+// stages may be cancelled - so it cannot reuse transitionStatus, which checks
+// one exact `canTransition(from, to)` pair. coordinatorId, when given, is the
+// same race guard as transitionStatus: the write also requires that
+// coordinator to still hold the event, so a reassignment before the write
+// matches nothing (409). Ops-manager callers pass no coordinatorId - they may
+// cancel any event, so no coordinator filter is added for them.
+async function cancel(id, extra = {}, coordinatorId) {
+  let query = getSupabase()
+    .from(TABLE)
+    .update({ ...extra, status: "CANCELLED" })
+    .eq("id", id)
+    .in("status", ACTIVE_STATUSES);
+  if (coordinatorId) query = query.eq("coordinator_id", coordinatorId);
+  return unwrap(await query.select().maybeSingle(), "cancel");
+}
+
 async function assignCoordinator(id, coordinatorId) {
   return unwrap(
     await getSupabase()
@@ -155,6 +172,7 @@ module.exports = {
   update,
   markSubmitted,
   transitionStatus,
+  cancel,
   assignCoordinator,
   findSubmittedUnassigned,
   findActiveAssignments,

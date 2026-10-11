@@ -7,7 +7,7 @@ const cors = require('../../../backend/node_modules/cors');
 const { createClient } = require('../../../backend/node_modules/@supabase/supabase-js');
 const createApp = require('../../../backend/src/app');
 const requirePermission = require('../../../backend/src/middleware/requirePermission');
-const { canTransition } = require('../../../backend/src/modules/events/lifecycle');
+const { canTransition, ACTIVE_STATUSES } = require('../../../backend/src/modules/events/lifecycle');
 const { frontendURL, backendPort, authPort, authURL, publicKey } = require('./settings.cjs');
 
 if (!process.env.PW_CONTROL_KEY) throw new Error('Start using Playwright; control key is required.');
@@ -124,6 +124,14 @@ const eventsRepository = {
     const event = findEvent(id);
     if (!event || event.status !== from || (coordinatorId && event.coordinator_id !== coordinatorId)) return null;
     Object.assign(event, extra, { status: to });
+    return { ...event };
+  },
+  // SCRUM-148: same guard as the real write - any of the four active stages,
+  // and, when given, the coordinator still holding the event.
+  async cancel(id, extra = {}, coordinatorId) {
+    const event = findEvent(id);
+    if (!event || !ACTIVE_STATUSES.includes(event.status) || (coordinatorId && event.coordinator_id !== coordinatorId)) return null;
+    Object.assign(event, extra, { status: 'CANCELLED' });
     return { ...event };
   },
   async createSubmitted(fields, organiserId) {

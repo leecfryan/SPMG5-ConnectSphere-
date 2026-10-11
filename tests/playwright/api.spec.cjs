@@ -107,7 +107,7 @@ test('[API-RBAC-050] Operations manager access remains limited to its permission
   const identity = await request.get('/api/auth/me', { headers });
   expect(identity.status()).toBe(200);
   expect((await identity.json()).permissions.sort()).toEqual([
-    'event_organisers.read', 'events.assign', 'events.assign_coordinator', 'events.review', 'internal.access',
+    'event_organisers.read', 'events.assign', 'events.assign_coordinator', 'events.cancel', 'events.review', 'internal.access',
   ]);
 
   for (const path of ['/api/venues', '/api/equipment', '/api/equipment/events', '/api/technical-support/equipment-requests']) {
