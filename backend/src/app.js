@@ -13,8 +13,9 @@ const createAssignmentsRoutes = require("./routes/assignments.routes");
 const createManagedEventsRoutes = require("./routes/managedEvents.routes");
 const createEventWorkspaceRoutes = require("./routes/eventWorkspace.routes");
 const createReviewRoutes = require("./routes/review.routes");
+const createNotificationsRoutes = require("./routes/notifications.routes");
 
-function createApp({ authClient, dataClient, eventsRepository, assignmentDependencies, venuesService, equipmentDependencies, managedEventsService, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
+function createApp({ authClient, dataClient, eventsRepository, assignmentDependencies, venuesService, equipmentDependencies, managedEventsService, notificationsService, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
   const app = express();
   const authenticate = requireAuth(authClient);
   app.disable("x-powered-by");
@@ -29,6 +30,7 @@ function createApp({ authClient, dataClient, eventsRepository, assignmentDepende
   app.get("/api/auth/me", authenticate, (req, res) => {
     res.json({ user: req.user, permissions: getPermissions(req.user.roles) });
   });
+  app.use("/api/notifications", createNotificationsRoutes(notificationsService, authenticate));
   app.use("/api/events", createEventsRoutes(eventsRepository, authenticate));
   app.use("/api/event-workspace", authenticate, createEventWorkspaceRoutes(dataClient));
   app.use("/api", equipmentRoutes({ authenticate, ...equipmentDependencies }));
