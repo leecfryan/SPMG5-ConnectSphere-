@@ -2,7 +2,7 @@ import { test, expect } from "vitest";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { STATUSES, TRANSITIONS, ACTIVE_STATUSES, PLANNING_STATUSES, canTransition } = require("../../../src/modules/events/lifecycle");
+const { STATUSES, TRANSITIONS, ACTIVE_STATUSES, POSTPONABLE_STATUSES, PLANNING_STATUSES, canTransition } = require("../../../src/modules/events/lifecycle");
 
 const AGREED_STATUSES = [
   "DRAFT",
@@ -13,24 +13,30 @@ const AGREED_STATUSES = [
   "COMPLETED",
   "CANCELLED",
   "REJECTED",
+  "POSTPONED",
 ];
 
 const AGREED_TRANSITIONS = [
   ["DRAFT", "SUBMITTED"],
   ["SUBMITTED", "UNDER_REVIEW"],
   ["SUBMITTED", "CANCELLED"],
+  ["SUBMITTED", "POSTPONED"],
   ["UNDER_REVIEW", "APPROVED"],
   ["UNDER_REVIEW", "REJECTED"],
   ["UNDER_REVIEW", "CANCELLED"],
+  ["UNDER_REVIEW", "POSTPONED"],
   ["APPROVED", "CONFIRMED"],
   ["APPROVED", "CANCELLED"],
+  ["APPROVED", "POSTPONED"],
   ["CONFIRMED", "COMPLETED"],
   ["CONFIRMED", "CANCELLED"],
+  ["CONFIRMED", "POSTPONED"],
+  ["POSTPONED", "CANCELLED"],
 ];
 
 const isAgreed = (from, to) => AGREED_TRANSITIONS.some(([a, b]) => a === from && b === to);
 
-test("SCRUM-97 AC1: the lifecycle has exactly the eight agreed statuses", () => {
+test("SCRUM-97/149 AC1: the lifecycle has exactly the agreed statuses", () => {
   expect([...STATUSES].sort()).toEqual([...AGREED_STATUSES].sort());
 });
 
@@ -97,7 +103,12 @@ test("SCRUM-99 AC1: only approved and confirmed events are open to venue and equ
   expect(Object.isFrozen(PLANNING_STATUSES)).toBe(true);
 });
 
-test("SCRUM-98: active events are those submitted and not yet finished, rejected or cancelled", () => {
-  expect([...ACTIVE_STATUSES].sort()).toEqual(["APPROVED", "CONFIRMED", "SUBMITTED", "UNDER_REVIEW"]);
+test("SCRUM-98/149: active events are those submitted, postponed, and not yet finished, rejected or cancelled", () => {
+  expect([...ACTIVE_STATUSES].sort()).toEqual(["APPROVED", "CONFIRMED", "POSTPONED", "SUBMITTED", "UNDER_REVIEW"]);
   expect(Object.isFrozen(ACTIVE_STATUSES)).toBe(true);
+});
+
+test("SCRUM-149: postponable events are the active statuses minus POSTPONED itself", () => {
+  expect([...POSTPONABLE_STATUSES].sort()).toEqual(["APPROVED", "CONFIRMED", "SUBMITTED", "UNDER_REVIEW"]);
+  expect(Object.isFrozen(POSTPONABLE_STATUSES)).toBe(true);
 });

@@ -93,7 +93,7 @@ test("SCRUM-97: without a coordinator, no coordinator filter is added", async ()
   expect(calls.some(([name, column]) => name === "eq" && column === "coordinator_id")).toBe(false);
 });
 
-test("SCRUM-148 AC2: cancel writes CANCELLED, restricted to the four active stages, plus any extra columns", async () => {
+test("SCRUM-148/149 AC2: cancel writes CANCELLED, restricted to the active stages (including POSTPONED), plus any extra columns", async () => {
   const { calls } = recorder({ id: "evt-1", status: "CANCELLED" });
 
   const event = await loadRepository().cancel("evt-1", {
@@ -105,7 +105,7 @@ test("SCRUM-148 AC2: cancel writes CANCELLED, restricted to the four active stag
     cancelled_by: "coord-1", cancelled_at: "2026-10-08T00:00:00.000Z", cancellation_reason: "Venue flooded", status: "CANCELLED",
   }]);
   expect(calls).toContainEqual(["eq", "id", "evt-1"]);
-  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED"]]);
+  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED", "POSTPONED"]]);
   expect(event).toEqual({ id: "evt-1", status: "CANCELLED" });
 });
 
@@ -145,4 +145,58 @@ test("SCRUM-148 failure: a Supabase error is thrown with the action named", asyn
   recorder(null, { message: "boom" });
 
   await expect(loadRepository().cancel("evt-1", {})).rejects.toThrow("events.repository: cancel failed - boom");
+});
+
+test("SCRUM-149 AC3: postpone writes POSTPONED, restricted to the four postponable stages (not POSTPONED itself), plus any extra columns", async () => {
+  const { calls } = recorder({ id: "evt-1", status: "POSTPONED" });
+
+  const event = await loadRepository().postpone("evt-1", {
+    postponed_by: "coord-1", postponed_at: "2026-10-10T00:00:00.000Z", postponement_reason: "New date not yet known",
+  });
+
+  expect(calls).toContainEqual(["from", "events"]);
+  expect(calls).toContainEqual(["update", {
+    postponed_by: "coord-1", postponed_at: "2026-10-10T00:00:00.000Z", postponement_reason: "New date not yet known", status: "POSTPONED",
+  }]);
+  expect(calls).toContainEqual(["eq", "id", "evt-1"]);
+  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED"]]);
+  expect(event).toEqual({ id: "evt-1", status: "POSTPONED" });
+});
+
+test("SCRUM-149: extra cannot override status to anything but POSTPONED", async () => {
+  const { calls } = recorder({ id: "evt-1" });
+
+  await loadRepository().postpone("evt-1", { status: "CONFIRMED" });
+
+  expect(calls).toContainEqual(["update", { status: "POSTPONED" }]);
+});
+
+test("SCRUM-149: with a coordinator given, the write also requires that coordinator to still hold the event", async () => {
+  const { calls } = recorder({ id: "evt-1" });
+
+  await loadRepository().postpone("evt-1", {}, "coord-1");
+
+  expect(calls).toContainEqual(["eq", "coordinator_id", "coord-1"]);
+});
+
+test("SCRUM-149: without a coordinator (the ops-manager caller), no coordinator filter is added", async () => {
+  const { calls } = recorder({ id: "evt-1" });
+
+  await loadRepository().postpone("evt-1", {});
+
+  expect(calls.some(([name, column]) => name === "eq" && column === "coordinator_id")).toBe(false);
+});
+
+test("SCRUM-149 conflict/boundary: zero rows matched (wrong stage, already POSTPONED, or a reassignment race) returns null", async () => {
+  recorder(null);
+
+  const event = await loadRepository().postpone("evt-1", {}, "coord-1");
+
+  expect(event).toBeNull();
+});
+
+test("SCRUM-149 failure: a Supabase error is thrown with the action named", async () => {
+  recorder(null, { message: "boom" });
+
+  await expect(loadRepository().postpone("evt-1", {})).rejects.toThrow("events.repository: postpone failed - boom");
 });

@@ -1,6 +1,6 @@
 // Importing the application/validation must not require administrative credentials.
 const getSupabase = () => require("../../supabase");
-const { canTransition, ACTIVE_STATUSES } = require("./lifecycle");
+const { canTransition, ACTIVE_STATUSES, POSTPONABLE_STATUSES } = require("./lifecycle");
 
 const TABLE = "events";
 
@@ -125,6 +125,18 @@ async function cancel(id, extra = {}, coordinatorId) {
   return unwrap(await query.select().maybeSingle(), "cancel");
 }
 
+// SCRUM-149: same shape as cancel(), gated on POSTPONABLE_STATUSES so an
+// already-postponed event cannot be postponed again.
+async function postpone(id, extra = {}, coordinatorId) {
+  let query = getSupabase()
+    .from(TABLE)
+    .update({ ...extra, status: "POSTPONED" })
+    .eq("id", id)
+    .in("status", POSTPONABLE_STATUSES);
+  if (coordinatorId) query = query.eq("coordinator_id", coordinatorId);
+  return unwrap(await query.select().maybeSingle(), "postpone");
+}
+
 async function assignCoordinator(id, coordinatorId) {
   return unwrap(
     await getSupabase()
@@ -173,6 +185,7 @@ module.exports = {
   markSubmitted,
   transitionStatus,
   cancel,
+  postpone,
   assignCoordinator,
   findSubmittedUnassigned,
   findActiveAssignments,
