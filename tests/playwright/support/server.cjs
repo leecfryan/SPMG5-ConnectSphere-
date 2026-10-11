@@ -126,6 +126,15 @@ const eventsRepository = {
     Object.assign(event, extra, { status: to });
     return { ...event };
   },
+  // SCRUM-139: read from the venue and equipment fixtures, in the production row shape.
+  async findArrangements(id) {
+    const { equipmentService } = equipmentDependencies;
+    const venueRequests = (await venuesService.listBookingRequests({ allVenues: true })).filter(r => r.event_id === id)
+      .map(r => ({ id: r.id, booking_date: r.booking_date, venue: { name: r.venue.name }, slots: r.slots }));
+    const equipmentRequests = await Promise.all((await equipmentService.listRequestsByEvent(id))
+      .map(async r => ({ id: r.id, status: r.status, equipment: { type: (await equipmentService.findEquipmentById(r.equipment_id)).type } })));
+    return { venueRequests, equipmentRequests };
+  },
   // SCRUM-148: same guard as the real write - any of the four active stages,
   // and, when given, the coordinator still holding the event.
   async cancel(id, extra = {}, coordinatorId) {
@@ -162,7 +171,8 @@ auth.patch('/__test/registrations/:id', (req, res) => {
   if (Object.hasOwn(req.body, 'status')) registration.status = req.body.status;
   res.sendStatus(204);
 });
-const app = createApp({ dataClient, authClient: client, eventsRepository, venuesService, equipmentDependencies, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
+const notificationFixture = require('./notification-storage.cjs')({ auth, eventsRepository });
+const app = createApp({ notificationsService: notificationFixture.identity, dataClient, authClient: client, eventsRepository, venuesService, equipmentDependencies, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
 // Fixture endpoints exercise real middleware; these are NOT production business endpoints.
 const permissions = ['venues.read', 'equipment.read', 'bookings.read', 'technical_requests.read', 'event_planning.read', 'attendees.read', 'clients.read', 'event_organisers.read'];
 for (const permission of permissions) {

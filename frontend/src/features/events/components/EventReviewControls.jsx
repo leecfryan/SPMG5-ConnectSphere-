@@ -6,7 +6,7 @@ import { apiFetch } from "../../../lib/api";
 // Matches ACTIVE_STATUSES in backend/src/modules/events/lifecycle.js.
 // SCRUM-149: POSTPONED joins it there, so it joins here too - a postponed
 // event is still reassignable to a different coordinator.
-const ASSIGNABLE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED", "POSTPONED"];
+const ASSIGNABLE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED", "SAFETY_REVIEW", "POSTPONED"];
 
 export default function EventReviewControls({ event, onUpdated }) {
   const { token } = useAuth();

@@ -74,7 +74,7 @@ test("SCRUM-97 AC2: status is not a writable column, so a general update cannot 
   await repository.update("evt-1", { name: "Gala", status: "CONFIRMED" });
 
   expect(repository.WRITABLE_COLS).not.toContain("status");
-  expect(calls).toContainEqual(["update", { name: "Gala" }]);
+  ([(["update", { name: "Gala" }]);
 });
 
 test("SCRUM-98 AC4: with a coordinator given, the write also requires that coordinator to still hold the event", async () => {
@@ -105,7 +105,7 @@ test("SCRUM-148/149 AC2: cancel writes CANCELLED, restricted to the active stage
     cancelled_by: "coord-1", cancelled_at: "2026-10-08T00:00:00.000Z", cancellation_reason: "Venue flooded", status: "CANCELLED",
   }]);
   expect(calls).toContainEqual(["eq", "id", "evt-1"]);
-  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED", "POSTPONED"]]);
+  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED", "POSTPONED"]]);
   expect(event).toEqual({ id: "evt-1", status: "CANCELLED" });
 });
 

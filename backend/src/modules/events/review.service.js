@@ -41,7 +41,7 @@ function createReviewService({ repository }) {
   }
 
   // SCRUM-148 AC1/AC2: the assigned coordinator or the ops manager may cancel
-  // at any of the four active stages, with a required reason. Unlike move(),
+  // at any of the five active stages, with a required reason. Unlike move(),
   // cancel has no single `from` status, so it uses repository.cancel instead
   // of transitionStatus - see events.repository.js. isOpsManager means no
   // coordinator_id filter is added to the write (an ops manager may cancel

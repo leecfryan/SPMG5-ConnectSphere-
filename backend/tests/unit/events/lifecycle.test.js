@@ -9,6 +9,7 @@ const AGREED_STATUSES = [
   "SUBMITTED",
   "UNDER_REVIEW",
   "APPROVED",
+  "SAFETY_REVIEW",
   "CONFIRMED",
   "COMPLETED",
   "CANCELLED",
@@ -25,9 +26,13 @@ const AGREED_TRANSITIONS = [
   ["UNDER_REVIEW", "REJECTED"],
   ["UNDER_REVIEW", "CANCELLED"],
   ["UNDER_REVIEW", "POSTPONED"],
+  ["APPROVED", "SAFETY_REVIEW"],
   ["APPROVED", "CONFIRMED"],
   ["APPROVED", "CANCELLED"],
   ["APPROVED", "POSTPONED"],
+  ["SAFETY_REVIEW", "APPROVED"],
+  ["SAFETY_REVIEW", "CANCELLED"],
+  ["SAFETY_REVIEW", "POSTPONED"],
   ["CONFIRMED", "COMPLETED"],
   ["CONFIRMED", "CANCELLED"],
   ["CONFIRMED", "POSTPONED"],
@@ -36,7 +41,7 @@ const AGREED_TRANSITIONS = [
 
 const isAgreed = (from, to) => AGREED_TRANSITIONS.some(([a, b]) => a === from && b === to);
 
-test("SCRUM-97/149 AC1: the lifecycle has exactly the agreed statuses", () => {
+test("SCRUM-97 AC1 / SCRUM-139 AC3 / SCRUM-149: the lifecycle has exactly the agreed statuses", () => {
   expect([...STATUSES].sort()).toEqual([...AGREED_STATUSES].sort());
 });
 
@@ -103,8 +108,20 @@ test("SCRUM-99 AC1: only approved and confirmed events are open to venue and equ
   expect(Object.isFrozen(PLANNING_STATUSES)).toBe(true);
 });
 
+test("SCRUM-139 AC4: an event under safety review is closed to venue and equipment planning", () => {
+  expect(PLANNING_STATUSES).not.toContain("SAFETY_REVIEW");
+});
+
+test("SCRUM-139 AC3: only an approved event can be submitted for the safety check", () => {
+  expect(STATUSES.filter((from) => canTransition(from, "SAFETY_REVIEW"))).toEqual(["APPROVED"]);
+});
+
+test("SCRUM-139 AC4: under safety review, the event can only be withdrawn to approved or cancelled", () => {
+  expect(STATUSES.filter((to) => canTransition("SAFETY_REVIEW", to)).sort()).toEqual(["APPROVED", "CANCELLED"]);
+});
+
 test("SCRUM-98/149: active events are those submitted, postponed, and not yet finished, rejected or cancelled", () => {
-  expect([...ACTIVE_STATUSES].sort()).toEqual(["APPROVED", "CONFIRMED", "POSTPONED", "SUBMITTED", "UNDER_REVIEW"]);
+  expect([...ACTIVE_STATUSES].sort()).toEqual(["APPROVED", "CONFIRMED", "POSTPONED", "SAFETY_REVIEW", "SUBMITTED", "UNDER_REVIEW"]);
   expect(Object.isFrozen(ACTIVE_STATUSES)).toBe(true);
 });
 

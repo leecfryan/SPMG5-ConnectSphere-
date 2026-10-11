@@ -13,8 +13,10 @@ const createAssignmentsRoutes = require("./routes/assignments.routes");
 const createManagedEventsRoutes = require("./routes/managedEvents.routes");
 const createEventWorkspaceRoutes = require("./routes/eventWorkspace.routes");
 const createReviewRoutes = require("./routes/review.routes");
+const createSafetyCheckRoutes = require("./routes/safetyCheck.routes");
+const createNotificationsRoutes = require("./routes/notifications.routes");
 
-function createApp({ authClient, dataClient, eventsRepository, assignmentDependencies, venuesService, equipmentDependencies, managedEventsService, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
+function createApp({ authClient, dataClient, eventsRepository, assignmentDependencies, venuesService, equipmentDependencies, managedEventsService, notificationsService, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
   const app = express();
   const authenticate = requireAuth(authClient);
   app.disable("x-powered-by");
@@ -29,6 +31,7 @@ function createApp({ authClient, dataClient, eventsRepository, assignmentDepende
   app.get("/api/auth/me", authenticate, (req, res) => {
     res.json({ user: req.user, permissions: getPermissions(req.user.roles) });
   });
+  app.use("/api/notifications", createNotificationsRoutes(notificationsService, authenticate));
   app.use("/api/events", createEventsRoutes(eventsRepository, authenticate));
   app.use("/api/event-workspace", authenticate, createEventWorkspaceRoutes(dataClient));
   app.use("/api", equipmentRoutes({ authenticate, ...equipmentDependencies }));
@@ -50,6 +53,7 @@ function createApp({ authClient, dataClient, eventsRepository, assignmentDepende
     equipmentService: equipmentDependencies?.equipmentService,
     releaseVenueBookingsForCancelledEvent: venuesService?.releaseBookingsForCancelledEvent,
   }));
+  app.use("/api/internal", createSafetyCheckRoutes(eventsRepository));
   app.use("/api/venues", authenticate, requirePermission("internal.access"), createVenuesRoutes(venuesService));
   // Event Organisers hold no internal.access, so this cannot live under
   // /api/internal. Nor under /api/events: the registration router's GET /:eventId
