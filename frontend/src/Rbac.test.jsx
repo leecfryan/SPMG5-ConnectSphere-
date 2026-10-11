@@ -146,7 +146,8 @@ test("[RBAC-ROLE-004] Multiple staff roles combine responsibilities without dupl
   renderStaffPage();
   const list = await screen.findByRole("list");
   expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
-    labels["venues.read"], labels["bookings.read"], labels["equipment.read"], labels["technical_requests.read"],
+    labels["venues.read"], labels["bookings.read"],
+    labels["equipment.read"], labels["technical_requests.read"],
   ]);
   expect(screen.queryByText(labels["clients.read"])).toBeNull();
 });

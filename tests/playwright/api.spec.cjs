@@ -92,7 +92,7 @@ test('[API-RBAC-049] Combined roles return unique capabilities and removal immed
   const account = await accounts.create(['venue_staff', 'technical_support_staff', 'attendee', 'venue_staff']);
   const headers = bearer(await accounts.session(account));
   const identity = await request.get('/api/auth/me', { headers });
-  expect((await identity.json()).permissions).toEqual(['events.browse', 'registrations.manage', 'venues.update', 'bookings.decide', 'equipment.review', 'equipment.manage', 'equipment.messages', 'internal.access', 'venues.read', 'bookings.read', 'equipment.read', 'technical_requests.read']);
+  expect((await identity.json()).permissions).toEqual(['events.browse', 'registrations.manage', 'venues.update', 'venues.unavailability', 'bookings.decide', 'equipment.review', 'equipment.manage', 'equipment.messages', 'internal.access', 'venues.read', 'bookings.read', 'equipment.read', 'technical_requests.read']);
   const access = await request.get('/api/internal/access', { headers });
   expect(access.status()).toBe(200);
   expect((await access.json()).responsibilities.map((item) => item.permission)).toEqual(permissions.slice(0, 4));
@@ -107,7 +107,7 @@ test('[API-RBAC-050] Operations manager access remains limited to its permission
   const identity = await request.get('/api/auth/me', { headers });
   expect(identity.status()).toBe(200);
   expect((await identity.json()).permissions.sort()).toEqual([
-    'event_organisers.read', 'events.assign', 'events.assign_coordinator', 'events.review', 'internal.access',
+    'event_organisers.read', 'events.assign', 'events.assign_coordinator', 'events.cancel', 'events.review', 'internal.access',
   ]);
 
   for (const path of ['/api/venues', '/api/equipment', '/api/equipment/events', '/api/technical-support/equipment-requests']) {

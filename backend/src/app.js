@@ -38,13 +38,20 @@ function createApp({ authClient, dataClient, eventsRepository, assignmentDepende
   app.use("/api/events", authenticate, requirePermission("events.browse"), registrationEventRoutes(dataClient));
   app.use("/api/registrations", authenticate, requirePermission("registrations.manage"), (req, res, next) => dataClient ? next() :
     res.status(503).json({ message: "This feature is not yet configured." }), registrationRoutes(dataClient));
+  app.use("/api/waitlist", authenticate, requirePermission("registrations.manage"), (req, res, next) => dataClient ? next() :
+    res.status(503).json({ message: "This feature is not yet configured." }), require("./modules/registrations/waitlistHandlers")(dataClient));
   // All internal routes must be registered after this gate, with their own permission guard.
   app.use("/api/internal", authenticate, requirePermission("internal.access"));
   app.get("/api/internal/access", (req, res) => {
     res.json({ responsibilities: getResponsibilities(req.user.roles) });
   });
   app.use("/api/internal", createAssignmentsRoutes(assignmentDependencies));
-  app.use("/api/internal", createReviewRoutes(eventsRepository));
+  // SCRUM-148: equipment release is in-lane; venue release is the one
+  // cross-lane addition the Venue owner approved for this story.
+  app.use("/api/internal", createReviewRoutes(eventsRepository, {
+    equipmentService: equipmentDependencies?.equipmentService,
+    releaseVenueBookingsForCancelledEvent: venuesService?.releaseBookingsForCancelledEvent,
+  }));
   app.use("/api/venues", authenticate, requirePermission("internal.access"), createVenuesRoutes(venuesService));
   // Event Organisers hold no internal.access, so this cannot live under
   // /api/internal. Nor under /api/events: the registration router's GET /:eventId

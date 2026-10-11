@@ -32,6 +32,10 @@ const policies = Object.freeze({
   "venues.update": {
     roles: ["venue_staff", "event_coordinator"],
   },
+  // SCRUM-133: marking and managing unavailable periods is Venue Staff work only.
+  "venues.unavailability": {
+    roles: ["venue_staff"],
+  },
   "bookings.request": {
     roles: ["event_coordinator"],
   },
@@ -48,6 +52,11 @@ const policies = Object.freeze({
   },
   // SCRUM-98/99: only the event's assigned coordinator reviews and decides it (discussions #80, #101).
   "events.decide": { roles: ["event_coordinator"], record: true },
+  // SCRUM-148: the assigned coordinator or the ops manager may cancel at any active stage. The ops
+  // manager has no record check (unconditional, like events.review/events.assign); the coordinator's
+  // record check is the same "still assigned" resolver events.decide uses. Provisional pending the
+  // customer's confirmation of who "Event Coordinator Lead" is - see SCRUM-148's task note.
+  "events.cancel": { roles: ["event_coordinator", "event_ops_manager"], record: true },
   "internal.access": {
     roles: [
       "event_coordinator",

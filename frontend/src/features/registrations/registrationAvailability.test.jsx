@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { useRegistrationResource } from "./hooks/useRegistrationResource";
 import { useEventRegistration } from "./hooks/useEventRegistration";
+import { AuthContext } from "../auth/useAuth";
 import EventListPage from "./pages/EventListPage";
 import EventDetailPage from "./pages/EventDetailPage";
 
@@ -68,15 +69,17 @@ test("full events show zero slots and do not display the registration form", () 
     data: { event: { ...EVENT, enrolled_attendees: 10 } },
   });
   render(
-    <MemoryRouter initialEntries={[`/events/${EVENT.id}`]}>
-      <Routes>
-        <Route path="/events/:eventId" element={<EventDetailPage />} />
-      </Routes>
-    </MemoryRouter>,
+    <AuthContext.Provider value={{ token: null }}>
+      <MemoryRouter initialEntries={[`/events/${EVENT.id}`]}>
+        <Routes>
+          <Route path="/events/:eventId" element={<EventDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthContext.Provider>,
   );
 
   expect(screen.getByText("0 slots left · Full")).toBeInTheDocument();
-  expect(screen.getByText(/waiting-list redirection is pending implementation/i)).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Event waitlist" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /register for this event/i })).not.toBeInTheDocument();
 });
 

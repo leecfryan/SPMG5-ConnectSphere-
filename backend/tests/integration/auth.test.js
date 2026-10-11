@@ -187,7 +187,7 @@ test("RBAC: identity response derives permissions from verified roles, never cla
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "no-store");
   const { permissions } = await response.json();
-  assert.deepEqual(permissions, ["events.browse", "registrations.manage", "venues.update", "bookings.decide", "internal.access", "venues.read", "bookings.read"]);
+  assert.deepEqual(permissions, ["events.browse", "registrations.manage", "venues.update", "venues.unavailability", "bookings.decide", "internal.access", "venues.read", "bookings.read"]);
 });
 
 test("RBAC: combined roles return unique permissions and role removal updates the next identity request", async (t) => {
@@ -195,7 +195,7 @@ test("RBAC: combined roles return unique permissions and role removal updates th
   const base = await setup(t, async () => ({ data: { user: { id: "user", app_metadata: { roles } } }, error: null }));
   const headers = { Authorization: "Bearer same-token" };
   assert.deepEqual((await (await fetch(base + "/api/auth/me", { headers })).json()).permissions,
-    ["events.browse", "registrations.manage", "venues.update", "bookings.decide", "equipment.review", "equipment.manage", "equipment.messages", "internal.access", "venues.read", "bookings.read", "equipment.read", "technical_requests.read"]);
+    ["events.browse", "registrations.manage", "venues.update", "venues.unavailability", "bookings.decide", "equipment.review", "equipment.manage", "equipment.messages", "internal.access", "venues.read", "bookings.read", "equipment.read", "technical_requests.read"]);
   roles = ["attendee"];
   assert.deepEqual((await (await fetch(base + "/api/auth/me", { headers })).json()).permissions, ["events.browse", "registrations.manage"]);
   assert.equal((await fetch(base + "/api/internal/access", { headers })).status, 403);
@@ -216,7 +216,7 @@ test("[RBAC-MANAGER-001] Managers can review events without gaining venue or equ
   const headers = { Authorization: "Bearer valid" };
   const { user, permissions } = await (await fetch(base + "/api/auth/me", { headers })).json();
   assert.deepEqual(user.accountTypes, ["internal"]);
-  assert.deepEqual(permissions.sort(), ["event_organisers.read", "events.assign", "events.assign_coordinator", "events.review", "internal.access"]);
+  assert.deepEqual(permissions.sort(), ["event_organisers.read", "events.assign", "events.assign_coordinator", "events.cancel", "events.review", "internal.access"]);
   assert.equal((await fetch(base + "/api/internal/access", { headers })).status, 200);
 
   // Not a coordinator, not venue staff, not technical support. The manager

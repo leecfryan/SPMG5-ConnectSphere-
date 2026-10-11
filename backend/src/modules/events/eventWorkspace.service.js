@@ -8,6 +8,7 @@ const FIELDS = [
   "expected_attendance", "venue_requirements", "accessibility_needs",
   "equipment_needs", "other_comments", "status", "organiser_id",
   "coordinator_id", "submitted_at", "approved_rejected_by", "approved_rejected_at", "approval_rejection_remark",
+  "cancelled_by", "cancelled_at", "cancellation_reason",
 ].join(",");
 
 function isCoordinator(user) {
@@ -43,8 +44,9 @@ function createEventWorkspaceService(client) {
     let query = client.from("events").select(FIELDS);
     if (scope === "organiser") query = query.in("organiser_id", organiserIds);
     // SCRUM-98 AC3: a coordinator keeps seeing the requests they rejected, with the outcome they recorded.
-    else if (scope === "coordinator") query = query.eq("coordinator_id", userId).in("status", [...ACTIVE_STATUSES, "REJECTED"]);
-    else if (scope === "manager") query = query.in("status", [...ACTIVE_STATUSES, "REJECTED"]);
+    // SCRUM-148 AC4: and the ones they (or the ops manager) cancelled, with its history.
+    else if (scope === "coordinator") query = query.eq("coordinator_id", userId).in("status", [...ACTIVE_STATUSES, "REJECTED", "CANCELLED"]);
+    else if (scope === "manager") query = query.in("status", [...ACTIVE_STATUSES, "REJECTED", "CANCELLED"]);
     else throw new Error("Unknown event scope");
     return query;
   }
@@ -67,7 +69,12 @@ function createEventWorkspaceService(client) {
     list: (scope, userId) => read(scope, userId),
     async find(scope, userId, id) {
       const event = await read(scope, userId, id);
-      return event && { ...event, approved_rejected_by_name: await approverName(event.approved_rejected_by) };
+      return event && {
+        ...event,
+        approved_rejected_by_name: await approverName(event.approved_rejected_by),
+        // SCRUM-148 AC4: same "name, else unknown" treatment as the approve/reject outcome.
+        cancelled_by_name: await approverName(event.cancelled_by),
+      };
     },
     async updateOrganiserEvent(userId, id, input) {
       const current = await read("organiser", userId, id);

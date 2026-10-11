@@ -3,7 +3,7 @@
 Test evidence for the Venue lane (epic SCRUM-6). Behaviour, API and the schema reference live in
 [Venue integration](venue-integration.md); this file is the catalogue of what is tested and where.
 
-**52 automated backend tests across three suites, all passing**, plus manual cases run against the shared Supabase
+**73 automated backend tests across four suites, all passing**, plus manual cases run against the shared Supabase
 database and recorded in the team's TESTS sheet.
 
 | Suite | File | Tests |
@@ -11,6 +11,7 @@ database and recorded in the team's TESTS sheet.
 | Decisions | `backend/tests/integration/venueDecisions.test.js` | 22 |
 | Catalogue, calendar, requests | `backend/tests/integration/venues.integration.test.js` | 26 |
 | Storage and query scope | `backend/tests/integration/venues.storage.test.js` | 4 |
+| Unavailability periods | `backend/tests/integration/venues.unavailability.test.js` | 21 |
 | Browser journeys | `tests/playwright/venues.browser.spec.cjs` | 6 |
 
 Run everything:
@@ -44,6 +45,7 @@ Test names lead with a bracketed tag, so the runner's output is the traceability
 | SCRUM-102 | Reject with a reason and suggested alternative | `[SCRUM-102]` | TC-220 to TC-229 |
 | SCRUM-18 | Search and filter potential venues | `[SCRUM-18]` | TC-260 to TC-273 |
 | SCRUM-19 | Assess shortlisted venue suitability | `[SCRUM-19]` | TC-274 to TC-286 |
+| SCRUM-133 | Mark a venue temporarily unavailable | `[TC-SCRUM-133-01]` to `[TC-SCRUM-133-21]` | TC-SCRUM-133-01 to TC-SCRUM-133-21 |
 
 Cross-cutting guards that apply to every story: `[VENUE-AUTH-001]` (seven identities against eight endpoints),
 `[VENUE-AUTH-002]`, `[VENUE-INPUT-001]` (forged ownership and role fields), `[VENUE-CONFIG-001]` (missing venue

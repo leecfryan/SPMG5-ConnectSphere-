@@ -21,6 +21,7 @@ middleware and hardcoded development roles have been removed.
 | `/venues/:id/booking-request` | `bookings.request` | Event Coordinator |
 | `/venues/booking-requests` | `bookings.read` | Venue Staff, Event Coordinator |
 | `/venues/booking-requests` decide controls | `bookings.decide` | Venue Staff |
+| `/venues/:id/unavailability` | `venues.unavailability` | Venue Staff |
 
 These are React Router pages with direct links and browser Back/refresh support.
 Shared navigation and sign-out stay available. All calls use relative `/api/venues`
@@ -96,6 +97,22 @@ selected, and other slots on the same day stay bookable.
 
 A rejection records the decision and nothing else: any resulting booking change
 is made by the Event Coordinator, so no counter-offer is applied automatically.
+
+## Venue unavailability periods (SCRUM-133)
+
+Venue Staff can block a venue from accepting new bookings for a defined date range and a subset of slots (am, pm, night). New booking requests that overlap an unavailable slot are rejected with 409; existing confirmed bookings are unaffected.
+
+`POST /api/venues/:id/unavailability` — body: `{ start_date, end_date, slots[], reason }`. `start_date` and `end_date` are `YYYY-MM-DD`; `end_date` must not be before `start_date`. `slots` must be a non-empty subset of `["am", "pm", "night"]`. Returns 201 with the created period record.
+
+`GET /api/venues/:id/unavailability` — returns 200 with the array of all period records for the venue, ordered by start date.
+
+`PATCH /api/venues/:id/unavailability/:periodId` — any subset of `{ start_date, end_date, slots, reason }`. At least one field is required. The effective end_date (after merging with the existing record) must not be before the effective start_date. Returns 200 with the updated period.
+
+`DELETE /api/venues/:id/unavailability/:periodId` — removes the period entirely. Returns 204. Returns 404 when the period does not exist or belongs to a different venue.
+
+All four endpoints require `venues.unavailability`, held by Venue Staff only. The `created_by` field is set server-side from the verified session; it cannot be supplied in the request body.
+
+**How blocking works.** `listUnavailabilityInRange` reads from both `venue_unavailability` (legacy per-slot seed rows) and `venue_unavailability_periods` (new period records). Period records are expanded into per-slot rows matching the shape the availability calendar already reads. The calendar marks those slots `unavailable`, and `findSlotProblems` rejects any booking request that targets a non-`available`/`pending` slot.
 
 ## Rejecting with a reason (SCRUM-102)
 
@@ -435,6 +452,41 @@ alter table public.venue_bookings enable row level security;
 alter table public.venue_unavailability enable row level security;
 ```
 
+### Unavailability periods (SCRUM-133)
+
+```sql
+-- SCRUM-133: venue unavailability periods
+-- New table. The existing venue_unavailability table (per-slot rows used for seed
+-- data and the calendar display) is left untouched. This table records periods as
+-- units so Venue Staff can edit and end them. listUnavailabilityInRange expands
+-- periods into the same row shape the calendar already reads.
+
+create table if not exists public.venue_unavailability_periods (
+  id          uuid primary key default gen_random_uuid(),
+  venue_id    uuid not null references public.venues(id) on delete cascade,
+  start_date  date not null,
+  end_date    date not null,
+  slots       text[] not null,
+  reason      text not null,
+  created_by  uuid references auth.users(id),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  constraint unavailability_period_dates_valid check (end_date >= start_date),
+  constraint unavailability_period_slots_nonempty check (array_length(slots, 1) > 0)
+);
+
+create index if not exists venue_unavailability_periods_venue_date
+  on public.venue_unavailability_periods (venue_id, start_date, end_date);
+
+drop trigger if exists venue_unavailability_periods_set_updated_at
+  on public.venue_unavailability_periods;
+create trigger venue_unavailability_periods_set_updated_at
+  before update on public.venue_unavailability_periods
+  for each row execute function public.set_updated_at();
+
+alter table public.venue_unavailability_periods enable row level security;
+```
+
 ### Booking requests and the atomic submit function
 
 ```sql
@@ -727,6 +779,51 @@ revoke execute on function public.decide_venue_booking_request(uuid, text, uuid,
 grant execute on function public.decide_venue_booking_request(uuid, text, uuid, text)
   to service_role;
 ```
+
+### Releasing bookings on event cancellation (SCRUM-148)
+
+Cross-lane addition, approved by the Venue owner and kept to exactly this: one SQL function and one
+`venues.service.js` export. The Event Lifecycle lane's cancel action (`POST
+/api/internal/events/:eventId/cancel`, see `docs/event-requests.md`'s *Cancelling an event* section) has no
+coordinator-triggered path of its own into `venue_bookings`/`venue_booking_requests` — the only existing write
+path was `decide_venue_booking_request` above, which is Venue Staff's decision, not a coordinator's cancellation.
+
+```sql
+-- SCRUM-148: releases every slot tied to a cancelled event's booking request(s),
+-- across however many venues the event used, in one call. Joins through
+-- venue_booking_requests.event_id rather than taking a request id directly, so
+-- a multi-venue event's bookings are all released together.
+create or replace function public.cancel_venue_booking_requests_for_event(
+  p_event_id uuid
+)
+returns setof uuid
+language plpgsql
+set search_path = public
+as $$
+begin
+  return query
+  update public.venue_bookings b
+  set status = 'cancelled', updated_at = now()
+  from public.venue_booking_requests r
+  where b.request_id = r.id
+    and r.event_id = p_event_id
+    and b.status <> 'cancelled'
+  returning b.id;
+end;
+$$;
+
+revoke execute on function public.cancel_venue_booking_requests_for_event(uuid)
+  from public, anon, authenticated;
+grant execute on function public.cancel_venue_booking_requests_for_event(uuid)
+  to service_role;
+```
+
+The `status <> 'cancelled'` guard makes it idempotent, same as `decide_venue_booking_request`'s. `venues.service.js`
+exports a thin wrapper, `releaseBookingsForCancelledEvent(eventId)`, called from the cancel action synchronously
+(the same timing as the equipment release) — if nothing calls it, cancelling still succeeds; the venue release is
+simply skipped. A later story wanting to change or cancel one booking on a multi-venue event without touching the
+others should share the "flip to cancelled" primitive here rather than duplicate it, scoped to one `request_id`
+instead of a whole event.
 
 ### Demonstration data
 
