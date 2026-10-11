@@ -93,7 +93,7 @@ test("SCRUM-97: without a coordinator, no coordinator filter is added", async ()
   expect(calls.some(([name, column]) => name === "eq" && column === "coordinator_id")).toBe(false);
 });
 
-test("SCRUM-148 AC2: cancel writes CANCELLED, restricted to the four active stages, plus any extra columns", async () => {
+test("SCRUM-148 AC2: cancel writes CANCELLED, restricted to the five active stages, plus any extra columns", async () => {
   const { calls } = recorder({ id: "evt-1", status: "CANCELLED" });
 
   const event = await loadRepository().cancel("evt-1", {
@@ -105,7 +105,7 @@ test("SCRUM-148 AC2: cancel writes CANCELLED, restricted to the four active stag
     cancelled_by: "coord-1", cancelled_at: "2026-10-08T00:00:00.000Z", cancellation_reason: "Venue flooded", status: "CANCELLED",
   }]);
   expect(calls).toContainEqual(["eq", "id", "evt-1"]);
-  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED"]]);
+  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED"]]);
   expect(event).toEqual({ id: "evt-1", status: "CANCELLED" });
 });
 

@@ -108,7 +108,7 @@ async function transitionStatus(id, from, to, extra = {}, coordinatorId) {
   return unwrap(await query.select().maybeSingle(), "transitionStatus");
 }
 
-// SCRUM-148: cancel has no single `from` status - any of the four active
+// SCRUM-148: cancel has no single `from` status - any of the five active
 // stages may be cancelled - so it cannot reuse transitionStatus, which checks
 // one exact `canTransition(from, to)` pair. coordinatorId, when given, is the
 // same race guard as transitionStatus: the write also requires that

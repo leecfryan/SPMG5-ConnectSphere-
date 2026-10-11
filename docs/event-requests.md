@@ -319,8 +319,8 @@ clarification; narrow this if the answer comes back differently.
 - `events.cancel` is a `record: true` permission. The ops manager passes the record check unconditionally; a
   coordinator must still be `coordinator_id` on the event. Someone else's event, an unknown id and a malformed id
   all get the same 403.
-- Cancel has no single "from" status — it is permitted from any of the four active stages (`SUBMITTED`,
-  `UNDER_REVIEW`, `APPROVED`, `CONFIRMED`; see [Status values](#status-values)), so it uses
+- Cancel has no single "from" status — it is permitted from any of the five active stages (`SUBMITTED`,
+  `UNDER_REVIEW`, `APPROVED`, `SAFETY_REVIEW`, `CONFIRMED`; see [Status values](#status-values)), so it uses
   `events.repository.js#cancel(id, extra, coordinatorId?)` rather than `transitionStatus`. The write still filters
   on `.in("status", ACTIVE_STATUSES)` and, when the caller is the coordinator, `coordinator_id`, so a stage change
   or reassignment in between means nothing is written and the answer is 409.
@@ -340,7 +340,7 @@ clarification; narrow this if the answer comes back differently.
 `approved_rejected_by_name`). The coordinator's and manager's own list scopes now include `CANCELLED`, alongside
 `REJECTED` and the active statuses, so a cancelled event does not vanish from either list.
 
-**In the browser.** On an event in any of the four active stages, the assigned coordinator (coordinator scope) or
+**In the browser.** On an event in any of the five active stages, the assigned coordinator (coordinator scope) or
 the Operations Manager (manager scope) sees a *Cancel event* control with a required reason field. After
 cancelling, the page shows a *Cancellation* summary (cancelled by, cancelled on, reason) alongside the existing
 *Review decision* summary, if there is one.
