@@ -780,6 +780,51 @@ grant execute on function public.decide_venue_booking_request(uuid, text, uuid, 
   to service_role;
 ```
 
+### Releasing bookings on event cancellation (SCRUM-148)
+
+Cross-lane addition, approved by the Venue owner and kept to exactly this: one SQL function and one
+`venues.service.js` export. The Event Lifecycle lane's cancel action (`POST
+/api/internal/events/:eventId/cancel`, see `docs/event-requests.md`'s *Cancelling an event* section) has no
+coordinator-triggered path of its own into `venue_bookings`/`venue_booking_requests` — the only existing write
+path was `decide_venue_booking_request` above, which is Venue Staff's decision, not a coordinator's cancellation.
+
+```sql
+-- SCRUM-148: releases every slot tied to a cancelled event's booking request(s),
+-- across however many venues the event used, in one call. Joins through
+-- venue_booking_requests.event_id rather than taking a request id directly, so
+-- a multi-venue event's bookings are all released together.
+create or replace function public.cancel_venue_booking_requests_for_event(
+  p_event_id uuid
+)
+returns setof uuid
+language plpgsql
+set search_path = public
+as $$
+begin
+  return query
+  update public.venue_bookings b
+  set status = 'cancelled', updated_at = now()
+  from public.venue_booking_requests r
+  where b.request_id = r.id
+    and r.event_id = p_event_id
+    and b.status <> 'cancelled'
+  returning b.id;
+end;
+$$;
+
+revoke execute on function public.cancel_venue_booking_requests_for_event(uuid)
+  from public, anon, authenticated;
+grant execute on function public.cancel_venue_booking_requests_for_event(uuid)
+  to service_role;
+```
+
+The `status <> 'cancelled'` guard makes it idempotent, same as `decide_venue_booking_request`'s. `venues.service.js`
+exports a thin wrapper, `releaseBookingsForCancelledEvent(eventId)`, called from the cancel action synchronously
+(the same timing as the equipment release) — if nothing calls it, cancelling still succeeds; the venue release is
+simply skipped. A later story wanting to change or cancel one booking on a multi-venue event without touching the
+others should share the "flip to cancelled" primitive here rather than duplicate it, scoped to one `request_id`
+instead of a whole event.
+
 ### Demonstration data
 
 The two blocks below are test data, not schema. They are what the manual test

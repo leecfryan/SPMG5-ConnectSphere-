@@ -119,7 +119,7 @@ stateDiagram-v2
 | `SAFETY_REVIEW` | Safety review | the assigned coordinator's *Submit for safety check* (SCRUM-139); not open to new venue or equipment requests |
 | `CONFIRMED` | Confirmed | not yet (confirm story) |
 | `COMPLETED` | Completed | not yet (complete story) |
-| `CANCELLED` | Cancelled | not yet (cancel story) |
+| `CANCELLED` | Cancelled | the assigned coordinator's or the ops manager's *Cancel event* (SCRUM-148) |
 | `REJECTED` | Rejected | the assigned coordinator's *Reject* (SCRUM-98) |
 
 `COMPLETED`, `CANCELLED` and `REJECTED` are terminal. Any move not on the diagram
@@ -152,6 +152,7 @@ one in.
 | `organiser_id` | the controller, from the verified session |
 | `coordinator_id` | coordinator assignment — see [Coordinator assignment](event-assignment.md) |
 | `approved_rejected_by`, `approved_rejected_at`, `approval_rejection_remark` | the review actions (§Review and approval), from the verified session and server clock |
+| `cancelled_by`, `cancelled_at`, `cancellation_reason` | the cancel action (§Cancelling an event), from the verified session and server clock |
 | `created_at` | database default |
 | `registration_fields` | the registration feature |
 
@@ -182,6 +183,7 @@ Module at `backend/src/modules/events/`.
 | GET | /api/internal/events/:eventId/safety-readiness | requireAuth + internal.access + events.safety.submit (assigned coordinator) | `{ ready, missing[] }` |
 | POST | /api/internal/events/:eventId/submit-safety-check | same | `APPROVED → SAFETY_REVIEW` when nothing is missing |
 | POST | /api/internal/events/:eventId/withdraw-safety-check | same | `SAFETY_REVIEW → APPROVED` |
+| POST | /api/internal/events/:eventId/cancel | requireAuth + internal.access + events.cancel (assigned coordinator or ops manager) | any active status `→ CANCELLED`; body `{ "reason": string }` (required) |
 
 ### Rules enforced server-side
 
@@ -264,6 +266,7 @@ alter table public.events
   add column if not exists approval_rejection_remark text;
 ```
 
+<<<<<<< HEAD
 ### Submit for the Operational Safety Check (SCRUM-139)
 
 `safetyReadiness.js` (the rule), `safetyCheck.service.js`, `safetyCheck.controller.js`,
@@ -304,6 +307,65 @@ reuses `review.routes.js#assignedToCaller`.
 | 500 | Reading arrangements failed | "Something went wrong. Please try again." |
 | 503 | The access check could not reach storage | "Unable to check access. Please try again." |
 
+=======
+### Cancelling an event (SCRUM-148)
+
+`review.service.js#cancel`, `review.controller.js`, `routes/review.routes.js` (same router as review/approval,
+since cancel shares its `/api/internal/events/:eventId` prefix). Either the event's **assigned coordinator** or
+the **Operations Manager** may cancel — unlike review, which is coordinator-only (discussions #80, #101).
+"Operations Manager" is provisional for "Event Coordinator Lead" in the story's AC, pending a customer
+clarification; narrow this if the answer comes back differently.
+
+- `events.cancel` is a `record: true` permission. The ops manager passes the record check unconditionally; a
+  coordinator must still be `coordinator_id` on the event. Someone else's event, an unknown id and a malformed id
+  all get the same 403.
+- Cancel has no single "from" status — it is permitted from any of the four active stages (`SUBMITTED`,
+  `UNDER_REVIEW`, `APPROVED`, `CONFIRMED`; see [Status values](#status-values)), so it uses
+  `events.repository.js#cancel(id, extra, coordinatorId?)` rather than `transitionStatus`. The write still filters
+  on `.in("status", ACTIVE_STATUSES)` and, when the caller is the coordinator, `coordinator_id`, so a stage change
+  or reassignment in between means nothing is written and the answer is 409.
+- A reason is required (`cancellation_reason`, trimmed; blank or missing is a 400) — unlike approve's optional
+  note, cancel always needs one.
+- Records `cancelled_by` (the caller) and `cancelled_at` (server clock), additive to any earlier
+  `approved_rejected_*` fields — a previously approved event's decision history and its cancellation are both
+  kept, not one overwriting the other.
+- Releases what the event was holding, synchronously in the same request: every `APPROVED`/`PENDING` equipment
+  request on the event moves to `RELEASED` (see `docs/equipment-integration.md`), and every
+  `pending`/`confirmed` venue booking on the event's booking request(s) is set to `cancelled` (see
+  `docs/venue-integration.md`). Both are optional dependencies on the cancel service — if either is not wired in,
+  cancelling still succeeds; the release side effects are simply skipped.
+
+**Cancellation shown to users.** The event workspace detail read also returns `cancelled_by`, `cancelled_at`,
+`cancellation_reason` and `cancelled_by_name` (same "name, else email, else `null`" rule as
+`approved_rejected_by_name`). The coordinator's and manager's own list scopes now include `CANCELLED`, alongside
+`REJECTED` and the active statuses, so a cancelled event does not vanish from either list.
+
+**In the browser.** On an event in any of the four active stages, the assigned coordinator (coordinator scope) or
+the Operations Manager (manager scope) sees a *Cancel event* control with a required reason field. After
+cancelling, the page shows a *Cancellation* summary (cancelled by, cancelled on, reason) alongside the existing
+*Review decision* summary, if there is one.
+
+| Status | When | Message |
+| --- | --- | --- |
+| 200 | Done | `{ event }`, the updated row |
+| 400 | No reason, or a blank one | "Give a reason for cancelling this event." |
+| 401 | No or invalid session | "Please sign in to continue." |
+| 403 | Not the assigned coordinator and not the ops manager | "You do not have permission to access this information." |
+| 404 | Event deleted after the access check | "That event request no longer exists." |
+| 409 | Not in an active stage, or reassigned meanwhile | "This event request has changed since you opened it. Refresh to see its current status." |
+| 503 | The access check could not reach storage | "Unable to check access. Please try again." |
+
+**Schema reference.** The three cancellation columns are added by hand in the Supabase SQL editor (no migration
+file):
+
+```sql
+alter table public.events
+  add column if not exists cancelled_by uuid,
+  add column if not exists cancelled_at timestamptz,
+  add column if not exists cancellation_reason text;
+```
+
+>>>>>>> ea2c70fa9494255a4ae01b18626c880d1da8ccda
 ### Request
 
 Unknown keys are ignored. Send timestamps as ISO 8601 with a zone — a browser
@@ -579,10 +641,10 @@ the Week 12 release and is not part of this sprint.
 - There is no migration file for `events`. Schema changes are made in the
   Supabase dashboard and need to be reflected in this document in the same
   sitting.
-- Start review, approve and reject move an event past `SUBMITTED` (SCRUM-98/99).
-  Confirm, cancel and complete have no action yet; they arrive with their own
-  stories.
+- Start review, approve, reject and cancel move an event past `SUBMITTED` (SCRUM-98/99/148).
+  Confirm and complete have no action yet; they arrive with their own stories.
 - The decision columns (`approved_rejected_by`, `approved_rejected_at`, `approval_rejection_remark`) must exist
-  in the shared database (SQL under *Schema reference*) before review works
+  in the shared database (SQL under *Schema reference*) before review works; the cancellation columns
+  (`cancelled_by`, `cancelled_at`, `cancellation_reason`) must exist before cancel works
   outside the tests.
 - US-13 has no Jira issue, so `US-13` remains the label in code and tests.

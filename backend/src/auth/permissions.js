@@ -54,6 +54,11 @@ const policies = Object.freeze({
   "events.decide": { roles: ["event_coordinator"], record: true },
   // SCRUM-139: only the assigned coordinator submits or withdraws the safety check.
   "events.safety.submit": { roles: ["event_coordinator"], record: true },
+  // SCRUM-148: the assigned coordinator or the ops manager may cancel at any active stage. The ops
+  // manager has no record check (unconditional, like events.review/events.assign); the coordinator's
+  // record check is the same "still assigned" resolver events.decide uses. Provisional pending the
+  // customer's confirmation of who "Event Coordinator Lead" is - see SCRUM-148's task note.
+  "events.cancel": { roles: ["event_coordinator", "event_ops_manager"], record: true },
   "internal.access": {
     roles: [
       "event_coordinator",
