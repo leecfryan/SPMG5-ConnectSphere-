@@ -74,7 +74,7 @@ test("SCRUM-97 AC2: status is not a writable column, so a general update cannot 
   await repository.update("evt-1", { name: "Gala", status: "CONFIRMED" });
 
   expect(repository.WRITABLE_COLS).not.toContain("status");
-  ([(["update", { name: "Gala" }]);
+  expect(calls).toContainEqual(["update", { name: "Gala" }]);
 });
 
 test("SCRUM-98 AC4: with a coordinator given, the write also requires that coordinator to still hold the event", async () => {
@@ -147,7 +147,7 @@ test("SCRUM-148 failure: a Supabase error is thrown with the action named", asyn
   await expect(loadRepository().cancel("evt-1", {})).rejects.toThrow("events.repository: cancel failed - boom");
 });
 
-test("SCRUM-149 AC3: postpone writes POSTPONED, restricted to the four postponable stages (not POSTPONED itself), plus any extra columns", async () => {
+test("SCRUM-149 AC3: postpone writes POSTPONED, restricted to the postponable stages (not POSTPONED itself), plus any extra columns", async () => {
   const { calls } = recorder({ id: "evt-1", status: "POSTPONED" });
 
   const event = await loadRepository().postpone("evt-1", {
@@ -159,7 +159,7 @@ test("SCRUM-149 AC3: postpone writes POSTPONED, restricted to the four postponab
     postponed_by: "coord-1", postponed_at: "2026-10-10T00:00:00.000Z", postponement_reason: "New date not yet known", status: "POSTPONED",
   }]);
   expect(calls).toContainEqual(["eq", "id", "evt-1"]);
-  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED"]]);
+  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED"]]);
   expect(event).toEqual({ id: "evt-1", status: "POSTPONED" });
 });
 
