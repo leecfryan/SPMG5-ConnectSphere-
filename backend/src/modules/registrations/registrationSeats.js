@@ -48,7 +48,11 @@ async function compareAndSetEnrolled(client, eventId, expected, next) {
   return { updated: Boolean(data), error };
 }
 
-async function claimRegistrationSeat(client, eventId, initialEvent) {
+async function claimRegistrationSeat(client, eventId, initialEvent, reservedSeats = 0) {
+  if (!Number.isInteger(reservedSeats) || reservedSeats < 0) {
+    return { status: "error", error: new Error("Invalid reserved seat count") };
+  }
+
   let state;
   try {
     state = {
@@ -61,7 +65,7 @@ async function claimRegistrationSeat(client, eventId, initialEvent) {
   }
 
   for (let attempt = 0; attempt < MAX_COMPARE_AND_SET_ATTEMPTS; attempt += 1) {
-    if (state.capacity !== null && state.enrolled >= state.capacity) {
+    if (state.capacity !== null && state.enrolled + reservedSeats >= state.capacity) {
       return { status: "full" };
     }
 
@@ -81,9 +85,35 @@ async function claimRegistrationSeat(client, eventId, initialEvent) {
     state = latest.state;
   }
 
-  return state.capacity !== null && state.enrolled >= state.capacity
+  return state.capacity !== null && state.enrolled + reservedSeats >= state.capacity
     ? { status: "full" }
     : { status: "busy" };
+}
+
+async function claimRegistrationSeatV2(client, eventId) {
+  const { data, error } = await client.rpc("claim_registration_seat_v2", {
+    p_event_id: eventId,
+  });
+  if (error) return { status: "error", error };
+
+  switch (data?.outcome) {
+    case "claimed":
+      return { status: "claimed", enrolled: data.enrolled_attendees };
+    case "event_not_found":
+      return { status: "missing" };
+    case "full":
+    case "waitlist_priority":
+    case "event_not_open":
+    case "registration_not_open":
+    case "registration_closed":
+    case "capacity_counter_overflow":
+      return { status: data.outcome };
+    default:
+      return {
+        status: "error",
+        error: new Error(`Unexpected seat claim outcome: ${data?.outcome ?? "empty response"}`),
+      };
+  }
 }
 
 async function releaseClaimedSeat(client, eventId, claimedEnrolled) {
@@ -120,6 +150,7 @@ async function releaseRegistrationSeat(client, eventId) {
 module.exports = {
   MAX_COMPARE_AND_SET_ATTEMPTS,
   claimRegistrationSeat,
+  claimRegistrationSeatV2,
   releaseClaimedSeat,
   releaseRegistrationSeat,
 };

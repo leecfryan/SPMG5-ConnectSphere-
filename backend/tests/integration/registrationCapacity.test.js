@@ -28,6 +28,10 @@ function makeDataClient({
   registrations = [],
   insertError,
   beforeEventUpdate,
+  offeredSeats = 0,
+  activeWaitlistCount = 0,
+  beforeSeatClaim,
+  rpcError,
 } = {}) {
   const event = {
     id: "event-capacity",
@@ -38,6 +42,8 @@ function makeDataClient({
   };
   const savedRegistrations = registrations.map((row) => ({ ...row }));
   const eventUpdates = [];
+  const seatState = { offeredSeats, activeWaitlistCount };
+  const rpcCalls = [];
 
   function execute(query, terminal) {
     const { table, operation, filters } = query;
@@ -104,6 +110,34 @@ function makeDataClient({
     event,
     eventUpdates,
     registrations: savedRegistrations,
+    rpcCalls,
+    rpc(name, args) {
+      rpcCalls.push({ name, args });
+      if (name !== "claim_registration_seat_v2") {
+        return Promise.resolve({ data: null, error: { message: `Unexpected RPC: ${name}` } });
+      }
+      if (rpcError) return Promise.resolve({ data: null, error: rpcError });
+
+      beforeSeatClaim?.({ event, seatState, args });
+      if (seatState.activeWaitlistCount > 0) {
+        return Promise.resolve({ data: { outcome: "waitlist_priority" }, error: null });
+      }
+
+      const enrolled = event.enrolled_attendees ?? 0;
+      if (event.expected_attendance !== null &&
+          enrolled + seatState.offeredSeats >= event.expected_attendance) {
+        return Promise.resolve({ data: { outcome: "full" }, error: null });
+      }
+      if (enrolled >= 32767) {
+        return Promise.resolve({ data: { outcome: "capacity_counter_overflow" }, error: null });
+      }
+
+      event.enrolled_attendees = enrolled + 1;
+      return Promise.resolve({
+        data: { outcome: "claimed", enrolled_attendees: event.enrolled_attendees },
+        error: null,
+      });
+    },
     from(table) {
       const query = { table, operation: "select", filters: [] };
       const builder = {
@@ -191,7 +225,7 @@ test("REG-CAP-002: a registration at capacity is refused without claiming a seat
 
   assert.equal(response.status, 409);
   assert.match(body.message, /reached or exceeded capacity/);
-  assert.match(body.message, /waiting-list redirection is pending implementation/);
+  assert.doesNotMatch(body.message, /pending implementation/);
   assert.equal(dataClient.eventUpdates.length, 0);
   assert.equal(dataClient.registrations.length, 0);
 });
@@ -215,55 +249,52 @@ test("REG-CAP-013: simultaneous requests cannot both claim the last seat", async
   assert.equal(dataClient.registrations.length, 1);
 });
 
-test("REG-CAP-004: a lost seat race re-reads the event and retries", async (t) => {
-  let updates = 0;
+test("REG-CAP-004: an offer created after the initial event read reserves the last seat", async (t) => {
   const { base, dataClient } = await setup(t, {
     enrolled: 0,
-    capacity: 3,
-    beforeEventUpdate: ({ event }) => {
-      updates += 1;
-      if (updates === 1) {
-        event.enrolled_attendees = 1;
-        return false;
-      }
-      return true;
+    capacity: 1,
+    beforeSeatClaim: ({ seatState }) => {
+      seatState.offeredSeats = 1;
     },
   });
 
   const response = await register(base);
 
-  assert.equal(response.status, 201);
-  assert.equal(updates, 2);
-  assert.equal(dataClient.event.enrolled_attendees, 2);
-  assert.deepEqual(dataClient.eventUpdates[0].filters.at(-1), {
-    column: "enrolled_attendees",
-    operator: "eq",
-    value: 0,
-  });
-  assert.deepEqual(dataClient.eventUpdates[1].filters.at(-1), {
-    column: "enrolled_attendees",
-    operator: "eq",
-    value: 1,
-  });
+  assert.equal(response.status, 409);
+  assert.equal(dataClient.event.enrolled_attendees, 0);
+  assert.equal(dataClient.registrations.length, 0);
+  assert.equal(dataClient.rpcCalls.length, 1);
 });
 
-test("REG-CAP-005: three lost seat races return a retryable busy response", async (t) => {
-  let updates = 0;
+test("REG-CAP-017: a queued attendee has priority over a normal registration", async (t) => {
+  const { base, dataClient } = await setup(t, {
+    enrolled: 0,
+    capacity: 1,
+    activeWaitlistCount: 1,
+  });
+
+  const response = await register(base);
+
+  assert.equal(response.status, 409);
+  assert.match((await response.json()).message, /waitlist attendees have priority/i);
+  assert.equal(dataClient.event.enrolled_attendees, 0);
+  assert.equal(dataClient.registrations.length, 0);
+});
+
+test("REG-CAP-005: a seat-claim RPC error returns a server error without inserting", async (t) => {
   const { base, dataClient } = await setup(t, {
     enrolled: 0,
     capacity: 3,
-    beforeEventUpdate: () => {
-      updates += 1;
-      return false;
-    },
+    rpcError: { message: "private claim failure" },
   });
 
   const response = await register(base);
   const body = await response.json();
 
-  assert.equal(response.status, 503);
-  assert.match(body.message, /busy.*Please retry/i);
-  assert.equal(updates, 3);
+  assert.equal(response.status, 500);
+  assert.match(body.message, /Unable to submit/);
+  assert.doesNotMatch(JSON.stringify(body), /private claim failure/);
+  assert.equal(dataClient.rpcCalls.length, 1);
   assert.equal(dataClient.registrations.length, 0);
 });
 
@@ -281,8 +312,8 @@ test("REG-CAP-006: an insert failure attempts to release the claimed seat", asyn
   assert.match(body.message, /Unable to submit/);
   assert.doesNotMatch(JSON.stringify(body), /private insert failure/);
   assert.equal(dataClient.event.enrolled_attendees, 0);
-  assert.equal(dataClient.eventUpdates.length, 2);
-  assert.equal(dataClient.eventUpdates[1].filters.at(-1).value, 1);
+  assert.equal(dataClient.eventUpdates.length, 1);
+  assert.equal(dataClient.eventUpdates[0].filters.at(-1).value, 1);
 });
 
 test("REG-CAP-007: a duplicate registration is rejected before claiming a seat", async (t) => {
@@ -347,11 +378,8 @@ test("REG-CAP-014: a null enrolled counter is claimed with an IS NULL compare", 
 
   assert.equal(response.status, 201);
   assert.equal(dataClient.event.enrolled_attendees, 1);
-  assert.deepEqual(dataClient.eventUpdates[0].filters.at(-1), {
-    column: "enrolled_attendees",
-    operator: "is",
-    value: null,
-  });
+  assert.equal(dataClient.rpcCalls.length, 1);
+  assert.equal(dataClient.rpcCalls[0].args.p_event_id, "event-capacity");
 });
 
 test("REG-CAP-015: a confirmed registration remains seat-counted and cannot be withdrawn", async (t) => {

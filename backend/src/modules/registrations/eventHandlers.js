@@ -1,5 +1,32 @@
 const express = require("express");
 
+async function addAvailability(dataClient, events) {
+  if (!events.length) return { events, error: null };
+
+  const { data: availability, error } = await dataClient.rpc(
+    "registration_availability_for_events",
+    { p_event_ids: events.map((event) => event.id) },
+  );
+  if (error) return { events: null, error };
+
+  if (!Array.isArray(availability)) {
+    return { events: null, error: new Error("Availability RPC returned an invalid result.") };
+  }
+  const byEventId = new Map(availability.map((row) => [row.event_id, row]));
+  if (events.some((event) => !byEventId.has(event.id))) {
+    return { events: null, error: new Error("Availability RPC omitted an event.") };
+  }
+  return {
+    events: events.map((event) => {
+      const publicAvailability = Object.fromEntries(
+        Object.entries(byEventId.get(event.id)).filter(([key]) => key !== "event_id"),
+      );
+      return { ...event, ...publicAvailability };
+    }),
+    error: null,
+  };
+}
+
 module.exports = function registrationEventRoutes(dataClient) {
   const router = express.Router();
   router.get("/registration-windows", async (req, res) => {
@@ -44,7 +71,12 @@ module.exports = function registrationEventRoutes(dataClient) {
       console.error("Events list error:", error.message);
       return res.status(500).json({ message: "Unable to load events. Please try again." });
     }
-    res.json({ events: events ?? [] });
+    const result = await addAvailability(dataClient, events ?? []);
+    if (result.error) {
+      console.error("Event availability lookup error:", result.error.message);
+      return res.status(500).json({ message: "Unable to load event availability. Please try again." });
+    }
+    res.json({ events: result.events });
   });
 
   router.get("/:eventId", async (req, res) => {
@@ -61,7 +93,12 @@ module.exports = function registrationEventRoutes(dataClient) {
       return res.status(500).json({ message: "Unable to load event. Please try again." });
     }
     if (!event) return res.status(404).json({ message: "Event not found." });
-    res.json({ event });
+    const result = await addAvailability(dataClient, [event]);
+    if (result.error) {
+      console.error("Event availability lookup error:", result.error.message);
+      return res.status(500).json({ message: "Unable to load event availability. Please try again." });
+    }
+    res.json({ event: result.events[0] });
   });
 
   return router;
