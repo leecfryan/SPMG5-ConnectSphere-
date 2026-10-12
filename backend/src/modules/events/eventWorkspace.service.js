@@ -9,6 +9,7 @@ const FIELDS = [
   "equipment_needs", "other_comments", "status", "organiser_id",
   "coordinator_id", "submitted_at", "approved_rejected_by", "approved_rejected_at", "approval_rejection_remark",
   "cancelled_by", "cancelled_at", "cancellation_reason",
+  "postponed_by", "postponed_at", "postponement_reason",
 ].join(",");
 
 function isCoordinator(user) {
@@ -74,6 +75,7 @@ function createEventWorkspaceService(client) {
         approved_rejected_by_name: await approverName(event.approved_rejected_by),
         // SCRUM-148 AC4: same "name, else unknown" treatment as the approve/reject outcome.
         cancelled_by_name: await approverName(event.cancelled_by),
+        postponed_by_name: await approverName(event.postponed_by),
       };
     },
     async updateOrganiserEvent(userId, id, input) {
