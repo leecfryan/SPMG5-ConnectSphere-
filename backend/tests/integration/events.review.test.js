@@ -1,6 +1,10 @@
-// SCRUM-98/99 over real HTTP: the /api/internal gate, the events.decide guard
-// and its assigned-coordinator record check, and the status codes the review
-// actions answer with. Only the repository is faked.
+// SCRUM-98/99/148 over real HTTP: the /api/internal gate, the events.decide
+// and events.cancel guards and their record checks, and the status codes the
+// review and cancel actions answer with. Only the repository (and, for
+// cancel's AC3 release calls, the equipment/venue dependencies) are faked -
+// the live-DB proof that the real release functions do what they say lives
+// in equipment-release-cancelled-event.test.js and
+// venue-release-cancelled-event.test.js.
 
 import { test, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { createRequire } from "node:module";
@@ -13,8 +17,16 @@ const EVENT_ID = "aaaaaaaa-0001-0000-0000-000000000000";
 const MISSING_ID = "aaaaaaaa-0009-0000-0000-000000000000";
 const ASSIGNED = "coord-assigned";
 const OTHER = "coord-other";
+const MANAGER = "ops-manager-1";
+// SCRUM-149: POSTPONED joins ACTIVE_STATUSES (cancel's own gate), but is
+// excluded from POSTPONABLE_STATUSES (postpone's gate) so it can't be
+// postponed twice.
+const ACTIVE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED", "POSTPONED"];
+const POSTPONABLE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED"];
 
-const repository = { findById: vi.fn(), transitionStatus: vi.fn() };
+const repository = { findById: vi.fn(), transitionStatus: vi.fn(), cancel: vi.fn(), postpone: vi.fn() };
+const equipmentService = { releaseReservationsForCancelledEvent: vi.fn() };
+const releaseVenueBookingsForCancelledEvent = vi.fn();
 let stored;
 
 // The token is "<user id>:<roles>", so each case states the identity it exercises.
@@ -30,7 +42,11 @@ const authClient = { auth: { getUser: async (token) => {
 
 let server, base;
 beforeAll(async () => {
-  server = createApp({ authClient, eventsRepository: repository }).listen(0, "127.0.0.1");
+  server = createApp({
+    authClient, eventsRepository: repository,
+    equipmentDependencies: { equipmentService },
+    venuesService: { releaseBookingsForCancelledEvent: releaseVenueBookingsForCancelledEvent },
+  }).listen(0, "127.0.0.1");
   await once(server, "listening");
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -45,6 +61,23 @@ beforeEach(() => {
     stored = { ...stored, ...extra, status: to };
     return { ...stored };
   });
+  repository.cancel.mockReset().mockImplementation(async (id, extra, coordinatorId) => {
+    if (id !== EVENT_ID) return null;
+    if (!ACTIVE_STATUSES.includes(stored.status)) return null;
+    if (coordinatorId && stored.coordinator_id !== coordinatorId) return null;
+    stored = { ...stored, ...extra, status: "CANCELLED" };
+    return { ...stored };
+  });
+  repository.postpone.mockReset().mockImplementation(async (id, extra, coordinatorId) => {
+    if (id !== EVENT_ID) return null;
+    if (!POSTPONABLE_STATUSES.includes(stored.status)) return null;
+    if (coordinatorId && stored.coordinator_id !== coordinatorId) return null;
+    stored = { ...stored, ...extra, status: "POSTPONED" };
+    return { ...stored };
+  });
+  equipmentService.releaseReservationsForCancelledEvent.mockReset()
+    .mockResolvedValue({ released: [], equipmentReverted: [], equipmentSkipped: [] });
+  releaseVenueBookingsForCancelledEvent.mockReset().mockResolvedValue([]);
 });
 
 function post(action, token = `${ASSIGNED}:event_coordinator`, body, id = EVENT_ID) {
@@ -220,14 +253,298 @@ test("SCRUM-98 failure: a storage error during the access check is a 503 and not
   expect(repository.transitionStatus).not.toHaveBeenCalled();
 });
 
-test("SCRUM-98 failure: without storage configured, the actions answer 503", async () => {
+test("SCRUM-98/148/149 failure: without storage configured, the actions answer 503", async () => {
   const bare = createApp({ authClient }).listen(0, "127.0.0.1");
   await once(bare, "listening");
   try {
-    const response = await fetch(`http://127.0.0.1:${bare.address().port}/api/internal/events/${EVENT_ID}/start-review`,
-      { method: "POST", headers: { Authorization: `Bearer ${ASSIGNED}:event_coordinator` } });
-    expect(response.status).toBe(503);
+    for (const action of ["start-review", "cancel", "postpone"]) {
+      const response = await fetch(`http://127.0.0.1:${bare.address().port}/api/internal/events/${EVENT_ID}/${action}`,
+        { method: "POST", headers: { Authorization: `Bearer ${ASSIGNED}:event_coordinator`, "Content-Type": "application/json" }, body: JSON.stringify({ reason: "x" }) });
+      expect(response.status, action).toBe(503);
+    }
   } finally {
     await new Promise((resolve) => bare.close(resolve));
   }
+});
+
+// ---------------------------------------------------------------------------
+// SCRUM-148: cancel. Same router/controller/service as review above, with a
+// different permission (events.cancel: assigned coordinator OR ops manager,
+// unlike events.decide's coordinator-only) and no single "from" status.
+// ---------------------------------------------------------------------------
+
+test.each(["", "invalid"])("SCRUM-148: an unauthenticated caller (%j) cannot cancel", async (token) => {
+  expect((await post("cancel", token, { reason: "x" })).status).toBe(401);
+});
+
+test.each(["event_organiser", "venue_staff", "technical_support_staff", "attendee", "unknown"])(
+  "[TC-148-04] %s cannot cancel an event", async (role) => {
+    expect((await post("cancel", `${ASSIGNED}:${role}`, { reason: "x" })).status).toBe(403);
+    expect(repository.cancel).not.toHaveBeenCalled();
+  });
+
+test("[TC-148-03] a coordinator not assigned to the event cannot cancel it", async () => {
+  const response = await post("cancel", `${OTHER}:event_coordinator`, { reason: "x" });
+
+  expect(response.status).toBe(403);
+  expect(repository.cancel).not.toHaveBeenCalled();
+  expect(stored.status).toBe("SUBMITTED");
+});
+
+test("[TC-148-01] the assigned coordinator cancels their own event; release runs synchronously", async () => {
+  const before = Date.now();
+
+  const response = await post("cancel", undefined, { reason: "Venue flooded" });
+
+  expect(response.status).toBe(200);
+  const { event } = await response.json();
+  expect(event).toMatchObject({ status: "CANCELLED", cancelled_by: ASSIGNED, cancellation_reason: "Venue flooded" });
+  expect(Date.parse(event.cancelled_at)).toBeGreaterThanOrEqual(before - 1000);
+  expect(equipmentService.releaseReservationsForCancelledEvent).toHaveBeenCalledWith(EVENT_ID, ASSIGNED);
+  expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledWith(EVENT_ID);
+});
+
+test("[TC-148-02] the ops manager cancels an event not assigned to them", async () => {
+  const response = await post("cancel", `${MANAGER}:event_ops_manager`, { reason: "Duplicate booking" });
+
+  expect(response.status).toBe(200);
+  expect((await response.json()).event.status).toBe("CANCELLED");
+  // No coordinatorId is passed for an ops-manager caller - they may cancel any event.
+  expect(repository.cancel).toHaveBeenCalledWith(EVENT_ID, expect.objectContaining({ cancelled_by: MANAGER }), undefined);
+});
+
+test("[TC-148-05] a reassignment between the access check and the write is a 409, nothing recorded", async () => {
+  repository.findById.mockImplementationOnce(async () => ({ ...stored }));
+  repository.cancel.mockImplementationOnce(async () => {
+    stored = { ...stored, coordinator_id: OTHER };
+    return null;
+  });
+
+  const response = await post("cancel", undefined, { reason: "x" });
+
+  expect(response.status).toBe(409);
+  expect(stored).toMatchObject({ status: "SUBMITTED", coordinator_id: OTHER });
+  expect(stored.cancelled_by).toBeUndefined();
+});
+
+// The exhaustive stage list (exactly the four ACTIVE_STATUSES, no more, no
+// less) is already proven once, precisely, by events.transition.test.js's
+// unit test on the repository query. One representative case on each side of
+// the boundary is enough to prove the HTTP wiring uses that same filter.
+test("[TC-148-06] cancel succeeds from an active stage (APPROVED)", async () => {
+  stored.status = "APPROVED";
+
+  const response = await post("cancel", undefined, { reason: "x" });
+
+  expect(response.status).toBe(200);
+  expect((await response.json()).event.status).toBe("CANCELLED");
+});
+
+test("[TC-148-07] cancel is refused from a terminal stage (COMPLETED)", async () => {
+  stored.status = "COMPLETED";
+
+  const response = await post("cancel", undefined, { reason: "x" });
+
+  expect(response.status).toBe(409);
+  expect(stored.status).toBe("COMPLETED");
+  expect(equipmentService.releaseReservationsForCancelledEvent).not.toHaveBeenCalled();
+});
+
+test.each([{}, { reason: "" }])("[TC-148-08] cancel without a reason (%j) is a 400, nothing recorded", async (body) => {
+  const response = await post("cancel", undefined, body);
+
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ message: "Give a reason for cancelling this event." });
+  expect(repository.cancel).not.toHaveBeenCalled();
+});
+
+test("[TC-148-09] a whitespace-only reason is treated as blank", async () => {
+  const response = await post("cancel", undefined, { reason: "   " });
+
+  expect(response.status).toBe(400);
+  expect(repository.cancel).not.toHaveBeenCalled();
+});
+
+test("SCRUM-148: status, cancelled_by and cancelled_at in the body are ignored; the server's values win", async () => {
+  const response = await post("cancel", undefined, {
+    reason: "x", status: "CONFIRMED", cancelled_by: OTHER, cancelled_at: "2000-01-01T00:00:00Z",
+  });
+
+  const { event } = await response.json();
+  expect(event.status).toBe("CANCELLED");
+  expect(event.cancelled_by).toBe(ASSIGNED);
+  expect(event.cancelled_at).not.toBe("2000-01-01T00:00:00Z");
+});
+
+test("SCRUM-148 failure: a storage error on the write is a safe 500", async () => {
+  repository.cancel.mockRejectedValueOnce(new Error("events.repository: cancel failed - boom"));
+  const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const response = await post("cancel", undefined, { reason: "x" });
+
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ message: "Something went wrong. Please try again." });
+  quiet.mockRestore();
+});
+
+// ---------------------------------------------------------------------------
+// SCRUM-149: postpone. Same router/controller/service shape as cancel, with
+// its own permission (events.postpone) and its own repository gate
+// (POSTPONABLE_STATUSES, not ACTIVE_STATUSES - an already-postponed event
+// can't be postponed again). No equipment release - AC3 names only venue
+// bookings and holds.
+// ---------------------------------------------------------------------------
+
+test.each(["", "invalid"])("SCRUM-149: an unauthenticated caller (%j) cannot postpone", async (token) => {
+  expect((await post("postpone", token, { reason: "x" })).status).toBe(401);
+});
+
+test.each(["event_organiser", "venue_staff", "technical_support_staff", "attendee", "unknown"])(
+  "[TC-149-20] %s cannot postpone an event", async (role) => {
+    expect((await post("postpone", `${ASSIGNED}:${role}`, { reason: "x" })).status).toBe(403);
+    expect(repository.postpone).not.toHaveBeenCalled();
+  });
+
+test("[TC-149-03] a coordinator not assigned to the event cannot postpone it", async () => {
+  const response = await post("postpone", `${OTHER}:event_coordinator`, { reason: "x" });
+
+  expect(response.status).toBe(403);
+  expect(repository.postpone).not.toHaveBeenCalled();
+  expect(stored.status).toBe("SUBMITTED");
+});
+
+test("[TC-149-01] the assigned coordinator postpones their own event; venue release runs synchronously, equipment is untouched", async () => {
+  const before = Date.now();
+
+  const response = await post("postpone", undefined, { reason: "New date not yet known" });
+
+  expect(response.status).toBe(200);
+  const { event } = await response.json();
+  expect(event).toMatchObject({ status: "POSTPONED", postponed_by: ASSIGNED, postponement_reason: "New date not yet known" });
+  expect(Date.parse(event.postponed_at)).toBeGreaterThanOrEqual(before - 1000);
+  expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledWith(EVENT_ID);
+  expect(equipmentService.releaseReservationsForCancelledEvent).not.toHaveBeenCalled();
+});
+
+test("[TC-149-02] the ops manager postpones an event not assigned to them", async () => {
+  const response = await post("postpone", `${MANAGER}:event_ops_manager`, { reason: "Venue double-booked" });
+
+  expect(response.status).toBe(200);
+  expect((await response.json()).event.status).toBe("POSTPONED");
+  // No coordinatorId is passed for an ops-manager caller - they may postpone any event.
+  expect(repository.postpone).toHaveBeenCalledWith(EVENT_ID, expect.objectContaining({ postponed_by: MANAGER }), undefined);
+});
+
+test("[TC-149-05] a reassignment between the access check and the write is a 409, nothing recorded", async () => {
+  repository.findById.mockImplementationOnce(async () => ({ ...stored }));
+  repository.postpone.mockImplementationOnce(async () => {
+    stored = { ...stored, coordinator_id: OTHER };
+    return null;
+  });
+
+  const response = await post("postpone", undefined, { reason: "x" });
+
+  expect(response.status).toBe(409);
+  expect(stored).toMatchObject({ status: "SUBMITTED", coordinator_id: OTHER });
+  expect(stored.postponed_by).toBeUndefined();
+});
+
+// The exhaustive stage list is proven once, precisely, by
+// events.transition.test.js's unit test on the repository query - this is
+// one representative case on each side of the boundary.
+test("[TC-149-19] postpone succeeds from an active stage (APPROVED) - companion to TC-149-12's refusal boundary", async () => {
+  stored.status = "APPROVED";
+
+  const response = await post("postpone", undefined, { reason: "x" });
+
+  expect(response.status).toBe(200);
+  expect((await response.json()).event.status).toBe("POSTPONED");
+});
+
+test("[TC-149-12] postpone is refused from a terminal stage (COMPLETED)", async () => {
+  stored.status = "COMPLETED";
+
+  const response = await post("postpone", undefined, { reason: "x" });
+
+  expect(response.status).toBe(409);
+  expect(stored.status).toBe("COMPLETED");
+  expect(releaseVenueBookingsForCancelledEvent).not.toHaveBeenCalled();
+});
+
+test("[TC-149-12] postpone is refused on an already-postponed event", async () => {
+  stored.status = "POSTPONED";
+
+  const response = await post("postpone", undefined, { reason: "x" });
+
+  expect(response.status).toBe(409);
+  expect(stored.status).toBe("POSTPONED");
+});
+
+test("[TC-149-11] a POSTPONED event can still be cancelled", async () => {
+  stored.status = "POSTPONED";
+
+  const response = await post("cancel", undefined, { reason: "Giving up on this one" });
+
+  expect(response.status).toBe(200);
+  expect((await response.json()).event).toMatchObject({ status: "CANCELLED", cancellation_reason: "Giving up on this one" });
+});
+
+test.each([{}, { reason: "" }])("[TC-149-04] postpone without a reason (%j) is a 400, nothing recorded", async (body) => {
+  const response = await post("postpone", undefined, body);
+
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ message: "Give a reason for postponing this event." });
+  expect(repository.postpone).not.toHaveBeenCalled();
+});
+
+test("[TC-149-04] a whitespace-only reason is treated as blank", async () => {
+  const response = await post("postpone", undefined, { reason: "   " });
+
+  expect(response.status).toBe(400);
+  expect(repository.postpone).not.toHaveBeenCalled();
+});
+
+test("SCRUM-149: status, postponed_by and postponed_at in the body are ignored; the server's values win", async () => {
+  const response = await post("postpone", undefined, {
+    reason: "x", status: "CONFIRMED", postponed_by: OTHER, postponed_at: "2000-01-01T00:00:00Z",
+  });
+
+  const { event } = await response.json();
+  expect(event.status).toBe("POSTPONED");
+  expect(event.postponed_by).toBe(ASSIGNED);
+  expect(event.postponed_at).not.toBe("2000-01-01T00:00:00Z");
+});
+
+test("[TC-149-10] venue release is skipped when postpone itself fails (missing reason)", async () => {
+  await post("postpone", undefined, {});
+
+  expect(releaseVenueBookingsForCancelledEvent).not.toHaveBeenCalled();
+});
+
+test("SCRUM-149 failure: a storage error on the write is a safe 500", async () => {
+  repository.postpone.mockRejectedValueOnce(new Error("events.repository: postpone failed - boom"));
+  const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const response = await post("postpone", undefined, { reason: "x" });
+
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ message: "Something went wrong. Please try again." });
+  quiet.mockRestore();
+});
+
+// TC-149-18: a characterization test. It documents cancel's existing,
+// equally-untested behaviour (no try/catch around the release call, so a
+// failure there surfaces as a generic 500 even though the status write
+// already committed) rather than endorsing it as correct - see the task
+// note's Decisions.
+test("[TC-149-18] characterization: a venue-release failure is a 500, even though the status write already committed", async () => {
+  releaseVenueBookingsForCancelledEvent.mockRejectedValueOnce(new Error("Failed to release venue bookings: boom"));
+  const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const response = await post("postpone", undefined, { reason: "x" });
+
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ message: "Something went wrong. Please try again." });
+  expect(stored.status).toBe("POSTPONED");
+  quiet.mockRestore();
 });

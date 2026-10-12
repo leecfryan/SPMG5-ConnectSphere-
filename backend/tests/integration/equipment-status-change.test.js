@@ -181,7 +181,12 @@ describe("SCRUM-103 AC4: the status change is recorded with who made it and when
     const type = freshType();
     const id = await insertEquipment({ type });
     const base = await startApp();
-    const before = new Date().toISOString();
+    // updated_at is stamped by the database, not by this process, so comparing
+    // it with a locally captured wall-clock time compares two different clocks.
+    // Read the row's own previous value instead - both come from the database.
+    const { data: beforeRow, error: beforeError } = await supabase
+      .from("equipment").select("updated_at").eq("id", id).single();
+    if (beforeError) throw beforeError;
 
     const response = await send(base, `/equipment/${id}/status`, "technical_support_staff", {
       method: "PATCH", body: { status: "DAMAGED" },
@@ -189,20 +194,25 @@ describe("SCRUM-103 AC4: the status change is recorded with who made it and when
     expect(response.status).toBe(200);
     const { data } = await response.json();
     expect(data.updated_by).toBe(technicalUserId);
-    expect(new Date(data.updated_at).getTime()).toBeGreaterThanOrEqual(new Date(before).getTime());
+    expect(new Date(data.updated_at).getTime())
+      .toBeGreaterThanOrEqual(new Date(beforeRow.updated_at).getTime());
   });
 
   test("[SCRUM-103 AC4 / TC-103-09] retire also records who and when", async () => {
     const type = freshType();
     const id = await insertEquipment({ type });
     const base = await startApp();
-    const before = new Date().toISOString();
+    // Same database-clock reasoning as TC-103-08 above.
+    const { data: beforeRow, error: beforeError } = await supabase
+      .from("equipment").select("updated_at").eq("id", id).single();
+    if (beforeError) throw beforeError;
 
     const response = await send(base, `/equipment/${id}/retire`, "technical_support_staff", { method: "PATCH" });
     expect(response.status).toBe(200);
     const { data } = await response.json();
     expect(data.updated_by).toBe(technicalUserId);
-    expect(new Date(data.updated_at).getTime()).toBeGreaterThanOrEqual(new Date(before).getTime());
+    expect(new Date(data.updated_at).getTime())
+      .toBeGreaterThanOrEqual(new Date(beforeRow.updated_at).getTime());
   });
 
   test("[SCRUM-103 AC4 / TC-103-10] updated_by is never taken from the client body - a forged field is rejected outright, not silently dropped", async () => {

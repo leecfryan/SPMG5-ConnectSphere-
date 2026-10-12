@@ -21,9 +21,9 @@ commit.
 ```
 
 `WorkspaceLayout` (every signed-in page) renders `nav.workspace-nav[aria-label="Workspace"]` with a `NavLink` per
-permitted feature, then the page (`<Outlet/>`), then `SignOutButton`. The link order is Account, Browse events,
+permitted feature, then the page (`<Outlet/>`), then `SignOutButton`. The link order is Account, Notifications, Browse events,
 My registrations, then feature links, then Responsibilities. Each link is behind the same `hasPermission` checks as
-its route.
+its route. Notifications, like Account, is available to every verified signed-in user.
 
 ## Layout modes
 

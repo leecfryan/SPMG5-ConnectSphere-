@@ -1,7 +1,7 @@
 # Event Status Lifecycle — Test Documentation
 
 **Deliverable evidence for SCRUM-97 (Progress an event through its status lifecycle), epic Event Lifecycle &
-Approval.** SCRUM-98 (review) and SCRUM-99 (approve) are in §8. Branch: `feature/eventLifecycleStatus` · **15 documented cases, 43 automated tests, all passing**
+Approval.** SCRUM-98 (review) and SCRUM-99 (approve) are in §8; SCRUM-139 (safety check) is in §9. Branch: `feature/eventLifecycleStatus` · **15 documented cases, 43 automated tests, all passing**
 — 34 backend unit, 9 frontend component, plus 1 manual database case.
 
 Story context — the eight statuses, the permitted moves, who sets each status and the schema change — is in
@@ -255,11 +255,167 @@ existing loading and error states, which these tests don't exercise.
 TC-SCRUM-98-13, 98-14, 98-22 to 98-26, 99-10 and 99-15/16 were added during build. They aren't in the original draft, but each is the
 failure or boundary path of an AC above.
 
-## 9. Requirements sources
+## 9. SCRUM-149 — postpone an event
+
+Same router/controller/service shape as SCRUM-148 (cancel, approved for this lane but never previously added to
+this file — see the note at the end of this section). No live-DB or Playwright coverage was added for this story;
+every AC is provable at the mocked-repository / component level, including the venue release call, to avoid load
+on the shared Supabase project's free tier.
+
+> **SCRUM-149:** As the assigned Event Coordinator, I want to postpone an event whose new date isn't known yet so
+> that its venues are released while the event's details are kept.
+>
+> 1. The assigned Event Coordinator or the Event Coordinator Lead can postpone an event without a new date, with
+>    a reason.
+> 2. The event's details and registrations are retained.
+> 3. The event's venue bookings and holds are released.
+
+| Layer | File | Pre-conditions |
+| --- | --- | --- |
+| Lifecycle (unit) | `backend/tests/unit/events/lifecycle.test.js` | Extended with `POSTPONED` in `STATUSES`, the four new edges into it, `POSTPONED → CANCELLED`, and dedicated `ACTIVE_STATUSES`/`POSTPONABLE_STATUSES` assertions. Same "typed from the agreed table" discipline as §3. |
+| Repository (unit) | `backend/tests/unit/events/events.transition.test.js` | Extended with `postpone()`'s own block, same `recorder()` harness as §2; `cancel()`'s existing test updated to expect `POSTPONED` in its status filter. |
+| Workload (unit) | `backend/tests/unit/events/assignments.service.test.js` | Extended: `findActiveAssignments`'s real query now expected to include `POSTPONED`. |
+| HTTP (integration) | `backend/tests/integration/events.review.test.js` | Same harness as SCRUM-98/99/148 (§8); `repository.postpone` added to the fake, gated on a local `POSTPONABLE_STATUSES`. |
+| HTTP (workspace) | `backend/tests/integration/eventWorkspace.test.js` | Same harness as §8; `postponed_by`/`postponed_at`/`postponement_reason` added to the fixture's field set; one case postpones then reassigns, one postpones then checks visibility. |
+| Registrations (integration) | `backend/tests/integration/registrations.test.js` | Existing non-`APPROVED` rejection test, one new case with a `POSTPONED` event. |
+| Component | `frontend/src/features/events/components/EventPostponeControl.test.jsx` | New file, same shape as `EventCancelControl.test.jsx`: jsdom, real component/service/`apiFetch`, `fetch` stubbed. |
+| Component | `frontend/src/features/events/components/EventCancelControl.test.jsx` | Extended: the "offers a cancel action" status list now includes `POSTPONED`. |
+
+| ID | AC | Type | Scenario | Test data | Expected result | Automated test | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TC-149-01 | 149-1, 149-3 | Happy | Assigned coordinator postpones their own event; the venue release call happens in the same request (also proves TC-149-09) | Event `coordinator_id` = caller | 200; `POSTPONED`, `postponed_by`/`postponed_at`/`postponement_reason` set; `releaseVenueBookingsForCancelledEvent` called with the event id; equipment release **not** called | `[TC-149-01] the assigned coordinator postpones their own event; venue release runs synchronously, equipment is untouched` | 2026-10-11 · pass · local |
+| TC-149-02 | 149-1 | Happy | Ops manager postpones an event not assigned to them | caller role `event_ops_manager` | 200; `POSTPONED`; no `coordinatorId` passed to the write | `[TC-149-02] the ops manager postpones an event not assigned to them` | 2026-10-11 · pass · local |
+| TC-149-03 | 149-1 | Negative | A coordinator not assigned to the event postpones it | caller `event_coordinator`, different id | 403; `repository.postpone` not called | `[TC-149-03] a coordinator not assigned to the event cannot postpone it` | 2026-10-11 · pass · local |
+| TC-149-04 | 149-1 | Negative / Boundary | No reason, blank reason, whitespace-only reason | `{}`, `{ reason: "" }`, `{ reason: "   " }` | 400 "Give a reason for postponing this event."; nothing written | `[TC-149-04] postpone without a reason (%j) is a 400, nothing recorded` (×2); `[TC-149-04] a whitespace-only reason is treated as blank` | 2026-10-11 · pass · local |
+| TC-149-05 | 149-1 | Conflict | Event reassigned between the access check and the write | write finds `coordinator_id` changed | 409; nothing recorded | `[TC-149-05] a reassignment between the access check and the write is a 409, nothing recorded` | 2026-10-11 · pass · local |
+| TC-149-06 | 149-2 | Happy | Postponed event stays visible to the assigned coordinator and the manager, every field (including an earlier approval) intact | Event previously `APPROVED` with a decision, then `POSTPONED` | 200 in both scopes; `postponed_by_name` resolved; earlier `approved_rejected_by`/remark still present | `[TC-149-06] the assigned coordinator and the manager both still see a postponed event, with every field intact` | 2026-10-11 · pass · local |
+| TC-149-08 | 149-2 | Boundary | A new registration attempt is refused once the event is postponed | Event `status = POSTPONED` | 409 "Registration is not open for this event." — the existing, unmodified `!== "APPROVED"` check | `[TC-149-08] POST /api/registrations: rejects registration for a POSTPONED event` | 2026-10-11 · pass · local |
+| TC-149-10 | 149-3 | Boundary | Venue release is skipped when postpone itself fails | missing reason | `releaseVenueBookingsForCancelledEvent` not called | `[TC-149-10] venue release is skipped when postpone itself fails (missing reason)` | 2026-10-11 · pass · local |
+| TC-149-11 | — | Happy | A `POSTPONED` event can still be cancelled | Event `status = POSTPONED` | 200; `CANCELLED`, cancellation fields set | `[TC-149-11] a POSTPONED event can still be cancelled` | 2026-10-11 · pass · local |
+| TC-149-12 | — | Boundary | A terminal or already-postponed event cannot be postponed again | `COMPLETED`; already `POSTPONED` | 409 for each | `[TC-149-12] postpone is refused from a terminal stage (COMPLETED)`; `[TC-149-12] postpone is refused on an already-postponed event`; unit query construction in `events.transition.test.js` | 2026-10-11 · pass · local |
+| TC-149-13 | 149-1, 149-3 | Happy / Negative | `EventPostponeControl` renders only on the four active stages, requires a non-blank reason, disables while in flight, surfaces a server refusal | Every status; empty/whitespace reason; a 403 response; an in-flight request | Hidden outside the four active stages; blocked client-side until typed; one request while disabled; server message shown as an alert | All cases in `EventPostponeControl.test.jsx` (`[TC-149-13]`, ×9) | 2026-10-11 · pass · local |
+| TC-149-14 | — | Happy | `EventCancelControl` now also renders for a `POSTPONED` event | `event.status = "POSTPONED"` | Visible (previously hidden) | `[TC-148-18 / TC-149-14] a %s event offers a cancel action` (extended parameter list) | 2026-10-11 · pass · local |
+| TC-149-15 | — | — | *Dropped.* `EventReviewControls.jsx` had no existing tests; building a new file's harness for one status case was judged disproportionate to the one-line fix. TC-149-17 proves the real behaviour at the integration layer instead. | — | — | — | not built — see *Decisions* in the task note |
+| TC-149-16 | — | Happy | A `POSTPONED` event counts toward its coordinator's workload | Fixture includes a `POSTPONED` event | `findActiveAssignments`'s real query includes `POSTPONED` | `[TC-149-16] SCRUM-26/149: workload counts read only assigned events in an active status (postponed included)` | 2026-10-11 · pass · local |
+| TC-149-17 | — | Happy | The ops manager can reassign a `POSTPONED` event to a different coordinator | Event `status = POSTPONED` | 200; `coordinator_id` updated | `[WORKFLOW-002b / TC-149-17] A postponed event can still be reassigned to a different coordinator` | 2026-10-11 · pass · local |
+| TC-149-18 | 149-3 | Failure | **Characterization test**: venue release throws after the status write already committed | release mock rejects | 500 "Something went wrong…"; the event's status is already `POSTPONED` regardless — documents cancel's pre-existing, equally-untested behaviour, doesn't endorse it | `[TC-149-18] characterization: a venue-release failure is a 500, even though the status write already committed` | 2026-10-11 · pass · local |
+| TC-149-19 | 149-1, 149-3 | Happy | Postpone succeeds from an active stage (`APPROVED`, representative) — the positive-side companion to TC-149-12, same split as cancel's TC-148-06/07 | Event `status = APPROVED` | 200; `POSTPONED` | `[TC-149-19] postpone succeeds from an active stage (APPROVED) - companion to TC-149-12's refusal boundary` | 2026-10-11 · pass · local |
+| TC-149-20 | 149-1 | Negative | A caller with an unrelated role entirely (not just "wrong coordinator") cannot postpone | `event_organiser`, `venue_staff`, `technical_support_staff`, `attendee`, `unknown` | 403 each; `repository.postpone` never called | `[TC-149-20] %s cannot postpone an event` (×5) | 2026-10-11 · pass · local |
+
+**On the gaps in the numbering:** there is no TC-149-07 — it was folded into TC-149-06 during planning review, before
+any code was written. TC-149-19 and TC-149-20 were not in the original plan at all; they were added during the
+build once it became clear that cancel's own precedent (TC-148-06/07 for the stage boundary, TC-148-04 for an
+unrelated role) had no postpone equivalent allocated. Both are documented here now that TC-149-08 — previously
+just a planned case — is a real, passing test, so this table matches what actually exists rather than what was
+first sketched.
+
+**Coverage** (2026-10-11, `test:cov`, local): `review.service.js` 100% statements/branches/functions for every
+`postpone` branch (reason validation, ops-manager/coordinator split, conflict/not-found, the release call, its
+skip path and its failure path). `events.repository.js#postpone` and the widened `cancel()` query are covered by
+their own unit tests. One reporting quirk, not a real gap: the terminal coverage table doesn't list `lifecycle.js`
+as a row at all despite 60+ passing assertions against it, and shows `review.controller.js` lines 39/51 (cancel's
+and postpone's shared-shape failure-response line) as "uncovered" even though both have passing tests exercising
+them — pre-existing behaviour of the tool, not something this story introduced or left unproven.
+
+**Test review.** Each new case was checked against a plausible wrong implementation:
+
+| Mutation | Test that goes red |
+| --- | --- |
+| Gate `postpone()` on `ACTIVE_STATUSES` instead of `POSTPONABLE_STATUSES` | TC-149-12 (second case) |
+| Leave `POSTPONED` out of `ACTIVE_STATUSES` | TC-149-11, TC-149-16, TC-149-17 |
+| Reuse cancel's `reason_required` failure key for postpone | would show cancel's message, not postpone's — TC-149-04 |
+| Call the venue release before the status write succeeds | TC-149-10 |
+| Pass `equipmentService` through to `postpone()`'s release call | TC-149-01's "equipment release not called" assertion |
+| Let a non-assigned coordinator or an unrelated role through | TC-149-03, TC-149-20 |
+
+**Note for whoever reads this next:** SCRUM-148 (cancel) itself never received an entry in this file, despite its
+own task note listing one as planned — there is no TC-148-xx table anywhere here. Not backfilled as part of this
+story (out of lane for what SCRUM-149 is responsible for), but worth raising with the story owner if cancel's own
+traceability is ever asked for in the Week 13 Q&A.
+
+---
+## 9. SCRUM-139 — submit for the Operational Safety Check
+
+Readiness rule, the three actions, the page controls and both Playwright journeys are automated. The venue and
+equipment refusals during review (AC4) reuse those lanes' existing "must be approved" checks; `SAFETY_REVIEW` was
+added to their refusal lists.
+
+> **SCRUM-139:** As an Event Coordinator, I want to submit an event for the Operational Safety Check once its venue
+> and technical arrangements are confirmed so that it can be reviewed and move into preparation.
+>
+> 1. An event can only be submitted once its essential venue bookings are approved and its technical arrangements
+>    are reserved.
+> 2. If arrangements are missing, submission is blocked and the missing items are shown.
+> 3. The event moves to a safety review status when submitted.
+> 4. Venue and technical arrangements cannot be changed during safety review unless the submission is withdrawn.
+
+| Layer | File | Pre-conditions |
+| --- | --- | --- |
+| Rule (unit) | `backend/tests/unit/events/safetyReadiness.test.js` | Pure `findMissingArrangements`; arrangements built per test (venue "Hall B", 2099-05-01) |
+| Repository (unit) | `backend/tests/unit/events/events.arrangements.test.js` | `recorder()` as in §2 |
+| Lifecycle (unit) | `backend/tests/unit/events/lifecycle.test.js` | As §2, with `SAFETY_REVIEW` in the typed table |
+| HTTP (integration) | `backend/tests/integration/events.safetyCheck.test.js` | Real `createApp`; `authClient.getUser` faked (token = `<user id>:<roles>`); in-memory event `APPROVED`, assigned to the caller, whose `transitionStatus` honours the status and coordinator filters |
+| Frontend (component) | `frontend/src/features/events/components/SafetyCheckControls.test.jsx` | Real component, `safetyService.js`, `useApiResource` and `apiFetch`; `fetch` stubbed; token `coordinator-token`; event `aaaaaaaa-0139-…` |
+| Frontend (page) | `frontend/src/features/events/pages/EventWorkspaceDetailPage.test.jsx` | As §8, with the in-memory event answering the safety-check POSTs |
+| Playwright | `tests/playwright/safety-check.api.spec.cjs`, `safety-check.browser.spec.cjs` | Real Express app and UI against the local Auth simulator; arrangements made through the venue and equipment lanes' own endpoints on a date 45 days ahead |
+
+| ID | AC | Type | Scenario | Test data | Expected result | Automated test | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-139-01 | 1 | Happy | Everything arranged | 2 confirmed venue requests, 1 `APPROVED` equipment | Nothing missing | `SCRUM-139 AC1: confirmed venues and approved equipment leave nothing missing` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-02 | 1 | Negative | No venue request | none | "No venue booking has been approved yet." | `SCRUM-139 AC1: an event with no venue request is missing a venue` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-03 | 1 | Negative | A venue still pending | 1 confirmed, 1 pending (Hall B · 2099-05-01) | Hall B listed, "Waiting for Venue Staff to decide." | `SCRUM-139 AC1: a pending venue request is missing, even beside a confirmed one` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-04 | 1 | Boundary | Rejected / cancelled beside a confirmed venue | 1 confirmed, 1 rejected, 1 cancelled | Nothing missing | `SCRUM-139 AC1: rejected and cancelled requests do not block when another venue is confirmed` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-05 | 1 | Boundary | Only rejected / cancelled venues | 1 rejected | "No venue booking has been approved yet." | `SCRUM-139 AC1: only rejected or cancelled requests count as no venue` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-06 | 1 | Negative | Equipment unattended or with issues | Projector `PENDING`, Speaker `REJECTED` | Both listed with the UI-label reasons | `SCRUM-139 AC1: unattended and issue equipment requests are missing` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-07 | 1 | Boundary | No equipment, or only released | 0 / 1 `RELEASED` | Nothing missing | `test.each` in `safetyReadiness.test.js` (×2) | 2026-10-09 · pass · local |
+| TC-SCRUM-139-08 | 2 | Happy | Every missing item listed together | no venue, 2 pending equipment | Three items, venue first | `SCRUM-139 AC2: every missing item is listed together, venue first` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-09 | 1, 2 | Negative | Submit with missing items | `APPROVED`, 1 pending venue | 409 with `missing`; still `APPROVED`; no write | `SCRUM-139 AC1/AC2: submitting with missing arrangements is a 409 listing them, and changes nothing`; `[SAFETY-E2E-API-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-10 | 2 | Happy | Readiness endpoint | not ready; ready | `{ ready: false, missing }`; `{ ready: true, missing: [] }` | `SCRUM-139 AC2: readiness lists what is missing…`; `SCRUM-139 AC1: readiness reports a fully arranged event as ready`; `[SAFETY-E2E-API-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-11 | 3 | Happy | Ready event submitted | `APPROVED`, ready | 200, `SAFETY_REVIEW`; write filtered on `APPROVED` and the caller | `SCRUM-139 AC3: a ready approved event moves to SAFETY_REVIEW for the calling coordinator only`; `[SAFETY-E2E-API-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-12 | 3 | Conflict | Wrong status, or changed meanwhile | `SUBMITTED`, `UNDER_REVIEW`, `SAFETY_REVIEW`, `CONFIRMED`, `CANCELLED`; lost race | 409 refresh message; nothing written | `test.each` wrong status (×5); `SCRUM-139 AC3 conflict: an event that changes between the check and the write is a 409` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-13 | 4 | Happy | Withdraw | `SAFETY_REVIEW` | 200, `APPROVED` | `SCRUM-139 AC4: withdrawing moves SAFETY_REVIEW back to APPROVED`; `[SAFETY-E2E-API-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-14 | 4 | Conflict | Withdraw when not in review | `APPROVED` | 409; unchanged | `SCRUM-139 AC4 conflict: an event not under safety review cannot be withdrawn`; `[SAFETY-E2E-API-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-15 | 4 | Negative | New venue request during review | `SAFETY_REVIEW` | Refused; nothing written | `[ACCESS-VENUE-002]` (now ×5); `[SAFETY-E2E-API-001]` (400) | 2026-10-09 · pass · local |
+| TC-SCRUM-139-16 | 4 | Negative | New equipment request during review | `SAFETY_REVIEW` | 409 "The event must be approved before requesting equipment." | `SCRUM-99 AC1: equipment cannot be requested for a SAFETY_REVIEW event…`; `[SAFETY-E2E-API-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-17 | 4 | Happy | Lifecycle table | — | `APPROVED→SAFETY_REVIEW`, `SAFETY_REVIEW→APPROVED/CANCELLED`; active, not planning | `lifecycle.test.js` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-18 | 1–4 | Negative | Access matrix | no token, `invalid`; 6 other roles; unassigned coordinator; unknown / malformed id | 401; 403; event unchanged | `SCRUM-139: an unauthenticated caller…` (×2); role `test.each` (×6); `SCRUM-139: a coordinator not assigned to the event…`; `SCRUM-139: an unknown or malformed event id…`; `[SAFETY-E2E-API-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-19 | 1–3 | Failure | Storage down | record check / arrangements / write throw | 503; 500 safe message, no provider text | `SCRUM-139 failure: …` (×5); `findArrangements throws when storage fails…` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-20 | 2 | Happy | Coordinator sees missing items | `APPROVED`, Hall B and Projector missing | Both listed; Submit disabled; *Check again* refetches | `[SCRUM-139-UI-001]`, `[SCRUM-139-UI-005]`, `[SCRUM-139-UI-011]`; `[E2E-SAFETY-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-21 | 2 | Failure | Readiness fails / submit refused meanwhile | 503; 409 with `missing` | Safe message and *Try again*; on 409 the server's message and the fresh list | `[SCRUM-139-UI-004]`, `[SCRUM-139-UI-003]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-22 | 3 | Happy | Submit from the page | ready `APPROVED` event | Badge "Safety review"; arrangement links gone; *Withdraw* shown | `[SCRUM-139-UI-002]`, `[SCRUM-139-UI-009]`; `[E2E-SAFETY-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-23 | 4 | Happy | Withdraw from the page | `SAFETY_REVIEW` | Badge "Approved – planning"; links back; a refused withdrawal shows the message | `[SCRUM-139-UI-006]`, `[SCRUM-139-UI-007]`, `[SCRUM-139-UI-009]`; `[E2E-SAFETY-001]` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-24 | 1 | Boundary | Confirmed + coordinator-cancelled slots | 2 confirmed, 1 cancelled | Counts as booked | `SCRUM-139 AC1: a request with confirmed and coordinator-cancelled slots counts as booked` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-25 | 2 | Boundary | Pending venue, nothing booked | 1 pending | Listed once, not also "No venue" | `SCRUM-139 AC2: a pending venue with nothing booked is listed once, not twice` | 2026-10-09 · pass · local |
+| TC-SCRUM-139-26 | 3 | Negative | Controls only for the assigned coordinator, in the right status | organiser, manager, other coordinator; 6 other statuses | No section; no safety request sent | `[SCRUM-139-UI-010]` (×3), `[SCRUM-139-UI-008]` (×6) | 2026-10-09 · pass · local |
+| TC-SCRUM-139-27 | 3, 4 | Failure | Double click while in flight | second click on *Submit* / *Withdraw* before the reply | Button "Submitting…" / "Withdrawing…" and disabled; one POST | `[SCRUM-139-UI-012]` (×2) | 2026-10-09 · pass · local |
+
+**Coverage** (2026-10-09, `test:cov`, local): `safetyReadiness.js`, `safetyCheck.service.js`,
+`safetyCheck.controller.js`, `safetyCheck.routes.js`, `lifecycle.js` and `review.routes.js` 100%.
+`events.repository.js` 88% lines; `findArrangements` is fully covered and the uncovered lines (`findById`,
+`findByIds`, `markSubmitted`) predate this story. `safetyService.js` 100%. `SafetyCheckControls.jsx` 100% lines and
+functions; v8 reports 79% branches, the JSX artefact described in §8 (every status, ready / not ready, loading,
+error and in-flight path has a test). The join hints in `findArrangements` (`venues!venue_id`,
+`equipment!equipment_id`) are proven against real Supabase only by the manual demo.
+
+**Test review.** Each case was checked against a plausible wrong implementation:
+
+| Mutation | Test that goes red |
+| --- | --- |
+| Drop the server-side readiness check on submit | TC-139-09 |
+| Drop the record check | the app refuses to start ("requires a server-side record access check") |
+| Count a pending slot as booked | TC-139-03 |
+| Let `REJECTED` equipment through | TC-139-06 |
+| Put `SAFETY_REVIEW` in `PLANNING_STATUSES` | TC-139-15, TC-139-17 (TC-139-16 is guarded by the equipment lane's own status list) |
+| UI: leave Submit enabled while in flight | TC-139-27 |
+
+TC-SCRUM-139-26 and 27 were added during build; each is a negative or failure path of an AC above.
+
+## 10. Requirements sources
 
 | Ref | What it says |
 | --- | --- |
 | **SCRUM-97** (backlog US-40) | Progress an event through its status lifecycle, 3 SP. AC in §1. |
 | Team-agreed lifecycle table | The 8 statuses and 10 permitted moves; recorded in `.agent/docs/architecture.md` §Database. `APPROVED` is the stored value for "approved / planning" because Registration and Venue already query it. |
 | **SCRUM-98**, **SCRUM-99** (backlog US-36, US-38) | Review and approve: the actions that use this lifecycle. See §8. |
+| **SCRUM-139** (backlog US-83) | Submit for the Operational Safety Check, 3 SP. See §9. |
 | Discussions #80, #94, #95, #101, #125 | The assigned coordinator decides; the manager only assigns; assignment doesn't start review; `approved_rejected_by` kept apart from `coordinator_id`; who sees the outcome |

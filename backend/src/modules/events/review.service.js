@@ -40,7 +40,69 @@ function createReviewService({ repository }) {
     return move(eventId, coordinatorId, "UNDER_REVIEW", "REJECTED", outcome(coordinatorId, parsed.note));
   }
 
-  return { startReview, approve, reject };
+  // SCRUM-148 AC1/AC2: the assigned coordinator or the ops manager may cancel
+  // at any of the five active stages, with a required reason. Unlike move(),
+  // cancel has no single `from` status, so it uses repository.cancel instead
+  // of transitionStatus - see events.repository.js. isOpsManager means no
+  // coordinator_id filter is added to the write (an ops manager may cancel
+  // any event); otherwise the write is guarded to the coordinator still
+  // holding the event, same race-guard shape as move().
+  //
+  // AC3: release what the event was holding. Equipment is in-lane; venue
+  // release is an optional, owner-approved seam (see the task note's
+  // Decisions). Both run synchronously here so AC3 is true the moment
+  // cancellation is saved, not only on a later equipment read.
+  async function cancel(eventId, actorId, reason, { isOpsManager = false, equipmentService, releaseVenueBookingsForCancelledEvent } = {}) {
+    const parsed = readNote(reason);
+    if (!parsed.ok || parsed.note === null) return { ok: false, reason: "reason_required" };
+
+    const extra = {
+      cancelled_by: actorId,
+      cancelled_at: new Date().toISOString(),
+      cancellation_reason: parsed.note,
+    };
+    const event = await repository.cancel(eventId, extra, isOpsManager ? undefined : actorId);
+    if (!event) {
+      const existing = await repository.findById(eventId);
+      return { ok: false, reason: existing ? "conflict" : "not_found" };
+    }
+
+    await equipmentService?.releaseReservationsForCancelledEvent?.(eventId, actorId);
+    await releaseVenueBookingsForCancelledEvent?.(eventId);
+
+    return { ok: true, event };
+  }
+
+  // SCRUM-149 AC1/AC3: same shape as cancel() - the assigned coordinator or
+  // the ops manager, a required reason, gated on repository.postpone's own
+  // POSTPONABLE_STATUSES (not ACTIVE_STATUSES, so an already-postponed event
+  // can't be postponed again). Reuses the same venue release call cancel()
+  // uses, synchronously - it releases every venue_bookings row tied to the
+  // event regardless of why the event changed. Equipment is out of scope for
+  // this story (AC3 names only venue bookings and holds).
+  async function postpone(eventId, actorId, reason, { isOpsManager = false, releaseVenueBookingsForCancelledEvent } = {}) {
+    const parsed = readNote(reason);
+    // A distinct key from cancel's "reason_required" - same FAILURES map in
+    // review.controller.js, different message ("postponing" vs "cancelling").
+    if (!parsed.ok || parsed.note === null) return { ok: false, reason: "postpone_reason_required" };
+
+    const extra = {
+      postponed_by: actorId,
+      postponed_at: new Date().toISOString(),
+      postponement_reason: parsed.note,
+    };
+    const event = await repository.postpone(eventId, extra, isOpsManager ? undefined : actorId);
+    if (!event) {
+      const existing = await repository.findById(eventId);
+      return { ok: false, reason: existing ? "conflict" : "not_found" };
+    }
+
+    await releaseVenueBookingsForCancelledEvent?.(eventId);
+
+    return { ok: true, event };
+  }
+
+  return { startReview, approve, reject, cancel, postpone };
 }
 
 module.exports = { createReviewService };

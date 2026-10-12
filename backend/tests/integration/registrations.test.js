@@ -318,6 +318,21 @@ test("POST /api/registrations: rejects registration for a non-APPROVED event", a
   assert.match((await res.json()).message, /not open/);
 });
 
+// SCRUM-149 AC2: postponing moves the event out of APPROVED, so new sign-ups
+// are refused by this existing check - no new code needed.
+test("[TC-149-08] POST /api/registrations: rejects registration for a POSTPONED event", async (t) => {
+  const base = await setup(t, {
+    tables: { events: () => ({ data: { ...DRAFT_EVENT, status: "POSTPONED" }, error: null }) },
+  });
+  const res = await fetch(base + "/api/registrations", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ eventId: "event-draft" }),
+  });
+  assert.equal(res.status, 409);
+  assert.match((await res.json()).message, /not open/);
+});
+
 test("POST /api/registrations: returns 400 when a required field is blank in registrationData", async (t) => {
   const eventWithRequired = {
     ...APPROVED_EVENT,

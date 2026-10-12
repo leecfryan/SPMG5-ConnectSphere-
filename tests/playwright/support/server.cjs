@@ -7,7 +7,7 @@ const cors = require('../../../backend/node_modules/cors');
 const { createClient } = require('../../../backend/node_modules/@supabase/supabase-js');
 const createApp = require('../../../backend/src/app');
 const requirePermission = require('../../../backend/src/middleware/requirePermission');
-const { canTransition } = require('../../../backend/src/modules/events/lifecycle');
+const { canTransition, ACTIVE_STATUSES, POSTPONABLE_STATUSES } = require('../../../backend/src/modules/events/lifecycle');
 const { frontendURL, backendPort, authPort, authURL, publicKey } = require('./settings.cjs');
 
 if (!process.env.PW_CONTROL_KEY) throw new Error('Start using Playwright; control key is required.');
@@ -126,6 +126,30 @@ const eventsRepository = {
     Object.assign(event, extra, { status: to });
     return { ...event };
   },
+  // SCRUM-139: read from the venue and equipment fixtures, in the production row shape.
+  async findArrangements(id) {
+    const { equipmentService } = equipmentDependencies;
+    const venueRequests = (await venuesService.listBookingRequests({ allVenues: true })).filter(r => r.event_id === id)
+      .map(r => ({ id: r.id, booking_date: r.booking_date, venue: { name: r.venue.name }, slots: r.slots }));
+    const equipmentRequests = await Promise.all((await equipmentService.listRequestsByEvent(id))
+      .map(async r => ({ id: r.id, status: r.status, equipment: { type: (await equipmentService.findEquipmentById(r.equipment_id)).type } })));
+    return { venueRequests, equipmentRequests };
+  },
+  // SCRUM-148: same guard as the real write - any of the four active stages,
+  // and, when given, the coordinator still holding the event.
+  async cancel(id, extra = {}, coordinatorId) {
+    const event = findEvent(id);
+    if (!event || !ACTIVE_STATUSES.includes(event.status) || (coordinatorId && event.coordinator_id !== coordinatorId)) return null;
+    Object.assign(event, extra, { status: 'CANCELLED' });
+    return { ...event };
+  },
+  // SCRUM-149: same guard shape as cancel, gated on POSTPONABLE_STATUSES.
+  async postpone(id, extra = {}, coordinatorId) {
+    const event = findEvent(id);
+    if (!event || !POSTPONABLE_STATUSES.includes(event.status) || (coordinatorId && event.coordinator_id !== coordinatorId)) return null;
+    Object.assign(event, extra, { status: 'POSTPONED' });
+    return { ...event };
+  },
   async createSubmitted(fields, organiserId) {
     const account = accounts.get(organiserId);
     if (!account || account.submissionFailure) throw new Error('Fixture event storage unavailable');
@@ -147,7 +171,8 @@ auth.patch('/__test/registrations/:id', (req, res) => {
   if (Object.hasOwn(req.body, 'status')) registration.status = req.body.status;
   res.sendStatus(204);
 });
-const app = createApp({ dataClient, authClient: client, eventsRepository, venuesService, equipmentDependencies, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
+const notificationFixture = require('./notification-storage.cjs')({ auth, eventsRepository });
+const app = createApp({ notificationsService: notificationFixture.identity, dataClient, authClient: client, eventsRepository, venuesService, equipmentDependencies, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
 // Fixture endpoints exercise real middleware; these are NOT production business endpoints.
 const permissions = ['venues.read', 'equipment.read', 'bookings.read', 'technical_requests.read', 'event_planning.read', 'attendees.read', 'clients.read', 'event_organisers.read'];
 for (const permission of permissions) {
