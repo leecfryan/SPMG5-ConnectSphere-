@@ -9,7 +9,8 @@ View them in the Supabase dashboard under Authentication > Users.
 | coordinator2.demo@example.com | event_coordinator | Internal |
 | coordinator3.demo@example.com | event_coordinator | Internal |
 | venue-technical.demo@example.com | venue_staff + technical_support_staff | Internal |
-| eventopsmanager.demo@example.com | event_ops_manager | Internal |
+| eventopsmanager.demo@example.com | event_coordinator_lead | Internal |
+| safety.demo@example.com | safety_officer | Internal |
 | venue.demo@example.com | venue_staff | Internal |
 | technical.demo@example.com | technical_support_staff | Internal |
 | organiser.demo@example.com | event_organiser | External |
@@ -39,6 +40,15 @@ new accounts. If a run stops partway through, correct the error and rerun it.
 
 Accounts are confirmed through the admin API; no signup or invitation emails are
 sent. All addresses use example.com and represent fictional users.
+
+SCRUM-142: `eventopsmanager.demo@example.com` remains the same account and now holds
+`event_coordinator_lead` (Event Coordinator Lead). Update existing trusted role
+metadata using the [manual Auth update](staff-access.md#schema-reference-manual-auth-metadata-update)
+before rerunning the seed; the seed will not overwrite a mismatched account.
+
+SCRUM-142 also adds `safety.demo@example.com` (Demo Safety Officer). It receives
+only basic staff access; safety review permissions are deferred to a separate
+story. The account is created only when an administrator runs the seed.
 
 ## Role data
 

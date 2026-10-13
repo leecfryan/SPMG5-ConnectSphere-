@@ -26,7 +26,7 @@ const TRANSITIONS = Object.freeze({
 });
 
 // Events still in progress: counted in a coordinator's workload and open to
-// (re)assignment by the Operations Manager (discussions #94, #101).
+// (re)assignment by the Event Coordinator Lead (discussions #94, #101).
 // POSTPONED joins this list (SCRUM-149): still the coordinator's responsibility.
 const ACTIVE_STATUSES = Object.freeze(["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED", "POSTPONED"]);
 

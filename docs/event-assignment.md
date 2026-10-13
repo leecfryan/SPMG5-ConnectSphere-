@@ -1,5 +1,9 @@
 # Coordinator Assignment — Sprint 1 scope
 
+SCRUM-142 renames the current manager role to Event Coordinator Lead (`event_coordinator_lead`).
+Historical acceptance criteria and customer quotations retain their original wording.
+Earlier execution results are historical evidence; rename verification is recorded separately.
+
 ## Scrum tickets
 
 | ID | User story |
@@ -107,9 +111,9 @@ All three are mounted under `/api/internal`, which already requires
 
 | Capability | Holder | Grants |
 | --- | --- | --- |
-| `events.assign_coordinator` | event_ops_manager | The three routes above and `/events/assignments` |
+| `events.assign_coordinator` | event_coordinator_lead | The three routes above and `/events/assignments` |
 
-`event_ops_manager` also gains `internal.access`, because `/api/internal` is
+`event_coordinator_lead` also gains `internal.access`, because `/api/internal` is
 gated on it before any route-specific check runs. Every other internal route
 keeps its own capability, so the Manager reaches the assignment queue and no
 other internal feature. See [staff access](staff-access.md).
@@ -167,7 +171,7 @@ ranked or pre-selected, because a coordinator may hold several events at once.
 | Page (frontend) | `frontend/src/features/events/AssignmentQueuePage.test.jsx` | 14 |
 
 The full case table is in [coordinator assignment tests](event-assignment-tests.md).
-Permission coverage for `event_ops_manager` is in
+Permission coverage for `event_coordinator_lead` is in
 `backend/tests/integration/auth.test.js` and `frontend/src/Rbac.test.jsx`.
 
 No test connects to Supabase.

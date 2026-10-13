@@ -117,7 +117,7 @@ test("SCRUM-143 AC3 TC-SCRUM-143-04: consecutive users receive different signatu
   }
 });
 
-test.each(["event_coordinator", "venue_staff", "technical_support_staff", "event_ops_manager", "event_organiser", "attendee", "none"])(
+test.each(["event_coordinator", "venue_staff", "technical_support_staff", "event_coordinator_lead", "event_organiser", "attendee", "none"])(
   "SCRUM-143 AC3 TC-SCRUM-143-05: signed-in %s can request their own inbox identity", async role => {
     const base = await setup();
     const response = await request(base, "alice:" + role);

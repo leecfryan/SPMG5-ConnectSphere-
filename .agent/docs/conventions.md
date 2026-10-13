@@ -211,7 +211,7 @@ Test names lead with an ID so the runner output is the traceability report:
 | Layer | Pattern | Example |
 |---|---|---|
 | Backend unit / integration | `[SCRUM-<n>] <behaviour>` or `SCRUM-<n> AC<k>: <behaviour>` | `[SCRUM-22] Rejecting records the reason and changes no booking` |
-| Frontend | `[SCRUM-<n>-UI-NNN] <behaviour>` | `[SCRUM-26-UI-001] the Event Operations Manager reaches the queue…` |
+| Frontend | `[SCRUM-<n>-UI-NNN] <behaviour>` | `[SCRUM-26-UI-001] the Event Coordinator Lead reaches the queue…` |
 | Playwright API | `[<AREA>-API-NNN] <behaviour>` | `[EVENT-API-006] Anonymous and forged-token submissions fail before persistence` |
 | Playwright browser | `[E2E-<AREA>-NNN] <behaviour>` | `[E2E-AUTH-004] Sign-out removes persisted session across reload and browser history` |
 

@@ -130,7 +130,7 @@ const staffCases = [
   ['E2E-RBAC-001', 'venue_staff', ['Venue information and availability', 'Venue booking information']],
   ['E2E-RBAC-002', 'technical_support_staff', ['Equipment information and availability', 'Technical requirements and arrangements']],
   ['E2E-RBAC-003', 'event_coordinator', ['Venue information and availability', 'Venue booking information', 'Equipment information and availability', 'Technical requirements and arrangements', 'Internal event planning', 'Event registration information', 'Client information for managed events', 'Event organiser information for managed events']],
-  ['E2E-RBAC-006', 'event_ops_manager', ['Event request review and coordinator assignment', 'Event organiser information for managed events']],
+  ['E2E-RBAC-006', 'event_coordinator_lead', ['Event request review and coordinator assignment', 'Event organiser information for managed events']],
 ];
 for (const [id, role, labels] of staffCases) {
   test(`[${id}] ${role} follows a protected deep link and sees only permitted responsibilities`, async ({ page, accounts }) => {
@@ -161,8 +161,8 @@ for (const [index, role] of ['attendee', 'event_organiser'].entries()) {
   });
 }
 
-test('[E2E-RBAC-006] Operations managers can enter their workspace but not other staff features', async ({ page, accounts }) => {
-  const account = await accounts.create(['event_ops_manager']);
+test('[E2E-RBAC-006] Event Coordinator Leads can enter their workspace but not other staff features', async ({ page, accounts }) => {
+  const account = await accounts.create(['event_coordinator_lead']);
   await page.goto('/staff/responsibilities');
   await signIn(page, account);
   await expect(page).toHaveURL(/\/staff\/responsibilities$/);
@@ -213,4 +213,64 @@ test('[E2E-ROUTE-001] Unknown routes display a recoverable not-found page', asyn
   await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible();
   await page.getByRole('link', { name: 'Go to home' }).click();
   await expect(page.getByLabel('Email address')).toBeVisible();
+});
+
+for (const [id, role] of [['001', 'event_coordinator_lead'], ['002', 'event_ops_manager']]) {
+  test(`[SCRUM-142-BROWSER-${id}] ${role} displays the lead name, keeps attendee access and survives refresh`, async ({ page, accounts }) => {
+    const account = await accounts.create([role, 'attendee']);
+    await page.goto('/sign-in');
+    await signIn(page, account);
+    await expect(page).toHaveURL(/\/account$/);
+    await expect(page.getByText('Event Coordinator Lead · Attendee', { exact: true })).toBeVisible();
+    await expect(page.getByText('Event Operations Manager', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Manage event requests', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Assign coordinators', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Browse events', exact: true })).toBeVisible();
+    await page.getByRole('link', { name: 'Manage event requests', exact: true }).click();
+    await expect(page).toHaveURL(/\/event-management$/);
+    await page.getByRole('link', { name: 'Account', exact: true }).click();
+    await page.reload();
+    await expect(page.getByText('Event Coordinator Lead · Attendee', { exact: true })).toBeVisible();
+    await page.goto('/venues');
+    await expect(page).toHaveURL(/\/forbidden$/);
+  });
+}
+
+
+test('[SCRUM-142-SAFETY-BROWSER-001] officer signs in at mobile width, survives reload and cannot open business pages', async ({ page, accounts }) => {
+  const account = await accounts.create(['safety_officer']);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto('/sign-in');
+  await signIn(page, account);
+  await expect(page.getByText('Safety Officer', { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('Safety Officer', { exact: true })).toBeVisible();
+  const nav = page.getByRole('navigation', { name: 'Workspace' });
+  await expect(nav.getByRole('link')).toHaveText(['Account', 'Notifications', 'Responsibilities']);
+  await nav.getByRole('link', { name: 'Responsibilities', exact: true }).click();
+  await expect(page.getByText('No responsibilities are assigned to your current roles.')).toBeVisible();
+  await expect(page.getByRole('listitem')).toHaveCount(0);
+  for (const url of ['/event-management', '/events/assignments', '/venues', '/technical-support', '/assigned-events']) {
+    await page.goto(url);
+    await expect(page.getByRole('heading', { name: 'Access denied' })).toBeVisible();
+  }
+});
+
+test('[SCRUM-142-SAFETY-BROWSER-002] officer plus attendee displays both roles and keeps attendee access after officer removal', async ({ page, accounts }) => {
+  const account = await accounts.create(['safety_officer', 'attendee']);
+  await page.goto('/sign-in');
+  await signIn(page, account);
+  await expect(page.getByText('Safety Officer · Attendee', { exact: true })).toBeVisible();
+  const nav = page.getByRole('navigation', { name: 'Workspace' });
+  await expect(nav.getByRole('link', { name: 'Browse events', exact: true })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'My registrations', exact: true })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Responsibilities', exact: true })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Manage event requests', exact: true })).toHaveCount(0);
+  await accounts.update(account, { roles: ['attendee'] });
+  await page.reload();
+  await expect(page.getByText('Attendee', { exact: true })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Responsibilities', exact: true })).toHaveCount(0);
+  await expect(nav.getByRole('link', { name: 'Browse events', exact: true })).toBeVisible();
+  await page.goto('/staff/responsibilities');
+  await expect(page.getByRole('heading', { name: 'Access denied' })).toBeVisible();
 });

@@ -40,11 +40,11 @@ function createReviewService({ repository }) {
     return move(eventId, coordinatorId, "UNDER_REVIEW", "REJECTED", outcome(coordinatorId, parsed.note));
   }
 
-  // SCRUM-148 AC1/AC2: the assigned coordinator or the ops manager may cancel
-  // at any of the five active stages, with a required reason. Unlike move(),
+  // SCRUM-148 AC1/AC2: the assigned coordinator or the coordinator lead may cancel
+  // at any active stage, including POSTPONED, with a required reason. Unlike move(),
   // cancel has no single `from` status, so it uses repository.cancel instead
-  // of transitionStatus - see events.repository.js. isOpsManager means no
-  // coordinator_id filter is added to the write (an ops manager may cancel
+  // of transitionStatus - see events.repository.js. isCoordinatorLead means no
+  // coordinator_id filter is added to the write (a coordinator lead may cancel
   // any event); otherwise the write is guarded to the coordinator still
   // holding the event, same race-guard shape as move().
   //
@@ -52,7 +52,7 @@ function createReviewService({ repository }) {
   // release is an optional, owner-approved seam (see the task note's
   // Decisions). Both run synchronously here so AC3 is true the moment
   // cancellation is saved, not only on a later equipment read.
-  async function cancel(eventId, actorId, reason, { isOpsManager = false, equipmentService, releaseVenueBookingsForCancelledEvent } = {}) {
+  async function cancel(eventId, actorId, reason, { isCoordinatorLead = false, equipmentService, releaseVenueBookingsForCancelledEvent } = {}) {
     const parsed = readNote(reason);
     if (!parsed.ok || parsed.note === null) return { ok: false, reason: "reason_required" };
 
@@ -61,7 +61,7 @@ function createReviewService({ repository }) {
       cancelled_at: new Date().toISOString(),
       cancellation_reason: parsed.note,
     };
-    const event = await repository.cancel(eventId, extra, isOpsManager ? undefined : actorId);
+    const event = await repository.cancel(eventId, extra, isCoordinatorLead ? undefined : actorId);
     if (!event) {
       const existing = await repository.findById(eventId);
       return { ok: false, reason: existing ? "conflict" : "not_found" };
@@ -74,13 +74,13 @@ function createReviewService({ repository }) {
   }
 
   // SCRUM-149 AC1/AC3: same shape as cancel() - the assigned coordinator or
-  // the ops manager, a required reason, gated on repository.postpone's own
+  // the coordinator lead, a required reason, gated on repository.postpone's own
   // POSTPONABLE_STATUSES (not ACTIVE_STATUSES, so an already-postponed event
   // can't be postponed again). Reuses the same venue release call cancel()
   // uses, synchronously - it releases every venue_bookings row tied to the
   // event regardless of why the event changed. Equipment is out of scope for
   // this story (AC3 names only venue bookings and holds).
-  async function postpone(eventId, actorId, reason, { isOpsManager = false, releaseVenueBookingsForCancelledEvent } = {}) {
+  async function postpone(eventId, actorId, reason, { isCoordinatorLead = false, releaseVenueBookingsForCancelledEvent } = {}) {
     const parsed = readNote(reason);
     // A distinct key from cancel's "reason_required" - same FAILURES map in
     // review.controller.js, different message ("postponing" vs "cancelling").
@@ -91,7 +91,7 @@ function createReviewService({ repository }) {
       postponed_at: new Date().toISOString(),
       postponement_reason: parsed.note,
     };
-    const event = await repository.postpone(eventId, extra, isOpsManager ? undefined : actorId);
+    const event = await repository.postpone(eventId, extra, isCoordinatorLead ? undefined : actorId);
     if (!event) {
       const existing = await repository.findById(eventId);
       return { ok: false, reason: existing ? "conflict" : "not_found" };

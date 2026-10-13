@@ -125,7 +125,7 @@ test("SCRUM-148 AC1: with a coordinator given, the write also requires that coor
   expect(calls).toContainEqual(["eq", "coordinator_id", "coord-1"]);
 });
 
-test("SCRUM-148: without a coordinator (the ops-manager caller), no coordinator filter is added", async () => {
+test("SCRUM-148: without a coordinator (the coordinator-lead caller), no coordinator filter is added", async () => {
   const { calls } = recorder({ id: "evt-1" });
 
   await loadRepository().cancel("evt-1", {});
@@ -179,7 +179,7 @@ test("SCRUM-149: with a coordinator given, the write also requires that coordina
   expect(calls).toContainEqual(["eq", "coordinator_id", "coord-1"]);
 });
 
-test("SCRUM-149: without a coordinator (the ops-manager caller), no coordinator filter is added", async () => {
+test("SCRUM-149: without a coordinator (the coordinator-lead caller), no coordinator filter is added", async () => {
   const { calls } = recorder({ id: "evt-1" });
 
   await loadRepository().postpone("evt-1", {});

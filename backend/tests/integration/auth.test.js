@@ -211,7 +211,7 @@ test("RBAC: missing and malformed roles return no permissions", async (t) => {
 
 test("[RBAC-MANAGER-001] Managers can review events without gaining venue or equipment responsibilities", async (t) => {
   const base = await setup(t, async () => ({ data: { user: {
-    id: "manager", app_metadata: { roles: ["event_ops_manager"] },
+    id: "manager", app_metadata: { roles: ["event_coordinator_lead"] },
   } }, error: null }));
   const headers = { Authorization: "Bearer valid" };
   const { user, permissions } = await (await fetch(base + "/api/auth/me", { headers })).json();

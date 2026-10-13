@@ -44,7 +44,7 @@ const fail = (status, message) => ({ status, ok: false, json: async () => ({ mes
 let handlers;
 beforeEach(() => { handlers = {}; });
 
-function setup(roles = ["event_ops_manager"], { queue = QUEUE } = {}) {
+function setup(roles = ["event_coordinator_lead"], { queue = QUEUE } = {}) {
   getAuthClient.mockResolvedValue({ auth: {
     onAuthStateChange: vi.fn((callback) => {
       queueMicrotask(() => callback("INITIAL_SESSION", { access_token: "token", user: { id: "sdk" } }));
@@ -54,7 +54,7 @@ function setup(roles = ["event_ops_manager"], { queue = QUEUE } = {}) {
   } });
   const fetchMock = vi.fn(async (url, options) => {
     if (url === "/api/auth/me") return ok({
-      user: { id: "manager", email: "ops@connectsphere.sg", fullName: "Ops Manager", roles, accountTypes: ["internal"] },
+      user: { id: "manager", email: "ops@connectsphere.sg", fullName: "Coordinator Lead", roles, accountTypes: ["internal"] },
       // The REAL policy decides, so this test fails if the permission is removed.
       permissions: getPermissions(roles),
     });
@@ -77,7 +77,7 @@ async function openQueueAndSelect(name = "Digital Literacy for Seniors") {
   return user;
 }
 
-test("[SCRUM-26-UI-001] the Event Operations Manager reaches the queue and sees it in the workspace nav", async () => {
+test("[SCRUM-26-UI-001] the Event Coordinator Lead reaches the queue and sees it in the workspace nav", async () => {
   setup();
   open();
   expect(await screen.findByRole("heading", { name: "Assign an Event Coordinator" })).toBeTruthy();
@@ -104,7 +104,7 @@ test("[SCRUM-26-UI-003] the queue lists submitted requests in the order the serv
 });
 
 test("[SCRUM-26-UI-004] an empty queue is a plain statement, not an error", async () => {
-  setup(["event_ops_manager"], { queue: [] });
+  setup(["event_coordinator_lead"], { queue: [] });
   open();
   expect(await screen.findByText("No submitted requests are waiting for a coordinator.")).toBeTruthy();
   expect(screen.queryByRole("alert")).toBeNull();

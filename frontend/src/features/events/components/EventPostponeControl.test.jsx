@@ -38,7 +38,7 @@ test.each(["DRAFT", "COMPLETED", "REJECTED", "CANCELLED", "POSTPONED"])(
   },
 );
 
-test.each(["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED"])(
+test.each(["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED"])(
   "[TC-149-13] a %s event offers a postpone action", (status) => {
     setup(status);
     expect(screen.getByRole("button", { name: "Postpone event" })).toBeInTheDocument();

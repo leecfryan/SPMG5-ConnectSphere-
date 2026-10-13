@@ -7,6 +7,7 @@ const supabase = require("../src/supabase");
 
 const SEED_ID = "connectsphere-sprint1";
 const users = [
+  { email: "safety.demo@example.com", name: "Demo Safety Officer", roles: ["safety_officer"], type: "internal" },
   { email: "coordinator2.demo@example.com", name: "Demo Coordinator Two", roles: ["event_coordinator"], type: "internal" },
   { email: "coordinator3.demo@example.com", name: "Demo Coordinator Three", roles: ["event_coordinator"], type: "internal" },
   { email: "venue-technical.demo@example.com", name: "Demo Venue and Technical Staff", roles: ["venue_staff", "technical_support_staff"], type: "internal" },
@@ -69,8 +70,8 @@ const users = [
   },
   {
     email: "eventopsmanager.demo@example.com",
-    name: " Demo Event Ops Manager",
-    roles: ["event_ops_manager"],
+    name: "Demo Event Coordinator Lead",
+    roles: ["event_coordinator_lead"],
     type: "internal",
   },
 ];

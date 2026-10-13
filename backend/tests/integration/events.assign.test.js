@@ -34,7 +34,7 @@ const authClient = { auth: { getUser: async (token) => ({
     id: "verified-manager", email: "eventopsmanager.demo@example.com",
     app_metadata: { roles: token.split(",") },
     // Never read: roles come from admin-controlled app_metadata only.
-    user_metadata: { full_name: "Ops Manager", roles: ["event_ops_manager"] },
+    user_metadata: { full_name: "Coordinator Lead", roles: ["event_coordinator_lead"] },
   } }, error: null,
 }) } };
 
@@ -58,14 +58,14 @@ beforeEach(() => {
   directory.listCoordinators.mockResolvedValue(COORDINATORS);
 });
 
-function send(path, role = "event_ops_manager", method = "GET", data) {
+function send(path, role = "event_coordinator_lead", method = "GET", data) {
   return fetch(base + "/api/internal" + path, {
     method,
     headers: {
       ...(role ? { Authorization: "Bearer " + role } : {}),
       "Content-Type": "application/json",
       // Forged role claims in headers must change nothing.
-      "x-user-role": "event_ops_manager",
+      "x-user-role": "event_coordinator_lead",
     },
     // fetch refuses a body on GET, so the role loops can pass one for every path.
     ...(data === undefined || method === "GET" ? {} : { body: JSON.stringify(data) }),
@@ -97,8 +97,8 @@ test("SCRUM-26: an event_coordinator holds internal.access yet is still refused 
   expect((await send("/events/unassigned", "event_coordinator")).status).toBe(403);
 });
 
-test("SCRUM-26: a multi-role account holding event_ops_manager is admitted", async () => {
-  expect((await send("/events/unassigned", "attendee,event_ops_manager")).status).toBe(200);
+test("SCRUM-26: a multi-role account holding event_coordinator_lead is admitted", async () => {
+  expect((await send("/events/unassigned", "attendee,event_coordinator_lead")).status).toBe(200);
 });
 
 test("SCRUM-26: the queue returns submitted, unassigned requests in the repository's order", async () => {
@@ -143,7 +143,7 @@ test("SCRUM-26: an empty directory is a 200 with an empty list", async () => {
 });
 
 test("SCRUM-26: assignment succeeds and does not move the event's status", async () => {
-  const response = await send(`/events/${EVENT_ID}/coordinator`, "event_ops_manager", "PUT", { coordinatorId: "coord-1" });
+  const response = await send(`/events/${EVENT_ID}/coordinator`, "event_coordinator_lead", "PUT", { coordinatorId: "coord-1" });
 
   expect(response.status).toBe(200);
   const { event } = await response.json();
@@ -154,7 +154,7 @@ test("SCRUM-26: assignment succeeds and does not move the event's status", async
 });
 
 test("SCRUM-26: a status or organiser smuggled into the body is ignored", async () => {
-  await send(`/events/${EVENT_ID}/coordinator`, "event_ops_manager", "PUT",
+  await send(`/events/${EVENT_ID}/coordinator`, "event_coordinator_lead", "PUT",
     { coordinatorId: "coord-1", status: "APPROVED", organiser_id: "someone-else", coordinator_id: "coord-2" });
 
   // Only the two values the route is allowed to act on reach the repository.
@@ -162,13 +162,13 @@ test("SCRUM-26: a status or organiser smuggled into the body is ignored", async 
 });
 
 test("SCRUM-26: a missing coordinator is a 400 and writes nothing", async () => {
-  const response = await send(`/events/${EVENT_ID}/coordinator`, "event_ops_manager", "PUT", {});
+  const response = await send(`/events/${EVENT_ID}/coordinator`, "event_coordinator_lead", "PUT", {});
   expect(response.status).toBe(400);
   expect(repository.assignCoordinator).not.toHaveBeenCalled();
 });
 
 test("SCRUM-26: someone who is not an Event Coordinator is a 422 and writes nothing", async () => {
-  const response = await send(`/events/${EVENT_ID}/coordinator`, "event_ops_manager", "PUT", { coordinatorId: "venue-staff-1" });
+  const response = await send(`/events/${EVENT_ID}/coordinator`, "event_coordinator_lead", "PUT", { coordinatorId: "venue-staff-1" });
   expect(response.status).toBe(422);
   expect(repository.assignCoordinator).not.toHaveBeenCalled();
 });
@@ -176,7 +176,7 @@ test("SCRUM-26: someone who is not an Event Coordinator is a 422 and writes noth
 test("SCRUM-26: an unknown event is a 404", async () => {
   repository.assignCoordinator.mockResolvedValue(null);
   repository.findById.mockResolvedValue(null);
-  const response = await send("/events/missing/coordinator", "event_ops_manager", "PUT", { coordinatorId: "coord-1" });
+  const response = await send("/events/missing/coordinator", "event_coordinator_lead", "PUT", { coordinatorId: "coord-1" });
   expect(response.status).toBe(404);
 });
 
@@ -184,7 +184,7 @@ test("SCRUM-26: a request another manager already assigned is a 409, not a silen
   repository.assignCoordinator.mockResolvedValue(null);
   repository.findById.mockResolvedValue({ ...QUEUE[0], coordinator_id: "coord-2" });
 
-  const response = await send(`/events/${EVENT_ID}/coordinator`, "event_ops_manager", "PUT", { coordinatorId: "coord-1" });
+  const response = await send(`/events/${EVENT_ID}/coordinator`, "event_coordinator_lead", "PUT", { coordinatorId: "coord-1" });
 
   expect(response.status).toBe(409);
   // Re-assignment is US-50; the message has to tell the manager that, or they
@@ -208,7 +208,7 @@ test("SCRUM-26: without the server data key, assignment reports 503 and sign-in 
   const unconfigured = createApp({ authClient }).listen(0, "127.0.0.1");
   await once(unconfigured, "listening");
   const url = `http://127.0.0.1:${unconfigured.address().port}`;
-  const headers = { Authorization: "Bearer event_ops_manager", "Content-Type": "application/json" };
+  const headers = { Authorization: "Bearer event_coordinator_lead", "Content-Type": "application/json" };
 
   for (const [path, method] of PATHS) {
     const response = await fetch(url + "/api/internal" + path, { method, headers, ...(method === "GET" ? {} : { body: "{}" }) });

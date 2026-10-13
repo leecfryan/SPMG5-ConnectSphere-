@@ -150,7 +150,7 @@ test.each(["", "invalid"])("SCRUM-139: an unauthenticated caller (%j) reaches no
   for (const action of ACTIONS) expect((await call(action, token)).status).toBe(401);
 });
 
-test.each(["event_ops_manager", "event_organiser", "venue_staff", "technical_support_staff", "attendee", "unknown"])(
+test.each(["event_coordinator_lead", "event_organiser", "venue_staff", "technical_support_staff", "attendee", "unknown"])(
   "SCRUM-139: %s cannot read readiness, submit or withdraw", async (role) => {
     for (const action of ACTIONS) expect((await call(action, `${ASSIGNED}:${role}`)).status).toBe(403);
     expect(repository.findArrangements).not.toHaveBeenCalled();

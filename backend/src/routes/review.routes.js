@@ -16,13 +16,13 @@ function createReviewRoutes(repository, cancelDependencies) {
   const isAssignedCoordinator = assignedToCaller(repository);
   const guard = requirePermission("events.decide", isAssignedCoordinator);
 
-  // SCRUM-148 AC1: the ops manager may cancel any event unconditionally; the
+  // SCRUM-148 AC1: the coordinator lead may cancel any event unconditionally; the
   // coordinator must still be the one assigned to it, same existence-hiding
   // shape as assignedToCaller above.
-  const assignedOrOpsManager = async (req) => req.user.roles.includes("event_ops_manager") || (await isAssignedCoordinator(req));
-  const cancelGuard = requirePermission("events.cancel", assignedOrOpsManager);
-  // SCRUM-149: same assigned-or-ops-manager check as cancel.
-  const postponeGuard = requirePermission("events.postpone", assignedOrOpsManager);
+  const assignedOrCoordinatorLead = async (req) => req.user.roles.includes("event_coordinator_lead") || (await isAssignedCoordinator(req));
+  const cancelGuard = requirePermission("events.cancel", assignedOrCoordinatorLead);
+  // SCRUM-149: same assigned-or-coordinator-lead check as cancel.
+  const postponeGuard = requirePermission("events.postpone", assignedOrCoordinatorLead);
 
   router.post("/events/:eventId/start-review", guard, controller.startReview);
   router.post("/events/:eventId/approve", guard, controller.approve);
