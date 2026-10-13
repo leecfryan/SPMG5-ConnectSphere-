@@ -14,6 +14,25 @@ const createApp = require("../../src/app");
 
 function makeDataClient(tables = {}) {
   return {
+    rpc(name, args) {
+      const handler = tables.rpc;
+      if (handler) return Promise.resolve(handler({ name, args }));
+      if (name === "registration_availability_for_events") {
+        return Promise.resolve({
+          data: (args.p_event_ids ?? []).map((event_id) => ({
+            event_id,
+            slots_remaining: null,
+            waitlist_queue_count: 0,
+            waitlist_reserved: 0,
+          })),
+          error: null,
+        });
+      }
+      return Promise.resolve({
+        data: { outcome: "claimed", enrolled_attendees: 1 },
+        error: null,
+      });
+    },
     from(table) {
       const q = { table, filters: [] };
       const resolve = (terminal) => {

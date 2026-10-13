@@ -22,7 +22,7 @@ export default function ManagedEventsPage() {
   const error = result?.token === token ? result.error : "";
 
   return (
-    <section className="card" aria-labelledby="managed-events-title">
+    <section className="card managed-events-page" aria-labelledby="managed-events-title">
       <p className="eyebrow">EVENTS</p>
       <h1 id="managed-events-title">My Events</h1>
       <p>Events you submitted as an organiser, or that were assigned to you as a coordinator.</p>

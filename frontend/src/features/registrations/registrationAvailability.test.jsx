@@ -27,6 +27,9 @@ const EVENT = {
   status: "APPROVED",
   enrolled_attendees: 7,
   expected_attendance: 10,
+  slots_remaining: 3,
+  waitlist_queue_count: 0,
+  waitlist_reserved: 0,
   registration_fields: [],
 };
 
@@ -66,7 +69,7 @@ test("event registration details show slots remaining alongside event informatio
 
 test("full events show zero slots and do not display the registration form", () => {
   useRegistrationResource.mockReturnValue({
-    data: { event: { ...EVENT, enrolled_attendees: 10 } },
+    data: { event: { ...EVENT, enrolled_attendees: 10, slots_remaining: 0 } },
   });
   render(
     <AuthContext.Provider value={{ token: null }}>
@@ -85,7 +88,7 @@ test("full events show zero slots and do not display the registration form", () 
 
 test("uncapped events display unlimited availability", () => {
   useRegistrationResource.mockReturnValue({
-    data: { event: { ...EVENT, expected_attendance: null } },
+    data: { event: { ...EVENT, expected_attendance: null, slots_remaining: null } },
   });
   render(
     <MemoryRouter initialEntries={[`/events/${EVENT.id}`]}>

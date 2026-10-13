@@ -2,6 +2,7 @@
 const { randomUUID } = require('node:crypto');
 module.exports = function registrationStorage(accounts) {
   const registrations = [];
+  const waitlistEntries = [];
   const events = () => [...accounts.values()].flatMap(account => account.events);
   function project(row, selection) {
     if (!selection || selection === '*') return { ...row };
@@ -13,11 +14,63 @@ module.exports = function registrationStorage(accounts) {
   }
   return {
     registrations,
+    async rpc(name, args) {
+      if (name === 'registration_availability_for_events') {
+        const availability = args.p_event_ids.map(eventId => {
+          const event = events().find(candidate => candidate.id === eventId);
+          if (!event) return null;
+          const capacity = event.expected_attendance;
+          const enrolled = event.enrolled_attendees ?? 0;
+          return {
+            event_id: eventId,
+            slots_remaining: capacity == null ? null : Math.max(0, capacity - enrolled),
+            waitlist_queue_count: 0,
+            waitlist_reserved: 0,
+          };
+        }).filter(Boolean);
+        return { data: availability, error: null };
+      }
+      if (name === 'claim_registration_seat_v2') {
+        const event = events().find(candidate => candidate.id === args.p_event_id);
+        if (!event) return { data: { outcome: 'event_not_found' }, error: null };
+        if (event.status !== 'APPROVED') return { data: { outcome: 'event_not_open' }, error: null };
+        const now = Date.now();
+        if (event.registration_start && now < Date.parse(event.registration_start)) {
+          return { data: { outcome: 'registration_not_open' }, error: null };
+        }
+        if (event.registration_end && now > Date.parse(event.registration_end)) {
+          return { data: { outcome: 'registration_closed' }, error: null };
+        }
+        const enrolled = event.enrolled_attendees ?? 0;
+        if (event.expected_attendance != null && enrolled >= event.expected_attendance) {
+          return { data: { outcome: 'full' }, error: null };
+        }
+        event.enrolled_attendees = enrolled + 1;
+        return {
+          data: { outcome: 'claimed', enrolled_attendees: event.enrolled_attendees },
+          error: null,
+        };
+      }
+      if (name === 'reconcile_event_waitlist') {
+        return { data: { outcome: 'reconciled' }, error: null };
+      }
+      if (name === 'get_my_waitlist_state') {
+        return {
+          data: { outcome: 'not_found', server_time: new Date().toISOString() },
+          error: null,
+        };
+      }
+      throw new Error(`Unsupported registration fixture RPC: ${name}`);
+    },
     from(table) {
       const filters = [];
       let selection = '*', insertion, update, ordering;
       function execute(single) {
-        const rows = table === 'events' ? events() : registrations;
+        const rows = table === 'events'
+          ? events()
+          : table === 'event_waitlist_entries'
+            ? waitlistEntries
+            : registrations;
         let result = rows.filter(row => filters.every(test => test(row)));
         if (insertion) {
           if (rows.some(row => row.attendee_id === insertion.attendee_id && row.event_id === insertion.event_id)) {

@@ -1,12 +1,13 @@
-# Registration information for managed events
+# Registration information and waitlist controls for managed events
 
-As an Event Organiser or Event Coordinator, you can see how many people are
-registered for the events you own or manage, and how many are waiting.
+Event Organisers and Event Coordinators can view registration counts for events
+they own or manage. Assigned Event Coordinators can also inspect and manage the
+active waitlist from the event detail page.
 
 | URL | Purpose |
 | --- | --- |
 | `/events/managed` | Events you submitted as an organiser, or that were assigned to you as a coordinator |
-| `/events/managed/:eventId` | That event's registration counts |
+| `/events/managed/:eventId` | Registration counts and, for assigned coordinators, waitlist controls |
 
 Both pages sit inside the shared `AuthProvider`, require a verified session, and
 are gated on `events.managed.read`. The "My Events" tab in the workspace
@@ -25,7 +26,7 @@ Waiting List: Y
 | X | `events.enrolled_attendees` | Nullable. Null renders as `0`. |
 | MaxEnrollment | `events.expected_attendance` | Nullable. Null renders as `-`, not `0`. |
 | Registration opens/closes | `events.registration_start` / `events.registration_end` | Nullable UTC instants; null start opens immediately, null end is unbounded. |
-| Y | count of `registrations` where `status = 'waitlisted'` | Still `0`: the shipped waitlist (SCRUM-151) uses a separate table, not this status. See below. |
+| Y | count of `registrations` where `status = 'waitlisted'` | This legacy summary count remains `0`; the real queue is separate and is shown in the coordinator-only panel below. |
 
 `events.enrolled_attendees`, `events.expected_attendance`,
 `events.registration_start`, and `events.registration_end` are read directly
@@ -52,34 +53,34 @@ flow.
 
 ## The waiting list count does not include the shipped waitlist
 
-The Waiting List figure counts `registrations` rows with `status = 'waitlisted'`
-through `.select('id', { count: 'exact', head: true })`. Nothing writes that
-status: registration writes `pending`, and `confirmed` / `withdrawn` come from the
-existing workflow.
+The Waiting List figure in the summary counts `registrations` rows with
+`status = 'waitlisted'` through `.select('id', { count: 'exact', head: true })`.
+Nothing writes that status: registration writes `pending`, and `confirmed` /
+`withdrawn` come from the existing workflow.
 
 The shipped waitlist (SCRUM-151) does **not** use this status. It stores entries in
 a separate `event_waitlist_entries` table and serves them through
-`/api/waitlist/:eventId`, so **the Waiting List figure still reads 0 for every
-event** even while attendees are queued. This is a known mismatch, recorded in the
-SCRUM-151 task note under *Found, not built*. Closing it means either counting the
-new table here or moving the waitlist onto `registrations.status`; neither is part
-of SCRUM-151.
+`/api/waitlist/:eventId`, so the summary's Waiting List figure still reads 0 even
+while attendees are queued. The coordinator panel described below reads the
+separate active queue directly. Updating the summary count remains a separate
+follow-up.
 
 The status name is held in one constant, `WAITLIST_STATUS`, at the top of
 `managedEvents.service.js`, precisely so that a rename is a one-line change.
 
 ## Authorisation
 
-Three permissions are defined in `backend/src/auth/permissions.js`; all are
-granted to Event Organisers and Event Coordinators:
+Managed-event access uses these permissions in `backend/src/auth/permissions.js`:
 
 | Permission | `record` | Route |
 | --- | --- | --- |
 | `events.managed.read` | no | `GET /api/managed-events` |
 | `events.registrations.read` | **yes** | `GET /api/managed-events/:eventId` |
 | `events.registration-window.update` | **yes** | `PATCH /api/managed-events/:eventId/registration-window` |
+| `events.waitlist.manage` | **yes** | Coordinator waitlist endpoints below |
 
-The update permission is granted to Event Organisers and Event Coordinators.
+The first three permissions are granted to Event Organisers and Event
+Coordinators. `events.waitlist.manage` is restricted to Event Coordinators.
 The patch route repeats the event ownership/assignment check and only accepts
 window values; it cannot update event status, ownership, registration counts or
 other event fields. See [Registration integration](registration-integration.md)
@@ -88,6 +89,24 @@ for partial-update validation and the manually added Supabase columns.
 The managed-event detail page includes the registration-window editor. It shows
 the close time and a reopen hint after the window has closed. Past end dates are
 valid inputs so a coordinator or organiser can extend the window.
+
+## Coordinator waitlist controls
+
+The assigned Event Coordinator can review the active waitlist, toggle automatic
+offers and promote an eligible attendee. These routes use the event assignment
+record check and the `events.waitlist.manage` permission. They display attendee
+names only; email, phone and registration answers are not included.
+
+| Method | Path | Permission | Purpose |
+| --- | --- | --- | --- |
+| GET | `/api/managed-events/:eventId/waitlist?limit=50&offset=0` | `events.waitlist.manage` | Read the ordered, paginated queue and counts |
+| GET | `/api/managed-events/:eventId/waitlist/settings` | `events.waitlist.manage` | Read auto-offer setting (defaults ON) |
+| PATCH | `/api/managed-events/:eventId/waitlist/settings` | `events.waitlist.manage` | Enable or pause automatic offers |
+| POST | `/api/managed-events/:eventId/waitlist/:entryId/promote` | `events.waitlist.manage` | Offer a place or directly register a manual override |
+
+When automatic offers are paused, existing offers remain reserved and valid
+until their deadline. The database routines maintain ordering, capacity and
+promotion atomically; see [Registration details](registrations.md#coordinator-waitlist-controls).
 
 The list scopes `organiser_id` / `coordinator_id` in its own query, so it needs
 no record resolver. The single event does: `canManageEvent` in

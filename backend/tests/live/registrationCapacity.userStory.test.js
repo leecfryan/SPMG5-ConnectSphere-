@@ -194,6 +194,12 @@ describe.skipIf(!live)("Registration capacity against Supabase", () => {
   });
 
   test("a live registration is rejected at capacity", async () => {
+    const { error } = await admin
+      .from("events")
+      .update({ expected_attendance: 1 })
+      .eq("id", eventId);
+    if (error) throw new Error(`Could not configure the temporary event capacity: ${error.message}`);
+
     const first = await register(attendeeTokens[ATTENDEES[0]]);
     expect(first.status).toBe(201);
 

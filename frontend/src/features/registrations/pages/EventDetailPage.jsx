@@ -21,6 +21,7 @@ function EventDetailPage() {
   const availability = event ? getRegistrationAvailability(event) : null;
   const windowState = useRegistrationWindow(event, data?.server_time, receivedAt, refresh);
   const [registeredEventId, setRegisteredEventId] = useState(null);
+  const [waitlistEntry, setWaitlistEntry] = useState(null);
   const registered = registeredEventId === eventId;
   const { register, busy, error: regError } = useEventRegistration();
 
@@ -90,8 +91,16 @@ function EventDetailPage() {
           <p role="status">You are registered. Taking you to your registrations…</p>
         ) : event.status === "APPROVED" ? (
           <>
+            <WaitlistPanel
+              eventId={event.id}
+              fields={event.registration_fields ?? []}
+              isFull={availability.isFull}
+              onEntryChange={setWaitlistEntry}
+            />
             {availability.isFull ? (
-              <WaitlistPanel eventId={event.id} />
+              null
+            ) : waitlistEntry ? (
+              null
             ) : (
               <>
                 <h2>Register for this event</h2>

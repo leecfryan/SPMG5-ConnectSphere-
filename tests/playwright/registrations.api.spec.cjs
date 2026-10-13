@@ -9,7 +9,8 @@ test('[REG-API-001] Approved event browsing excludes internal planning fields an
   expect(listed).toMatchObject({ id: event.id, name: event.name, status: 'APPROVED' });
   // A positive public event control makes an empty or broken listing fail too.
   expect(Object.keys(listed).sort()).toEqual([
-    'description', 'enrolled_attendees', 'expected_attendance', 'id', 'name', 'start_time', 'status',
+    'description', 'enrolled_attendees', 'expected_attendance', 'id', 'name', 'slots_remaining',
+    'start_time', 'status', 'waitlist_queue_count', 'waitlist_reserved',
   ]);
   expect(JSON.stringify(listed)).not.toContain('PRIVATE');
   const detail = await request.get('/api/events/' + event.id, { headers: headers[1] });
@@ -18,7 +19,8 @@ test('[REG-API-001] Approved event browsing excludes internal planning fields an
   expect(body.event.registration_fields[0].id).toBe('full_name');
   expect(Object.keys(body.event).sort()).toEqual([
     'description', 'end_time', 'enrolled_attendees', 'expected_attendance', 'id', 'name', 'purpose',
-    'registration_fields', 'start_time', 'status',
+    'registration_fields', 'slots_remaining', 'start_time', 'status', 'waitlist_queue_count',
+    'waitlist_reserved',
   ]);
   expect(JSON.stringify(body)).not.toContain('PRIVATE');
   for (const field of ['organiser_id', 'coordinator_id', 'other_comments', 'equipment_needs', 'venue_requirements']) expect(body.event).not.toHaveProperty(field);

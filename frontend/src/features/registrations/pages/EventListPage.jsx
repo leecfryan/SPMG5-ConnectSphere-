@@ -16,7 +16,7 @@ export default function EventListPage() {
   const windows = new Map((windowData?.windows ?? []).map((window) => [window.id, window]));
 
   return (
-    <section className="card" aria-labelledby="events-title">
+    <section className="card browse-events-page" aria-labelledby="events-title">
       <Link to="/" className="back-link">Back to workspace</Link>
       <p className="eyebrow">EVENTS</p>
       <h1 id="events-title">Events</h1>
