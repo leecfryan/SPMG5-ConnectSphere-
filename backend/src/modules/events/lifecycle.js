@@ -8,24 +8,30 @@ const STATUSES = Object.freeze([
   "COMPLETED",
   "CANCELLED",
   "REJECTED",
+  "POSTPONED",
 ]);
 
 const TRANSITIONS = Object.freeze({
   DRAFT: Object.freeze(["SUBMITTED"]),
-  SUBMITTED: Object.freeze(["UNDER_REVIEW", "CANCELLED"]),
-  UNDER_REVIEW: Object.freeze(["APPROVED", "REJECTED", "CANCELLED"]),
-  APPROVED: Object.freeze(["SAFETY_REVIEW", "CONFIRMED", "CANCELLED"]),
+  SUBMITTED: Object.freeze(["UNDER_REVIEW", "CANCELLED", "POSTPONED"]),
+  UNDER_REVIEW: Object.freeze(["APPROVED", "REJECTED", "CANCELLED", "POSTPONED"]),
+  APPROVED: Object.freeze(["SAFETY_REVIEW", "CONFIRMED", "CANCELLED", "POSTPONED"]),
   // SCRUM-139 AC4: back to APPROVED is the coordinator withdrawing the submission.
-  SAFETY_REVIEW: Object.freeze(["APPROVED", "CANCELLED"]),
-  CONFIRMED: Object.freeze(["COMPLETED", "CANCELLED"]),
+  SAFETY_REVIEW: Object.freeze(["APPROVED", "CANCELLED", "POSTPONED"]),
+  CONFIRMED: Object.freeze(["COMPLETED", "CANCELLED", "POSTPONED"]),
   COMPLETED: Object.freeze([]),
   CANCELLED: Object.freeze([]),
   REJECTED: Object.freeze([]),
+  POSTPONED: Object.freeze(["CANCELLED"]), // SCRUM-149: resume isn't built yet
 });
 
 // Events still in progress: counted in a coordinator's workload and open to
 // (re)assignment by the Operations Manager (discussions #94, #101).
-const ACTIVE_STATUSES = Object.freeze(["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED"]);
+// POSTPONED joins this list (SCRUM-149): still the coordinator's responsibility.
+const ACTIVE_STATUSES = Object.freeze(["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED", "POSTPONED"]);
+
+// SCRUM-149: ACTIVE_STATUSES minus POSTPONED, so an already-postponed event can't be postponed again.
+const POSTPONABLE_STATUSES = Object.freeze(["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED"]);
 
 // SCRUM-99 AC1: only approved (and later confirmed) events may have venue and
 // equipment arranged. Booking before approval is refused. SAFETY_REVIEW is left
@@ -38,4 +44,4 @@ function canTransition(from, to) {
   return TRANSITIONS[from].includes(to);
 }
 
-module.exports = { STATUSES, TRANSITIONS, ACTIVE_STATUSES, PLANNING_STATUSES, canTransition };
+module.exports = { STATUSES, TRANSITIONS, ACTIVE_STATUSES, POSTPONABLE_STATUSES, PLANNING_STATUSES, canTransition };
