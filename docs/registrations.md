@@ -290,77 +290,110 @@ the nullable default, and existing configured windows survive a reseed. See
 [Registration integration](registration-integration.md) for the endpoint,
 authorization, countdown retry, and timezone details.
 
-## Waitlist (SCRUM-151)
+## Waitlists and released-place offers (SCRUM-151 and offer story)
 
-A full event can be joined through a waitlist instead of being refused. The
-waitlist is attendee activity and reuses the `registrations.manage` permission
-(attendee only) — no new permission. When an event is full
-(`availability.isFull`), the event detail page renders `WaitlistPanel` in place of
-the registration form.
+Attendees can join a full event's waitlist and view their own current position.
+When capacity opens, the database reconciliation routine offers it to the next
+eligible queue attendee. The attendee can accept or decline the offer in My
+Registrations; an expired or declined offer is removed and reconciliation can
+offer the place to the next attendee. Waitlist routes reuse the
+`registrations.manage` permission (attendee only).
 
 ### API
 
 | Method | Path | Permission | Response |
 | --- | --- | --- | --- |
-| POST | `/api/waitlist/:eventId` | `registrations.manage` | `201 { entry, position }`; `409` when not full, not open, already joined or already registered; `404` unknown event |
-| GET | `/api/waitlist/:eventId` | `registrations.manage` | `200 { entry, position }`; `404` when the caller is not on the list |
-| DELETE | `/api/waitlist/:eventId` | `registrations.manage` | `204`; `404` when the caller is not on the list |
+| POST | `/api/waitlist/:eventId` | `registrations.manage` | `201 { entry, position, server_time }`; `409` if ineligible, not full, already joined/registered, or invalid details; `404` unknown event |
+| GET | `/api/waitlist/:eventId` | `registrations.manage` | `200 { entry, position, effective_deadline, server_time }`; a non-member gets `200` with null state; `404` only when event is missing |
+| GET | `/api/waitlist/:eventId/state` | `registrations.manage` | Same empty-state behavior for the event-page lookup |
+| DELETE | `/api/waitlist/:eventId` | `registrations.manage` | `204`; `404` when the caller has no active entry |
+| PUT | `/api/waitlist/:eventId/details` | `registrations.manage` | `200 { entry, effective_deadline, server_time }` |
+| POST | `/api/waitlist/:eventId/offer/accept` | `registrations.manage` | `200 { registrationId, serverTime }`; `409` for expired, incomplete, or unavailable offers |
+| POST | `/api/waitlist/:eventId/offer/decline` | `registrations.manage` | `204`; `404` if the caller has no offer |
+| GET | `/api/registrations/me` | `registrations.manage` | Caller-owned `registrations`, `waitlist`, `offers`, and `server_time` |
 
-Route wiring lives in `backend/src/app.js` (mounted after `authenticate` and the
-`registrations.manage` guard, with the shared 503-when-unconfigured check).
-Handlers are in `backend/src/modules/registrations/waitlistHandlers.js`; the
-data access is `backend/src/modules/registrations/waitlistService.js`.
+Route wiring lives in `backend/src/app.js`; handlers are in
+`backend/src/modules/registrations/waitlistHandlers.js`; database access is in
+`backend/src/modules/registrations/waitlistService.js`.
+
+### Coordinator waitlist controls
+
+An assigned Event Coordinator can review the active queue, change the
+automatic-offer setting, and promote an eligible attendee from the managed
+event detail page. A missing setting defaults to enabled. Disabling automatic
+offers prevents new automatic offers; existing offers remain reserved and
+valid until their deadline. The normal registration path remains blocked while
+the queue or an offer reserves capacity.
+
+| Method | Path | Permission | Description |
+| --- | --- | --- | --- |
+| GET | `/api/managed-events/:eventId/waitlist?limit=50&offset=0` | `events.waitlist.manage` | Ordered queue page, counts, offer deadlines, eligibility and setting |
+| GET | `/api/managed-events/:eventId/waitlist/settings` | `events.waitlist.manage` | Read the automatic-offer setting |
+| PATCH | `/api/managed-events/:eventId/waitlist/settings` | `events.waitlist.manage` | Set `{ "enabled": boolean }` |
+| POST | `/api/managed-events/:eventId/waitlist/:entryId/promote` | `events.waitlist.manage` | Optionally pass `{ "reason": "..." }`; creates a timed offer when capacity is available, otherwise directly confirms the coordinator's override |
+
+The permission is limited to Event Coordinators and each request verifies
+event assignment. The queue displays attendee names resolved from Auth
+`user_metadata.full_name`; it does not return email, phone, or registration
+answers. The coordinator API service and page panel live in
+`backend/src/modules/registrations/waitlistCoordinatorService.js`,
+`backend/src/modules/registrations/waitlistCoordinator.controller.js`, and
+`frontend/src/features/managedEvents/components/WaitlistCoordinatorPanel.jsx`.
 
 ### Rules
 
-- The attendee id is always `req.user.id` from the verified session — a value in
-  the request body is ignored, so a caller cannot join or withdraw on someone
-  else's behalf.
-- Joining is only allowed when the event is `APPROVED`, registration is open,
-  and the event is full (`enrolled_attendees >= expected_attendance`, with a null
-  cap meaning unlimited and `0` meaning full). Otherwise `409`.
-- A `pending` or `confirmed` registration for the same event blocks joining
-  (`409`); a `withdrawn` one does not.
-- Joining is atomic. The check and the insert happen together in the Postgres
-  function `enqueue_waitlist_if_full`, so concurrent duplicate joins leave
-  exactly one active row (the second caller gets `409`).
-- Position is the caller's 1-based place in the active list ordered by
-  `created_at, id`; it is computed on read, so a withdrawal shifts the people
-  behind up by one.
-- Withdrawal deletes the active row (hard delete, no history). A repeat
-  withdrawal is `404`, and rejoining returns to the back of the queue.
-- Storage failures return a generic `500` and never leak the provider message.
+- The attendee id always comes from verified `req.user.id`. Request-body
+  attendee identifiers are ignored.
+- The database functions serialize joining, seat claiming, reconciliation and
+  offer acceptance. An attendee with a pending/confirmed registration cannot
+  also occupy the active queue. A unique constraint prevents duplicate active
+  entries.
+- Waitlist joining requires an approved, uncancelled event that has not started
+  and is full after accounting for offered seats. Registration-window start/end
+  values do **not** gate waitlist join or offer acceptance; those windows still
+  gate ordinary registration. The event start time does gate eligibility.
+- Position is one-based and computed dynamically. Manual overrides order ahead
+  of FIFO; otherwise entries use `created_at, id`. Withdrawals and overrides
+  therefore update reported positions without persisting stale position values.
+- On reconciliation, pending/expired offers are processed before new offers.
+  The standard offer duration is three days, with an effective deadline of the
+  earlier of expiry and event start. An offer is only made when that deadline
+  leaves at least one hour to respond. Multiple available places may be offered
+  in queue order.
+- Accepting within the effective deadline creates/confirms the attendee's
+  registration and consumes the offered seat. Declining or expiry frees the
+  reservation and reconciliation advances the queue.
+- My Registrations includes the caller's active waitlist entries and offers.
+  Ordinary queue entries remain shown as “Waitlist”; open offers appear as
+  “Place Offered”; accepted offers appear as registrations. Offer deadlines
+  are returned as `LEAST(offer_expires_at, start_time)` with server time.
+- Withdrawing deletes the caller's active queue row; it does not decrement the
+  event's enrolled-registration count. A repeat withdrawal returns `404`.
+- No offer or waitlist response includes another attendee's identity. Storage
+  failures return a generic `500`; the server logs provider details, not the
+  browser console.
 
-### Schema reference (manual, no migration file)
+### Schema reference (manual Supabase changes)
 
-The waitlist needs a new table and function, added by hand in the Supabase
-dashboard — no `supabase/` folder or migration file is committed.
+The base `event_waitlist_entries` table was created in Supabase before the
+offer implementation. Its core contract is a UUID entry id, event and attendee
+foreign keys, active status, and creation timestamp. The offer implementation
+adds `registration_data jsonb`, `offer_state text`, `offered_at timestamptz`,
+`offer_expires_at timestamptz`, `override_at timestamptz`, `override_by uuid`
+and `override_reason text`; it also adds constraints and indexes for valid
+offers, override ownership, FIFO/override order and expiry lookup.
 
-**Not yet recorded.** The exact DDL is not in the repository. The contract the
-code depends on is:
+The database contract uses `enqueue_waitlist_if_full_v2(uuid, uuid, jsonb)`,
+`get_my_waitlist_state(uuid, uuid)`, `claim_registration_seat_v2(uuid)`,
+`registration_availability_for_events(uuid[])`, and the offer/reconciliation
+and coordinator routines verified in Supabase. Database changes are applied
+and maintained directly in Supabase; no local SQL scripts or migrations are
+needed by the running application or test runners. New environments must
+configure the same database contract in Supabase before enabling these
+features.
 
-```text
-table event_waitlist_entries
-  id          uuid        primary key default gen_random_uuid()
-  event_id    uuid        not null  references events(id) on delete cascade
-  attendee_id uuid        not null  references auth.users(id) on delete cascade
-  status      text        not null  default 'active'
-  created_at  timestamptz not null  default now()
-  unique (event_id, attendee_id)            -- one active entry per attendee per event
-
-function enqueue_waitlist_if_full(p_event_id uuid, p_attendee_id uuid)
-  returns an object carrying an `outcome` (and `entry` when joined) with outcomes:
-    joined · event_not_found · already_waitlisted · already_registered ·
-    event_not_full · event_not_open · registration_not_open ·
-    registration_closed · invalid_request
-```
-
-> **Action for the owner:** paste the real `\d public.event_waitlist_entries` and
-> `pg_get_functiondef('public.enqueue_waitlist_if_full'::regproc)` output here so
-> this matches the live objects. Tell teammates before and after the dashboard
-> change, because the database is shared.
-
-See [Registration test guide](registrations-tests.md) for the SCRUM-151 test
-cases and traceability, and
-[the task note](../.agent/docs/other/SCRUM-151-join-waitlist.md) for the plan,
-decisions and explain-back.
+See [Registration test guide](registrations-tests.md) for automated coverage
+and opt-in live tests, and
+[the SCRUM-151 task note](../.agent/docs/other/SCRUM-151-join-waitlist.md).
+The offer story's Jira key was not provided; its task note is
+[waitlist-offers.md](../.agent/docs/other/waitlist-offers.md).

@@ -16,7 +16,7 @@ const createReviewRoutes = require("./routes/review.routes");
 const createSafetyCheckRoutes = require("./routes/safetyCheck.routes");
 const createNotificationsRoutes = require("./routes/notifications.routes");
 
-function createApp({ authClient, dataClient, eventsRepository, assignmentDependencies, venuesService, equipmentDependencies, managedEventsService, notificationsService, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
+function createApp({ authClient, dataClient, eventsRepository, assignmentDependencies, venuesService, equipmentDependencies, managedEventsService, waitlistCoordinatorService, notificationsService, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
   const app = express();
   const authenticate = requireAuth(authClient);
   app.disable("x-powered-by");
@@ -58,7 +58,11 @@ function createApp({ authClient, dataClient, eventsRepository, assignmentDepende
   // Event Organisers hold no internal.access, so this cannot live under
   // /api/internal. Nor under /api/events: the registration router's GET /:eventId
   // would swallow the detail path, the same reason Venue sits on its own prefix.
-  app.use("/api/managed-events", createManagedEventsRoutes({ authenticate, managedEventsService }));
+  app.use("/api/managed-events", createManagedEventsRoutes({
+    authenticate,
+    managedEventsService,
+    waitlistCoordinatorService,
+  }));
   app.use(errorHandler);
   return app;
 }

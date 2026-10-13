@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router";
 import { useAuth } from "../../auth/useAuth";
 import { fetchEventRegistrationSummary, fetchManagedRegistrationWindow } from "../managedEventsService";
 import RegistrationWindowEditor from "../components/RegistrationWindowEditor";
+import WaitlistCoordinatorPanel from "../components/WaitlistCoordinatorPanel";
 import "../../events/events.css";
 
 // The server answers 403 for an event that belongs to someone else and for one
@@ -56,11 +57,11 @@ export default function ManagedEventDetailPage() {
   const summary = result.summary;
   const isFull = Number.isInteger(summary.maxEnrollment) && summary.enrolled >= summary.maxEnrollment;
   return (
-    <section className="card" aria-labelledby="managed-event-title">
+    <section className="card managed-event-detail" aria-labelledby="managed-event-title">
       <Link to="/events/managed" className="back-link">Back to my events</Link>
       <p className="eyebrow">EVENT</p>
       <h1 id="managed-event-title">{summary.name}</h1>
-      <dl className="account-details">
+      <dl className="account-details managed-event-summary">
         <div>
           <dt>Current Registrations</dt>
           <dd>
@@ -91,6 +92,9 @@ export default function ManagedEventDetailPage() {
               : current);
           }}
         />
+      )}
+      {typeof hasPermission === "function" && hasPermission("events.waitlist.manage") && (
+        <WaitlistCoordinatorPanel eventId={eventId} token={token} />
       )}
     </section>
   );

@@ -43,6 +43,33 @@ function makeDataClient(overrides = {}) {
     event,
     registrations,
     eventUpdates,
+    async rpc(name, args) {
+      if (name !== "claim_registration_seat_v2") {
+        return { data: null, error: { message: `Unexpected RPC: ${name}` } };
+      }
+      if (args.p_event_id !== event.id) {
+        return { data: { outcome: "event_not_found" }, error: null };
+      }
+      if (event.status !== "APPROVED") {
+        return { data: { outcome: "event_not_open" }, error: null };
+      }
+      const now = Date.now();
+      if (event.registration_start && now < new Date(event.registration_start).getTime()) {
+        return { data: { outcome: "registration_not_open" }, error: null };
+      }
+      if (event.registration_end && now > new Date(event.registration_end).getTime()) {
+        return { data: { outcome: "registration_closed" }, error: null };
+      }
+      const enrolled = event.enrolled_attendees ?? 0;
+      if (event.expected_attendance !== null && enrolled >= event.expected_attendance) {
+        return { data: { outcome: "full" }, error: null };
+      }
+      event.enrolled_attendees = enrolled + 1;
+      return {
+        data: { outcome: "claimed", enrolled_attendees: event.enrolled_attendees },
+        error: null,
+      };
+    },
     from(table) {
       const rows = table === "events" ? [event] : registrations;
       const query = { operation: "select", filters: [] };

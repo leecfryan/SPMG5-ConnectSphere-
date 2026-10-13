@@ -228,11 +228,20 @@ describe.skipIf(!live)("Waitlist story against the real Supabase database", () =
 
   test.each([
     ["unapproved", { status: "DRAFT" }],
-    ["before registration opens", { registrationStart: "2099-01-01T00:00:00Z" }],
-    ["after registration closes", { registrationEnd: "2000-01-01T00:00:00Z" }],
   ])("AC1: joining an event %s is refused", async (_label, fields) => {
     await updateTemporaryEvent(fields);
     expect((await api(tokens.attendees[0], `/api/waitlist/${eventId}`, { method: "POST" })).status).toBe(409);
+  });
+
+  test.each([
+    ["before registration opens", { registrationStart: "2099-01-01T00:00:00Z" }],
+    ["after registration closes", { registrationEnd: "2000-01-01T00:00:00Z" }],
+  ])("AC1: joining a full eligible event %s succeeds", async (_label, fields) => {
+    await updateTemporaryEvent(fields);
+    const joined = await api(tokens.attendees[0], `/api/waitlist/${eventId}`, { method: "POST" });
+    expect(joined.status).toBe(201);
+    expect(joined.body.position).toBe(1);
+    expect(joined.body.entry.event_id).toBe(eventId);
   });
 
   test.each(["pending", "confirmed"])("AC1: %s registration blocks joining; withdrawn registration does not", async (status) => {
@@ -260,7 +269,7 @@ describe.skipIf(!live)("Waitlist story against the real Supabase database", () =
     expect(await readEntries()).toHaveLength(1);
   });
 
-  test("AC3: position follows FIFO and shifts after withdrawal; non-members receive 404", async () => {
+  test("AC3: position follows FIFO and shifts after withdrawal; non-members receive an empty state", async () => {
     for (const token of tokens.attendees) {
       expect((await api(token, `/api/waitlist/${eventId}`, { method: "POST" })).status).toBe(201);
     }
@@ -276,7 +285,13 @@ describe.skipIf(!live)("Waitlist story against the real Supabase database", () =
       return result.body.position;
     }));
     expect(shifted).toEqual([1, 2]);
-    expect((await api(tokens.attendees[0], `/api/waitlist/${eventId}`)).status).toBe(404);
+    const nonMember = await api(tokens.attendees[0], `/api/waitlist/${eventId}`);
+    expect(nonMember.status).toBe(200);
+    expect(nonMember.body).toMatchObject({
+      entry: null,
+      position: null,
+      effective_deadline: null,
+    });
   });
 
   test("AC4: withdrawal deletes the row; repeat withdrawal is 404 and rejoin goes to the back", async () => {
@@ -299,7 +314,13 @@ describe.skipIf(!live)("Waitlist story against the real Supabase database", () =
       method: "POST",
       body: JSON.stringify({ attendee_id: attendees[1].id }),
     });
-    expect((await api(tokens.attendees[1], `/api/waitlist/${eventId}`)).status).toBe(404);
+    const otherAttendeeState = await api(tokens.attendees[1], `/api/waitlist/${eventId}`);
+    expect(otherAttendeeState.status).toBe(200);
+    expect(otherAttendeeState.body).toMatchObject({
+      entry: null,
+      position: null,
+      effective_deadline: null,
+    });
     expect((await api(tokens.attendees[1], `/api/waitlist/${eventId}`, { method: "DELETE" })).status).toBe(404);
     expect((await readEntries()).map((row) => row.attendee_id)).toEqual([attendees[0].id]);
   });
