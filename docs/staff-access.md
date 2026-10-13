@@ -28,7 +28,7 @@ Event Coordinators, and `bookings.request` for Event Coordinators. They do not
 change the read responsibilities listed below or grant external roles access.
 
 Event writes use `events.submit` and `events.own.update` (Event Organisers, external),
-`events.assign_coordinator` (Event Operations Managers), and `events.decide` and
+`events.assign_coordinator` (Event Coordinator Leads), and `events.decide` and
 `events.safety.submit` (the event's assigned Event Coordinator). None appears in the
 read matrix below, which lists read permissions only.
 
@@ -39,7 +39,7 @@ read matrix below, which lists read permissions only.
 | `bookings.request` | Event Coordinators | Booking requests |
 | `events.submit` | Event Organisers | `POST /api/events`, `/events/new` |
 | `events.own.update` | Event Organisers | `PATCH /api/event-workspace/organiser/:id`; owner check in lookup and write; colleague events remain view only |
-| `events.assign_coordinator` | Event Operations Managers | The assignment queue: `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` |
+| `events.assign_coordinator` | Event Coordinator Leads | The assignment queue: `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` |
 | `events.decide` | Event Coordinators, **assigned event only** (record check on `coordinator_id`) | `POST /api/internal/events/:eventId/{start-review,approve,reject}` |
 | `events.safety.submit` | Event Coordinators, **assigned event only** (same record check) | `GET /api/internal/events/:eventId/safety-readiness`, `POST /api/internal/events/:eventId/{submit-safety-check,withdraw-safety-check}` |
 
@@ -64,7 +64,7 @@ specification.
 | clients.read | No | No | Yes | No | Yes |
 | event_organisers.read | No | No | Yes | No | Yes |
 
-All four internal roles, including `event_ops_manager`, have `internal.access`.
+All four internal roles, including `event_coordinator_lead`, have `internal.access`.
 Managers have `events.review` and `events.assign`, not venue/equipment booking
 permissions. Coordinators have `events.assigned.read`; organisers have
 `events.own.read`, `events.own.update` and `events.submit`. Only attendee responsibility grants
@@ -138,7 +138,7 @@ must still be guarded and scoped, because that client can bypass RLS.
 
 Run npm --prefix backend test. permissions.test.js covers:
 - The eight read permissions against the original five roles, plus the Event
-  Operations Manager's internal-access grant in the authentication tests —
+  Event Coordinator Lead's internal-access grant in the authentication tests —
   which asserts the blast radius, not just the grant: the manager reaches
   `/api/internal/access` and is still refused all six venue, equipment and
   technical-support routes.
@@ -156,7 +156,7 @@ Manual checks:
 3. Sign in as Event Coordinator: see the coordination responsibilities. The
    workspace nav has no "Assign coordinators" link, and `/events/assignments`
    opens `/forbidden` despite the account holding `internal.access`.
-4. Sign in as Event Operations Manager: "Assign coordinators" appears, the
+4. Sign in as Event Coordinator Lead: "Assign coordinators" appears, the
    queue loads, and `/venues`, `/equipment/requests` and `/technical-support`
    all open `/forbidden`.
 5. Sign in as Organiser or Attendee: no staff navigation link; entering
@@ -181,3 +181,98 @@ implementation. No extra role was inferred from other discussions.
 ## Equipment integration
 
 Equipment uses this same trusted role matrix. Coordinators submit requests for assigned events; technical support reviews arrangements across events. Both use scoped clarification threads. See [Equipment integration](equipment-integration.md) for routes, action permissions and database prerequisites.
+
+## SCRUM-142 — Event Coordinator Lead
+
+Event Coordinator Lead replaces Event Operations Manager. The canonical trusted
+role is `event_coordinator_lead`, including permission policies, account labels,
+coordinator assignment and unrestricted lead cancellation. Its responsibilities
+and permissions are unchanged. Multiple trusted roles still combine capabilities
+without bypassing record checks.
+
+`requireAuth` translates the legacy `event_ops_manager` claim **only after**
+Supabase verifies the caller and reads administrator-controlled
+`app_metadata.roles`. It returns `event_coordinator_lead` and deduplicates it with
+any existing canonical claim. No active policy or cancellation check grants the
+legacy identifier directly. User-editable metadata, request headers, body and
+query parameters cannot activate this compatibility rule.
+
+### Schema reference: manual Auth metadata update
+
+No schema change or migration file is needed. Existing Supabase Auth accounts
+still need their stored role renamed. Tell teammates before running this update
+and after verifying it. Run the SQL manually in the Supabase dashboard SQL Editor;
+the agent does not execute it. Deploying the compatible application code before
+updating stored roles avoids a period when old application code rejects the new
+identifier. The compatibility rule preserves access while stored claims are old.
+
+Preview affected accounts:
+
+```sql
+select id, raw_app_meta_data -> 'roles' as roles
+from auth.users
+where jsonb_typeof(raw_app_meta_data -> 'roles') = 'array'
+  and (raw_app_meta_data -> 'roles') @> '["event_ops_manager"]'::jsonb;
+```
+
+Replace only that role, preserving other metadata and other roles. Duplicate
+legacy/canonical entries become one canonical role in the earliest position.
+The update can be repeated safely; after the first successful update it matches
+no additional accounts.
+
+```sql
+update auth.users as u
+set raw_app_meta_data = jsonb_set(
+  u.raw_app_meta_data,
+  '{roles}',
+  (
+    select jsonb_agg(role_value order by first_position)
+    from (
+      select
+        case when assigned.role_value = '"event_ops_manager"'::jsonb
+          then '"event_coordinator_lead"'::jsonb
+          else assigned.role_value
+        end as role_value,
+        min(assigned.position) as first_position
+      from jsonb_array_elements(u.raw_app_meta_data -> 'roles')
+        with ordinality as assigned(role_value, position)
+      group by case when assigned.role_value = '"event_ops_manager"'::jsonb
+        then '"event_coordinator_lead"'::jsonb
+        else assigned.role_value
+      end
+    ) as canonical_roles
+  ),
+  false
+)
+where jsonb_typeof(u.raw_app_meta_data -> 'roles') = 'array'
+  and (u.raw_app_meta_data -> 'roles') @> '["event_ops_manager"]'::jsonb
+returning id, raw_app_meta_data -> 'roles' as roles;
+```
+
+Verify that the preview query now returns zero rows, then sign in as an existing
+lead account and confirm its account label, management and assignment access.
+Verify other roles on a combined-role account still work. Do not replace a
+user's entire metadata object or roles array with only the new role.
+
+The existing demo identity `eventopsmanager.demo@example.com` is unchanged to
+preserve its user ID and relationships. New seed accounts use the canonical role
+and the display name Demo Event Coordinator Lead. Update old seeded role metadata
+before rerunning the seed: its existing collision check deliberately refuses to
+overwrite accounts whose trusted roles differ.
+
+### Rename verification
+
+- `backend/tests/integration/roles.rename.test.js`: canonical and legacy claims,
+  exact permission list, duplicate/combined roles, assignment access, unrestricted
+  lead cancellation, denied coordinator decisions, spoofing refusal with unchanged
+  event data, and role removal on the next request.
+- `frontend/src/Rbac.test.jsx`: SCRUM-142 account display and combined navigation.
+- `tests/playwright/api.spec.cjs`: SCRUM-142 canonical/legacy identity and revocation
+  over the real local Auth simulator.
+- `tests/playwright/browser.spec.cjs`: SCRUM-142 canonical/legacy sign-in, display,
+  manager navigation, refresh and direct-route denial.
+
+The SCRUM-142 working plan and execution reports stay outside this repository
+under Ryan's local reporting preferences. Manual UAT and the shared Auth update
+remain unexecuted until Ryan runs them. Safety Officer permissions are a separate,
+unresolved part of SCRUM-142; this rename does not grant them.

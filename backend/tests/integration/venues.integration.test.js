@@ -60,7 +60,7 @@ test.each(["DRAFT", "SUBMITTED", "UNDER_REVIEW", "SAFETY_REVIEW", "REJECTED"])("
   expect(service.submitBookingRequest).not.toHaveBeenCalled();
 });
 
-test.each(["", "invalid", "attendee", "event_organiser", "technical_support_staff", "event_ops_manager", "unknown"])(
+test.each(["", "invalid", "attendee", "event_organiser", "technical_support_staff", "event_coordinator_lead", "unknown"])(
   "[VENUE-AUTH-001] Invalid or unrelated identity %s cannot access any venue endpoint, even with a forged role header", async (role) => {
     for (const [path, method] of [["", "GET"], [`/${venueId}`, "GET"], [`/${venueId}/availability`, "GET"],
       ["/booking-events", "GET"], ["/booking-requests", "GET"], [`/booking-requests/${requestId}`, "GET"],
@@ -307,7 +307,7 @@ test("[SCRUM-19] A missing or malformed id is refused before any lookup", async 
   expect((await send(`/not-a-uuid/suitability?event_id=${eventId}`, "event_coordinator")).status).toBe(400);
   expect(service.getEventById).not.toHaveBeenCalled();
 });
-test.each(["", "invalid", "venue_staff", "attendee", "event_organiser", "technical_support_staff", "event_ops_manager"])(
+test.each(["", "invalid", "venue_staff", "attendee", "event_organiser", "technical_support_staff", "event_coordinator_lead"])(
   "[SCRUM-19] %s cannot assess a venue against someone's event", async (role) => {
     expect((await suitability(`event_id=${eventId}`, role)).status).toBe(!role || role === "invalid" ? 401 : 403);
     expect(service.getEventById).not.toHaveBeenCalled();

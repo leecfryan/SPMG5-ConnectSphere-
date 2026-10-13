@@ -98,7 +98,7 @@ test("[SCRUM-22] Rejecting records the reason and changes no booking", async () 
   expect(service.updateVenue).not.toHaveBeenCalled();
 });
 
-test.each(["", "invalid", "event_coordinator", "event_organiser", "attendee", "technical_support_staff", "event_ops_manager"])(
+test.each(["", "invalid", "event_coordinator", "event_organiser", "attendee", "technical_support_staff", "event_coordinator_lead"])(
   "[VENUE-DECIDE-001] %s cannot decide a booking request",
   async (role) => {
     const response = await decide({ decision: "confirmed" }, role);

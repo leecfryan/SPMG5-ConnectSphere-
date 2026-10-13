@@ -24,7 +24,7 @@ const TRANSITIONS = Object.freeze({
 });
 
 // Events still in progress: counted in a coordinator's workload and open to
-// (re)assignment by the Operations Manager (discussions #94, #101).
+// (re)assignment by the Event Coordinator Lead (discussions #94, #101).
 const ACTIVE_STATUSES = Object.freeze(["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED"]);
 
 // SCRUM-99 AC1: only approved (and later confirmed) events may have venue and

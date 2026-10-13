@@ -54,7 +54,7 @@ function appFor(roles) {
         id: token,
         // user_metadata.roles is deliberately set to a privileged role: it is
         // user-editable, so requireAuth must ignore it and read app_metadata.
-        user_metadata: { roles: ["event_ops_manager", "event_coordinator"] },
+        user_metadata: { roles: ["event_coordinator_lead", "event_coordinator"] },
         app_metadata: { roles },
       } }, error: null,
     }) } },
@@ -190,7 +190,7 @@ test("a role without events.registrations.read is denied before any record is re
 });
 
 test("a client-supplied role claim cannot grant access", async () => {
-  // appFor's fake user also carries event_coordinator/event_ops_manager in
+  // appFor's fake user also carries event_coordinator/event_coordinator_lead in
   // user_metadata, which is attacker-editable. requireAuth must read
   // app_metadata only, so this is denied.
   const { status } = await getAs(detail(SOMEONE_ELSES_EVENT.id), ORGANISER, ["attendee"]);

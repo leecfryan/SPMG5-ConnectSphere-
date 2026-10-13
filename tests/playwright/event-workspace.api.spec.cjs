@@ -102,8 +102,8 @@ test('[REVIEW-E2E-API-002] SCRUM-148: only the assigned coordinator may cancel, 
   expect((await cancel(headers.first, { reason: 'Again' })).status()).toBe(409);
 });
 
-// SCRUM-148: the ops manager may cancel any event, not just one assigned to them.
-test('[REVIEW-E2E-API-003] SCRUM-148: the ops manager may cancel any event', async ({ accounts, request }) => {
+// SCRUM-148: the coordinator lead may cancel any event, not just one assigned to them.
+test('[REVIEW-E2E-API-003] SCRUM-148: the coordinator lead may cancel any event', async ({ accounts, request }) => {
   const { event, first, manager, headers, update } = await setupWorkflow(accounts, request);
   expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
   const cancel = (as, data) => request.post(`/api/internal/events/${event.id}/cancel`, { headers: as, data });
@@ -157,7 +157,7 @@ test('[EVENT-API-101] SCRUM-100: Untrusted profile company does not grant access
 });
 
 const organiserDeniedRoles = [
-  ['attendee'], ['event_ops_manager'], ['event_coordinator'], ['venue_staff'],
+  ['attendee'], ['event_coordinator_lead'], ['event_coordinator'], ['venue_staff'],
   ['technical_support_staff'], ['venue_staff', 'technical_support_staff'],
 ];
 for (const [index, roles] of organiserDeniedRoles.entries()) {

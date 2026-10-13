@@ -3,7 +3,7 @@ import { useAuth } from "../features/auth/useAuth";
 const roleLabels = {
   event_coordinator: "Event Coordinator", venue_staff: "Venue Staff",
   technical_support_staff: "Technical Support Staff", event_organiser: "Event Organiser",
-  attendee: "Attendee", event_ops_manager: "Event Operations Manager",
+  attendee: "Attendee", event_coordinator_lead: "Event Coordinator Lead",
 };
 
 export default function AccountPage() {

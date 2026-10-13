@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 const EVENT_ID = "aaaaaaaa-0098-4000-8000-000000000002";
-const ROLES = { coordinator: ["event_coordinator"], organiser: ["event_organiser"], manager: ["event_ops_manager"] };
+const ROLES = { coordinator: ["event_coordinator"], organiser: ["event_organiser"], manager: ["event_coordinator_lead"] };
 const PATHS = { coordinator: "/assigned-events", organiser: "/my-event-requests", manager: "/event-management" };
 // 2099-10-05T02:30:00Z is 10:30 am on 5 Oct in Asia/Singapore (vitest.config TZ).
 const DECISION = { approved_rejected_by: "coord-1", approved_rejected_by_name: "Ada Tan", approved_rejected_at: "2099-10-05T02:30:00Z", approval_rejection_remark: "Ready for planning." };

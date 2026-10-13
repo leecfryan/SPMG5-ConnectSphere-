@@ -89,7 +89,8 @@ swallows them. Inside any router, declare static paths before parameter paths.
 - `requireAuth(authClient)` verifies the bearer token with Supabase on **every** request and builds
   `req.user = { id, email, fullName, roles[], accountTypes[] }` from `app_metadata.roles` only. It never trusts
   headers, query, body or `user_metadata`.
-- Roles: internal `event_coordinator`, `venue_staff`, `technical_support_staff`, `event_ops_manager`; external
+- SCRUM-142 renames the manager role to `event_coordinator_lead`. Verified legacy Auth claims are normalised at the authentication boundary until Ryan applies the documented Auth metadata update in `docs/staff-access.md`. All policies and direct role checks use the canonical identifier.
+- Roles: internal `event_coordinator`, `venue_staff`, `technical_support_staff`, `event_coordinator_lead`; external
   `event_organiser`, `attendee`. `roles` is an array, so a person can hold several.
 - `backend/src/auth/permissions.js` is the single policy table: `"<area>.<action>": { roles: [...], label?, record? }`.
   - `*.read` permissions are refused for anything but GET/HEAD. A write needs its own action permission

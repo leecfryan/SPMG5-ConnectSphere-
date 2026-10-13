@@ -55,7 +55,7 @@ venue, booking and equipment business pages/API handlers are not implemented by
 this task. Auth/network transports remain fakes; Express token verification and
 record authorisation are not exercised by this frontend suite.
 
-The `event_ops_manager` policy is documented as a guard-matrix case: it has
+The `event_coordinator_lead` policy is documented as a guard-matrix case: it has
 `event_organisers.read` and `internal.access`, so internal pages are denied by
 their own permissions rather than at the shared gate. Passing that test confirms
 current behavior, not customer approval of that policy. See
@@ -196,14 +196,14 @@ Verified on 2026-09-18: **134 passed, 0 failed, 0 skipped**. Titles below are ta
 | RBAC-GUARD-038 | attendee may not open a attendees.read … |
 | RBAC-GUARD-039 | attendee may not open a clients.read pa… |
 | RBAC-GUARD-040 | attendee may not open a event_organiser… |
-| RBAC-GUARD-041 | event_ops_manager may not open a venues… |
-| RBAC-GUARD-042 | event_ops_manager may not open a bookin… |
-| RBAC-GUARD-043 | event_ops_manager may not open a equipm… |
-| RBAC-GUARD-044 | event_ops_manager may not open a techni… |
-| RBAC-GUARD-045 | event_ops_manager may not open a event_… |
-| RBAC-GUARD-046 | event_ops_manager may not open a attend… |
-| RBAC-GUARD-047 | event_ops_manager may not open a client… |
-| RBAC-GUARD-048 | event_ops_manager may not open a event_… |
+| RBAC-GUARD-041 | event_coordinator_lead may not open a venues… |
+| RBAC-GUARD-042 | event_coordinator_lead may not open a bookin… |
+| RBAC-GUARD-043 | event_coordinator_lead may not open a equipm… |
+| RBAC-GUARD-044 | event_coordinator_lead may not open a techni… |
+| RBAC-GUARD-045 | event_coordinator_lead may not open a event_… |
+| RBAC-GUARD-046 | event_coordinator_lead may not open a attend… |
+| RBAC-GUARD-047 | event_coordinator_lead may not open a client… |
+| RBAC-GUARD-048 | event_coordinator_lead may not open a event_… |
 | RBAC-SCOPE-001 | venue_staff page guard permits venues.read for unassigned-venue despite unrelated profile metadata |
 | RBAC-SCOPE-002 | venue_staff page guard permits venues.read for east-location despite unrelated profile metadata |
 | RBAC-SCOPE-003 | technical_support_staff page guard permits equipment.read for microphone despite unrelated profile metadata |

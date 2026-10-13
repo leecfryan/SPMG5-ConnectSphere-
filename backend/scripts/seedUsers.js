@@ -69,8 +69,8 @@ const users = [
   },
   {
     email: "eventopsmanager.demo@example.com",
-    name: " Demo Event Ops Manager",
-    roles: ["event_ops_manager"],
+    name: "Demo Event Coordinator Lead",
+    roles: ["event_coordinator_lead"],
     type: "internal",
   },
 ];

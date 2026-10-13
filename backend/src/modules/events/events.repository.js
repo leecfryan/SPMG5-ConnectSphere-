@@ -113,7 +113,7 @@ async function transitionStatus(id, from, to, extra = {}, coordinatorId) {
 // one exact `canTransition(from, to)` pair. coordinatorId, when given, is the
 // same race guard as transitionStatus: the write also requires that
 // coordinator to still hold the event, so a reassignment before the write
-// matches nothing (409). Ops-manager callers pass no coordinatorId - they may
+// matches nothing (409). Coordinator-lead callers pass no coordinatorId - they may
 // cancel any event, so no coordinator filter is added for them.
 async function cancel(id, extra = {}, coordinatorId) {
   let query = getSupabase()

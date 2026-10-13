@@ -119,7 +119,7 @@ stateDiagram-v2
 | `SAFETY_REVIEW` | Safety review | the assigned coordinator's *Submit for safety check* (SCRUM-139); not open to new venue or equipment requests |
 | `CONFIRMED` | Confirmed | not yet (confirm story) |
 | `COMPLETED` | Completed | not yet (complete story) |
-| `CANCELLED` | Cancelled | the assigned coordinator's or the ops manager's *Cancel event* (SCRUM-148) |
+| `CANCELLED` | Cancelled | the assigned coordinator's or the coordinator lead's *Cancel event* (SCRUM-148) |
 | `REJECTED` | Rejected | the assigned coordinator's *Reject* (SCRUM-98) |
 
 `COMPLETED`, `CANCELLED` and `REJECTED` are terminal. Any move not on the diagram
@@ -183,7 +183,7 @@ Module at `backend/src/modules/events/`.
 | GET | /api/internal/events/:eventId/safety-readiness | requireAuth + internal.access + events.safety.submit (assigned coordinator) | `{ ready, missing[] }` |
 | POST | /api/internal/events/:eventId/submit-safety-check | same | `APPROVED → SAFETY_REVIEW` when nothing is missing |
 | POST | /api/internal/events/:eventId/withdraw-safety-check | same | `SAFETY_REVIEW → APPROVED` |
-| POST | /api/internal/events/:eventId/cancel | requireAuth + internal.access + events.cancel (assigned coordinator or ops manager) | any active status `→ CANCELLED`; body `{ "reason": string }` (required) |
+| POST | /api/internal/events/:eventId/cancel | requireAuth + internal.access + events.cancel (assigned coordinator or coordinator lead) | any active status `→ CANCELLED`; body `{ "reason": string }` (required) |
 
 ### Rules enforced server-side
 
@@ -312,11 +312,10 @@ reuses `review.routes.js#assignedToCaller`.
 
 `review.service.js#cancel`, `review.controller.js`, `routes/review.routes.js` (same router as review/approval,
 since cancel shares its `/api/internal/events/:eventId` prefix). Either the event's **assigned coordinator** or
-the **Operations Manager** may cancel — unlike review, which is coordinator-only (discussions #80, #101).
-"Operations Manager" is provisional for "Event Coordinator Lead" in the story's AC, pending a customer
-clarification; narrow this if the answer comes back differently.
+the **Event Coordinator Lead** may cancel — unlike review, which is coordinator-only (discussions #80, #101).
+SCRUM-142 renames the existing manager role to `event_coordinator_lead` without changing its access.
 
-- `events.cancel` is a `record: true` permission. The ops manager passes the record check unconditionally; a
+- `events.cancel` is a `record: true` permission. The coordinator lead passes the record check unconditionally; a
   coordinator must still be `coordinator_id` on the event. Someone else's event, an unknown id and a malformed id
   all get the same 403.
 - Cancel has no single "from" status — it is permitted from any of the five active stages (`SUBMITTED`,
@@ -350,7 +349,7 @@ cancelling, the page shows a *Cancellation* summary (cancelled by, cancelled on,
 | 200 | Done | `{ event }`, the updated row |
 | 400 | No reason, or a blank one | "Give a reason for cancelling this event." |
 | 401 | No or invalid session | "Please sign in to continue." |
-| 403 | Not the assigned coordinator and not the ops manager | "You do not have permission to access this information." |
+| 403 | Not the assigned coordinator and not the coordinator lead | "You do not have permission to access this information." |
 | 404 | Event deleted after the access check | "That event request no longer exists." |
 | 409 | Not in an active stage, or reassigned meanwhile | "This event request has changed since you opened it. Refresh to see its current status." |
 | 503 | The access check could not reach storage | "Unable to check access. Please try again." |

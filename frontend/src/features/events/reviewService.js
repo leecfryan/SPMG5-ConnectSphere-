@@ -17,7 +17,7 @@ export function rejectEvent(eventId, note, token) {
     .then((body) => body.event);
 }
 
-// SCRUM-148: the assigned coordinator or the ops manager cancels, with a required reason.
+// SCRUM-148: the assigned coordinator or the coordinator lead cancels, with a required reason.
 export function cancelEvent(eventId, reason, token) {
   return apiFetch(`/api/internal/events/${eventId}/cancel`, token, { method: "POST", body: { reason } })
     .then((body) => body.event);

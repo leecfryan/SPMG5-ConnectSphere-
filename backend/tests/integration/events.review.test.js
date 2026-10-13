@@ -17,7 +17,7 @@ const EVENT_ID = "aaaaaaaa-0001-0000-0000-000000000000";
 const MISSING_ID = "aaaaaaaa-0009-0000-0000-000000000000";
 const ASSIGNED = "coord-assigned";
 const OTHER = "coord-other";
-const MANAGER = "ops-manager-1";
+const MANAGER = "coordinator-lead-1";
 const ACTIVE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED"];
 
 const repository = { findById: vi.fn(), transitionStatus: vi.fn(), cancel: vi.fn() };
@@ -88,7 +88,7 @@ test.each(["", "invalid"])("SCRUM-98: an unauthenticated caller (%j) reaches no 
   for (const action of ACTIONS) expect((await post(action, token, { note: "x" })).status).toBe(401);
 });
 
-test.each(["event_ops_manager", "event_organiser", "venue_staff", "technical_support_staff", "attendee", "unknown"])(
+test.each(["event_coordinator_lead", "event_organiser", "venue_staff", "technical_support_staff", "attendee", "unknown"])(
   "SCRUM-98 AC4: %s cannot start, approve or reject a review", async (role) => {
     for (const action of ACTIONS) expect((await post(action, `${ASSIGNED}:${role}`, { note: "x" })).status).toBe(403);
     expect(repository.transitionStatus).not.toHaveBeenCalled();
@@ -258,7 +258,7 @@ test("SCRUM-98/148 failure: without storage configured, the actions answer 503",
 
 // ---------------------------------------------------------------------------
 // SCRUM-148: cancel. Same router/controller/service as review above, with a
-// different permission (events.cancel: assigned coordinator OR ops manager,
+// different permission (events.cancel: assigned coordinator OR coordinator lead,
 // unlike events.decide's coordinator-only) and no single "from" status.
 // ---------------------------------------------------------------------------
 
@@ -293,12 +293,12 @@ test("[TC-148-01] the assigned coordinator cancels their own event; release runs
   expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledWith(EVENT_ID);
 });
 
-test("[TC-148-02] the ops manager cancels an event not assigned to them", async () => {
-  const response = await post("cancel", `${MANAGER}:event_ops_manager`, { reason: "Duplicate booking" });
+test("[TC-148-02] the coordinator lead cancels an event not assigned to them", async () => {
+  const response = await post("cancel", `${MANAGER}:event_coordinator_lead`, { reason: "Duplicate booking" });
 
   expect(response.status).toBe(200);
   expect((await response.json()).event.status).toBe("CANCELLED");
-  // No coordinatorId is passed for an ops-manager caller - they may cancel any event.
+  // No coordinatorId is passed for an coordinator-lead caller - they may cancel any event.
   expect(repository.cancel).toHaveBeenCalledWith(EVENT_ID, expect.objectContaining({ cancelled_by: MANAGER }), undefined);
 });
 

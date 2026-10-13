@@ -1,0 +1,130 @@
+import { afterAll, beforeAll, beforeEach, expect, test, vi } from "vitest";
+import { createRequire } from "node:module";
+import { once } from "node:events";
+
+const require = createRequire(import.meta.url);
+const createApp = require("../../src/app");
+const { getPermissions } = require("../../src/auth/permissions");
+const EVENT_ID = "aaaaaaaa-0001-0000-0000-000000000000";
+const LEAD_PERMISSIONS = [
+  "event_organisers.read", "events.assign", "events.assign_coordinator",
+  "events.cancel", "events.review", "internal.access",
+];
+let roles, stored, server, base;
+const repository = { findById: vi.fn(), cancel: vi.fn(), transitionStatus: vi.fn() };
+const queue = { findSubmittedUnassigned: vi.fn() };
+const authClient = { auth: { getUser: vi.fn(async () => ({
+  data: { user: {
+    id: "lead", app_metadata: { roles },
+    user_metadata: { roles: ["event_coordinator_lead", "event_ops_manager"] },
+  } }, error: null,
+})) } };
+
+beforeAll(async () => {
+  server = createApp({ authClient, eventsRepository: repository,
+    assignmentDependencies: { repository: queue, directory: {} },
+  }).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  base = `http://127.0.0.1:${server.address().port}`;
+});
+afterAll(() => new Promise((resolve) => server.close(resolve)));
+beforeEach(() => {
+  roles = ["event_coordinator_lead"];
+  stored = { id: EVENT_ID, status: "SUBMITTED", coordinator_id: "someone-else" };
+  repository.findById.mockReset().mockImplementation(async () => ({ ...stored }));
+  repository.cancel.mockReset().mockImplementation(async (_id, extra) => {
+    stored = { ...stored, ...extra, status: "CANCELLED" };
+    return { ...stored };
+  });
+  repository.transitionStatus.mockReset();
+  queue.findSubmittedUnassigned.mockReset().mockResolvedValue([{ ...stored }]);
+});
+function send(path, method = "GET", data) {
+  return fetch(base + path, { method, headers: {
+    Authorization: "Bearer same-token", "Content-Type": "application/json",
+    "X-User-Role": "event_coordinator_lead",
+  }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
+}
+
+test.each([
+  ["001", "event_coordinator_lead"], ["002", "event_ops_manager"],
+])("[SCRUM-142-INT-%s] trusted %s returns the canonical lead role and exact existing capabilities", async (_id, role) => {
+  roles = [role];
+  const identity = await send("/api/auth/me");
+  expect(identity.status).toBe(200);
+  const body = await identity.json();
+  expect(body.user.roles).toEqual(["event_coordinator_lead"]);
+  expect(body.user.accountTypes).toEqual(["internal"]);
+  expect(body.permissions.sort()).toEqual(LEAD_PERMISSIONS);
+  expect((await send("/api/internal/access")).status).toBe(200);
+  const assignment = await send("/api/internal/events/unassigned");
+  expect(assignment.status).toBe(200);
+  expect(await assignment.json()).toEqual({ events: [stored] });
+  for (const path of ["/api/venues", "/api/equipment", "/api/technical-support/equipment-requests"]) {
+    expect((await send(path)).status, path).toBe(403);
+  }
+});
+
+test("[SCRUM-142-INT-003] legacy, canonical and duplicate roles combine without duplicate capabilities", async () => {
+  roles = ["attendee", "event_ops_manager", "event_coordinator_lead", "venue_staff", "attendee"];
+  const identity = await (await send("/api/auth/me")).json();
+  expect(identity.user.roles).toEqual(["attendee", "event_coordinator_lead", "venue_staff"]);
+  expect(identity.user.accountTypes).toEqual(["internal", "external"]);
+  expect(identity.permissions.sort()).toEqual([
+    ...LEAD_PERMISSIONS, "bookings.decide", "bookings.read", "events.browse",
+    "registrations.manage", "venues.read", "venues.unavailability", "venues.update",
+  ].sort());
+});
+
+test.each([
+  ["004", "event_coordinator_lead"], ["005", "event_ops_manager"],
+])("[SCRUM-142-INT-%s] %s can cancel an event assigned to someone else", async (_id, role) => {
+  roles = [role];
+  const response = await send(`/api/internal/events/${EVENT_ID}/cancel`, "POST", { reason: "Duplicate booking" });
+  expect(response.status).toBe(200);
+  expect((await response.json()).event).toMatchObject({ status: "CANCELLED", cancelled_by: "lead" });
+  expect(repository.cancel).toHaveBeenCalledWith(EVENT_ID,
+    expect.objectContaining({ cancellation_reason: "Duplicate booking", cancelled_by: "lead" }), undefined);
+});
+
+test.each([
+  ["006", "event_coordinator_lead"], ["007", "event_ops_manager"],
+])("[SCRUM-142-INT-%s] %s does not gain the assigned coordinator's review decisions", async (_id, role) => {
+  roles = [role];
+  for (const action of ["start-review", "approve", "reject"]) {
+    expect((await send(`/api/internal/events/${EVENT_ID}/${action}`, "POST", { note: "Forged approval" })).status).toBe(403);
+  }
+  expect(repository.transitionStatus).not.toHaveBeenCalled();
+  expect(stored).toEqual({ id: EVENT_ID, status: "SUBMITTED", coordinator_id: "someone-else" });
+});
+
+test("[SCRUM-142-INT-008] editable metadata, headers, query and body cannot grant either lead role", async () => {
+  roles = ["attendee"];
+  const identity = await (await send("/api/auth/me?role=event_coordinator_lead")).json();
+  expect(identity.user.roles).toEqual(["attendee"]);
+  expect(identity.permissions).toEqual(["events.browse", "registrations.manage"]);
+  const before = { ...stored };
+  const response = await send(`/api/internal/events/${EVENT_ID}/cancel`, "POST", {
+    reason: "Forged cancellation", roles: ["event_coordinator_lead", "event_ops_manager"], isCoordinatorLead: true,
+  });
+  expect(response.status).toBe(403);
+  expect(repository.cancel).not.toHaveBeenCalled();
+  expect(stored).toEqual(before);
+});
+
+test.each([
+  ["009", "event_coordinator_lead"], ["010", "event_ops_manager"],
+])("[SCRUM-142-INT-%s] removing %s revokes its capabilities on the next request and keeps other roles", async (_id, role) => {
+  roles = [role, "attendee"];
+  expect((await send("/api/internal/events/unassigned")).status).toBe(200);
+  roles = ["attendee"];
+  expect((await send("/api/internal/events/unassigned")).status).toBe(403);
+  const identity = await (await send("/api/auth/me")).json();
+  expect(identity.user.roles).toEqual(["attendee"]);
+  expect(identity.permissions).toEqual(["events.browse", "registrations.manage"]);
+});
+
+test("[SCRUM-142-POLICY-001] the legacy identifier grants nothing directly outside verified authentication", () => {
+  expect(getPermissions(["event_ops_manager"])).toEqual([]);
+  expect(getPermissions(["event_coordinator_lead"]).sort()).toEqual(LEAD_PERMISSIONS);
+});

@@ -1,5 +1,9 @@
 # Event Status Lifecycle — Test Documentation
 
+SCRUM-142 renames the current manager role to Event Coordinator Lead (`event_coordinator_lead`).
+Historical acceptance criteria and customer quotations retain their original wording.
+Earlier execution results are historical evidence; rename verification is recorded separately.
+
 **Deliverable evidence for SCRUM-97 (Progress an event through its status lifecycle), epic Event Lifecycle &
 Approval.** SCRUM-98 (review) and SCRUM-99 (approve) are in §8; SCRUM-139 (safety check) is in §9. Branch: `feature/eventLifecycleStatus` · **15 documented cases, 43 automated tests, all passing**
 — 34 backend unit, 9 frontend component, plus 1 manual database case.
@@ -181,7 +185,7 @@ venue and equipment lanes' own tests.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | TC-SCRUM-98-01 | 98-1 | Happy | Assigned coordinator opens their submitted event | `SUBMITTED` event with every organiser field, assigned to `first` | 200; name, status and every organiser-supplied field returned; shown on the page | `[SCRUM-98] AC1: the assigned coordinator opens a submitted request and sees everything the organiser supplied`; `[REVIEW-E2E-UI-001]` | 2026-10-05 · pass · local |
 | TC-SCRUM-98-02 | 98-1 | Negative | Another coordinator opens it | `second` opens `first`'s event by id, in the list and by URL | 404 "Event not found."; no organiser detail in the response; not in their list (404, like an unknown id, so existence isn't revealed) | `[SCRUM-98] AC1: another coordinator cannot open the request, and its details are not revealed`; `[REVIEW-E2E-UI-003]` | 2026-10-05 · pass · local |
-| TC-SCRUM-98-03 | 98-1, 98-4 | Negative | Any other role calls the review actions | `event_ops_manager`, `event_organiser`, `venue_staff`, `technical_support_staff`, `attendee`, `unknown` × the 3 actions | 403; nothing written | `SCRUM-98 AC4: %s cannot start, approve or reject a review` (×6) | 2026-10-01 · pass · local |
+| TC-SCRUM-98-03 | 98-1, 98-4 | Negative | Any other role calls the review actions | `event_coordinator_lead`, `event_organiser`, `venue_staff`, `technical_support_staff`, `attendee`, `unknown` × the 3 actions | 403; nothing written | `SCRUM-98 AC4: %s cannot start, approve or reject a review` (×6) | 2026-10-01 · pass · local |
 | TC-SCRUM-98-04 | 98-1 | Failure | No or invalid session | no token, `invalid` × the 3 actions | 401 | `SCRUM-98: an unauthenticated caller (%j) reaches no review action` (×2) | 2026-10-01 · pass · local |
 | TC-SCRUM-98-05 | 98-2 | Happy | Assigned coordinator starts review | `POST …/start-review` | 200; `UNDER_REVIEW`; write filtered on `SUBMITTED` and the caller | `SCRUM-98 AC2: the assigned coordinator starts review and the event is UNDER_REVIEW`; `SCRUM-98 AC2: starting review moves SUBMITTED to UNDER_REVIEW for the calling coordinator only` | 2026-10-01 · pass · local |
 | TC-SCRUM-98-06 | 98-2 | Conflict | Start review twice | second `start-review` | 409 with the refresh message; still `UNDER_REVIEW` | `SCRUM-98 AC2 conflict: starting review twice is a 409 and changes nothing` | 2026-10-01 · pass · local |

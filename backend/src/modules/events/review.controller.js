@@ -26,13 +26,13 @@ function createReviewController(repository, cancelDependencies = {}) {
     };
   }
 
-  // SCRUM-148: a cancel caller may be the assigned coordinator or the ops
-  // manager (req.user.roles carries the verified role claims); isOpsManager
+  // SCRUM-148: a cancel caller may be the assigned coordinator or the coordinator
+  // lead (req.user.roles carries the verified role claims); isCoordinatorLead
   // is derived here rather than trusted from the body.
   async function cancel(req, res) {
     try {
-      const isOpsManager = req.user.roles.includes("event_ops_manager");
-      const result = await review.cancel(req.params.eventId, req.user.id, req.body?.reason, { isOpsManager, ...cancelDependencies });
+      const isCoordinatorLead = req.user.roles.includes("event_coordinator_lead");
+      const result = await review.cancel(req.params.eventId, req.user.id, req.body?.reason, { isCoordinatorLead, ...cancelDependencies });
       if (result.ok) return res.json({ event: result.event });
       const [status, message] = FAILURES[result.reason];
       return res.status(status).json({ message });

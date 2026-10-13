@@ -8,7 +8,7 @@ event. A role name, URL parameter, or submitted user ID never proves ownership.
 | --- | --- |
 | Attendee | Browse events open for registration; manage only their own registrations |
 | Event organiser (external client) | Submit requests; view and edit responsible events; view other events in the same client organisation only |
-| Event operations manager | See requests and assign or reassign a verified coordinator account |
+| Event Coordinator Lead | See requests and assign or reassign a verified coordinator account |
 | Event coordinator | See requirements and arrange bookings only for assigned events |
 | Venue staff | Venue catalogue and booking requests across all venues |
 | Technical support staff | Equipment catalogue, equipment bookings and their clarification threads across all events |
