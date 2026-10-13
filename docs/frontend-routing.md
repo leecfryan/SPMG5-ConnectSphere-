@@ -17,10 +17,10 @@ same frontend port (Docker: 5173); routing does not start another Vite process.
 | `/venues/*` | Internal venue pages; see [Venue integration](venue-integration.md) for child routes. |
 | `/equipment/requests?event=<uuid>` | Assigned coordinator Equipment request page; requires `equipment.request`. |
 | `/technical-support` | Technical dashboard; requires `equipment.review`. |
-| `/events/assignments` | Requires `events.assign_coordinator`; the Event Operations Manager's queue for routing submitted requests to coordinators. See [Coordinator assignment](event-assignment.md). |
+| `/events/assignments` | Requires `events.assign_coordinator`; the Event Coordinator Lead's queue for routing submitted requests to coordinators. See [Coordinator assignment](event-assignment.md). |
 | `/account` | Backend-verified identity for every signed-in role. |
 | `/notifications` | Own Novu inbox and unread count for every signed-in account, including accounts without roles; no role capability required. |
-| `/staff/responsibilities` | Requires `internal.access`; lists responsibilities from the protected staff API. |
+| `/staff/responsibilities` | Requires `internal.access`; lists responsibilities from the protected staff API, or an empty-state message when none are assigned. Safety Officer has basic staff access only (SCRUM-142). |
 | `/forbidden` | Signed-in access-denied page. |
 | Other URLs | Not-found page with a home link. |
 
@@ -81,7 +81,7 @@ role is removed even before the UI receives another auth event.
 Venue and Equipment implement this integration pattern; other features should follow it.
 See [Equipment integration](equipment-integration.md) for action permissions and event scope.
 Multi-role users share feature URLs; they are not redirected to a single role's
-dashboard. Existing read permissions are retained; Venue adds explicit write capabilities. `event_ops_manager` holds `event_organisers.read` and `internal.access`, and
+dashboard. Existing read permissions are retained; Venue adds explicit write capabilities. `event_coordinator_lead` holds `event_organisers.read` and `internal.access`, and
 reaches the assignment queue at `/events/assignments` through its own
 `events.assign_coordinator` capability. Every other internal page keeps the
 permission it requires, so this role is denied them individually rather than at

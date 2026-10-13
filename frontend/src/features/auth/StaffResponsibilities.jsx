@@ -54,6 +54,8 @@ export default function StaffResponsibilities({ token }) {
             Retry staff access
           </button>
         </>
+      ) : responsibilities?.length === 0 ? (
+        <p>No responsibilities are assigned to your current roles.</p>
       ) : responsibilities ? (
         <ul>
           {responsibilities.map(({ permission, label }) => (

@@ -5,7 +5,7 @@ const createApp = require("../../src/app");
 const storage = require("../../../tests/playwright/support/registration-storage.cjs");
 
 async function setup(t) {
-  const roles = { manager: ["event_ops_manager"], first: ["event_coordinator"], second: ["event_coordinator"],
+  const roles = { manager: ["event_coordinator_lead"], first: ["event_coordinator"], second: ["event_coordinator"],
     organiser: ["event_organiser"], otherOrganiser: ["event_organiser"], attendee: ["attendee"],
     venue: ["venue_staff"], technical: ["technical_support_staff"], dual: ["venue_staff", "technical_support_staff"] };
   const users = Object.fromEntries(Object.entries(roles).map(([key, values]) => [key, {

@@ -109,7 +109,7 @@ Control endpoints require a random per-run key and all services bind to loopback
 No test auth code is imported by production startup or added to Docker images.
 Do not deploy the test launcher. Test credentials are synthetic and disposable.
 
-The `event_ops_manager` policy grants `internal.access` alongside
+The `event_coordinator_lead` policy grants `internal.access` alongside
 `event_organisers.read`, so that role passes the shared gate and is refused by
 each endpoint's own capability instead. Tests expect denial per route rather
 than a blanket 403. This records current behavior; it does not establish

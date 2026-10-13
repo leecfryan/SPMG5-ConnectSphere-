@@ -43,7 +43,7 @@ test("SCRUM-26: only event_coordinator accounts are returned, as id, fullName an
     user("coord-1", ["event_coordinator"]),
     user("venue-1", ["venue_staff"]),
     user("tech-1", ["technical_support_staff"]),
-    user("manager-1", ["event_ops_manager"]),
+    user("manager-1", ["event_coordinator_lead"]),
   ] });
 
   const coordinators = await createCoordinatorDirectory(client).listCoordinators();

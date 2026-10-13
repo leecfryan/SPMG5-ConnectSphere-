@@ -82,7 +82,10 @@ The backend verifies staff roles before serving /api/internal routes. A central
 permission matrix grants Venue Staff venue/booking reads, Technical Support Staff
 equipment/technical reads, and Event Coordinators coordination reads. External
 roles grant no internal access. The staff responsibilities page displays responsibilities
-returned by GET /api/internal/access.
+returned by GET /api/internal/access. SCRUM-142 also recognises Safety Officer
+(`safety_officer`) as internal staff with basic staff access only; safety review
+permissions and its workflow are deferred to a separate story. Other assigned
+roles continue to grant their own capabilities.
 
 Feature owners must attach requirePermission to their data endpoints. Sensitive
 record permissions also require a server-side relationship resolver. The Venue feature now applies these guards to its real endpoints; other feature

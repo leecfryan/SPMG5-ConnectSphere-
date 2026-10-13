@@ -178,7 +178,7 @@ test.each([
   ["RBAC-ACCESS-001", "external user", verifiedUser, []],
   ["RBAC-ACCESS-002", "internal classification alone", staffUser, []],
   ["RBAC-ACCESS-003", "unrecognised permission", staffUser, ["administrator"]],
-  ["RBAC-ACCESS-004", "existing manager policy", { ...staffUser, roles: ["event_ops_manager"] }, ["event_organisers.read"]],
+  ["RBAC-ACCESS-004", "existing manager policy", { ...staffUser, roles: ["event_coordinator_lead"] }, ["event_organisers.read"]],
 ])("[%s] %s cannot access a staff page by URL", async (_id, _name, identity, permissions) => {
   const { fetchMock } = setup(session, identity, permissions);
   renderApp(["/staff/responsibilities"]);

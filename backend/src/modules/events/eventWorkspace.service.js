@@ -45,7 +45,7 @@ function createEventWorkspaceService(client) {
     let query = client.from("events").select(FIELDS);
     if (scope === "organiser") query = query.in("organiser_id", organiserIds);
     // SCRUM-98 AC3: a coordinator keeps seeing the requests they rejected, with the outcome they recorded.
-    // SCRUM-148 AC4: and the ones they (or the ops manager) cancelled, with its history.
+    // SCRUM-148 AC4: and the ones they (or the coordinator lead) cancelled, with its history.
     else if (scope === "coordinator") query = query.eq("coordinator_id", userId).in("status", [...ACTIVE_STATUSES, "REJECTED", "CANCELLED"]);
     else if (scope === "manager") query = query.in("status", [...ACTIVE_STATUSES, "REJECTED", "CANCELLED"]);
     else throw new Error("Unknown event scope");

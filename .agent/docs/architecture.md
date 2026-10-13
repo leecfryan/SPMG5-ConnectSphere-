@@ -89,8 +89,10 @@ swallows them. Inside any router, declare static paths before parameter paths.
 - `requireAuth(authClient)` verifies the bearer token with Supabase on **every** request and builds
   `req.user = { id, email, fullName, roles[], accountTypes[] }` from `app_metadata.roles` only. It never trusts
   headers, query, body or `user_metadata`.
-- Roles: internal `event_coordinator`, `venue_staff`, `technical_support_staff`, `event_ops_manager`; external
+- SCRUM-142 renames the manager role to `event_coordinator_lead`. Verified legacy Auth claims are normalised at the authentication boundary until Ryan applies the documented Auth metadata update in `docs/staff-access.md`. All policies and direct role checks use the canonical identifier.
+- Roles: internal `event_coordinator`, `venue_staff`, `technical_support_staff`, `event_coordinator_lead`, `safety_officer`; external
   `event_organiser`, `attendee`. `roles` is an array, so a person can hold several.
+- SCRUM-142 registers Safety Officer as internal staff with `internal.access` only. Ryan explicitly deferred safety review permissions/workflows to a separate story; coordinator safety submission is unchanged.
 - `backend/src/auth/permissions.js` is the single policy table: `"<area>.<action>": { roles: [...], label?, record? }`.
   - `*.read` permissions are refused for anything but GET/HEAD. A write needs its own action permission
     (`events.submit`, `bookings.decide`, `equipment.review`, …). Never reuse a read permission for a write.
@@ -137,6 +139,8 @@ swallows them. Inside any router, declare static paths before parameter paths.
 | Staff | `GET /api/internal/access` | `internal.access` |
 | Event requests | `POST /api/events` | `events.submit` |
 | Assignment | `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` | `internal.access` + `events.assign_coordinator` |
+| Postponement | `POST /api/internal/events/:eventId/postpone` | `internal.access` + `events.postpone`; assigned coordinator or Event Coordinator Lead |
+| Coordinator waitlist | `GET /api/managed-events/:eventId/waitlist`, `GET/PATCH /api/managed-events/:eventId/waitlist/settings`, `POST /api/managed-events/:eventId/waitlist/:entryId/promote` | `events.waitlist.manage`; assigned coordinator only |
 | Safety check | `GET /api/internal/events/:eventId/safety-readiness`, `POST /api/internal/events/:eventId/{submit-safety-check,withdraw-safety-check}` | `internal.access` + `events.safety.submit`, assigned coordinator only |
 | Event workspaces | `GET /api/event-workspace/organiser[/<id>]`, `GET /api/event-workspace/coordinator[/<id>]`, `GET /api/event-workspace/manager[/<id>]`, `GET /api/event-workspace/coordinators`; `PATCH /api/event-workspace/organiser/<id>`, `/<id>/coordinator` | `events.own.read` / `events.own.update` / `events.assigned.read` / `events.review` / `events.assign`, with organisation, ownership and state checks |
 | Registration | `GET /api/events`, `GET /api/events/:eventId` (APPROVED only); `POST /api/registrations`, `GET /api/registrations/me`, `GET /api/registrations/me/:registrationId`, `PATCH /api/registrations/:registrationId/withdraw` | authenticated, `events.browse` / `registrations.manage`, scoped to `req.user.id` |
@@ -201,7 +205,7 @@ shares the database.
   ```
 - Event statuses (confirmed by the team; don't add, rename or drop one without the team agreeing):
   `DRAFT` · `SUBMITTED` · `UNDER_REVIEW` · `APPROVED` · `SAFETY_REVIEW` · `CONFIRMED` · `COMPLETED` · `CANCELLED` ·
-  `REJECTED`. `APPROVED` is the stored value for "approved / planning". `SAFETY_REVIEW` (SCRUM-139) is active but
+  `REJECTED` · `POSTPONED`. `APPROVED` is the stored value for "approved / planning". `SAFETY_REVIEW` (SCRUM-139) is active but
   not a planning status, so venue and equipment requests are refused while it holds. Registration's event list and Venue's bookable events
   already read it. The code currently writes only `SUBMITTED` (organisers) and `APPROVED` (seed data); the lifecycle
   code that moves events through the rest is not built yet. Status is written only by the lifecycle code, never

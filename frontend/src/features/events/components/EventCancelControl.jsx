@@ -4,7 +4,7 @@ import { cancelEvent } from "../reviewService";
 
 // SCRUM-149: POSTPONED joins this list - an event can be cancelled from any
 // status ACTIVE_STATUSES names, which now includes a postponed one.
-const ACTIVE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED", "POSTPONED"];
+const ACTIVE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED", "POSTPONED"];
 
 // SCRUM-148 AC1/AC2: who may see this is decided by the page (the assigned
 // coordinator, or the manager scope) - this component only gates on status,

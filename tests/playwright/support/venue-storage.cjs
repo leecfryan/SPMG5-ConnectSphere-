@@ -48,6 +48,18 @@ module.exports = function venueStorage(accounts) {
     async listBookingRequests(scope) { return requests.filter(r => visible(r, scope)); },
     // Same rule as decide_venue_booking_request: coordinator-cancelled slots stay cancelled.
     async decideBookingRequest(id, decision) { const r = requests.find(r => r.id === id); if (!r) return null; for (const slot of r.slots) if (slot.status !== 'cancelled') slot.status = decision; return id; },
+    // SCRUM-148/149: mirror the production release RPC for cancellation and postponement.
+    async releaseBookingsForCancelledEvent(eventId) {
+      let released = 0;
+      for (const request of requests.filter(r => r.event_id === eventId)) {
+        for (const slot of request.slots) {
+          if (!['pending', 'confirmed'].includes(slot.status)) continue;
+          slot.status = 'cancelled';
+          released += 1;
+        }
+      }
+      return released;
+    },
     // SCRUM-133: unavailability period CRUD
     async createUnavailabilityPeriod(venueId, data, createdBy) {
       const period = { ...data, id: randomUUID(), venue_id: venueId, created_by: createdBy,

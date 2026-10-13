@@ -10,7 +10,7 @@ import EventDetailPanel from "../components/EventDetailPanel";
 import CoordinatorTable from "../components/CoordinatorTable";
 import "../events.css";
 
-// SCRUM-26. The Event Operations Manager reads a submitted request and routes
+// SCRUM-26. The Event Coordinator Lead reads a submitted request and routes
 // it to an Event Coordinator. That is the whole screen.
 //
 // Deliberately absent, because each belongs to a story of its own:

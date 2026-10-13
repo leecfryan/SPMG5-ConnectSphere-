@@ -1,5 +1,9 @@
 # Coordinator Assignment — Test Documentation
 
+SCRUM-142 renames the current manager role to Event Coordinator Lead (`event_coordinator_lead`).
+Historical acceptance criteria and customer quotations retain their original wording.
+Earlier execution results are historical evidence; rename verification is recorded separately.
+
 **Deliverable evidence for SCRUM-26 (Assign Event Coordinator), under epic SCRUM-7 (Event Request).**
 Branch: `feature/assignCoordinator` · **77 documented cases, all passing**
 — 63 backend (§2–§5) and 14 frontend (§6).
@@ -58,7 +62,7 @@ what is specific to that case.
 | API (integration) | `backend/tests/integration/events.assign.test.js` | 22 | Express app on an ephemeral port (`listen(0)`); the bearer token **is** the comma-separated role list, so each case states the identity it exercises. Repository and directory both faked. |
 | Page (frontend) | `frontend/src/features/events/AssignmentQueuePage.test.jsx` | 14 | jsdom; `getAuthClient` mocked and `fetch` stubbed, both reset in `afterEach`. The page is rendered through the real `App` and router, so the route guard is exercised rather than bypassed. Permissions come from the **real** `backend/src/auth/permissions.js`, loaded with `createRequire` — removing the manager's capability fails these tests. |
 
-Permission coverage for `event_ops_manager` beyond this feature lives in
+Permission coverage for `event_coordinator_lead` beyond this feature lives in
 `backend/tests/integration/auth.test.js` and `frontend/src/Rbac.test.jsx`.
 
 ---
@@ -88,7 +92,7 @@ Permission coverage for `event_ops_manager` beyond this feature lives in
 | AS-X01 | No endpoint is reachable unauthenticated | `""`, `"invalid"` × 3 paths | `401` every time | `an unauthenticated caller (%s) reaches no assignment endpoint` |
 | AS-X02 | No other role reaches any endpoint | 6 roles × 3 paths | `403`; repository never called | `%s is signed in but cannot see or change assignments` |
 | AS-X03 | `internal.access` alone is not enough | `event_coordinator` | `403` — the capability is specific, not the area | `an event_coordinator holds internal.access yet is still refused - the capability is specific` |
-| AS-X04 | A multi-role account holding the manager role is admitted | `event_coordinator,event_ops_manager` | `200` | `a multi-role account holding event_ops_manager is admitted` |
+| AS-X04 | A multi-role account holding the manager role is admitted | `event_coordinator,event_coordinator_lead` | `200` | `a multi-role account holding event_coordinator_lead is admitted` |
 
 Forged `x-user-role` headers are sent on **every** request in this file; roles
 come from the verified token's `app_metadata` only. The matching blast-radius

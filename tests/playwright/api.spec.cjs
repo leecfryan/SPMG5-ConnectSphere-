@@ -63,7 +63,7 @@ const matrix = [
   ['technical_support_staff', ['equipment.read', 'technical_requests.read']],
   ['event_coordinator', permissions],
   // SCRUM-26 grants managers internal access; organiser reads still require a record check.
-  ['attendee', []], ['event_organiser', []], ['event_ops_manager', ['event_organisers.read']],
+  ['attendee', []], ['event_organiser', []], ['event_coordinator_lead', ['event_organisers.read']],
 ];
 for (const [roleIndex, [role, allowed]] of matrix.entries()) {
   for (const [permissionIndex, permission] of permissions.entries()) {
@@ -101,8 +101,8 @@ test('[API-RBAC-049] Combined roles return unique capabilities and removal immed
   expect((await (await request.get('/api/auth/me', { headers })).json()).permissions).toEqual(['events.browse', 'registrations.manage']);
 });
 
-test('[API-RBAC-050] Operations manager access remains limited to its permissions and authorised records', async ({ request, accounts }) => {
-  const account = await accounts.create(['event_ops_manager']);
+test('[API-RBAC-050] Event Coordinator Lead access remains limited to its permissions and authorised records', async ({ request, accounts }) => {
+  const account = await accounts.create(['event_coordinator_lead']);
   const headers = bearer(await accounts.session(account));
   const identity = await request.get('/api/auth/me', { headers });
   expect(identity.status()).toBe(200);
@@ -166,4 +166,83 @@ test('[API-SCOPE-001] Venue and equipment access is independent of unrelated pro
   for (const path of ['venues.read/venue-b', 'venues.read/east-location', 'equipment.read/microphone']) {
     expect((await request.get('/api/internal/fixtures/' + path, { headers })).status()).toBe(200);
   }
+});
+
+for (const [id, role] of [['001', 'event_coordinator_lead'], ['002', 'event_ops_manager']]) {
+  test(`[SCRUM-142-API-${id}] ${role} is verified as Event Coordinator Lead and role removal keeps attendee access`, async ({ request, accounts }) => {
+    const account = await accounts.create([role, 'attendee']);
+    const headers = bearer(await accounts.session(account));
+    const identity = await request.get('/api/auth/me', { headers });
+    expect(identity.status()).toBe(200);
+    const body = await identity.json();
+    expect(body.user.roles).toEqual(['event_coordinator_lead', 'attendee']);
+    expect(body.user.accountTypes).toEqual(['internal', 'external']);
+    expect(body.permissions.sort()).toEqual([
+      'event_organisers.read', 'events.assign', 'events.assign_coordinator', 'events.browse',
+      'events.cancel', 'events.postpone', 'events.review', 'internal.access', 'registrations.manage',
+    ]);
+    expect((await request.get('/api/event-workspace/manager', { headers })).status()).toBe(200);
+    expect((await request.get('/api/venues', { headers })).status()).toBe(403);
+    await accounts.update(account, { roles: ['attendee'] });
+    expect((await request.get('/api/event-workspace/manager', { headers })).status()).toBe(403);
+    expect((await request.get('/api/internal/access', { headers })).status()).toBe(403);
+    expect((await (await request.get('/api/auth/me', { headers })).json()).permissions).toEqual(['events.browse', 'registrations.manage']);
+  });
+}
+
+
+for (const [index, permission] of permissions.entries()) {
+  test(`[SCRUM-142-SAFETY-API-${String(index + 1).padStart(3, '0')}] Safety Officer cannot read ${permission}`, async ({ request, accounts }) => {
+    const account = await accounts.create(['safety_officer']);
+    const headers = bearer(await accounts.session(account));
+    const response = await request.get('/api/internal/fixtures/' + permission + '/managed-event', { headers });
+    expect(response.status()).toBe(403);
+    expect(Object.keys(await response.json())).toEqual(['message']);
+    const counts = await accounts.counts(account);
+    expect(counts.record).toBe(0);
+    expect(counts.handler).toBe(0);
+  });
+}
+
+test('[SCRUM-142-SAFETY-API-009] verified officer is internal with no feature permissions', async ({ request, accounts }) => {
+  const account = await accounts.create(['safety_officer', 'safety_officer', 'unknown']);
+  const headers = bearer(await accounts.session(account));
+  const identity = await request.get('/api/auth/me', { headers });
+  expect(identity.status()).toBe(200);
+  const body = await identity.json();
+  expect(body.user.roles).toEqual(['safety_officer']);
+  expect(body.user.accountTypes).toEqual(['internal']);
+  expect(body.permissions).toEqual(['internal.access']);
+  const access = await request.get('/api/internal/access', { headers });
+  expect(access.status()).toBe(200);
+  expect(await access.json()).toEqual({ responsibilities: [] });
+});
+
+test('[SCRUM-142-SAFETY-API-010] officer can accompany attendee and Venue Staff and removal preserves their capabilities', async ({ request, accounts }) => {
+  const account = await accounts.create(['safety_officer', 'attendee', 'venue_staff']);
+  const headers = bearer(await accounts.session(account));
+  const body = await (await request.get('/api/auth/me', { headers })).json();
+  expect(body.user.roles).toEqual(['safety_officer', 'attendee', 'venue_staff']);
+  expect(body.user.accountTypes).toEqual(['internal', 'external']);
+  expect(body.permissions.sort()).toEqual(['bookings.decide', 'bookings.read', 'events.browse', 'internal.access', 'registrations.manage', 'venues.read', 'venues.unavailability', 'venues.update']);
+  expect((await request.get('/api/venues', { headers })).status()).toBe(200);
+  expect((await request.get('/api/event-workspace/manager', { headers })).status()).toBe(403);
+  await accounts.update(account, { roles: ['safety_officer', 'attendee'] });
+  expect((await request.get('/api/venues', { headers })).status()).toBe(403);
+  expect((await request.get('/api/internal/access', { headers })).status()).toBe(200);
+  await accounts.update(account, { roles: ['attendee'] });
+  expect((await request.get('/api/internal/access', { headers })).status()).toBe(403);
+  expect((await (await request.get('/api/auth/me', { headers })).json()).permissions).toEqual(['events.browse', 'registrations.manage']);
+});
+
+test('[SCRUM-142-SAFETY-API-011] forged editable officer claims cannot elevate attendee access', async ({ request, accounts }) => {
+  const account = await accounts.create(['attendee'], { roles: ['safety_officer'], user_type: 'internal' });
+  const headers = { ...bearer(await accounts.session(account)), 'X-User-Role': 'safety_officer', 'X-Permissions': 'internal.access' };
+  const response = await request.get('/api/auth/me?role=safety_officer', { headers });
+  expect(response.status()).toBe(200);
+  const body = await response.json();
+  expect(body.user.roles).toEqual(['attendee']);
+  expect(body.user.accountTypes).toEqual(['external']);
+  expect(body.permissions).toEqual(['events.browse', 'registrations.manage']);
+  expect((await request.get('/api/internal/access', { headers })).status()).toBe(403);
 });

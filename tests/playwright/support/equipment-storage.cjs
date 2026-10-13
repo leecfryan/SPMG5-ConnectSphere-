@@ -18,6 +18,12 @@ module.exports = function equipmentStorage(accounts) {
       requests.push(row);
       return row;
     },
+    // SCRUM-148: the fixture units are AVAILABLE; cancellation releases only their event reservations.
+    async releaseReservationsForCancelledEvent(eventId) {
+      const releasable = requests.filter(row => row.event_id === eventId && ['PENDING', 'APPROVED'].includes(row.status));
+      for (const row of releasable) row.status = 'RELEASED';
+      return { released: releasable.map(row => row.id), equipmentReverted: [], equipmentSkipped: [] };
+    },
     async updateStatus(id, status) { const row = requests.find(row => row.id === id); if (!row) return null; row.status = status; return row; },
   };
   return {

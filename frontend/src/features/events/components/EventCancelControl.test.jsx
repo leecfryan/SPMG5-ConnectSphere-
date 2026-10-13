@@ -38,7 +38,7 @@ test.each(["DRAFT", "COMPLETED", "REJECTED", "CANCELLED"])(
   },
 );
 
-test.each(["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED", "POSTPONED"])(
+test.each(["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED", "POSTPONED"])(
   "[TC-148-18 / TC-149-14] a %s event offers a cancel action", (status) => {
     setup(status);
     expect(screen.getByRole("button", { name: "Cancel event" })).toBeInTheDocument();

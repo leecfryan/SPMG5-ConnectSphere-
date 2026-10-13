@@ -83,7 +83,7 @@ test.each([
   ["EVENT-AUTH-004", "venue_staff", 403],
   ["EVENT-AUTH-005", "technical_support_staff", 403],
   ["EVENT-AUTH-006", "event_coordinator", 403],
-  ["EVENT-AUTH-007", "event_ops_manager", 403],
+  ["EVENT-AUTH-007", "event_coordinator_lead", 403],
 ])("[%s] Token role '%s' cannot submit an organiser request (HTTP %s)", async (_id, token, expected) => {
   const response = await post({ ...completeBody(), roles: ["event_organiser"] }, token);
   expect(response.status).toBe(expected);

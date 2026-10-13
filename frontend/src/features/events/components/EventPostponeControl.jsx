@@ -2,10 +2,10 @@ import { useState } from "react";
 import { useAuth } from "../../auth/useAuth";
 import { postponeEvent } from "../reviewService";
 
-// SCRUM-149: the four stages an event can be postponed from - without a
+// SCRUM-149: the five stages an event can be postponed from - without a
 // known new date yet, so an already-postponed event is excluded (see
 // backend/src/modules/events/lifecycle.js#POSTPONABLE_STATUSES).
-const POSTPONABLE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED"];
+const POSTPONABLE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED"];
 
 // SCRUM-149 AC1/AC3: who may see this is decided by the page (the assigned
 // coordinator, or the manager scope) - this component only gates on status,

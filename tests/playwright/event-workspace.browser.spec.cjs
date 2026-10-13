@@ -210,3 +210,29 @@ test('[E2E-EVENT-101] SCRUM-100: Revocation while editing is refused by the real
   await expect(page.getByRole('button', { name: 'Edit event', exact: true })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: events.organiser.name, exact: true })).toHaveCount(0);
 });
+
+for (const [id, role, status] of [['001', 'event_coordinator_lead', 'SUBMITTED'], ['002', 'event_ops_manager', 'SAFETY_REVIEW']]) {
+  test(`[SCRUM-142-MERGE-BROWSER-${id}] ${role} can postpone a ${status} event, refresh and cancel it`, async ({ page, accounts, request }) => {
+    const { event, first, update } = await setupWorkflow(accounts, request);
+    expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
+    await accounts.updateEvent(event.id, { status });
+    const lead = await accounts.create([role]);
+    await page.goto(`/event-management/${event.id}`);
+    await signIn(page, lead);
+    await expect(page.getByRole('heading', { name: event.name, exact: true })).toBeVisible();
+    const postpone = page.getByRole('region', { name: 'Postpone event', exact: true });
+    await postpone.getByLabel('Reason', { exact: true }).fill('New date pending');
+    await postpone.getByRole('button', { name: 'Postpone event', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Postponement', exact: true })).toBeVisible();
+    await expect(page.getByText('New date pending', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Postpone event', exact: true })).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Postponement', exact: true })).toBeVisible();
+    const cancel = page.getByRole('region', { name: 'Cancel event', exact: true });
+    await cancel.getByLabel('Reason', { exact: true }).fill('No replacement date');
+    await cancel.getByRole('button', { name: 'Cancel event', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Cancellation', exact: true })).toBeVisible();
+    await expect(page.getByText('New date pending', { exact: true })).toBeVisible();
+    await expect(page.getByText('No replacement date', { exact: true })).toBeVisible();
+  });
+}

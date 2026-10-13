@@ -3,7 +3,7 @@ const { backendURL } = require('./settings.cjs');
 
 async function setupWorkflow(accounts, request) {
   const organiser = await accounts.create(['event_organiser']);
-  const manager = await accounts.create(['event_ops_manager']);
+  const manager = await accounts.create(['event_coordinator_lead']);
   const first = await accounts.create(['event_coordinator'], { full_name: 'Coordinator One' });
   const second = await accounts.create(['event_coordinator'], { full_name: 'Coordinator Two' });
   const dual = await accounts.create(['venue_staff', 'technical_support_staff']);
