@@ -66,7 +66,9 @@ specification.
 | clients.read | No | No | Yes | No | Yes |
 | event_organisers.read | No | No | Yes | No | Yes |
 
-All four internal roles, including `event_coordinator_lead`, have `internal.access`.
+All five internal roles, including `event_coordinator_lead` and `safety_officer`, have `internal.access`.
+Safety Officer alone has no feature permissions or read responsibilities. It does
+not receive the assigned coordinator's `events.safety.submit` capability.
 Managers have `events.review` and `events.assign`, not venue/equipment booking
 permissions. Coordinators have `events.assigned.read`; organisers have
 `events.own.read`, `events.own.update` and `events.submit`. Only attendee responsibility grants
@@ -283,5 +285,56 @@ server status lists; POSTPONED is cancellable but not postponable again.
 
 The SCRUM-142 working plan and execution reports stay outside this repository
 under Ryan's local reporting preferences. Manual UAT and the shared Auth update
-remain unexecuted until Ryan runs them. Safety Officer permissions are a separate,
-unresolved part of SCRUM-142; this rename does not grant them.
+remain unexecuted until Ryan runs them.
+
+
+## SCRUM-142 — Safety Officer
+
+Ryan confirmed on 2026-10-13 that this story registers Safety Officer as staff;
+its safety review permissions and workflow belong to a separate story. The trusted
+identifier is `safety_officer`, displayed as **Safety Officer**. Its only capability
+is `internal.access`: Account, Notifications and Responsibilities are available,
+with an empty-state message when no feature responsibilities are assigned.
+Officer-only accounts cannot access lead, coordinator, venue, equipment or attendee
+business functions, including coordinator safety-check submission and withdrawal.
+
+Roles remain additive: an officer can also hold `attendee`, `venue_staff` or
+`event_coordinator_lead`; the other role's permissions and record checks still apply.
+Removing officer removes only the capability it grants; another internal role can
+still provide staff access. Editable `user_metadata.roles` and request claims cannot
+assign this role.
+
+### Assignment and schema reference
+
+No schema SQL is needed to recognise this role. Recognition does not assign it to
+any existing user. An administrator must append `safety_officer` to the target
+user's existing admin-controlled `app_metadata.roles` array, preserving other roles
+and metadata, through the team's trusted Auth administration process. Tell teammates
+before and after changing shared assignments. Sign out and in to refresh the UI;
+the server verifies current roles on every request. The optional demo seed now
+creates `safety.demo@example.com`; see [seed users](seed-users.md). Neither the seed
+nor any shared Auth update has been run by the agent.
+
+### Verification and manual UAT
+
+- `backend/tests/integration/roles.rename.test.js`: SCRUM-142-SAFETY-INT-001–006 cover
+  trusted identity, exact capabilities, duplicate/combined roles, next-request
+  removal, legacy-lead coexistence, forged claims and refused writes with unchanged
+  stored event and no venue/equipment release callbacks.
+- `frontend/src/Rbac.test.jsx`: SCRUM-142-SAFETY-UI-001–008 cover role labels,
+  combined navigation, empty responsibilities and direct-page refusal.
+- `tests/playwright/api.spec.cjs`: SCRUM-142-SAFETY-API-001–011 exercise all eight
+  read responsibility families, identity, combined-role access/removal and forged
+  editable metadata against the real SDK and local Auth simulator.
+- `tests/playwright/browser.spec.cjs`: SCRUM-142-SAFETY-BROWSER-001–002 exercise
+  mobile sign-in, reload, navigation, direct URL denial, combined roles and removal.
+
+Manual UAT is **Not Executed**. Assign officer-only, sign in and verify Account
+shows Safety Officer; open Responsibilities and refresh to see the empty message.
+Open `/event-management`, `/events/assignments`, `/assigned-events`, `/venues` and
+`/technical-support` directly and expect Access denied. Then append officer to an
+attendee or existing staff account, sign out/in and verify both role labels and
+the original role's functions; remove only officer and verify remaining access.
+Existing lead rename UAT and its manual Auth update remain separate pending work.
+The test specifications and genuine automated execution report stay outside the
+repository under Ryan's local reporting preferences.

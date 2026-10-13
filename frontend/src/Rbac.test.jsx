@@ -322,3 +322,39 @@ test("[SCRUM-142-UI-001] the account displays Event Coordinator Lead alongside a
   expect(screen.getByRole("link", { name: "Browse events", exact: true })).toBeTruthy();
   expect(screen.queryByRole("link", { name: "Venues", exact: true })).toBeNull();
 });
+
+
+test("[SCRUM-142-SAFETY-UI-001] Safety Officer sees its account label and basic staff navigation only", async () => {
+  setup(["safety_officer"]);
+  render(<MemoryRouter initialEntries={["/account"]}><App /></MemoryRouter>);
+  expect(await screen.findByText("Safety Officer", { exact: true })).toBeTruthy();
+  const nav = screen.getByRole("navigation", { name: "Workspace" });
+  expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["Account", "Notifications", "Responsibilities"]);
+});
+
+test("[SCRUM-142-SAFETY-UI-002] Safety Officer plus attendee displays both roles and keeps registration navigation", async () => {
+  setup(["safety_officer", "attendee"], { profile: { accountTypes: ["internal", "external"] } });
+  render(<MemoryRouter initialEntries={["/account"]}><App /></MemoryRouter>);
+  expect(await screen.findByText("Safety Officer · Attendee")).toBeTruthy();
+  const nav = screen.getByRole("navigation", { name: "Workspace" });
+  for (const name of ["Responsibilities", "Browse events", "My registrations"]) expect(within(nav).getByRole("link", { name })).toBeTruthy();
+  expect(within(nav).queryByRole("link", { name: "Manage event requests" })).toBeNull();
+});
+
+test("[SCRUM-142-SAFETY-UI-003] officer staff access clearly reports no assigned feature responsibilities", async () => {
+  setup(["safety_officer"]);
+  renderStaffPage();
+  expect(await screen.findByText("No responsibilities are assigned to your current roles.")).toBeTruthy();
+  expect(screen.queryByRole("listitem")).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test.each([
+  ["004", "/event-management"], ["005", "/events/assignments"], ["006", "/venues"],
+  ["007", "/technical-support"], ["008", "/assigned-events"],
+])("[SCRUM-142-SAFETY-UI-%s] Safety Officer cannot bypass the permission guard at %s", async (_id, url) => {
+  const { fetchMock } = setup(["safety_officer"]);
+  render(<MemoryRouter initialEntries={[url]}><App /></MemoryRouter>);
+  expect(await screen.findByRole("heading", { name: "Access denied" })).toBeTruthy();
+  expect(fetchMock.mock.calls.every(([path]) => path === "/api/auth/me")).toBe(true);
+});

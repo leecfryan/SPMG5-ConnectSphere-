@@ -235,3 +235,42 @@ for (const [id, role] of [['001', 'event_coordinator_lead'], ['002', 'event_ops_
     await expect(page).toHaveURL(/\/forbidden$/);
   });
 }
+
+
+test('[SCRUM-142-SAFETY-BROWSER-001] officer signs in at mobile width, survives reload and cannot open business pages', async ({ page, accounts }) => {
+  const account = await accounts.create(['safety_officer']);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto('/sign-in');
+  await signIn(page, account);
+  await expect(page.getByText('Safety Officer', { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('Safety Officer', { exact: true })).toBeVisible();
+  const nav = page.getByRole('navigation', { name: 'Workspace' });
+  await expect(nav.getByRole('link')).toHaveText(['Account', 'Notifications', 'Responsibilities']);
+  await nav.getByRole('link', { name: 'Responsibilities', exact: true }).click();
+  await expect(page.getByText('No responsibilities are assigned to your current roles.')).toBeVisible();
+  await expect(page.getByRole('listitem')).toHaveCount(0);
+  for (const url of ['/event-management', '/events/assignments', '/venues', '/technical-support', '/assigned-events']) {
+    await page.goto(url);
+    await expect(page.getByRole('heading', { name: 'Access denied' })).toBeVisible();
+  }
+});
+
+test('[SCRUM-142-SAFETY-BROWSER-002] officer plus attendee displays both roles and keeps attendee access after officer removal', async ({ page, accounts }) => {
+  const account = await accounts.create(['safety_officer', 'attendee']);
+  await page.goto('/sign-in');
+  await signIn(page, account);
+  await expect(page.getByText('Safety Officer · Attendee', { exact: true })).toBeVisible();
+  const nav = page.getByRole('navigation', { name: 'Workspace' });
+  await expect(nav.getByRole('link', { name: 'Browse events', exact: true })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'My registrations', exact: true })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Responsibilities', exact: true })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Manage event requests', exact: true })).toHaveCount(0);
+  await accounts.update(account, { roles: ['attendee'] });
+  await page.reload();
+  await expect(page.getByText('Attendee', { exact: true })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Responsibilities', exact: true })).toHaveCount(0);
+  await expect(nav.getByRole('link', { name: 'Browse events', exact: true })).toBeVisible();
+  await page.goto('/staff/responsibilities');
+  await expect(page.getByRole('heading', { name: 'Access denied' })).toBeVisible();
+});

@@ -4,6 +4,7 @@ const roleLabels = {
   event_coordinator: "Event Coordinator", venue_staff: "Venue Staff",
   technical_support_staff: "Technical Support Staff", event_organiser: "Event Organiser",
   attendee: "Attendee", event_coordinator_lead: "Event Coordinator Lead",
+  safety_officer: "Safety Officer",
 };
 
 export default function AccountPage() {

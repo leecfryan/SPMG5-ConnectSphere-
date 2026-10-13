@@ -68,6 +68,7 @@ const policies = Object.freeze({
       "venue_staff",
       "technical_support_staff",
       "event_coordinator_lead",
+      "safety_officer",
     ],
   },
   "venues.read": {
