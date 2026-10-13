@@ -30,6 +30,8 @@ module.exports = function createVenuesRoutes(service) {
   // SCRUM-22: Venue Staff decide a request. bookingScope is applied so the
   // response comes back through the same visibility rule as the review list.
   router.patch("/booking-requests/:requestId/decision", requirePermission("bookings.decide", bookingScope), available, controller.patchBookingRequestDecision);
+  // SCRUM-135: Venue Staff view conflict flags raised after a setup/turnaround change.
+  router.get("/:id/booking-conflicts", requirePermission("venues.conflicts"), available, controller.getConflictFlags);
   // SCRUM-133: Venue Staff manage unavailability periods for a venue.
   router.get("/:id/unavailability", requirePermission("venues.unavailability"), available, controller.getUnavailabilityPeriods);
   router.post("/:id/unavailability", requirePermission("venues.unavailability"), available, controller.postUnavailabilityPeriod);

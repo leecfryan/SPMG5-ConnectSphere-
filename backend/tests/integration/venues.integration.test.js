@@ -14,7 +14,8 @@ const event = { id: eventId, name: "Assigned conference", status: "APPROVED", st
 const body = { event_id: eventId, booking_date: bookingDate, slots: ["am"], expected_attendees: 100,
   room_layout: "Theatre", required_facilities: ["Projector"], accessibility_requirements: ["Lift"] };
 const service = Object.fromEntries(["listVenues", "getVenueById", "updateVenue", "listBookingsInRange", "listUnavailabilityInRange",
-  "listBookingsForVenuesOnDate", "listUnavailabilityForVenuesOnDate", "getEventById", "listBookableEvents", "listSlotRowsForDate", "submitBookingRequest", "getBookingRequestById", "listBookingRequests"].map((name) => [name, vi.fn()]));
+  "listBookingsForVenuesOnDate", "listUnavailabilityForVenuesOnDate", "getEventById", "listBookableEvents", "listSlotRowsForDate", "submitBookingRequest", "getBookingRequestById", "listBookingRequests",
+  "recheckConflictsAfterUpdate", "listConflictingRequests"].map((name) => [name, vi.fn()]));
 const authClient = { auth: { getUser: async (token) => ({ data: { user: token === "invalid" ? null : {
   id: "verified-user", app_metadata: { roles: token.split(",") }, user_metadata: { roles: ["venue_staff"] },
 } }, error: null }) } };
