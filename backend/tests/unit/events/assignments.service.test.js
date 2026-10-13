@@ -183,13 +183,13 @@ test("SCRUM-26: the queue is submitted, unassigned, oldest first, with a created
   expect(calls).toContainEqual(["order", "created_at", { ascending: true }]);
 });
 
-test("SCRUM-26: workload counts read only assigned events in an active status", async () => {
+test("[TC-149-16] SCRUM-26/149: workload counts read only assigned events in an active status (postponed included)", async () => {
   const { calls } = recorder([]);
   const repository = require("../../../src/modules/events/events.repository");
 
   await repository.findActiveAssignments();
 
   expect(calls).toContainEqual(["select", "coordinator_id, start_time"]);
-  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED"]]);
+  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED", "POSTPONED"]]);
   expect(calls).toContainEqual(["not", "coordinator_id", "is", null]);
 });

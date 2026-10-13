@@ -2,7 +2,7 @@ import { test, expect } from "vitest";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { STATUSES, TRANSITIONS, ACTIVE_STATUSES, PLANNING_STATUSES, canTransition } = require("../../../src/modules/events/lifecycle");
+const { STATUSES, TRANSITIONS, ACTIVE_STATUSES, POSTPONABLE_STATUSES, PLANNING_STATUSES, canTransition } = require("../../../src/modules/events/lifecycle");
 
 const AGREED_STATUSES = [
   "DRAFT",
@@ -14,27 +14,34 @@ const AGREED_STATUSES = [
   "COMPLETED",
   "CANCELLED",
   "REJECTED",
+  "POSTPONED",
 ];
 
 const AGREED_TRANSITIONS = [
   ["DRAFT", "SUBMITTED"],
   ["SUBMITTED", "UNDER_REVIEW"],
   ["SUBMITTED", "CANCELLED"],
+  ["SUBMITTED", "POSTPONED"],
   ["UNDER_REVIEW", "APPROVED"],
   ["UNDER_REVIEW", "REJECTED"],
   ["UNDER_REVIEW", "CANCELLED"],
+  ["UNDER_REVIEW", "POSTPONED"],
   ["APPROVED", "SAFETY_REVIEW"],
   ["APPROVED", "CONFIRMED"],
   ["APPROVED", "CANCELLED"],
+  ["APPROVED", "POSTPONED"],
   ["SAFETY_REVIEW", "APPROVED"],
   ["SAFETY_REVIEW", "CANCELLED"],
+  ["SAFETY_REVIEW", "POSTPONED"],
   ["CONFIRMED", "COMPLETED"],
   ["CONFIRMED", "CANCELLED"],
+  ["CONFIRMED", "POSTPONED"],
+  ["POSTPONED", "CANCELLED"],
 ];
 
 const isAgreed = (from, to) => AGREED_TRANSITIONS.some(([a, b]) => a === from && b === to);
 
-test("SCRUM-97 AC1 / SCRUM-139 AC3: the lifecycle has exactly the nine agreed statuses", () => {
+test("SCRUM-97 AC1 / SCRUM-139 AC3 / SCRUM-149: the lifecycle has exactly the agreed statuses", () => {
   expect([...STATUSES].sort()).toEqual([...AGREED_STATUSES].sort());
 });
 
@@ -109,11 +116,16 @@ test("SCRUM-139 AC3: only an approved event can be submitted for the safety chec
   expect(STATUSES.filter((from) => canTransition(from, "SAFETY_REVIEW"))).toEqual(["APPROVED"]);
 });
 
-test("SCRUM-139 AC4: under safety review, the event can only be withdrawn to approved or cancelled", () => {
-  expect(STATUSES.filter((to) => canTransition("SAFETY_REVIEW", to)).sort()).toEqual(["APPROVED", "CANCELLED"]);
+test("SCRUM-139 AC4/SCRUM-149: under safety review, the event can only move to approved, cancelled or postponed", () => {
+  expect(STATUSES.filter((to) => canTransition("SAFETY_REVIEW", to)).sort()).toEqual(["APPROVED", "CANCELLED", "POSTPONED"]);
 });
 
-test("SCRUM-98: active events are those submitted and not yet finished, rejected or cancelled", () => {
-  expect([...ACTIVE_STATUSES].sort()).toEqual(["APPROVED", "CONFIRMED", "SAFETY_REVIEW", "SUBMITTED", "UNDER_REVIEW"]);
+test("SCRUM-98/149: active events are those submitted, postponed, and not yet finished, rejected or cancelled", () => {
+  expect([...ACTIVE_STATUSES].sort()).toEqual(["APPROVED", "CONFIRMED", "POSTPONED", "SAFETY_REVIEW", "SUBMITTED", "UNDER_REVIEW"]);
   expect(Object.isFrozen(ACTIVE_STATUSES)).toBe(true);
+});
+
+test("SCRUM-149: postponable events are the active statuses minus POSTPONED itself", () => {
+  expect([...POSTPONABLE_STATUSES].sort()).toEqual(["APPROVED", "CONFIRMED", "SAFETY_REVIEW", "SUBMITTED", "UNDER_REVIEW"]);
+  expect(Object.isFrozen(POSTPONABLE_STATUSES)).toBe(true);
 });

@@ -142,6 +142,39 @@ function buildAvailabilityCalendar(input) {
   });
 }
 
+// SCRUM-134: converts "HH:MM" to minutes from midnight for range overlap maths.
+function timeToMinutes(timeStr) {
+  const [h, m] = timeStr.split(":").map(Number);
+  return h * 60 + m;
+}
+
+// SCRUM-134: returns every slot whose time window the committed period covers.
+// The committed period is [earliest_slot_start - setup, latest_slot_end + turnaround].
+// A slot is included when its window overlaps the committed period.
+// Buffer slots (those not in requestedSlots) are what `findSlotProblems` checks
+// for setup/turnaround conflicts.
+function committedSlots(requestedSlots, setupMinutes, turnaroundMinutes) {
+  if (!requestedSlots || requestedSlots.length === 0) return [];
+  const setup = Number.isFinite(setupMinutes) && setupMinutes > 0 ? setupMinutes : 0;
+  const turnaround =
+    Number.isFinite(turnaroundMinutes) && turnaroundMinutes > 0 ? turnaroundMinutes : 0;
+
+  const ordered = SLOTS.filter((s) => requestedSlots.includes(s));
+  if (ordered.length === 0) return [];
+
+  const eventStart = timeToMinutes(SLOT_WINDOWS[ordered[0]].start);
+  const eventEnd = timeToMinutes(SLOT_WINDOWS[ordered[ordered.length - 1]].end);
+
+  const committedStart = eventStart - setup;
+  const committedEnd = eventEnd + turnaround;
+
+  return SLOTS.filter((slot) => {
+    const slotStart = timeToMinutes(SLOT_WINDOWS[slot].start);
+    const slotEnd = timeToMinutes(SLOT_WINDOWS[slot].end);
+    return slotStart < committedEnd && slotEnd > committedStart;
+  });
+}
+
 module.exports = {
   SLOTS,
   SLOT_WINDOWS,
@@ -153,4 +186,6 @@ module.exports = {
   dayKeyFor,
   slotIsOpen,
   buildAvailabilityCalendar,
+  timeToMinutes,
+  committedSlots,
 };

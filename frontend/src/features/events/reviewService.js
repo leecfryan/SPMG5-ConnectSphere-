@@ -22,3 +22,9 @@ export function cancelEvent(eventId, reason, token) {
   return apiFetch(`/api/internal/events/${eventId}/cancel`, token, { method: "POST", body: { reason } })
     .then((body) => body.event);
 }
+
+// SCRUM-149: same shape as cancelEvent.
+export function postponeEvent(eventId, reason, token) {
+  return apiFetch(`/api/internal/events/${eventId}/postpone`, token, { method: "POST", body: { reason } })
+    .then((body) => body.event);
+}

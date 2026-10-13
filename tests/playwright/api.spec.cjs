@@ -107,7 +107,7 @@ test('[API-RBAC-050] Event Coordinator Lead access remains limited to its permis
   const identity = await request.get('/api/auth/me', { headers });
   expect(identity.status()).toBe(200);
   expect((await identity.json()).permissions.sort()).toEqual([
-    'event_organisers.read', 'events.assign', 'events.assign_coordinator', 'events.cancel', 'events.review', 'internal.access',
+    'event_organisers.read', 'events.assign', 'events.assign_coordinator', 'events.cancel', 'events.postpone', 'events.review', 'internal.access',
   ]);
 
   for (const path of ['/api/venues', '/api/equipment', '/api/equipment/events', '/api/technical-support/equipment-requests']) {
@@ -179,7 +179,7 @@ for (const [id, role] of [['001', 'event_coordinator_lead'], ['002', 'event_ops_
     expect(body.user.accountTypes).toEqual(['internal', 'external']);
     expect(body.permissions.sort()).toEqual([
       'event_organisers.read', 'events.assign', 'events.assign_coordinator', 'events.browse',
-      'events.cancel', 'events.review', 'internal.access', 'registrations.manage',
+      'events.cancel', 'events.postpone', 'events.review', 'internal.access', 'registrations.manage',
     ]);
     expect((await request.get('/api/event-workspace/manager', { headers })).status()).toBe(200);
     expect((await request.get('/api/venues', { headers })).status()).toBe(403);

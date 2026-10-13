@@ -14,6 +14,25 @@ const createApp = require("../../src/app");
 
 function makeDataClient(tables = {}) {
   return {
+    rpc(name, args) {
+      const handler = tables.rpc;
+      if (handler) return Promise.resolve(handler({ name, args }));
+      if (name === "registration_availability_for_events") {
+        return Promise.resolve({
+          data: (args.p_event_ids ?? []).map((event_id) => ({
+            event_id,
+            slots_remaining: null,
+            waitlist_queue_count: 0,
+            waitlist_reserved: 0,
+          })),
+          error: null,
+        });
+      }
+      return Promise.resolve({
+        data: { outcome: "claimed", enrolled_attendees: 1 },
+        error: null,
+      });
+    },
     from(table) {
       const q = { table, filters: [] };
       const resolve = (terminal) => {
@@ -308,6 +327,21 @@ test("POST /api/registrations: returns 404 for a non-existent event", async (t) 
 test("POST /api/registrations: rejects registration for a non-APPROVED event", async (t) => {
   const base = await setup(t, {
     tables: { events: () => ({ data: DRAFT_EVENT, error: null }) },
+  });
+  const res = await fetch(base + "/api/registrations", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ eventId: "event-draft" }),
+  });
+  assert.equal(res.status, 409);
+  assert.match((await res.json()).message, /not open/);
+});
+
+// SCRUM-149 AC2: postponing moves the event out of APPROVED, so new sign-ups
+// are refused by this existing check - no new code needed.
+test("[TC-149-08] POST /api/registrations: rejects registration for a POSTPONED event", async (t) => {
+  const base = await setup(t, {
+    tables: { events: () => ({ data: { ...DRAFT_EVENT, status: "POSTPONED" }, error: null }) },
   });
   const res = await fetch(base + "/api/registrations", {
     method: "POST",

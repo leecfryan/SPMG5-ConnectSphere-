@@ -21,11 +21,14 @@ function createReviewRoutes(repository, cancelDependencies) {
   // shape as assignedToCaller above.
   const assignedOrCoordinatorLead = async (req) => req.user.roles.includes("event_coordinator_lead") || (await isAssignedCoordinator(req));
   const cancelGuard = requirePermission("events.cancel", assignedOrCoordinatorLead);
+  // SCRUM-149: same assigned-or-coordinator-lead check as cancel.
+  const postponeGuard = requirePermission("events.postpone", assignedOrCoordinatorLead);
 
   router.post("/events/:eventId/start-review", guard, controller.startReview);
   router.post("/events/:eventId/approve", guard, controller.approve);
   router.post("/events/:eventId/reject", guard, controller.reject);
   router.post("/events/:eventId/cancel", cancelGuard, controller.cancel);
+  router.post("/events/:eventId/postpone", postponeGuard, controller.postpone);
 
   return router;
 }

@@ -31,6 +31,9 @@ const EVENT = {
   status: "APPROVED",
   enrolled_attendees: 0,
   expected_attendance: 10,
+  slots_remaining: 10,
+  waitlist_queue_count: 0,
+  waitlist_reserved: 0,
   registration_start: null,
   registration_end: null,
 };
@@ -148,6 +151,7 @@ test("a full event retains the Full state instead of showing a registration form
   const event = {
     ...EVENT,
     enrolled_attendees: 10,
+    slots_remaining: 0,
     registration_start: new Date(NOW + 60_000).toISOString(),
   };
   useRegistrationResource.mockReturnValue({

@@ -68,15 +68,20 @@ export default function RegistrationWindowEditor({ event, token, onSaved }) {
 
   return (
     <form className="registration-window-editor form-section" onSubmit={save} aria-busy={busy}>
-      <h2>Registration window</h2>
+      <div className="registration-window-editor__header">
+        <div>
+          <h2>Registration window</h2>
+          <p>Choose when attendees can register. Leave a date empty for no limit.</p>
+        </div>
+        <span className="registration-window-editor__timezone">Your local time</span>
+      </div>
       {isClosed && (
         <p className="registration-window-closed" role="status">
           Registration closed on {formatRegistrationTime(event.registration_end)}. Set a new end date to reopen.
         </p>
       )}
-      <p>Optional. Times use your local timezone. Registration dates are independent of the event schedule.</p>
       <div className="field-pair">
-        <div>
+        <div className="registration-window-editor__field">
           <label htmlFor="managed-registration-start">Registration opens</label>
           <input
             id="managed-registration-start"
@@ -87,8 +92,9 @@ export default function RegistrationWindowEditor({ event, token, onSaved }) {
             onChange={(e) => update("registration_start", e.target.value)}
             aria-invalid={error && error.includes("start") ? "true" : undefined}
           />
+          <span className="field-hint">Optional start date</span>
         </div>
-        <div>
+        <div className="registration-window-editor__field">
           <label htmlFor="managed-registration-end">Registration closes</label>
           <input
             id="managed-registration-end"
@@ -99,6 +105,7 @@ export default function RegistrationWindowEditor({ event, token, onSaved }) {
             onChange={(e) => update("registration_end", e.target.value)}
             aria-invalid={error && error.includes("end") ? "true" : undefined}
           />
+          <span className="field-hint">Optional closing date</span>
         </div>
       </div>
       {registrationEndsAfterEventStarts(fields.registration_end, event.start_time) && (
@@ -108,9 +115,11 @@ export default function RegistrationWindowEditor({ event, token, onSaved }) {
       )}
       {error && <p className="field-error" role="alert">{error}</p>}
       {message && <p className="assign-confirmation" role="status">{message}</p>}
-      <button className="primary" type="submit" disabled={busy}>
-        {busy ? "Saving…" : "Save registration window"}
-      </button>
+      <div className="registration-window-editor__actions">
+        <button className="primary" type="submit" disabled={busy}>
+          {busy ? "Saving…" : "Save registration window"}
+        </button>
+      </div>
     </form>
   );
 }

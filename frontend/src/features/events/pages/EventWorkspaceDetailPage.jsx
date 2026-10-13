@@ -8,6 +8,8 @@ import EventDecisionControls from "../components/EventDecisionControls";
 import EventDecisionSummary from "../components/EventDecisionSummary";
 import EventCancelControl from "../components/EventCancelControl";
 import EventCancellationSummary from "../components/EventCancellationSummary";
+import EventPostponeControl from "../components/EventPostponeControl";
+import EventPostponeSummary from "../components/EventPostponeSummary";
 import EventRequestForm from "../components/EventRequestForm";
 import SafetyCheckControls from "../components/SafetyCheckControls";
 import StatusBadge from "../components/StatusBadge";
@@ -47,6 +49,7 @@ function Detail({ scope, eventId }) {
       </dl>
       <EventDecisionSummary event={event} />
       <EventCancellationSummary event={event} />
+      <EventPostponeSummary event={event} />
       {scope === "coordinator" && event.coordinator_id === user.id && <EventDecisionControls event={event} onDecided={reload} />}
       {scope === "coordinator" && event.coordinator_id === user.id && <SafetyCheckControls key={event.status} event={event} onChanged={reload} />}
       {scope === "manager" && <EventReviewControls key={`${event.id}:${event.status}:${event.coordinator_id}`} event={event} onUpdated={reload} />}
@@ -54,8 +57,10 @@ function Detail({ scope, eventId }) {
         <Link to="/venues">Arrange venue bookings</Link>
         <Link to={`/equipment/requests?event=${encodeURIComponent(event.id)}`}>Arrange equipment and technical support</Link>
       </nav>}
-      {(scope === "manager" || (scope === "coordinator" && event.coordinator_id === user.id)) &&
-        <EventCancelControl event={event} onCancelled={reload} />}
+      {(scope === "manager" || (scope === "coordinator" && event.coordinator_id === user.id)) && <>
+        <EventPostponeControl event={event} onPostponed={reload} />
+        <EventCancelControl event={event} onCancelled={reload} />
+      </>}
     </>}
   </section>;
 }

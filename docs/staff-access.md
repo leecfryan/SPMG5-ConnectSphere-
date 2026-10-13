@@ -40,6 +40,8 @@ read matrix below, which lists read permissions only.
 | `events.submit` | Event Organisers | `POST /api/events`, `/events/new` |
 | `events.own.update` | Event Organisers | `PATCH /api/event-workspace/organiser/:id`; owner check in lookup and write; colleague events remain view only |
 | `events.assign_coordinator` | Event Coordinator Leads | The assignment queue: `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` |
+| `events.postpone` | Event Coordinators assigned to the event, Event Coordinator Leads | `POST /api/internal/events/:eventId/postpone`; coordinators retain the assignment check (SCRUM-149/142) |
+| `events.waitlist.manage` | Event Coordinators assigned to the event | Coordinator waitlist listing, offer settings and manual promotion; leads do not gain this capability (SCRUM-142 staging integration) |
 | `events.decide` | Event Coordinators, **assigned event only** (record check on `coordinator_id`) | `POST /api/internal/events/:eventId/{start-review,approve,reject}` |
 | `events.safety.submit` | Event Coordinators, **assigned event only** (same record check) | `GET /api/internal/events/:eventId/safety-readiness`, `POST /api/internal/events/:eventId/{submit-safety-check,withdraw-safety-check}` |
 
@@ -271,6 +273,13 @@ overwrite accounts whose trusted roles differ.
   over the real local Auth simulator.
 - `tests/playwright/browser.spec.cjs`: SCRUM-142 canonical/legacy sign-in, display,
   manager navigation, refresh and direct-route denial.
+
+The 2026-10-13 staging integration also preserves SCRUM-149 postponement for
+canonical and legacy lead accounts, with venue release and equipment retention,
+while coordinator waitlist management remains coordinator-only. Verification
+adds SCRUM-142-INT-011/012/013 and SCRUM-142-MERGE-API/BROWSER-001/002 in the existing suites.
+The frontend cancel/postpone controls include SAFETY_REVIEW to match the existing
+server status lists; POSTPONED is cancellable but not postponable again.
 
 The SCRUM-142 working plan and execution reports stay outside this repository
 under Ryan's local reporting preferences. Manual UAT and the shared Auth update

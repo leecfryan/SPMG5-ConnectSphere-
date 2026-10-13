@@ -114,6 +114,18 @@ All four endpoints require `venues.unavailability`, held by Venue Staff only. Th
 
 **How blocking works.** `listUnavailabilityInRange` reads from both `venue_unavailability` (legacy per-slot seed rows) and `venue_unavailability_periods` (new period records). Period records are expanded into per-slot rows matching the shape the availability calendar already reads. The calendar marks those slots `unavailable`, and `findSlotProblems` rejects any booking request that targets a non-`available`/`pending` slot.
 
+## Committed period: setup and turnaround time (SCRUM-134)
+
+Every booking request carries a **committed period** that extends beyond the requested slot(s): the venue's `setup_minutes` before the first slot starts and `turnaround_minutes` after the last slot ends. `committedSlots(requestedSlots, setupMinutes, turnaroundMinutes)` in `venues.availability.js` computes this by mapping slot names to their time windows (am 08:00–12:00, pm 12:00–18:00, night 18:00–23:00) and returning every slot whose window overlaps the extended range.
+
+Example: requesting pm at Marina Grand Ballroom (setup=120, turnaround=60) → committed start 10:00, committed end 19:00 → committed slots are am, pm and night. All three must be clear.
+
+**How the conflict check works.** `findSlotProblems` receives the venue and calls `committedSlots` to find any buffer slots (those covered by setup/turnaround but not directly requested). Each buffer slot is checked with the same `REQUESTABLE_STATUSES` test as the directly requested slots: `closed`, `booked` or `unavailable` all block the request. The error message distinguishes setup and turnaround buffers, e.g. `am is needed for setup time but is not available (booked: Morning Session)`.
+
+**Where the rule applies.** Both places that decide whether a booking can be made use committed slots: `postBookingRequest` (AC2 conflict check) and `filterByAvailability` (SCRUM-18 catalogue date+slot search). The availability calendar display is unchanged — it shows what is actually booked, not what cannot be requested.
+
+Venues with `setup_minutes = 0` and `turnaround_minutes = 0` are unaffected: `committedSlots` returns exactly the requested slots, so the check is identical to pre-134 behaviour.
+
 ## Rejecting with a reason (SCRUM-102)
 
 A rejection must carry a reason. `validateDecision` refuses a `rejected`

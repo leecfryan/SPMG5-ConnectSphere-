@@ -259,6 +259,85 @@ existing loading and error states, which these tests don't exercise.
 TC-SCRUM-98-13, 98-14, 98-22 to 98-26, 99-10 and 99-15/16 were added during build. They aren't in the original draft, but each is the
 failure or boundary path of an AC above.
 
+## 9. SCRUM-149 — postpone an event
+
+Same router/controller/service shape as SCRUM-148 (cancel, approved for this lane but never previously added to
+this file — see the note at the end of this section). No live-DB or Playwright coverage was added for this story;
+every AC is provable at the mocked-repository / component level, including the venue release call, to avoid load
+on the shared Supabase project's free tier.
+
+> **SCRUM-149:** As the assigned Event Coordinator, I want to postpone an event whose new date isn't known yet so
+> that its venues are released while the event's details are kept.
+>
+> 1. The assigned Event Coordinator or the Event Coordinator Lead can postpone an event without a new date, with
+>    a reason.
+> 2. The event's details and registrations are retained.
+> 3. The event's venue bookings and holds are released.
+
+| Layer | File | Pre-conditions |
+| --- | --- | --- |
+| Lifecycle (unit) | `backend/tests/unit/events/lifecycle.test.js` | Extended with `POSTPONED` in `STATUSES`, the four new edges into it, `POSTPONED → CANCELLED`, and dedicated `ACTIVE_STATUSES`/`POSTPONABLE_STATUSES` assertions. Same "typed from the agreed table" discipline as §3. |
+| Repository (unit) | `backend/tests/unit/events/events.transition.test.js` | Extended with `postpone()`'s own block, same `recorder()` harness as §2; `cancel()`'s existing test updated to expect `POSTPONED` in its status filter. |
+| Workload (unit) | `backend/tests/unit/events/assignments.service.test.js` | Extended: `findActiveAssignments`'s real query now expected to include `POSTPONED`. |
+| HTTP (integration) | `backend/tests/integration/events.review.test.js` | Same harness as SCRUM-98/99/148 (§8); `repository.postpone` added to the fake, gated on a local `POSTPONABLE_STATUSES`. |
+| HTTP (workspace) | `backend/tests/integration/eventWorkspace.test.js` | Same harness as §8; `postponed_by`/`postponed_at`/`postponement_reason` added to the fixture's field set; one case postpones then reassigns, one postpones then checks visibility. |
+| Registrations (integration) | `backend/tests/integration/registrations.test.js` | Existing non-`APPROVED` rejection test, one new case with a `POSTPONED` event. |
+| Component | `frontend/src/features/events/components/EventPostponeControl.test.jsx` | New file, same shape as `EventCancelControl.test.jsx`: jsdom, real component/service/`apiFetch`, `fetch` stubbed. |
+| Component | `frontend/src/features/events/components/EventCancelControl.test.jsx` | Extended: the "offers a cancel action" status list now includes `POSTPONED`. |
+
+| ID | AC | Type | Scenario | Test data | Expected result | Automated test | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TC-149-01 | 149-1, 149-3 | Happy | Assigned coordinator postpones their own event; the venue release call happens in the same request (also proves TC-149-09) | Event `coordinator_id` = caller | 200; `POSTPONED`, `postponed_by`/`postponed_at`/`postponement_reason` set; `releaseVenueBookingsForCancelledEvent` called with the event id; equipment release **not** called | `[TC-149-01] the assigned coordinator postpones their own event; venue release runs synchronously, equipment is untouched` | 2026-10-11 · pass · local |
+| TC-149-02 | 149-1 | Happy | Event Coordinator Lead postpones an event not assigned to them | caller role `event_coordinator_lead` | 200; `POSTPONED`; no `coordinatorId` passed to the write | `[TC-149-02] the coordinator lead postpones an event not assigned to them` | 2026-10-11 · pass · local |
+| TC-149-03 | 149-1 | Negative | A coordinator not assigned to the event postpones it | caller `event_coordinator`, different id | 403; `repository.postpone` not called | `[TC-149-03] a coordinator not assigned to the event cannot postpone it` | 2026-10-11 · pass · local |
+| TC-149-04 | 149-1 | Negative / Boundary | No reason, blank reason, whitespace-only reason | `{}`, `{ reason: "" }`, `{ reason: "   " }` | 400 "Give a reason for postponing this event."; nothing written | `[TC-149-04] postpone without a reason (%j) is a 400, nothing recorded` (×2); `[TC-149-04] a whitespace-only reason is treated as blank` | 2026-10-11 · pass · local |
+| TC-149-05 | 149-1 | Conflict | Event reassigned between the access check and the write | write finds `coordinator_id` changed | 409; nothing recorded | `[TC-149-05] a reassignment between the access check and the write is a 409, nothing recorded` | 2026-10-11 · pass · local |
+| TC-149-06 | 149-2 | Happy | Postponed event stays visible to the assigned coordinator and the manager, every field (including an earlier approval) intact | Event previously `APPROVED` with a decision, then `POSTPONED` | 200 in both scopes; `postponed_by_name` resolved; earlier `approved_rejected_by`/remark still present | `[TC-149-06] the assigned coordinator and the manager both still see a postponed event, with every field intact` | 2026-10-11 · pass · local |
+| TC-149-08 | 149-2 | Boundary | A new registration attempt is refused once the event is postponed | Event `status = POSTPONED` | 409 "Registration is not open for this event." — the existing, unmodified `!== "APPROVED"` check | `[TC-149-08] POST /api/registrations: rejects registration for a POSTPONED event` | 2026-10-11 · pass · local |
+| TC-149-10 | 149-3 | Boundary | Venue release is skipped when postpone itself fails | missing reason | `releaseVenueBookingsForCancelledEvent` not called | `[TC-149-10] venue release is skipped when postpone itself fails (missing reason)` | 2026-10-11 · pass · local |
+| TC-149-11 | — | Happy | A `POSTPONED` event can still be cancelled | Event `status = POSTPONED` | 200; `CANCELLED`, cancellation fields set | `[TC-149-11] a POSTPONED event can still be cancelled` | 2026-10-11 · pass · local |
+| TC-149-12 | — | Boundary | A terminal or already-postponed event cannot be postponed again | `COMPLETED`; already `POSTPONED` | 409 for each | `[TC-149-12] postpone is refused from a terminal stage (COMPLETED)`; `[TC-149-12] postpone is refused on an already-postponed event`; unit query construction in `events.transition.test.js` | 2026-10-11 · pass · local |
+| TC-149-13 | 149-1, 149-3 | Happy / Negative | `EventPostponeControl` renders only on the four active stages, requires a non-blank reason, disables while in flight, surfaces a server refusal | Every status; empty/whitespace reason; a 403 response; an in-flight request | Hidden outside the four active stages; blocked client-side until typed; one request while disabled; server message shown as an alert | All cases in `EventPostponeControl.test.jsx` (`[TC-149-13]`, ×9) | 2026-10-11 · pass · local |
+| TC-149-14 | — | Happy | `EventCancelControl` now also renders for a `POSTPONED` event | `event.status = "POSTPONED"` | Visible (previously hidden) | `[TC-148-18 / TC-149-14] a %s event offers a cancel action` (extended parameter list) | 2026-10-11 · pass · local |
+| TC-149-15 | — | — | *Dropped.* `EventReviewControls.jsx` had no existing tests; building a new file's harness for one status case was judged disproportionate to the one-line fix. TC-149-17 proves the real behaviour at the integration layer instead. | — | — | — | not built — see *Decisions* in the task note |
+| TC-149-16 | — | Happy | A `POSTPONED` event counts toward its coordinator's workload | Fixture includes a `POSTPONED` event | `findActiveAssignments`'s real query includes `POSTPONED` | `[TC-149-16] SCRUM-26/149: workload counts read only assigned events in an active status (postponed included)` | 2026-10-11 · pass · local |
+| TC-149-17 | — | Happy | The coordinator lead can reassign a `POSTPONED` event to a different coordinator | Event `status = POSTPONED` | 200; `coordinator_id` updated | `[WORKFLOW-002b / TC-149-17] A postponed event can still be reassigned to a different coordinator` | 2026-10-11 · pass · local |
+| TC-149-18 | 149-3 | Failure | **Characterization test**: venue release throws after the status write already committed | release mock rejects | 500 "Something went wrong…"; the event's status is already `POSTPONED` regardless — documents cancel's pre-existing, equally-untested behaviour, doesn't endorse it | `[TC-149-18] characterization: a venue-release failure is a 500, even though the status write already committed` | 2026-10-11 · pass · local |
+| TC-149-19 | 149-1, 149-3 | Happy | Postpone succeeds from an active stage (`APPROVED`, representative) — the positive-side companion to TC-149-12, same split as cancel's TC-148-06/07 | Event `status = APPROVED` | 200; `POSTPONED` | `[TC-149-19] postpone succeeds from an active stage (APPROVED) - companion to TC-149-12's refusal boundary` | 2026-10-11 · pass · local |
+| TC-149-20 | 149-1 | Negative | A caller with an unrelated role entirely (not just "wrong coordinator") cannot postpone | `event_organiser`, `venue_staff`, `technical_support_staff`, `attendee`, `unknown` | 403 each; `repository.postpone` never called | `[TC-149-20] %s cannot postpone an event` (×5) | 2026-10-11 · pass · local |
+
+**On the gaps in the numbering:** there is no TC-149-07 — it was folded into TC-149-06 during planning review, before
+any code was written. TC-149-19 and TC-149-20 were not in the original plan at all; they were added during the
+build once it became clear that cancel's own precedent (TC-148-06/07 for the stage boundary, TC-148-04 for an
+unrelated role) had no postpone equivalent allocated. Both are documented here now that TC-149-08 — previously
+just a planned case — is a real, passing test, so this table matches what actually exists rather than what was
+first sketched.
+
+**Coverage** (2026-10-11, `test:cov`, local): `review.service.js` 100% statements/branches/functions for every
+`postpone` branch (reason validation, ops-manager/coordinator split, conflict/not-found, the release call, its
+skip path and its failure path). `events.repository.js#postpone` and the widened `cancel()` query are covered by
+their own unit tests. One reporting quirk, not a real gap: the terminal coverage table doesn't list `lifecycle.js`
+as a row at all despite 60+ passing assertions against it, and shows `review.controller.js` lines 39/51 (cancel's
+and postpone's shared-shape failure-response line) as "uncovered" even though both have passing tests exercising
+them — pre-existing behaviour of the tool, not something this story introduced or left unproven.
+
+**Test review.** Each new case was checked against a plausible wrong implementation:
+
+| Mutation | Test that goes red |
+| --- | --- |
+| Gate `postpone()` on `ACTIVE_STATUSES` instead of `POSTPONABLE_STATUSES` | TC-149-12 (second case) |
+| Leave `POSTPONED` out of `ACTIVE_STATUSES` | TC-149-11, TC-149-16, TC-149-17 |
+| Reuse cancel's `reason_required` failure key for postpone | would show cancel's message, not postpone's — TC-149-04 |
+| Call the venue release before the status write succeeds | TC-149-10 |
+| Pass `equipmentService` through to `postpone()`'s release call | TC-149-01's "equipment release not called" assertion |
+| Let a non-assigned coordinator or an unrelated role through | TC-149-03, TC-149-20 |
+
+**Note for whoever reads this next:** SCRUM-148 (cancel) itself never received an entry in this file, despite its
+own task note listing one as planned — there is no TC-148-xx table anywhere here. Not backfilled as part of this
+story (out of lane for what SCRUM-149 is responsible for), but worth raising with the story owner if cancel's own
+traceability is ever asked for in the Week 13 Q&A.
+
+---
 ## 9. SCRUM-139 — submit for the Operational Safety Check
 
 Readiness rule, the three actions, the page controls and both Playwright journeys are automated. The venue and

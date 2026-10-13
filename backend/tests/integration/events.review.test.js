@@ -18,9 +18,13 @@ const MISSING_ID = "aaaaaaaa-0009-0000-0000-000000000000";
 const ASSIGNED = "coord-assigned";
 const OTHER = "coord-other";
 const MANAGER = "coordinator-lead-1";
-const ACTIVE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED"];
+// SCRUM-149: POSTPONED joins ACTIVE_STATUSES (cancel's own gate), but is
+// excluded from POSTPONABLE_STATUSES (postpone's gate) so it can't be
+// postponed twice.
+const ACTIVE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED", "POSTPONED"];
+const POSTPONABLE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED"];
 
-const repository = { findById: vi.fn(), transitionStatus: vi.fn(), cancel: vi.fn() };
+const repository = { findById: vi.fn(), transitionStatus: vi.fn(), cancel: vi.fn(), postpone: vi.fn() };
 const equipmentService = { releaseReservationsForCancelledEvent: vi.fn() };
 const releaseVenueBookingsForCancelledEvent = vi.fn();
 let stored;
@@ -62,6 +66,13 @@ beforeEach(() => {
     if (!ACTIVE_STATUSES.includes(stored.status)) return null;
     if (coordinatorId && stored.coordinator_id !== coordinatorId) return null;
     stored = { ...stored, ...extra, status: "CANCELLED" };
+    return { ...stored };
+  });
+  repository.postpone.mockReset().mockImplementation(async (id, extra, coordinatorId) => {
+    if (id !== EVENT_ID) return null;
+    if (!POSTPONABLE_STATUSES.includes(stored.status)) return null;
+    if (coordinatorId && stored.coordinator_id !== coordinatorId) return null;
+    stored = { ...stored, ...extra, status: "POSTPONED" };
     return { ...stored };
   });
   equipmentService.releaseReservationsForCancelledEvent.mockReset()
@@ -242,11 +253,11 @@ test("SCRUM-98 failure: a storage error during the access check is a 503 and not
   expect(repository.transitionStatus).not.toHaveBeenCalled();
 });
 
-test("SCRUM-98/148 failure: without storage configured, the actions answer 503", async () => {
+test("SCRUM-98/148/149 failure: without storage configured, the actions answer 503", async () => {
   const bare = createApp({ authClient }).listen(0, "127.0.0.1");
   await once(bare, "listening");
   try {
-    for (const action of ["start-review", "cancel"]) {
+    for (const action of ["start-review", "cancel", "postpone"]) {
       const response = await fetch(`http://127.0.0.1:${bare.address().port}/api/internal/events/${EVENT_ID}/${action}`,
         { method: "POST", headers: { Authorization: `Bearer ${ASSIGNED}:event_coordinator`, "Content-Type": "application/json" }, body: JSON.stringify({ reason: "x" }) });
       expect(response.status, action).toBe(503);
@@ -373,5 +384,167 @@ test("SCRUM-148 failure: a storage error on the write is a safe 500", async () =
 
   expect(response.status).toBe(500);
   expect(await response.json()).toEqual({ message: "Something went wrong. Please try again." });
+  quiet.mockRestore();
+});
+
+// ---------------------------------------------------------------------------
+// SCRUM-149: postpone. Same router/controller/service shape as cancel, with
+// its own permission (events.postpone) and its own repository gate
+// (POSTPONABLE_STATUSES, not ACTIVE_STATUSES - an already-postponed event
+// can't be postponed again). No equipment release - AC3 names only venue
+// bookings and holds.
+// ---------------------------------------------------------------------------
+
+test.each(["", "invalid"])("SCRUM-149: an unauthenticated caller (%j) cannot postpone", async (token) => {
+  expect((await post("postpone", token, { reason: "x" })).status).toBe(401);
+});
+
+test.each(["event_organiser", "venue_staff", "technical_support_staff", "attendee", "unknown"])(
+  "[TC-149-20] %s cannot postpone an event", async (role) => {
+    expect((await post("postpone", `${ASSIGNED}:${role}`, { reason: "x" })).status).toBe(403);
+    expect(repository.postpone).not.toHaveBeenCalled();
+  });
+
+test("[TC-149-03] a coordinator not assigned to the event cannot postpone it", async () => {
+  const response = await post("postpone", `${OTHER}:event_coordinator`, { reason: "x" });
+
+  expect(response.status).toBe(403);
+  expect(repository.postpone).not.toHaveBeenCalled();
+  expect(stored.status).toBe("SUBMITTED");
+});
+
+test("[TC-149-01] the assigned coordinator postpones their own event; venue release runs synchronously, equipment is untouched", async () => {
+  const before = Date.now();
+
+  const response = await post("postpone", undefined, { reason: "New date not yet known" });
+
+  expect(response.status).toBe(200);
+  const { event } = await response.json();
+  expect(event).toMatchObject({ status: "POSTPONED", postponed_by: ASSIGNED, postponement_reason: "New date not yet known" });
+  expect(Date.parse(event.postponed_at)).toBeGreaterThanOrEqual(before - 1000);
+  expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledWith(EVENT_ID);
+  expect(equipmentService.releaseReservationsForCancelledEvent).not.toHaveBeenCalled();
+});
+
+test("[TC-149-02] the coordinator lead postpones an event not assigned to them", async () => {
+  const response = await post("postpone", `${MANAGER}:event_coordinator_lead`, { reason: "Venue double-booked" });
+
+  expect(response.status).toBe(200);
+  expect((await response.json()).event.status).toBe("POSTPONED");
+  // No coordinatorId is passed for an coordinator-lead caller - they may postpone any event.
+  expect(repository.postpone).toHaveBeenCalledWith(EVENT_ID, expect.objectContaining({ postponed_by: MANAGER }), undefined);
+});
+
+test("[TC-149-05] a reassignment between the access check and the write is a 409, nothing recorded", async () => {
+  repository.findById.mockImplementationOnce(async () => ({ ...stored }));
+  repository.postpone.mockImplementationOnce(async () => {
+    stored = { ...stored, coordinator_id: OTHER };
+    return null;
+  });
+
+  const response = await post("postpone", undefined, { reason: "x" });
+
+  expect(response.status).toBe(409);
+  expect(stored).toMatchObject({ status: "SUBMITTED", coordinator_id: OTHER });
+  expect(stored.postponed_by).toBeUndefined();
+});
+
+// The exhaustive stage list is proven once, precisely, by
+// events.transition.test.js's unit test on the repository query - this is
+// one representative case on each side of the boundary.
+test("[TC-149-19] postpone succeeds from an active stage (APPROVED) - companion to TC-149-12's refusal boundary", async () => {
+  stored.status = "APPROVED";
+
+  const response = await post("postpone", undefined, { reason: "x" });
+
+  expect(response.status).toBe(200);
+  expect((await response.json()).event.status).toBe("POSTPONED");
+});
+
+test("[TC-149-12] postpone is refused from a terminal stage (COMPLETED)", async () => {
+  stored.status = "COMPLETED";
+
+  const response = await post("postpone", undefined, { reason: "x" });
+
+  expect(response.status).toBe(409);
+  expect(stored.status).toBe("COMPLETED");
+  expect(releaseVenueBookingsForCancelledEvent).not.toHaveBeenCalled();
+});
+
+test("[TC-149-12] postpone is refused on an already-postponed event", async () => {
+  stored.status = "POSTPONED";
+
+  const response = await post("postpone", undefined, { reason: "x" });
+
+  expect(response.status).toBe(409);
+  expect(stored.status).toBe("POSTPONED");
+});
+
+test("[TC-149-11] a POSTPONED event can still be cancelled", async () => {
+  stored.status = "POSTPONED";
+
+  const response = await post("cancel", undefined, { reason: "Giving up on this one" });
+
+  expect(response.status).toBe(200);
+  expect((await response.json()).event).toMatchObject({ status: "CANCELLED", cancellation_reason: "Giving up on this one" });
+});
+
+test.each([{}, { reason: "" }])("[TC-149-04] postpone without a reason (%j) is a 400, nothing recorded", async (body) => {
+  const response = await post("postpone", undefined, body);
+
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ message: "Give a reason for postponing this event." });
+  expect(repository.postpone).not.toHaveBeenCalled();
+});
+
+test("[TC-149-04] a whitespace-only reason is treated as blank", async () => {
+  const response = await post("postpone", undefined, { reason: "   " });
+
+  expect(response.status).toBe(400);
+  expect(repository.postpone).not.toHaveBeenCalled();
+});
+
+test("SCRUM-149: status, postponed_by and postponed_at in the body are ignored; the server's values win", async () => {
+  const response = await post("postpone", undefined, {
+    reason: "x", status: "CONFIRMED", postponed_by: OTHER, postponed_at: "2000-01-01T00:00:00Z",
+  });
+
+  const { event } = await response.json();
+  expect(event.status).toBe("POSTPONED");
+  expect(event.postponed_by).toBe(ASSIGNED);
+  expect(event.postponed_at).not.toBe("2000-01-01T00:00:00Z");
+});
+
+test("[TC-149-10] venue release is skipped when postpone itself fails (missing reason)", async () => {
+  await post("postpone", undefined, {});
+
+  expect(releaseVenueBookingsForCancelledEvent).not.toHaveBeenCalled();
+});
+
+test("SCRUM-149 failure: a storage error on the write is a safe 500", async () => {
+  repository.postpone.mockRejectedValueOnce(new Error("events.repository: postpone failed - boom"));
+  const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const response = await post("postpone", undefined, { reason: "x" });
+
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ message: "Something went wrong. Please try again." });
+  quiet.mockRestore();
+});
+
+// TC-149-18: a characterization test. It documents cancel's existing,
+// equally-untested behaviour (no try/catch around the release call, so a
+// failure there surfaces as a generic 500 even though the status write
+// already committed) rather than endorsing it as correct - see the task
+// note's Decisions.
+test("[TC-149-18] characterization: a venue-release failure is a 500, even though the status write already committed", async () => {
+  releaseVenueBookingsForCancelledEvent.mockRejectedValueOnce(new Error("Failed to release venue bookings: boom"));
+  const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const response = await post("postpone", undefined, { reason: "x" });
+
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ message: "Something went wrong. Please try again." });
+  expect(stored.status).toBe("POSTPONED");
   quiet.mockRestore();
 });

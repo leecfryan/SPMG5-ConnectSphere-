@@ -1,14 +1,13 @@
 const express = require("express");
 const {
-  claimRegistrationSeat,
+  claimRegistrationSeatV2,
   releaseClaimedSeat,
   releaseRegistrationSeat,
 } = require("./registrationSeats");
+const createWaitlistService = require("./waitlistService");
 
 const FULL_MESSAGE =
-  "This event has reached or exceeded capacity. Registration is unavailable; waiting-list redirection is pending implementation.";
-const BUSY_MESSAGE =
-  "Registration is busy right now. Please retry.";
+  "This event has reached or exceeded capacity. Registration is unavailable.";
 
 function logSeatReleaseFailure(message, result) {
   if (result.error || result.exhausted || !result.released) {
@@ -16,8 +15,24 @@ function logSeatReleaseFailure(message, result) {
   }
 }
 
+async function reconcileActiveWaitlist(dataClient, eventId) {
+  const { count, error } = await dataClient
+    .from("event_waitlist_entries")
+    .select("id", { count: "exact", head: true })
+    .eq("event_id", eventId)
+    .eq("status", "active");
+  if (error) return { error };
+  if (!count) return { ok: true };
+
+  const { error: reconcileError } = await dataClient.rpc("reconcile_event_waitlist", {
+    p_event_id: eventId,
+  });
+  return reconcileError ? { error: reconcileError } : { ok: true };
+}
+
 module.exports = function registrationRoutes(dataClient) {
   const router = express.Router();
+  const waitlistService = createWaitlistService(dataClient);
 
   // POST /api/registrations
   router.post("/", async (req, res) => {
@@ -76,12 +91,28 @@ module.exports = function registrationRoutes(dataClient) {
       return res.status(409).json({ message: "You are already registered for this event." });
     }
 
-    const claim = await claimRegistrationSeat(dataClient, eventId, event);
+    const claim = await claimRegistrationSeatV2(dataClient, eventId);
     if (claim.status === "full") {
       return res.status(409).json({ message: FULL_MESSAGE });
     }
-    if (claim.status === "busy") {
-      return res.status(503).json({ message: BUSY_MESSAGE });
+    if (claim.status === "capacity_counter_overflow") {
+      return res.status(409).json({ message: "This event cannot accept additional registrations." });
+    }
+    if (claim.status === "waitlist_priority") {
+      return res.status(409).json({
+        message: "Waitlist attendees have priority for the available place.",
+      });
+    }
+    if (claim.status === "event_not_open") {
+      return res.status(409).json({ message: "Registration is not open for this event." });
+    }
+    if (claim.status === "registration_not_open") {
+      return res.status(409).json({
+        message: `Registration has not opened yet. It opens on ${new Date(event.registration_start).toISOString()}.`,
+      });
+    }
+    if (claim.status === "registration_closed") {
+      return res.status(409).json({ message: "Registration has closed." });
     }
     if (claim.status === "missing") {
       return res.status(404).json({ message: "Event not found." });
@@ -117,7 +148,7 @@ module.exports = function registrationRoutes(dataClient) {
       return res.status(500).json({ message: "Unable to submit your registration. Please try again." });
     }
 
-    res.status(201).json({ registration });
+    return res.status(201).json({ registration });
   });
 
   // GET /api/registrations/me
@@ -133,7 +164,18 @@ module.exports = function registrationRoutes(dataClient) {
       return res.status(500).json({ message: "Unable to load your registrations. Please try again." });
     }
 
-    res.json({ registrations: registrations ?? [] });
+    const waitlistResult = await waitlistService.listMyEntries(req.user.id);
+    if (!waitlistResult.ok) {
+      console.error("My registration offers lookup error:", waitlistResult.error?.message);
+      return res.status(500).json({ message: "Unable to load your registrations. Please try again." });
+    }
+
+    res.json({
+      registrations: registrations ?? [],
+      offers: waitlistResult.entries.filter((entry) => entry.status === "offered"),
+      waitlist: waitlistResult.entries.filter((entry) => entry.status === "waitlist"),
+      server_time: waitlistResult.serverTime,
+    });
   });
 
   // GET /api/registrations/me/:registrationId
@@ -208,6 +250,10 @@ module.exports = function registrationRoutes(dataClient) {
       try {
         const release = await releaseRegistrationSeat(dataClient, existing.event_id);
         logSeatReleaseFailure("Withdrawn registration seat release failed:", release);
+        const reconciliation = await reconcileActiveWaitlist(dataClient, existing.event_id);
+        if (reconciliation.error) {
+          console.error("Waitlist reconcile after withdrawal failed:", reconciliation.error.message);
+        }
       } catch (releaseError) {
         console.error(
           "Withdrawn registration seat release failed:",

@@ -21,6 +21,7 @@ const event = {
   id: "public-event", name: "Community workshop", status: "APPROVED",
   description: "An attendee-facing workshop", purpose: "Meet the community",
   start_time: "2099-10-10T10:00:00Z", end_time: "2099-10-10T15:00:00Z",
+  slots_remaining: 1, waitlist_queue_count: 0, waitlist_reserved: 0,
   registration_fields: [{ id: "full_name", label: "Full name", type: "text", required: true }],
   ...privateFields,
 };

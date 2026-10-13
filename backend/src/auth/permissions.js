@@ -28,6 +28,10 @@ const policies = Object.freeze({
     roles: ["event_organiser", "event_coordinator"],
     record: true,
   },
+  "events.waitlist.manage": {
+    roles: ["event_coordinator"],
+    record: true,
+  },
   "events.assign_coordinator": { roles: ["event_coordinator_lead"] },
   "venues.update": {
     roles: ["venue_staff", "event_coordinator"],
@@ -56,6 +60,8 @@ const policies = Object.freeze({
   "events.safety.submit": { roles: ["event_coordinator"], record: true },
   // SCRUM-148/142: the lead may cancel any active event; coordinators must still be assigned.
   "events.cancel": { roles: ["event_coordinator", "event_coordinator_lead"], record: true },
+  // SCRUM-149/142: postponement uses the same assigned-coordinator or lead access as cancellation.
+  "events.postpone": { roles: ["event_coordinator", "event_coordinator_lead"], record: true },
   "internal.access": {
     roles: [
       "event_coordinator",
