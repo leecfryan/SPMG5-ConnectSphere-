@@ -136,11 +136,14 @@ Run from the repository root. Node 22.
 | Frontend lint / build | `npm --prefix frontend run lint` · `npm --prefix frontend run build` |
 | Playwright (browser + API) | `npm run test:playwright` (`test:e2e` browser only, `test:api` API only) |
 | Playwright report | `npm run test:playwright:report` |
+| Live-DB e2e (user runs; shared dev database) | `npm --prefix tests/e2e test` |
 | Seed demo users (user runs) | `npm --prefix backend run seed:users`. Accounts are in [docs/seed-users.md](docs/seed-users.md) |
 
-**CI** ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on push and PR to `staging` and runs all four
-suites: frontend lint + test + build, backend check + test, Docker build, and Playwright. Every one of them must
-be green locally before you call a story done. Backend `npm test` needs `SUPABASE_URL` and `SUPABASE_SECRET_KEY` in
+**CI** ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on push and PR to `staging` and runs five
+jobs: frontend lint + test + build, backend check + test, Docker build, Playwright (`tests/playwright`, fake
+storage) and Live-DB E2E (`tests/e2e`, the shared dev Supabase, one run at a time across all PRs). The first four
+must be green locally before you call a story done. The live suite is run locally by the user, never the agent
+(see *Which end-to-end suite* in §5). Backend `npm test` needs `SUPABASE_URL` and `SUPABASE_SECRET_KEY` in
 the root `.env` (see §6, *Tests*).
 
 ## 5. How a story is built
@@ -182,6 +185,41 @@ The full checklist with templates is in [.agent/tasks/README.md](.agent/tasks/RE
    history feeds the sprint charts). A story not done by sprint end goes back to the backlog; never merge it
    half-done.
 
+### Which end-to-end suite
+
+There are two Playwright suites. Both go through the real UI and backend; they differ in where the data lives.
+
+| | `tests/playwright` (default) | `tests/e2e` (live-DB) |
+|---|---|---|
+| Data | Fake Auth and in-memory storage (`support/server.cjs`, `support/<f>-storage.cjs`) | Real rows in the shared dev Supabase, created and deleted by each test |
+| Cost | Fast, parallel, touches nothing shared | Slow, serial, one CI run at a time across every open PR |
+| Who runs it | The agent, the user and CI | The user and CI only |
+
+**Use `tests/playwright` for** every user journey in an AC, every role and denial check (403 for the wrong role,
+the wrong record, a revoked role), every negative, boundary, conflict and failure case, and hand-offs between
+lanes. If the fake storage can represent the behaviour, the test belongs here.
+
+**Add a `tests/e2e` live test only when** the AC depends on something the fakes can't prove:
+
+- a Supabase query, filter or join whose correctness depends on the real schema (column names, types, nulls)
+- a database constraint, trigger, RPC or row-level security rule
+- behaviour that only appears with real data, such as concurrency or capacity limits, timestamps and time zones
+  set by the database, or self-healing reads
+- a schema change made by hand this story, to prove the dashboard change matches the code
+
+Even then:
+
+- **1–3 live tests per epic**, happy paths that cross the database. Extend an existing live spec before adding a
+  new one, and say in the task note which of these criteria justifies it.
+- **Self-contained.** Create throwaway accounts and rows with `tests/e2e/support/live-equipment-fixtures.js` (or
+  a sibling `support/<f>-fixtures.js`) and delete exactly what was created in `finally` / `afterEach`. Never
+  mutate the seeded demo accounts, and never depend on rows someone made by hand.
+- **The agent never runs it.** It uses the secret key against the shared database. Give the user the command, and
+  have them tell the team before running anything that could collide with someone else's data.
+- The same rules apply to the opt-in backend suites in `backend/tests/live/` (`RUN_LIVE_*=true`).
+
+Details and patterns: *Testing* §3 in [.agent/docs/conventions.md](.agent/docs/conventions.md).
+
 ### Definition of Done
 
 - [ ] Every AC in the task note is ✅ with named tests, or explicitly agreed as descoped with the user
@@ -195,6 +233,8 @@ The full checklist with templates is in [.agent/tasks/README.md](.agent/tasks/RE
       empty / error states handled
 - [ ] Backend and frontend Vitest and Playwright (API and browser) cover the story; **all** suites green
       locally, including earlier sprints' test cases (the regression run), then green in CI on the PR
+- [ ] Any live-DB test meets the criteria in *Which end-to-end suite*, stays within the epic's limit, cleans up
+      after itself, and has been run by the user and passed `playwright-live` in CI
 - [ ] Cross-cutting bar: works at 375px wide, keyboard-usable, errors are safe sentences, access checked on the server
 - [ ] Lint and build green; no `console.log` left behind (the startup scripts `server.js` and `checkSupabase.js`
       excepted); no skipped or deleted tests
@@ -228,8 +268,9 @@ Details: [.agent/docs/architecture.md](.agent/docs/architecture.md) (stack, laye
   policy in `auth/permissions.js`; `record: true` permissions must have a server-side relationship check.
   Frontend guards are UX, not security.
 - **Database**: Supabase Postgres. Schema changes are made by hand in the dashboard; no migration files.
-- **Tests**: Vitest (unit + integration, backend and frontend), Playwright (browser + API against a local Auth
-  simulator; no cloud needed).
+- **Tests**: Vitest (unit + integration, backend and frontend), Playwright in `tests/playwright` (browser + API
+  against a local Auth simulator; no cloud needed), and a small live-DB Playwright suite in `tests/e2e` against the
+  shared dev Supabase (see *Which end-to-end suite* in §5).
 - **External APIs**: Novu Cloud selected for SCRUM-143 notifications. The backend signs own inbox identity; @novu/react renders the authenticated /notifications inbox and unread count. Approval/rejection delivery uses a backend worker and a Supabase outbox holding only pending work; Ryan applies its documented schema manually. Setup is in [docs/notifications.md](docs/notifications.md).
 - **Deployment**: not planned yet. Don't add hosting config.
 
