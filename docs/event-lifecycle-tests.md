@@ -414,7 +414,59 @@ error and in-flight path has a test). The join hints in `findArrangements` (`ven
 
 TC-SCRUM-139-26 and 27 were added during build; each is a negative or failure path of an AC above.
 
-## 10. Requirements sources
+## 10. SCRUM-140 — review an event's operational safety information
+
+The queue, the read-only detail, the role matrix and the refused writes are automated at every layer. No schema
+change: the AC2 facts without their own column are read from existing fields (mapping in
+[event-requests.md](event-requests.md#review-an-events-safety-information-scrum-140)).
+
+> **SCRUM-140:** As a Safety Officer, I want to view the information needed to assess an event's safety so that I
+> can make an informed decision.
+>
+> 1. The Safety Officer can view a list of events awaiting safety review.
+> 2. The Safety Officer can view the event's attendance, venue capacity and layout, emergency access, accessibility,
+>    equipment placement, crowd movement and venue restrictions.
+> 3. The Safety Officer can view the confirmed venue and technical arrangements, with each venue shown separately.
+> 4. The Safety Officer can view but not edit event details.
+
+| Layer | File | Pre-conditions |
+| --- | --- | --- |
+| Service (unit) | `backend/tests/unit/events/safetyReview.service.test.js` | Repository faked; Hall A (capacity 200) and Hall B (80), 2099-05-01 |
+| Repository (unit) | `backend/tests/unit/events/events.arrangements.test.js` | `recorder()` as in §2 |
+| HTTP (integration) | `backend/tests/integration/events.safetyReview.test.js` | Real `createApp`; token = `<user id>:<roles>`; event `bbbbbbbb-0001-…` `SAFETY_REVIEW` whose stored row also carries organiser and coordinator ids |
+| Frontend (pages) | `frontend/src/features/events/SafetyReview.test.jsx` | Real `App`, router and guards; permissions from the real `permissions.js`; `fetch` stubbed |
+| Playwright | `tests/playwright/safety-review.api.spec.cjs`, `safety-review.browser.spec.cjs` | Real Express app and UI against the local Auth simulator; arrangements made through the venue and equipment lanes' own endpoints and submitted through SCRUM-139, 47 and 48 days ahead |
+
+| ID | AC | Type | Scenario | Test data | Expected result | Automated test | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-140-01 | 1 | Happy | Officer lists events awaiting review | 2 `SAFETY_REVIEW` events | 200, soonest first, with name, times and attendance; nav link reaches the list | `[SCRUM-140] AC1: the Safety Officer gets the events awaiting safety review`; `[SCRUM-140-UI-001]`; `[SAFETY-REVIEW-API-001]` | 2026-10-14 · pass · local |
+| TC-SCRUM-140-02 | 1 | Negative | Other statuses are not listed | event `APPROVED` before submission and after withdrawal | Not in the list; query filtered on `SAFETY_REVIEW` | `SCRUM-140 AC1: findAwaitingSafetyReview reads only SAFETY_REVIEW events…`; `[SAFETY-REVIEW-API-001]` | 2026-10-14 · pass · local |
+| TC-SCRUM-140-03 | 1 | Boundary | Nothing awaiting review | empty queue | 200 `[]`; "No events are waiting for a safety review." | `[SCRUM-140] AC1: an empty queue is an empty list, not an error`; `[SCRUM-140-UI-002]` | 2026-10-14 · pass · local |
+| TC-SCRUM-140-04 | 1–4 | Negative | Only Safety Officers reach the API | no token; coordinator, lead, venue staff, tech support, organiser, attendee | 401; 403 for each role on list and detail, before any read | `[SCRUM-140] access: …` (7 tests); `[SAFETY-REVIEW-API-001]` | 2026-10-14 · pass · local |
+| TC-SCRUM-140-05 | 2 | Happy | Detail shows every AC2 fact | Hall A: capacity 200, Theatre, notes "Fire exits on the east wall."; projector "Mounted at the rear of Hall A" | Attendance, capacity, layout, emergency access/restrictions, accessibility, placement and crowd movement shown with their values | `[SCRUM-140] AC2/AC3: the detail shows…`; `[SCRUM-140-UI-003]` | 2026-10-14 · pass · local |
+| TC-SCRUM-140-06 | 2 | Boundary | Missing facts are visible as missing | `null`, `""` and `[]` values | Each reads "Not provided" | `[SCRUM-140-UI-005]` | 2026-10-14 · pass · local |
+| TC-SCRUM-140-07 | 3 | Happy | Each venue shown separately | Hall A (200) and Hall B (90) both booked | Two venue sections, each with its own capacity, notes and confirmed slots | `[SCRUM-140] AC3: each booked venue is returned separately…`; `[SCRUM-140-UI-004]`; `[E2E-SAFETY-REVIEW-001]` | 2026-10-14 · pass · local |
+| TC-SCRUM-140-08 | 3 | Negative | Only confirmed arrangements are shown | pending and rejected venue requests; `PENDING`, `REJECTED`, `RELEASED` equipment; cancelled slot | Only the booked venue (confirmed slots only) and `APPROVED` equipment | `[SCRUM-140] AC3: pending and rejected venue requests…`; `[SCRUM-140] AC2/AC3: only reserved (APPROVED) equipment…`; `[SAFETY-REVIEW-API-001]` | 2026-10-14 · pass · local |
+| TC-SCRUM-140-09 | 2–3 | Negative | Detail only for events awaiting review | `APPROVED` event; unknown UUID; `not-a-uuid` | 404 "That event is not waiting for a safety review." with no arrangement read; 400 "That event reference is not valid." | `[SCRUM-140] an event still in planning…`, `…an unknown event…`, `…a malformed event reference…`; `[SCRUM-140-UI-008]` | 2026-10-14 · pass · local |
+| TC-SCRUM-140-10 | 4 | Happy | The page offers no way to edit | detail page | No form, input or button; "Read only." note; back link only | `[SCRUM-140-UI-006]`; `[E2E-SAFETY-REVIEW-001]` | 2026-10-14 · pass · local |
+| TC-SCRUM-140-11 | 4 | Negative | The officer cannot change the event through the API | POST/PUT/PATCH/DELETE on both paths; lifecycle actions; workspace PATCH; venue decision | 403 on every one; nothing written; event still awaiting review | `[SCRUM-140] AC4: … is refused for the Safety Officer` (4); `[SCRUM-140] AC4: the Safety Officer cannot change the event…`; `[SAFETY-REVIEW-API-001]` | 2026-10-14 · pass · local |
+| TC-SCRUM-140-12 | 2 | Cross-cutting | Only safety-relevant fields leave the server (#45) | stored row with `organiser_id`, `coordinator_id` | Neither id nor `status` in the response; repository selects no organiser/coordinator column | `[SCRUM-140] #45: the detail carries no organiser, coordinator or status field`; `SCRUM-140 AC2: findAwaitingSafetyReviewById…` | 2026-10-14 · pass · local |
+| TC-SCRUM-140-13 | 1–3 | Failure | Storage down or not configured | repository throws; no `eventsRepository` | 500 "Something went wrong. Please try again."; 503 "Safety review is not configured." after the permission check; page shows the message and *Try again* recovers | `[SCRUM-140] failure: …` (2); `SCRUM-140 failure: findAwaitingSafetyReview throws…`; `[SCRUM-140-UI-007]` | 2026-10-14 · pass · local |
+| TC-SCRUM-140-14 | 1 | Happy | Navigation follows the permission | coordinator, lead, venue staff | No *Safety reviews* link; direct URL shows Access denied without an API call | `[SCRUM-140-UI-009]`–`011`; `[SCRUM-142-SAFETY-UI-001]` | 2026-10-14 · pass · local |
+| TC-SCRUM-140-15 | 1–3 | Happy | Journey at 375 px: coordinator submits, officer reviews | Playwright accounts; Integration Hall | Event in the queue; detail shows one venue section and no buttons but *Sign out*; no sideways scroll | `[E2E-SAFETY-REVIEW-001]` | 2026-10-14 · pass · local |
+| TC-SCRUM-140-16 | 3 | Boundary | No confirmed venue and no equipment | empty `venues` and `equipment` | "No confirmed venue booking." and "No equipment is reserved for this event." | `[SCRUM-140-UI-012]` | 2026-10-14 · pass · local |
+
+**Coverage (2026-10-14):** `safetyReview.service.js`, `safetyReview.controller.js`, `safetyReview.routes.js` and
+the new repository functions 100% lines and branches. `SafetyReviewListPage.jsx` and `SafetyReviewDetailPage.jsx`
+100% lines; the remaining branch counts are V8's per-JSX-expression entries for the dev-mode JSX transform, not
+decisions in the code. Every real branch (loading, error, empty, present, *Not provided*) has a test above.
+
+**Test review:** two deliberate mutations were each caught: showing every venue request instead of booked ones
+(service and integration tests fail), and granting `events.safety.read` to coordinators (integration role matrix
+fails). The SCRUM-142 role tests that pinned the officer to `internal.access` only were updated, not loosened: they
+still assert the exact permission list.
+
+## 11. Requirements sources
 
 | Ref | What it says |
 | --- | --- |

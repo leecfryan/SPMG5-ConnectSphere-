@@ -166,15 +166,18 @@ test("[SCRUM-142-INT-013] forged lead claims cannot postpone or release arrangem
 });
 
 
-test("[SCRUM-142-SAFETY-INT-001] trusted Safety Officer is internal with only basic staff access", async () => {
+// SCRUM-140 adds the deferred safety review read; nothing else is granted.
+test("[SCRUM-142-SAFETY-INT-001] trusted Safety Officer is internal with basic staff access and safety review reading only", async () => {
   roles = ["safety_officer", "unknown", "safety_officer"];
   const identity = await (await send("/api/auth/me")).json();
   expect(identity.user.roles).toEqual(["safety_officer"]);
   expect(identity.user.accountTypes).toEqual(["internal"]);
-  expect(identity.permissions).toEqual(["internal.access"]);
+  expect(identity.permissions).toEqual(["events.safety.read", "internal.access"]);
   const access = await send("/api/internal/access");
   expect(access.status).toBe(200);
-  expect(await access.json()).toEqual({ responsibilities: [] });
+  expect(await access.json()).toEqual({ responsibilities: [
+    { permission: "events.safety.read", label: "Operational safety review", requiresRecordCheck: false },
+  ] });
 });
 
 test("[SCRUM-142-SAFETY-INT-002] Safety Officer plus attendee preserves both types and removes only staff access on revocation", async () => {
@@ -182,7 +185,7 @@ test("[SCRUM-142-SAFETY-INT-002] Safety Officer plus attendee preserves both typ
   const identity = await (await send("/api/auth/me")).json();
   expect(identity.user.roles).toEqual(["safety_officer", "attendee"]);
   expect(identity.user.accountTypes).toEqual(["internal", "external"]);
-  expect(identity.permissions.sort()).toEqual(["events.browse", "internal.access", "registrations.manage"]);
+  expect(identity.permissions.sort()).toEqual(["events.browse", "events.safety.read", "internal.access", "registrations.manage"]);
   expect((await send("/api/internal/access")).status).toBe(200);
   roles = ["attendee"];
   expect((await send("/api/internal/access")).status).toBe(403);
@@ -196,7 +199,7 @@ test("[SCRUM-142-SAFETY-INT-003] Safety Officer combines with Venue Staff withou
   const identity = await (await send("/api/auth/me")).json();
   expect(identity.user.roles).toEqual(roles);
   expect(identity.permissions.sort()).toEqual([
-    "bookings.decide", "bookings.read", "internal.access", "venues.read", "venues.unavailability", "venues.update",
+    "bookings.decide", "bookings.read", "events.safety.read", "internal.access", "venues.read", "venues.unavailability", "venues.update",
   ]);
 });
 
@@ -204,7 +207,7 @@ test("[SCRUM-142-SAFETY-INT-004] Safety Officer can accompany the renamed lead w
   roles = ["event_ops_manager", "safety_officer"];
   const identity = await (await send("/api/auth/me")).json();
   expect(identity.user.roles).toEqual(["event_coordinator_lead", "safety_officer"]);
-  expect(identity.permissions.sort()).toEqual(LEAD_PERMISSIONS);
+  expect(identity.permissions.sort()).toEqual([...LEAD_PERMISSIONS, "events.safety.read"].sort());
   expect((await send("/api/internal/events/unassigned")).status).toBe(200);
 });
 

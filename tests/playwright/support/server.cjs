@@ -126,14 +126,29 @@ const eventsRepository = {
     Object.assign(event, extra, { status: to });
     return { ...event };
   },
-  // SCRUM-139: read from the venue and equipment fixtures, in the production row shape.
+  // SCRUM-139/140: read from the venue and equipment fixtures, in the production row shape.
   async findArrangements(id) {
     const { equipmentService } = equipmentDependencies;
     const venueRequests = (await venuesService.listBookingRequests({ allVenues: true })).filter(r => r.event_id === id)
-      .map(r => ({ id: r.id, booking_date: r.booking_date, venue: { name: r.venue.name }, slots: r.slots }));
+      .map(r => ({ id: r.id, booking_date: r.booking_date, expected_attendees: r.expected_attendees, room_layout: r.room_layout,
+        accessibility_requirements: r.accessibility_requirements ?? [], slots: r.slots,
+        venue: { name: r.venue.name, capacity: r.venue.capacity, accessibility_features: r.venue.accessibility_features, notes: r.venue.notes } }));
     const equipmentRequests = await Promise.all((await equipmentService.listRequestsByEvent(id))
-      .map(async r => ({ id: r.id, status: r.status, equipment: { type: (await equipmentService.findEquipmentById(r.equipment_id)).type } })));
+      .map(async r => ({ id: r.id, status: r.status, quantity_requested: r.quantity_requested, technical_requirement: r.technical_requirement,
+        equipment: { type: (await equipmentService.findEquipmentById(r.equipment_id)).type } })));
     return { venueRequests, equipmentRequests };
+  },
+  // SCRUM-140: same filter and columns as the real queries.
+  async findAwaitingSafetyReview() {
+    return [...accounts.values()].flatMap(account => account.events).filter(event => event.status === 'SAFETY_REVIEW')
+      .sort((a, b) => a.start_time.localeCompare(b.start_time))
+      .map(({ id, name, start_time, end_time, expected_attendance }) => ({ id, name, start_time, end_time, expected_attendance }));
+  },
+  async findAwaitingSafetyReviewById(id) {
+    const event = findEvent(id);
+    if (event?.status !== 'SAFETY_REVIEW') return null;
+    const { name, description, start_time, end_time, expected_attendance, accessibility_needs, other_comments } = event;
+    return { id, name, description, start_time, end_time, expected_attendance, accessibility_needs, other_comments };
   },
   // SCRUM-148: same guard as the real write - any of the four active stages,
   // and, when given, the coordinator still holding the event.

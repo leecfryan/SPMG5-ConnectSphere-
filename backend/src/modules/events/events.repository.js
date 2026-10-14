@@ -175,20 +175,52 @@ async function findActiveAssignments() {
   );
 }
 
+// SCRUM-140: what a Safety Officer needs to judge the event. Organiser,
+// coordinator and registration details are left out (discussion #45).
+const SAFETY_REVIEW_FIELDS = "id, name, description, start_time, end_time, expected_attendance, accessibility_needs, other_comments";
+
+async function findAwaitingSafetyReview() {
+  return unwrap(
+    await getSupabase()
+      .from(TABLE)
+      .select("id, name, start_time, end_time, expected_attendance")
+      .eq("status", "SAFETY_REVIEW")
+      .order("start_time", { ascending: true }),
+    "findAwaitingSafetyReview",
+  );
+}
+
+async function findAwaitingSafetyReviewById(id) {
+  return unwrap(
+    await getSupabase()
+      .from(TABLE)
+      .select(SAFETY_REVIEW_FIELDS)
+      .eq("id", id)
+      .eq("status", "SAFETY_REVIEW")
+      .maybeSingle(),
+    "findAwaitingSafetyReviewById",
+  );
+}
+
 // SCRUM-139: read-only view of the Venue and Equipment lanes' rows for one
 // event, shaped for safetyReadiness.js. The "!" hints name the foreign key, as
 // venues.service.js does, because venue_bookings links to two tables.
+// SCRUM-140 reads the same rows for the safety facts, hence the extra columns.
 async function findArrangements(eventId) {
   const supabase = getSupabase();
   const [venueRequests, equipmentRequests] = await Promise.all([
     supabase
       .from("venue_booking_requests")
-      .select("id, booking_date, venue:venues!venue_id(name), slots:venue_bookings!request_id(slot, status)")
+      .select(
+        "id, booking_date, expected_attendees, room_layout, accessibility_requirements, " +
+        "venue:venues!venue_id(name, capacity, accessibility_features, notes), " +
+        "slots:venue_bookings!request_id(slot, status)",
+      )
       .eq("event_id", eventId)
       .order("booking_date", { ascending: true }),
     supabase
       .from("equipment_requests")
-      .select("id, status, equipment:equipment!equipment_id(type)")
+      .select("id, status, quantity_requested, technical_requirement, equipment:equipment!equipment_id(type)")
       .eq("event_id", eventId)
       .order("created_at", { ascending: true }),
   ]);
@@ -213,4 +245,6 @@ module.exports = {
   findSubmittedUnassigned,
   findActiveAssignments,
   findArrangements,
+  findAwaitingSafetyReview,
+  findAwaitingSafetyReviewById,
 };

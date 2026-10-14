@@ -91,11 +91,11 @@ and managed events under `/api/managed-events`. Inside any router, declare stati
   `req.user = { id, email, fullName, roles[], accountTypes[] }` from `app_metadata.roles` only. It never trusts
   headers, query, body or `user_metadata`.
 - Roles: internal `event_coordinator`, `venue_staff`, `technical_support_staff`, `event_coordinator_lead`, `safety_officer`; external
-  `event_organiser`, `attendee`. `roles` is an array, so a person can hold several. Any other value is dropped.
+  `event_organiser`, `attendee`. `roles` is an array, so a person can hold several.
 - `requireAuth` maps a verified legacy `event_ops_manager` claim to `event_coordinator_lead` (SCRUM-142). Policies
   and role checks use only the canonical name. The Auth metadata update that retires the legacy claim is in
   [../../docs/staff-access.md](../../docs/staff-access.md).
-- `safety_officer` holds only `internal.access`. No safety review permission exists yet.
+- `safety_officer` holds both `internal.access` and `events.safety.read`.
 - `backend/src/auth/permissions.js` is the single policy table: `"<area>.<action>": { roles: [...], label?, record? }`.
   - `*.read` permissions are refused for anything but GET/HEAD. A write needs its own action permission
     (`events.submit`, `bookings.decide`, `equipment.review`, …). Never reuse a read permission for a write.
@@ -145,6 +145,7 @@ and managed events under `/api/managed-events`. Inside any router, declare stati
 | Review | `POST /api/internal/events/:eventId/{start-review,approve,reject}` | `internal.access` + `events.decide`; assigned coordinator only |
 | Cancellation, postponement | `POST /api/internal/events/:eventId/cancel`, `POST /api/internal/events/:eventId/postpone` | `internal.access` + `events.cancel` / `events.postpone`; assigned coordinator or Event Coordinator Lead |
 | Safety check | `GET /api/internal/events/:eventId/safety-readiness`, `POST /api/internal/events/:eventId/{submit-safety-check,withdraw-safety-check}` | `internal.access` + `events.safety.submit`, assigned coordinator only |
+| Safety review | `GET /api/internal/safety-reviews`, `GET /api/internal/safety-reviews/:eventId` | `internal.access` + `events.safety.read` (Safety Officer); `SAFETY_REVIEW` events only |
 | Event workspaces | `GET /api/event-workspace/organiser[/<id>]`, `GET /api/event-workspace/coordinator[/<id>]`, `GET /api/event-workspace/manager[/<id>]`, `GET /api/event-workspace/coordinators`; `PATCH /api/event-workspace/organiser/<id>`, `/<id>/coordinator` | `events.own.read` / `events.own.update` / `events.assigned.read` / `events.review` / `events.assign`, with organisation, ownership and state checks |
 | Managed events | `GET /api/managed-events`, `GET /api/managed-events/:eventId`, `GET|PATCH /api/managed-events/:eventId/registration-window` | `events.managed.read` / `events.registrations.read` / `events.registration-window.update`; the caller's own or assigned event |
 | Coordinator waitlist | `GET /api/managed-events/:eventId/waitlist`, `GET|PATCH /api/managed-events/:eventId/waitlist/settings`, `POST /api/managed-events/:eventId/waitlist/:entryId/promote` | `events.waitlist.manage`; assigned coordinator only |
