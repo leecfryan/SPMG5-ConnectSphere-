@@ -7,3 +7,4 @@
 .event-workspace form { display: grid; gap: .7rem; max-width: 40rem; }
 .event-workspace select { padding: .7rem; font: inherit; }
 .event-actions { display: flex; flex-wrap: wrap; gap: 1rem; margin-block: 1rem; }
+.safety-venue { border: 1px solid #d6dedb; border-radius: .5rem; padding: 0 1rem; margin-block: 1rem; }
