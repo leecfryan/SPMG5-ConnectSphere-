@@ -31,16 +31,17 @@ its route. Notifications, like Account, is available to every verified signed-in
 
 | Mode | Class | Used by | Shape |
 |---|---|---|---|
-| Default | none | sign-in, account, events, registrations, responsibilities | Two columns: intro `1fr`, page `440px` |
+| Default | none | sign-in, account, notifications, browse events, registrations, managed events (`/events/managed`), responsibilities | Two columns: intro `1fr`, page `440px` |
 | Wide form | `main.wide` | `/events/new` | Intro `1fr`, page `560px` |
-| Full workspace | `main.venue-workspace` | `/venues/*`, `/equipment/*`, `/technical-support`, `/events/assignments` | One column up to 1160px, intro hidden |
+| Full workspace | `main.venue-workspace` | `/venues/*`, `/equipment/*`, `/technical-support`, `/my-event-requests/*`, `/assigned-events/*`, `/event-management/*`, `/events/assignments` | One column up to 1160px, intro hidden |
 
 A new list, table, calendar or dashboard page adds its path to the `fullWorkspace` condition in `App.jsx`. A single
 form or detail card stays in the default mode. Everything collapses to one column at **≤ 760px**.
 
 ## Palette
 
-Global colours are literal hex in `index.css` / `App.css`, with no global custom properties. Reuse these values
+Colours are literal hex, with no global custom properties. Most live in `index.css` / `App.css`; the success,
+pending and neutral pairs are repeated in feature stylesheets (`events.css`, `registrations.css`). Reuse these values
 exactly; don't introduce a second primary colour.
 
 | Role | Value |
