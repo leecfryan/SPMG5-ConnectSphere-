@@ -17,10 +17,10 @@ installs it, not the agent.
 | Auth | Supabase Auth, email + password (`@supabase/supabase-js`) | Browser SDK signs in; Express verifies each token with `auth.getUser` |
 | Database | Supabase Postgres (cloud) | Accessed only from the backend. Schema changed by hand in the dashboard; SQL recorded in each lane guide's *Schema reference*, no migration files |
 | Unit / integration tests | Vitest 5 (backend and frontend), React Testing Library + user-event + jsdom on the frontend | A few older backend suites (`auth`, `permissions`, `equipment`) still run on `node:test`. Leave them; new tests use Vitest |
-| End-to-end tests | Playwright (root `package.json`), Chromium + direct HTTP API projects | `tests/playwright/` runs against a local Auth simulator; no cloud, no `.env` needed. `tests/e2e/` is a separate real-Supabase package, run by hand and not in CI; add new specs to `tests/playwright/` only |
+| End-to-end tests | Playwright (root `package.json`), Chromium + direct HTTP API projects | `tests/playwright/` runs against a local Auth simulator; no cloud, no `.env` needed. `tests/e2e/` is a separate package that runs against the shared Supabase project (CI job *Live-DB E2E Tests*, one run at a time). Add new specs to `tests/playwright/` unless the story needs real-database behaviour |
 | Lint | ESLint (`backend/eslint.config.mjs`, `frontend/eslint.config.js`) | No Prettier. Match surrounding formatting by hand |
 | Local runtime | npm scripts, or Docker Compose (frontend :5173, backend :3000) | Supabase is never run locally |
-| CI | GitHub Actions on push / PR to `staging` | Frontend, backend (including live equipment integration), Docker build, Playwright |
+| CI | GitHub Actions on push / PR to `staging` | Frontend lint + test + build, backend check + test, Docker build, Playwright, live-DB E2E (`tests/e2e`) |
 | External APIs | Novu Cloud selected for SCRUM-143 | Backend signs inbox identity locally; @novu/react connects to the US cloud inbox. See *External integrations* below |
 | Deployment | None planned | Don't add hosting, build pipelines or production config |
 
@@ -80,19 +80,22 @@ them in tests needs no credentials.
 
 ### Mount order matters
 
-`/api/events` is mounted twice: the Event Lifecycle router first, then Registration's `eventHandlers` (`GET /`,
-`GET /:eventId`). Static paths such as `/api/events/reviews` must live in the **first** router, or `/:eventId`
-swallows them. Inside any router, declare static paths before parameter paths.
+`/api/events` is mounted twice: the Event Lifecycle router first (`POST /`), then Registration's `eventHandlers`
+(`GET /registration-windows[/:eventId]`, `GET /`, `GET /:eventId`). A new static `GET /api/events/<name>` path must
+be declared before `/:eventId` swallows it. That is why staff event actions live under `/api/internal/events/…`
+and managed events under `/api/managed-events`. Inside any router, declare static paths before parameter paths.
 
 ## Auth and permissions
 
 - `requireAuth(authClient)` verifies the bearer token with Supabase on **every** request and builds
   `req.user = { id, email, fullName, roles[], accountTypes[] }` from `app_metadata.roles` only. It never trusts
   headers, query, body or `user_metadata`.
-- SCRUM-142 renames the manager role to `event_coordinator_lead`. Verified legacy Auth claims are normalised at the authentication boundary until Ryan applies the documented Auth metadata update in `docs/staff-access.md`. All policies and direct role checks use the canonical identifier.
 - Roles: internal `event_coordinator`, `venue_staff`, `technical_support_staff`, `event_coordinator_lead`, `safety_officer`; external
   `event_organiser`, `attendee`. `roles` is an array, so a person can hold several.
-- SCRUM-142 registers Safety Officer as internal staff. SCRUM-140 adds its only feature permission, `events.safety.read` (read-only, no record check: officers are a pool); coordinator safety submission is unchanged.
+- `requireAuth` maps a verified legacy `event_ops_manager` claim to `event_coordinator_lead` (SCRUM-142). Policies
+  and role checks use only the canonical name. The Auth metadata update that retires the legacy claim is in
+  [../../docs/staff-access.md](../../docs/staff-access.md).
+- `safety_officer` holds both `internal.access` and `events.safety.read`.
 - `backend/src/auth/permissions.js` is the single policy table: `"<area>.<action>": { roles: [...], label?, record? }`.
   - `*.read` permissions are refused for anything but GET/HEAD. A write needs its own action permission
     (`events.submit`, `bookings.decide`, `equipment.review`, …). Never reuse a read permission for a write.
@@ -139,14 +142,17 @@ swallows them. Inside any router, declare static paths before parameter paths.
 | Staff | `GET /api/internal/access` | `internal.access` |
 | Event requests | `POST /api/events` | `events.submit` |
 | Assignment | `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` | `internal.access` + `events.assign_coordinator` |
-| Postponement | `POST /api/internal/events/:eventId/postpone` | `internal.access` + `events.postpone`; assigned coordinator or Event Coordinator Lead |
-| Coordinator waitlist | `GET /api/managed-events/:eventId/waitlist`, `GET/PATCH /api/managed-events/:eventId/waitlist/settings`, `POST /api/managed-events/:eventId/waitlist/:entryId/promote` | `events.waitlist.manage`; assigned coordinator only |
+| Review | `POST /api/internal/events/:eventId/{start-review,approve,reject}` | `internal.access` + `events.decide`; assigned coordinator only |
+| Cancellation, postponement | `POST /api/internal/events/:eventId/cancel`, `POST /api/internal/events/:eventId/postpone` | `internal.access` + `events.cancel` / `events.postpone`; assigned coordinator or Event Coordinator Lead |
 | Safety check | `GET /api/internal/events/:eventId/safety-readiness`, `POST /api/internal/events/:eventId/{submit-safety-check,withdraw-safety-check}` | `internal.access` + `events.safety.submit`, assigned coordinator only |
 | Safety review | `GET /api/internal/safety-reviews`, `GET /api/internal/safety-reviews/:eventId` | `internal.access` + `events.safety.read` (Safety Officer); `SAFETY_REVIEW` events only |
 | Event workspaces | `GET /api/event-workspace/organiser[/<id>]`, `GET /api/event-workspace/coordinator[/<id>]`, `GET /api/event-workspace/manager[/<id>]`, `GET /api/event-workspace/coordinators`; `PATCH /api/event-workspace/organiser/<id>`, `/<id>/coordinator` | `events.own.read` / `events.own.update` / `events.assigned.read` / `events.review` / `events.assign`, with organisation, ownership and state checks |
-| Registration | `GET /api/events`, `GET /api/events/:eventId` (APPROVED only); `POST /api/registrations`, `GET /api/registrations/me`, `GET /api/registrations/me/:registrationId`, `PATCH /api/registrations/:registrationId/withdraw` | authenticated, `events.browse` / `registrations.manage`, scoped to `req.user.id` |
-| Venues | `GET /api/venues`, `GET /api/venues/:id`, `GET /api/venues/:id/availability`, `PATCH /api/venues/:id`, `GET /api/venues/booking-events`, `POST /api/venues/:id/booking-requests`, `GET /api/venues/booking-requests[/:requestId]`, `PATCH /api/venues/booking-requests/:requestId/decision` | `internal.access` + `venues.read` / `venues.update` / `bookings.request` / `bookings.read` / `bookings.decide` |
-| Equipment | `GET /api/equipment`, `GET /api/equipment/events`, `GET|POST /api/events/:eventId/equipment-requests`, `GET /api/technical-support/equipment-requests`, `PATCH /api/equipment-requests/:id/status`, `GET|POST /api/events/:eventId/messages`, `PATCH /api/messages/:id` | `internal.access` + `equipment.*` with an event relationship check |
+| Managed events | `GET /api/managed-events`, `GET /api/managed-events/:eventId`, `GET|PATCH /api/managed-events/:eventId/registration-window` | `events.managed.read` / `events.registrations.read` / `events.registration-window.update`; the caller's own or assigned event |
+| Coordinator waitlist | `GET /api/managed-events/:eventId/waitlist`, `GET|PATCH /api/managed-events/:eventId/waitlist/settings`, `POST /api/managed-events/:eventId/waitlist/:entryId/promote` | `events.waitlist.manage`; assigned coordinator only |
+| Registration | `GET /api/events`, `GET /api/events/:eventId`, `GET /api/events/registration-windows[/:eventId]` (APPROVED only); `POST /api/registrations`, `GET /api/registrations/me`, `GET /api/registrations/me/:registrationId`, `PATCH /api/registrations/:registrationId/withdraw` | authenticated, `events.browse` / `registrations.manage`, scoped to `req.user.id` |
+| Attendee waitlist | `POST|GET|DELETE /api/waitlist/:eventId`, `GET /api/waitlist/:eventId/state`, `PUT /api/waitlist/:eventId/details`, `POST /api/waitlist/:eventId/offer/{accept,decline}` | `registrations.manage`, scoped to `req.user.id` |
+| Venues | `GET /api/venues`, `GET /api/venues/:id`, `GET /api/venues/:id/availability`, `PATCH /api/venues/:id`, `GET /api/venues/:id/suitability`, `GET /api/venues/booking-events`, `POST /api/venues/:id/booking-requests`, `GET /api/venues/booking-requests[/:requestId]`, `PATCH /api/venues/booking-requests/:requestId/decision`, `GET|POST /api/venues/:id/unavailability`, `PATCH|DELETE /api/venues/:id/unavailability/:periodId` | `internal.access` + `venues.read` / `venues.update` / `bookings.request` / `bookings.read` / `bookings.decide` / `venues.unavailability` |
+| Equipment | `GET /api/equipment`, `GET /api/equipment/availability`, `POST /api/equipment`, `PATCH /api/equipment/:id`, `PATCH /api/equipment/:id/{retire,status}`, `GET /api/equipment/events`, `GET|POST /api/events/:eventId/equipment-requests`, `GET /api/technical-support/equipment-requests`, `PATCH /api/equipment-requests/:id/status`, `GET|POST /api/events/:eventId/messages`, `PATCH /api/messages/:id` | `internal.access` + `equipment.read` / `equipment.request` / `equipment.review` / `equipment.manage` / `equipment.messages`, with an event relationship check |
 
 Keep this table current when adding or removing an endpoint.
 
@@ -207,19 +213,14 @@ shares the database.
 - Event statuses (confirmed by the team; don't add, rename or drop one without the team agreeing):
   `DRAFT` · `SUBMITTED` · `UNDER_REVIEW` · `APPROVED` · `SAFETY_REVIEW` · `CONFIRMED` · `COMPLETED` · `CANCELLED` ·
   `REJECTED` · `POSTPONED`. `APPROVED` is the stored value for "approved / planning". `SAFETY_REVIEW` (SCRUM-139) is active but
-  not a planning status, so venue and equipment requests are refused while it holds. Registration's event list and Venue's bookable events
-  already read it. The code currently writes only `SUBMITTED` (organisers) and `APPROVED` (seed data); the lifecycle
-  code that moves events through the rest is not built yet. Status is written only by the lifecycle code, never
-  through `WRITABLE_COLS`.
+  not a planning status, so venue and equipment requests are refused while it holds. The permitted moves are in
+  `backend/src/modules/events/lifecycle.js`. Status is written only by `events.repository.js` (`createSubmitted`,
+  `markSubmitted`, `transitionStatus`, `cancel`, `postpone`), each guarded by the expected current status, and by
+  `seedData.js`; never through `WRITABLE_COLS`.
 - Roles are not in a table. They're in Supabase Auth `app_metadata.roles`, set by `backend/scripts/seedUsers.js`.
 - Relationships used for record checks: `events.organiser_id`, `events.coordinator_id`,
   `registrations.attendee_id` / `registrations.event_id`, `venue_booking_requests.event_id`,
   `equipment_requests.event_id`.
-  already read it. The permitted moves between them are in `backend/src/modules/events/lifecycle.js` (SCRUM-97), and
-  `events.repository.js#transitionStatus` is the only post-submission writer. The code currently writes only
-  `SUBMITTED` (organisers) and `APPROVED` (seed data); the actions that move events through the rest are not
-  built yet. Status is written only by the lifecycle code, never
-  through `WRITABLE_COLS`.
 
 Keep this section current: when a manual schema change is made, update this section and remove whatever it resolved.
 
@@ -252,7 +253,6 @@ The page mounts only inside RequireAuth. It uses the verified caller's config an
 remounts on account/token changes; pending config requests are cancelled and
 Novu cache/socket state is disposed on unmount. No role capability is required.
 
-When a story's acceptance criteria require an outside service (email, calendar, payments, maps, …), record it here:
-the service, the story that needs it, where the key lives (backend `.env` only, added to `.env.example` without a
-value), which module calls it, and how tests fake it. Until then this section stays empty, and no code should call
-out to the internet.
+When a story's acceptance criteria require another outside service (email, calendar, payments, maps, …), record it
+here: the service, the story that needs it, where the key lives (backend `.env` only, added to `.env.example` without
+a value), which module calls it, and how tests fake it. No code calls out to a service that isn't recorded here.
