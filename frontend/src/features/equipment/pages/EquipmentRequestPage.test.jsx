@@ -59,6 +59,6 @@ test("[TC-150-frontend-06] a REVIEW_REQUIRED row with available_for_window: true
     borrow_start: "2026-01-01T09:00:00Z", borrow_end: "2026-01-01T17:00:00Z",
     available_for_window: true,
   }]);
-  await screen.findByText("REVIEW_REQUIRED");
+  await screen.findByText("Needs re-review");
   expect(screen.queryByText("Not available for these dates")).not.toBeInTheDocument();
 });

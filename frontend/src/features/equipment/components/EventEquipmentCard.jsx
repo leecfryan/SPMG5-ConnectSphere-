@@ -1,19 +1,10 @@
 import { useState } from "react";
 import ClarificationThread from "./ClarificationThread";
+import { STATUS_LABEL } from "../equipmentStatusLabels";
 
-// Scrum-28-Scrum64 (AC2): the API only ever accepts APPROVED/REJECTED as a
-// target (PENDING is a starting state, never selectable - see
-// equipment.validation.js's REVIEW_STATUSES), so "Unattended" stays a
-// disabled option: it can be the current value, never a choice. SCRUM-104:
-// RELEASED is the same - a request only ever reaches it when its event is
-// cancelled, never through this selector. SCRUM-150: REVIEW_REQUIRED is the
-// same again - only a reschedule/postpone sets it, and it can only leave
-// that status via this same APPROVED/REJECTED decision (not a new value to
-// pick).
-const STATUS_LABEL = {
-  PENDING: "Unattended", APPROVED: "Assigned", REJECTED: "Issues", RELEASED: "Released",
-  REVIEW_REQUIRED: "Needs re-review",
-};
+// SCRUM-104/150: PENDING/RELEASED/REVIEW_REQUIRED stay disabled options below
+// - each can be the current value, never a choice through this selector
+// (see equipment.validation.js's REVIEW_STATUSES for the two the API accepts).
 
 function formatWindow(startIso, endIso) {
   const fmt = (iso) =>
