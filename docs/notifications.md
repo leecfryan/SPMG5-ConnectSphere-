@@ -338,3 +338,18 @@ Server startup wiring is exercised in the cached Node 22 backend image with
 current source mounted read-only and all provider transports replaced. This is
 a runtime check, not a Docker Compose rebuild. Ryan performs the rebuild command
 after shared setup. Full live equipment/Supabase tests and PR CI remain pending.
+
+## Coordinator notifications — SCRUM-155 checkpoint 1
+
+The delivery worker now uses the queue record's `workflow` when present, falling
+back to `event-decision` for existing records. Existing decision deliveries keep
+the same recipient, payload, retry and acknowledgement behaviour. No database
+change is required for this compatibility checkpoint.
+
+Coordinator assignment/reassignment delivery is not active yet. The next
+checkpoint must persist the authenticated assigner's identity, enqueue distinct
+incoming/outgoing deliveries in the assignment transaction, and extend the
+current queue schema to support multiple notifications for one event. The
+`event-assignment` Novu workflow and message templates will be documented with
+that integration. No new tests were written or executed for checkpoint 1 at
+Ryan's request; this is not evidence that SCRUM-155 acceptance criteria pass.

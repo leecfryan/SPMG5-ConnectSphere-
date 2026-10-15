@@ -8,7 +8,7 @@ function createNotificationDeliveryService({ repository, secretKey, fetchImpl = 
     const response = await fetchImpl("https://api.novu.co/v1/events/trigger", {
       method: "POST",
       headers: { Authorization: "ApiKey " + secretKey, "Content-Type": "application/json", "Idempotency-Key": row.id },
-      body: JSON.stringify({ name: "event-decision", to: { subscriberId: row.recipient_id }, transactionId: row.id, payload: row.payload }),
+      body: JSON.stringify({ name: row.workflow ?? "event-decision", to: { subscriberId: row.recipient_id }, transactionId: row.id, payload: row.payload }),
       signal: AbortSignal.timeout(10000), redirect: "error",
     });
     if (!response.ok) throw new Error("Notification provider did not accept the request.");
