@@ -346,8 +346,10 @@ SCRUM-142 renames the existing manager role to `event_coordinator_lead` without 
 - Records `cancelled_by` (the caller) and `cancelled_at` (server clock), additive to any earlier
   `approved_rejected_*` fields — a previously approved event's decision history and its cancellation are both
   kept, not one overwriting the other.
-- Releases what the event was holding, synchronously in the same request: every `APPROVED`/`PENDING` equipment
-  request on the event moves to `RELEASED` (see `docs/equipment-integration.md`), and every
+- Releases what the event was holding, synchronously in the same request: every `APPROVED`/`PENDING`/
+  `REVIEW_REQUIRED` equipment request on the event moves to `RELEASED` (SCRUM-150 added `REVIEW_REQUIRED` to this
+  set, so a reschedule-flagged request is never left stranded by a later cancellation; see
+  `docs/equipment-integration.md`), and every
   `pending`/`confirmed` venue booking on the event's booking request(s) is set to `cancelled` (see
   `docs/venue-integration.md`). Both are optional dependencies on the cancel service — if either is not wired in,
   cancelling still succeeds; the release side effects are simply skipped.
@@ -399,9 +401,12 @@ postponed, then cancelled outright later (see [Status values](#status-values)); 
 - Records `postponed_by` and `postponed_at`, kept in separate columns from `cancelled_by`/`cancelled_at` so an
   event that is postponed and later cancelled keeps both reasons on record rather than one overwriting the other.
 - Releases the event's venue bookings and holds, synchronously, by calling the **same**
-  `venuesService.releaseBookingsForCancelledEvent(eventId)` cancel uses — unchanged, no new Venue-lane SQL. Unlike
-  cancel, postpone does **not** release equipment reservations; the story's AC names only venue bookings and
-  holds. (Releasing equipment on postpone too is a proposed follow-up story, not built here.)
+  `venuesService.releaseBookingsForCancelledEvent(eventId)` cancel uses — unchanged, no new Venue-lane SQL.
+  **SCRUM-150:** postpone now also releases the event's equipment reservations, the same way cancel does —
+  reusing the exact same `equipmentService.releaseReservationsForEvent(eventId, actorId)` call (renamed from
+  `releaseReservationsForCancelledEvent`, since it never actually read `events.status`). Postpone never carries a
+  new date, so there is no window left to hold equipment against; see `docs/equipment-integration.md` for the
+  full reschedule/postpone equipment handling.
 - A postponed event still counts toward its coordinator's workload, is still reassignable to a different
   coordinator, and is still cancellable outright — all because `POSTPONED` is in `ACTIVE_STATUSES`, not because
   postpone's own code does anything special for them.

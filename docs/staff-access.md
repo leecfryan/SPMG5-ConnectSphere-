@@ -280,6 +280,12 @@ The 2026-10-13 staging integration also preserves SCRUM-149 postponement for
 canonical and legacy lead accounts, with venue release and equipment retention,
 while coordinator waitlist management remains coordinator-only. Verification
 adds SCRUM-142-INT-011/012/013 and SCRUM-142-MERGE-API/BROWSER-001/002 in the existing suites.
+
+**Superseded 2026-10-14 (SCRUM-150):** the "equipment retention" half of this note and
+SCRUM-142-INT-011/012 no longer hold - postpone now releases equipment reservations the
+same way cancel does (see `.agent/docs/other/SCRUM-150-equipment-reschedule-review.md`).
+Ryan confirmed commenting the two assertions out for now; proper reconciliation (update
+or retire them) is next sprint's cleanup, owned by him.
 The frontend cancel/postpone controls include SAFETY_REVIEW to match the existing
 server status lists; POSTPONED is cancellable but not postponable again.
 
