@@ -19,8 +19,11 @@ module.exports = function equipmentStorage(accounts) {
       return row;
     },
     // SCRUM-148: the fixture units are AVAILABLE; cancellation releases only their event reservations.
-    async releaseReservationsForCancelledEvent(eventId) {
-      const releasable = requests.filter(row => row.event_id === eventId && ['PENDING', 'APPROVED'].includes(row.status));
+    // SCRUM-150: renamed from releaseReservationsForCancelledEvent to match the real
+    // equipment.service.js - review.service.js now calls this same name from both
+    // cancel() and postpone(), and REVIEW_REQUIRED joins the releasable set there too.
+    async releaseReservationsForEvent(eventId) {
+      const releasable = requests.filter(row => row.event_id === eventId && ['PENDING', 'APPROVED', 'REVIEW_REQUIRED'].includes(row.status));
       for (const row of releasable) row.status = 'RELEASED';
       return { released: releasable.map(row => row.id), equipmentReverted: [], equipmentSkipped: [] };
     },
