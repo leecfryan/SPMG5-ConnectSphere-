@@ -275,7 +275,10 @@ function validateUpdateEquipment(input) {
 // now calls isBlockingOverlap too. See that file for the superseded Rule A
 // query.
 
-const BLOCKING_REQUEST_STATUSES = ["PENDING", "APPROVED"];
+// SCRUM-150: REVIEW_REQUIRED (a reservation flagged for re-review after an
+// event reschedule) still holds the unit against other events, same as
+// PENDING - it is not assumed invalid until Technical Support resolves it.
+const BLOCKING_REQUEST_STATUSES = ["PENDING", "APPROVED", "REVIEW_REQUIRED"];
 
 // borrow_start/borrow_end are timestamptz columns stored in UTC. Truncating
 // to a UTC calendar day (rather than comparing full timestamps) is what
