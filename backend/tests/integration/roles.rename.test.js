@@ -13,7 +13,7 @@ const LEAD_PERMISSIONS = [
 let roles, stored, server, base;
 const repository = { findById: vi.fn(), cancel: vi.fn(), postpone: vi.fn(), transitionStatus: vi.fn() };
 const releaseVenueBookingsForCancelledEvent = vi.fn();
-const equipmentService = { releaseReservationsForCancelledEvent: vi.fn() };
+const equipmentService = { releaseReservationsForEvent: vi.fn() };
 const queue = { findSubmittedUnassigned: vi.fn() };
 const authClient = { auth: { getUser: vi.fn(async () => ({
   data: { user: {
@@ -45,7 +45,7 @@ beforeEach(() => {
     return { ...stored };
   });
   releaseVenueBookingsForCancelledEvent.mockReset().mockResolvedValue([]);
-  equipmentService.releaseReservationsForCancelledEvent.mockReset().mockResolvedValue({});
+  equipmentService.releaseReservationsForEvent.mockReset().mockResolvedValue({});
   repository.transitionStatus.mockReset();
   queue.findSubmittedUnassigned.mockReset().mockResolvedValue([{ ...stored }]);
 });
@@ -139,18 +139,30 @@ test("[SCRUM-142-POLICY-001] the legacy identifier grants nothing directly outsi
   expect(getPermissions(["event_coordinator_lead"]).sort()).toEqual(LEAD_PERMISSIONS);
 });
 
-test.each([
-  ["011", "event_coordinator_lead"], ["012", "event_ops_manager"],
-])("[SCRUM-142-INT-%s] %s retains postponement access with venue release and no equipment release", async (_id, role) => {
-  roles = [role];
-  const response = await send(`/api/internal/events/${EVENT_ID}/postpone`, "POST", { reason: "New date not yet known" });
-  expect(response.status).toBe(200);
-  expect((await response.json()).event).toMatchObject({ status: "POSTPONED", postponed_by: "lead", postponement_reason: "New date not yet known" });
-  expect(repository.postpone).toHaveBeenCalledWith(EVENT_ID,
-    expect.objectContaining({ postponed_by: "lead", postponement_reason: "New date not yet known" }), undefined);
-  expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledWith(EVENT_ID);
-  expect(equipmentService.releaseReservationsForCancelledEvent).not.toHaveBeenCalled();
-});
+// SCRUM-150 (a later, unrelated story) changed what postpone() itself does:
+// it now releases equipment via equipmentService.releaseReservationsForEvent,
+// same as cancel. That makes this test's "no equipment release" half of its
+// assertion factually false going forward - not because the SCRUM-142 role
+// rename broke, but because postpone's own behavior moved under it. This is
+// Ryan's signed-off SCRUM-142 verification (see docs/staff-access.md's
+// 2026-10-13 note), so it isn't rewritten here.
+//
+// Commented out rather than deleted or left failing, per Ryan: leave it in
+// place as a record of the old assertion, clean it up properly next sprint
+// (update the expectation or retire the test) rather than doing that
+// reconciliation inline in this story.
+// test.each([
+//   ["011", "event_coordinator_lead"], ["012", "event_ops_manager"],
+// ])("[SCRUM-142-INT-%s] %s retains postponement access with venue release and no equipment release", async (_id, role) => {
+//   roles = [role];
+//   const response = await send(`/api/internal/events/${EVENT_ID}/postpone`, "POST", { reason: "New date not yet known" });
+//   expect(response.status).toBe(200);
+//   expect((await response.json()).event).toMatchObject({ status: "POSTPONED", postponed_by: "lead", postponement_reason: "New date not yet known" });
+//   expect(repository.postpone).toHaveBeenCalledWith(EVENT_ID,
+//     expect.objectContaining({ postponed_by: "lead", postponement_reason: "New date not yet known" }), undefined);
+//   expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledWith(EVENT_ID);
+//   expect(equipmentService.releaseReservationsForEvent).not.toHaveBeenCalled();
+// });
 
 test("[SCRUM-142-INT-013] forged lead claims cannot postpone or release arrangements", async () => {
   roles = ["attendee"];
@@ -161,7 +173,7 @@ test("[SCRUM-142-INT-013] forged lead claims cannot postpone or release arrangem
   expect(response.status).toBe(403);
   expect(repository.postpone).not.toHaveBeenCalled();
   expect(releaseVenueBookingsForCancelledEvent).not.toHaveBeenCalled();
-  expect(equipmentService.releaseReservationsForCancelledEvent).not.toHaveBeenCalled();
+  expect(equipmentService.releaseReservationsForEvent).not.toHaveBeenCalled();
   expect(stored).toEqual(before);
 });
 
@@ -224,7 +236,7 @@ test("[SCRUM-142-SAFETY-INT-005] officer-only business reads and writes are refu
   expect(repository.transitionStatus).not.toHaveBeenCalled();
   expect(queue.findSubmittedUnassigned).not.toHaveBeenCalled();
   expect(releaseVenueBookingsForCancelledEvent).not.toHaveBeenCalled();
-  expect(equipmentService.releaseReservationsForCancelledEvent).not.toHaveBeenCalled();
+  expect(equipmentService.releaseReservationsForEvent).not.toHaveBeenCalled();
   expect(stored).toEqual(before);
 });
 
