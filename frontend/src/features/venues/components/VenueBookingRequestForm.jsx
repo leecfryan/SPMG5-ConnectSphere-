@@ -53,6 +53,7 @@ function toggle(list, item) {
 
 function slotHint(cell) {
   if (cell.status === "pending") return `${cell.label}, already requested but still open`;
+  if (cell.status === "tentative") return `${cell.label}, held tentatively — cannot be requested`;
   if (cell.status === "booked" || cell.status === "unavailable") return cell.label;
   if (cell.status === "closed") return "Outside operating hours";
   return "Open for booking";
