@@ -419,7 +419,7 @@ function createVenuesController(service) {
   // SCRUM-88: submitted requests available to Venue Staff for review
   async function getBookingRequests(req, res, next) {
     try {
-      const { status } = req.query;
+      const { status, event_id: eventId } = req.query;
 
       if (status !== undefined && !REQUEST_STATUS_FILTERS.includes(status)) {
         return validationFailed(
@@ -428,7 +428,15 @@ function createVenuesController(service) {
         );
       }
 
-      const requests = (await listBookingRequests(req.bookingScope)).map(withStatus);
+      if (eventId !== undefined && !UUID_PATTERN.test(eventId)) {
+        return validationFailed(res, "event_id must be a valid event id");
+      }
+
+      const requests = (
+        eventId === undefined
+          ? await listBookingRequests(req.bookingScope)
+          : await listBookingRequests(req.bookingScope, eventId)
+      ).map(withStatus);
       const filtered =
         status === undefined
           ? requests

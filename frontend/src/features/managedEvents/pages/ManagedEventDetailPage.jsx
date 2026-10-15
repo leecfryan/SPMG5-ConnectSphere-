@@ -4,6 +4,7 @@ import { useAuth } from "../../auth/useAuth";
 import { fetchEventRegistrationSummary, fetchManagedRegistrationWindow } from "../managedEventsService";
 import RegistrationWindowEditor from "../components/RegistrationWindowEditor";
 import WaitlistCoordinatorPanel from "../components/WaitlistCoordinatorPanel";
+import EventVenueBookings from "../../venues/components/EventVenueBookings";
 import "../../events/events.css";
 
 // The server answers 403 for an event that belongs to someone else and for one
@@ -61,6 +62,10 @@ export default function ManagedEventDetailPage() {
       <Link to="/events/managed" className="back-link">Back to my events</Link>
       <p className="eyebrow">EVENT</p>
       <h1 id="managed-event-title">{summary.name}</h1>
+      <section className="event-venues-section" aria-labelledby="managed-event-venues-title">
+        <h2 id="managed-event-venues-title">Venues</h2>
+        <EventVenueBookings bookings={summary.venueBookings} />
+      </section>
       <dl className="account-details managed-event-summary">
         <div>
           <dt>Current Registrations</dt>

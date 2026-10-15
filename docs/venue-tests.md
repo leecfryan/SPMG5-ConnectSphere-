@@ -42,6 +42,36 @@ Test names lead with a bracketed tag, so the runner's output is the traceability
 | SCRUM-17 | Availability calendar | `[SCRUM-17]` | TC-110, TC-124 to TC-127 |
 | SCRUM-21 | Submit a booking request | `[SCRUM-21]`, `[VENUE-SCOPE-001/002/003]` | TC-111 to TC-116, TC-128, TC-129 |
 | SCRUM-22 | Decide a venue booking request | `[SCRUM-22]`, `[VENUE-DECIDE-001]` to `[VENUE-DECIDE-004]` | TC-131 to TC-140 |
+
+## Multi-venue event coverage (SCRUM-137)
+
+The multi-venue implementation keeps one request and independent status per
+venue booking. New submissions require `purpose`; existing rows without a
+purpose remain readable as legacy data. The event-scoped request endpoint uses
+`event_id` without weakening coordinator ownership scope.
+
+Coverage includes:
+
+- Multiple venue requests for one event, including different dates or periods.
+- Per-booking venue, purpose, booking date and slot-period display.
+- Independent confirmation and rejection with mixed outcomes visible together.
+- Required purpose validation and legacy `Not recorded` display.
+- Invalid event filters and coordinator cross-event isolation.
+
+The confirmed-slot exclusion constraint remains the concurrency authority for
+venue conflicts. No registration, waitlist, event-capacity or equipment behavior
+is changed by this story.
+
+The shared `EventVenueBookings` component renders all related bookings together
+on Browse Event details, My Events cards and My Event details. Browse Events
+cards deliberately omit venues until the attendee opens an event. Each rendered
+booking includes venue, location, purpose, date, period and derived status.
+
+After the fixture correction, the full Playwright verification on 2026-10-15
+ran 185 tests: 185 passed and 0 failed. `[VENUE-E2E-002]` now supplies
+`Planning and coordination session`, matching the current required-purpose
+contract; production behavior was not loosened.
+
 | SCRUM-20 | Block conflicting venue booking | `[SCRUM-20]` | TC-167 to TC-175 |
 | SCRUM-102 | Reject with a reason and suggested alternative | `[SCRUM-102]` | TC-220 to TC-229 |
 | SCRUM-18 | Search and filter potential venues | `[SCRUM-18]` | TC-260 to TC-273 |

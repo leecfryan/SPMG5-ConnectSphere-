@@ -1,16 +1,19 @@
 # Playwright browser and backend API acceptance tests
 
-> The original sign-in/RBAC cases below are retained. PR #2 adds 7 event browser
-> cases and 9 event API cases (104 total). See [event-request integration](../event-request-integration.md).
+> The original sign-in/RBAC cases below are retained alongside event, venue,
+> registration and safety-review acceptance cases. See [event-request integration](../event-request-integration.md).
 > Feature files now use `*browser.spec.cjs` or `*api.spec.cjs` for discovery.
 
 The root Playwright runner complements the frontend Vitest/React Testing Library
 suite and the existing backend Node integration tests. Every test has a unique
-ID and a descriptive title. There are 17 Chromium browser tests and 71 HTTP API
-tests, including 48 individual role/permission combinations.
+ID and a descriptive title. The current run contains 185 tests across Chromium
+browser and HTTP API projects.
 
-Verified locally on 2026-09-18: **88 passed, 0 failed, 0 skipped, 0 flaky**.
-The existing backend integration suite also passed all 28 tests.
+Latest local verification after the fixture correction on 2026-10-15:
+**185 passed, 0 failed, 0 skipped**. `[VENUE-E2E-002]` now enters the required
+purpose before submitting. The production behavior remains unchanged.
+The backend suite passed **859 tests**, with 43 live Supabase tests skipped because
+they require live-database configuration.
 
 ## What runs
 
@@ -34,6 +37,11 @@ launcher to exercise the real permission middleware and record-access contract.
 These fixtures are not implemented venue/equipment/client features. The simulator
 issues test tokens from an in-memory allowlist; it does not validate JWT signatures
 or replicate all GoTrue behavior.
+
+Browse Events cards intentionally show event identity, date, description and
+registration availability without venue bookings. Venue bookings are displayed
+after opening the event detail page; My Events cards and details continue to show
+all related bookings.
 
 ## Install and run
 

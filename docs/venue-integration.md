@@ -38,8 +38,11 @@ occupied-slot labels instead of other events' names; venue staff keep event labe
 `GET /api/venues/booking-events` returns upcoming, approved (`APPROVED` or `CONFIRMED`, `PLANNING_STATUSES` in `events/lifecycle.js`) events assigned to
 the verified coordinator through the existing `events.coordinator_id` column.
 `POST /api/venues/:id/booking-requests` checks that same relationship, validates
-requirements and slot conflicts, and supplies the verified requester ID to the
-database. Submitted requests remain pending and do not consume confirmed slots.
+requirements and slot conflicts, requires a trimmed per-booking `purpose` (maximum
+2000 characters), and supplies the verified requester ID to the database. The
+database stores one request row per venue booking, so multiple venues may be
+requested for the same event. Submitted requests remain pending and do not consume
+confirmed slots.
 
 Venue Staff can review venue requests across locations. For coordinators, both
 `GET /api/venues/booking-requests` and `GET /api/venues/booking-requests/:id`
@@ -48,6 +51,18 @@ verified identity; the database service applies it using an inner event join.
 Responses select venue requirements and event name/timing/status, not whole
 client, attendee or internal planning records. Managers assign events through `/event-management`.
 An unassigned event will not appear in a coordinator's picker.
+
+`GET /api/venues/booking-requests?event_id=<uuid>` returns all booking rows for
+the selected event within the caller's existing scope. The event-scoped response
+is intentionally not limited to pending rows, so confirmed, rejected, cancelled
+and mixed slot outcomes remain visible together. The frontend venue request list
+uses this filter for the combined event booking view and displays each booking's
+venue, purpose, date and slot period.
+
+The public event APIs also attach related venue booking data for event details,
+while the Browse Events list UI intentionally hides venues until an attendee
+opens the event. My Events cards and details show all related bookings together,
+including their independent statuses.
 
 ## Deciding a request (SCRUM-22)
 

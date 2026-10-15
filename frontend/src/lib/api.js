@@ -113,8 +113,11 @@ export function decideBookingRequest(requestId, decision, note, token) {
 }
 
 // SCRUM-88: what Venue Staff review
-export function fetchBookingRequests({ status } = {}, token) {
-  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+export function fetchBookingRequests({ status, eventId } = {}, token) {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (eventId) params.set("event_id", eventId);
+  const query = params.toString() ? `?${params.toString()}` : "";
   return request(`/api/venues/booking-requests${query}`, token);
 }
 

@@ -1,5 +1,6 @@
 import { useAuth } from "../../auth/useAuth";
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router";
 import { decideBookingRequest, fetchBookingRequests } from "../../../lib/api";
 import {
   IconAlert,
@@ -257,6 +258,12 @@ function RequestCard({ request, canDecide, onDecided }) {
 
         <div className="v-request-requirements">
           <div>
+            <p className="v-subheading">Purpose</p>
+            <p className={request.purpose ? "v-notes" : "v-none"}>
+              {request.purpose || "Not recorded"}
+            </p>
+          </div>
+          <div>
             <p className="v-subheading">Facilities</p>
             <ChipsOrNone items={request.required_facilities} />
           </div>
@@ -303,11 +310,13 @@ function RequestCard({ request, canDecide, onDecided }) {
 
 function VenueBookingRequestList({ onBack }) {
   const { token, hasPermission } = useAuth();
+  const [searchParams] = useSearchParams();
+  const eventId = searchParams.get("event") || searchParams.get("event_id");
   const canDecide = hasPermission("bookings.decide");
-  const [status, setStatus] = useState("pending");
+  const [status, setStatus] = useState(eventId ? "" : "pending");
   const [result, setResult] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const queryKey = JSON.stringify([status, token, refreshKey]);
+  const queryKey = JSON.stringify([status, eventId, token, refreshKey]);
   const current = result?.key === queryKey;
   const requests = current ? result.requests : [];
   const isLoading = !current;
@@ -315,11 +324,11 @@ function VenueBookingRequestList({ onBack }) {
 
   useEffect(() => {
     let active = true;
-    fetchBookingRequests({ status }, token)
+    fetchBookingRequests({ status, eventId }, token)
       .then((requests) => { if (active) setResult({ key: queryKey, requests }); })
       .catch((err) => { if (active) setResult({ key: queryKey, requests: [], error: err.message }); });
     return () => { active = false; };
-  }, [status, token, queryKey]);
+  }, [status, eventId, token, queryKey]);
 
   return (
     <div className="venue-booking-requests">
@@ -331,7 +340,9 @@ function VenueBookingRequestList({ onBack }) {
       <header className="v-page-header">
         <div>
           <p className="v-eyebrow">For Venue Staff to review</p>
-          <h1 className="v-title">Venue booking requests</h1>
+          <h1 className="v-title">
+            {eventId ? "Venue bookings for this event" : "Venue booking requests"}
+          </h1>
           <p className="v-subtitle">
             Requests submitted by event coordinators, with the event timing and
             venue requirements needed to assess them.
@@ -342,8 +353,9 @@ function VenueBookingRequestList({ onBack }) {
           Show
           <select
             className="v-input"
-            value={status}
+            value={eventId ? "" : status}
             onChange={(e) => setStatus(e.target.value)}
+            disabled={Boolean(eventId)}
           >
             {STATUS_FILTERS.map((filter) => (
               <option key={filter.value} value={filter.value}>

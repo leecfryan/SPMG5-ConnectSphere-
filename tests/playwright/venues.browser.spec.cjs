@@ -52,6 +52,7 @@ test('[VENUE-E2E-002] Submitted event flows into an assigned coordinator booking
   await page.getByRole('combobox', { name: 'Event', exact: true }).selectOption(event.id);
   await page.getByRole('combobox', { name: 'Room layout', exact: true }).selectOption('Theatre');
   await page.getByRole('checkbox', { name: /^AM / }).check();
+  await page.locator('label.v-field').filter({ hasText: 'Purpose' }).locator('textarea').fill('Planning and coordination session');
   await page.getByRole('button', { name: 'Submit booking request', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Booking request submitted' })).toBeVisible();
   const outsiderSession = await accounts.session(outsider);

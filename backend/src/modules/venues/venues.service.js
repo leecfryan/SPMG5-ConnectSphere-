@@ -157,6 +157,7 @@ const BOOKING_REQUEST_FIELDS = [
   "required_facilities",
   "accessibility_requirements",
   "additional_requirements",
+  "purpose",
   "submitted_at",
   "decided_at",
   "decision_note",
@@ -225,6 +226,7 @@ async function submitBookingRequest(venueId, eventName, value, requesterId) {
     p_required_facilities: value.required_facilities,
     p_accessibility_requirements: value.accessibility_requirements,
     p_additional_requirements: value.additional_requirements,
+    p_purpose: value.purpose,
   });
 
   if (error) throw new Error(`Failed to submit booking request: ${error.message}`);
@@ -247,13 +249,14 @@ async function getBookingRequestById(id, scope) {
 // Paging can come later if a real venue ever has more than this outstanding.
 const BOOKING_REQUEST_LIST_LIMIT = 200;
 
-async function listBookingRequests(scope) {
+async function listBookingRequests(scope, eventId) {
   let query = getSupabase()
     .from("venue_booking_requests")
     .select(BOOKING_REQUEST_FIELDS)
     .order("submitted_at", { ascending: false })
     .limit(BOOKING_REQUEST_LIST_LIMIT);
   query = applyBookingScope(query, scope);
+  if (eventId) query = query.eq("event_id", eventId);
   const { data, error } = await query;
 
   if (error) throw new Error(`Failed to list booking requests: ${error.message}`);
