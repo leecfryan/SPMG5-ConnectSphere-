@@ -27,6 +27,31 @@ module.exports = function equipmentStorage(accounts) {
       for (const row of releasable) row.status = 'RELEASED';
       return { released: releasable.map(row => row.id), equipmentReverted: [], equipmentSkipped: [] };
     },
+    // SCRUM-150: eventWorkspace.service.js calls this through `?.`, so a missing
+    // method here would silently flag nothing rather than fail loudly - matching
+    // the real equipment.service.js's filter (PENDING/APPROVED/REVIEW_REQUIRED,
+    // re-flaggable) and borrow-window update (only when datesChanged). No
+    // Playwright test calls this path yet (see the task note's Found, not built).
+    async flagReservationsForReview(eventId, { startTime, endTime, datesChanged = false } = {}) {
+      const flaggable = requests.filter(row => row.event_id === eventId && ['PENDING', 'APPROVED', 'REVIEW_REQUIRED'].includes(row.status));
+      for (const row of flaggable) {
+        row.status = 'REVIEW_REQUIRED';
+        if (datesChanged) {
+          row.borrow_start = startTime;
+          row.borrow_end = endTime;
+        }
+      }
+      return { flagged: flaggable.map(row => row.id) };
+    },
+    // SCRUM-150: equipment.controller.js calls this directly, not through `?.` -
+    // a missing method here would throw, not silently no-op, the moment any
+    // REVIEW_REQUIRED row is read or approved.
+    async isRequestAvailableForWindow(request) {
+      const unit = equipment().find(item => item.id === request.equipment_id);
+      if (!unit || unit.status !== 'AVAILABLE') return false;
+      const others = requests.filter(row => row.equipment_id === request.equipment_id && row.id !== request.id && BLOCKING_REQUEST_STATUSES.includes(row.status));
+      return !others.some(row => isBlockingOverlap(row, request.borrow_start, request.borrow_end));
+    },
     async updateStatus(id, status) { const row = requests.find(row => row.id === id); if (!row) return null; row.status = status; return row; },
   };
   return {
