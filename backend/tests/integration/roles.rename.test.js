@@ -141,28 +141,23 @@ test("[SCRUM-142-POLICY-001] the legacy identifier grants nothing directly outsi
 
 // SCRUM-150 (a later, unrelated story) changed what postpone() itself does:
 // it now releases equipment via equipmentService.releaseReservationsForEvent,
-// same as cancel. That makes this test's "no equipment release" half of its
-// assertion factually false going forward - not because the SCRUM-142 role
-// rename broke, but because postpone's own behavior moved under it. This is
-// Ryan's signed-off SCRUM-142 verification (see docs/staff-access.md's
-// 2026-10-13 note), so it isn't rewritten here.
-//
-// Commented out rather than deleted or left failing, per Ryan: leave it in
-// place as a record of the old assertion, clean it up properly next sprint
-// (update the expectation or retire the test) rather than doing that
-// reconciliation inline in this story.
-// test.each([
-//   ["011", "event_coordinator_lead"], ["012", "event_ops_manager"],
-// ])("[SCRUM-142-INT-%s] %s retains postponement access with venue release and no equipment release", async (_id, role) => {
-//   roles = [role];
-//   const response = await send(`/api/internal/events/${EVENT_ID}/postpone`, "POST", { reason: "New date not yet known" });
-//   expect(response.status).toBe(200);
-//   expect((await response.json()).event).toMatchObject({ status: "POSTPONED", postponed_by: "lead", postponement_reason: "New date not yet known" });
-//   expect(repository.postpone).toHaveBeenCalledWith(EVENT_ID,
-//     expect.objectContaining({ postponed_by: "lead", postponement_reason: "New date not yet known" }), undefined);
-//   expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledWith(EVENT_ID);
-//   expect(equipmentService.releaseReservationsForEvent).not.toHaveBeenCalled();
-// });
+// same as cancel. This test's original "no equipment release" assertion was
+// true for SCRUM-142's role rename verification at the time it was written,
+// and is updated here to match postpone's new behaviour - not a change to
+// anything this test actually verifies (venue release, the role rename
+// itself), just the one fact about postpone that moved under it.
+test.each([
+  ["011", "event_coordinator_lead"], ["012", "event_ops_manager"],
+])("[SCRUM-142-INT-%s] %s retains postponement access with venue release and equipment release", async (_id, role) => {
+  roles = [role];
+  const response = await send(`/api/internal/events/${EVENT_ID}/postpone`, "POST", { reason: "New date not yet known" });
+  expect(response.status).toBe(200);
+  expect((await response.json()).event).toMatchObject({ status: "POSTPONED", postponed_by: "lead", postponement_reason: "New date not yet known" });
+  expect(repository.postpone).toHaveBeenCalledWith(EVENT_ID,
+    expect.objectContaining({ postponed_by: "lead", postponement_reason: "New date not yet known" }), undefined);
+  expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledWith(EVENT_ID);
+  expect(equipmentService.releaseReservationsForEvent).toHaveBeenCalledWith(EVENT_ID, "lead");
+});
 
 test("[SCRUM-142-INT-013] forged lead claims cannot postpone or release arrangements", async () => {
   roles = ["attendee"];
