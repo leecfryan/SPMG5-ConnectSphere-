@@ -18,7 +18,23 @@ function isCoordinator(user) {
     Array.isArray(user.app_metadata?.roles) && user.app_metadata.roles.includes("event_coordinator"));
 }
 
-function createEventWorkspaceService(client) {
+// SCRUM-150 AC1: the organiser's own PATCH is the only path that changes an
+// event's date, time or equipment needs - no "significant change" heuristic,
+// any actual value change on these three columns counts. start_time/end_time
+// compare by instant (matching events.validation.js#validateUpdate's own
+// "must be in the future" check), not by string, so re-submitting an
+// equivalent timestamp in a different format is still a no-op.
+const RESCHEDULE_FIELDS = ["start_time", "end_time", "equipment_needs"];
+function rescheduleFieldChanged(field, before, after) {
+  if (field === "start_time" || field === "end_time") {
+    const beforeTime = before ? new Date(before).getTime() : null;
+    const afterTime = after ? new Date(after).getTime() : null;
+    return beforeTime !== afterTime;
+  }
+  return (before ?? null) !== (after ?? null);
+}
+
+function createEventWorkspaceService(client, equipmentService) {
   async function unwrap(query) {
     const { data, error } = await query;
     if (error) throw error;
@@ -93,7 +109,24 @@ function createEventWorkspaceService(client) {
       // SCRUM-100: recheck responsibility in the write itself, after the read check.
       const event = await unwrap(client.from("events").update(fields)
         .eq("id", id).eq("organiser_id", userId).select(FIELDS).maybeSingle());
-      return event ? { ok: true, event } : { ok: false, reason: "conflict" };
+      if (!event) return { ok: false, reason: "conflict" };
+
+      // SCRUM-150 AC1/AC3: a real change to the date, time or equipment needs
+      // flags this event's PENDING/APPROVED equipment_requests for review,
+      // after the event write itself has succeeded.
+      const changedFields = RESCHEDULE_FIELDS.filter(
+        (field) => Object.hasOwn(fields, field) && rescheduleFieldChanged(field, current[field], fields[field]),
+      );
+      if (changedFields.length > 0) {
+        const datesChanged = changedFields.includes("start_time") || changedFields.includes("end_time");
+        await equipmentService?.flagReservationsForReview?.(id, {
+          startTime: event.start_time,
+          endTime: event.end_time,
+          datesChanged,
+        });
+      }
+
+      return { ok: true, event };
     },
     async coordinators() {
       const choices = [];

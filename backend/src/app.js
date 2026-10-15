@@ -33,7 +33,9 @@ function createApp({ authClient, dataClient, eventsRepository, assignmentDepende
   });
   app.use("/api/notifications", createNotificationsRoutes(notificationsService, authenticate));
   app.use("/api/events", createEventsRoutes(eventsRepository, authenticate));
-  app.use("/api/event-workspace", authenticate, createEventWorkspaceRoutes(dataClient));
+  // SCRUM-150: the organiser's reschedule PATCH flags equipment_requests for
+  // review - equipment is in-lane, same reasoning as review.routes.js below.
+  app.use("/api/event-workspace", authenticate, createEventWorkspaceRoutes(dataClient, equipmentDependencies?.equipmentService));
   app.use("/api", equipmentRoutes({ authenticate, ...equipmentDependencies }));
   // These routes expose approved event information and each user's own registrations.
   app.use("/api/events", authenticate, requirePermission("events.browse"), registrationEventRoutes(dataClient));
