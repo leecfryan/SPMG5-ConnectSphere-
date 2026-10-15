@@ -56,6 +56,10 @@
   --v-closed-bg: #f6f7f7;
   --v-closed-fg: #929d98;
   --v-closed-bd: #e3e8e5;
+  /* SCRUM-146: tentative hold — distinct from pending (amber) and booked (red) */
+  --v-tentative-bg: #eff0fb;
+  --v-tentative-fg: #3d42a0;
+  --v-tentative-bd: #c9caf3;
 
   width: 100%;
   max-width: 1160px;
@@ -573,6 +577,12 @@
   color: var(--v-closed-fg);
   background: var(--v-closed-bg);
   border-color: var(--v-closed-bd);
+}
+
+.v-status-tentative {
+  color: var(--v-tentative-fg);
+  background: var(--v-tentative-bg);
+  border-color: var(--v-tentative-bd);
 }
 
 .v-tag {
