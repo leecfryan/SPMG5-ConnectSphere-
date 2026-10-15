@@ -120,6 +120,7 @@ const service = Object.fromEntries(
     "createUnavailabilityPeriod", "listUnavailabilityPeriods",
     "getUnavailabilityPeriodById", "updateUnavailabilityPeriod",
     "deleteUnavailabilityPeriod",
+    "listActiveHoldsInRange", "listHolds", "createHold",
   ].map((name) => [name, vi.fn()])
 );
 
@@ -158,7 +159,7 @@ beforeEach(() => {
   for (const name of [
     "listBookingsInRange", "listUnavailabilityInRange", "listSlotRowsForDate",
     "listBookingRequests", "listBookingsForVenuesOnDate",
-    "listUnavailabilityForVenuesOnDate",
+    "listUnavailabilityForVenuesOnDate", "listActiveHoldsInRange",
   ]) {
     service[name].mockResolvedValue([]);
   }
