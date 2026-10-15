@@ -323,8 +323,13 @@ repo-wide change to live testing.
   storage adapters and retains cross-feature equipment assignment/access
   checks; dedicated equipment workflows use the live suite below.
 
-`tests/e2e/` is the live-Supabase Playwright suite, separate from CI because
-it writes to a real development database:
+`tests/e2e/` is the live-Supabase Playwright suite. It writes to the shared
+development database, so it has its own `package.json` and its own CI job,
+`playwright-live` in `.github/workflows/ci.yml`. That job runs on every push
+and PR to `staging`, one run at a time (`concurrency: playwright-live-db`) so
+two PRs never race on the same rows. CI provides only the Supabase
+credentials, so `technical-support-review.spec.js` (below) skips itself
+there. Run it locally with `npm --prefix tests/e2e test`.
 
 - `equipment-request.spec.js`: the request page end-to-end (AC1-4), the
   Scrum-29 dropdown-filter and event-derived borrow-window behaviour, the

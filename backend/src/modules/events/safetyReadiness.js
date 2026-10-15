@@ -55,4 +55,4 @@ function findMissingArrangements({ venueRequests, equipmentRequests }) {
   return missing;
 }
 
-module.exports = { findMissingArrangements };
+module.exports = { findMissingArrangements, venueState };

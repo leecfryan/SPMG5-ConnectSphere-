@@ -202,6 +202,8 @@ Module at `backend/src/modules/events/`.
 | GET | /api/internal/events/:eventId/safety-readiness | requireAuth + internal.access + events.safety.submit (assigned coordinator) | `{ ready, missing[] }` |
 | POST | /api/internal/events/:eventId/submit-safety-check | same | `APPROVED → SAFETY_REVIEW` when nothing is missing |
 | POST | /api/internal/events/:eventId/withdraw-safety-check | same | `SAFETY_REVIEW → APPROVED` |
+| GET | /api/internal/safety-reviews | requireAuth + internal.access + events.safety.read (any Safety Officer) | `{ events[] }` awaiting safety review, soonest start first |
+| GET | /api/internal/safety-reviews/:eventId | same | `{ event, venues[], equipment[] }`; 404 unless the event is `SAFETY_REVIEW` |
 | POST | /api/internal/events/:eventId/cancel | requireAuth + internal.access + events.cancel (assigned coordinator or coordinator lead) | any active status (including `POSTPONED`) `→ CANCELLED`; body `{ "reason": string }` (required) |
 | POST | /api/internal/events/:eventId/postpone | requireAuth + internal.access + events.postpone (assigned coordinator or coordinator lead) | any of the five postponable stages `→ POSTPONED`; body `{ "reason": string }` (required) |
 
@@ -325,6 +327,50 @@ reuses `review.routes.js#assignedToCaller`.
 | 409 | Wrong status, or reassigned meanwhile | "This event has changed since you opened it. Refresh to see its current status." |
 | 500 | Reading arrangements failed | "Something went wrong. Please try again." |
 | 503 | The access check could not reach storage | "Unable to check access. Please try again." |
+
+### Review an event's safety information (SCRUM-140)
+
+`safetyReview.service.js`, `safetyReview.controller.js`, `routes/safetyReview.routes.js`,
+`events.repository.js#findAwaitingSafetyReview`, `#findAwaitingSafetyReviewById` and the shared
+`#findArrangements`. Pages: `SafetyReviewListPage.jsx` (`/safety-reviews`) and
+`SafetyReviewDetailPage.jsx` (`/safety-reviews/:eventId`), with a *Safety reviews* nav link.
+
+- **Who:** `events.safety.read`, Safety Officer only. Safety Officers are a pool rather than
+  assigned per event, so any of them may read any event awaiting review and there is no record
+  check. It is a `*.read` permission, so `requirePermission` refuses every method but GET/HEAD
+  (AC4: view, not edit). The officer holds no write permission anywhere.
+- **List (AC1):** `status = SAFETY_REVIEW`, soonest `start_time` first. Columns: id, name, start,
+  end, expected attendance.
+- **Detail (AC2–AC3):** only while the event is `SAFETY_REVIEW` (otherwise 404, so a withdrawn
+  event leaves the queue). The event's columns are an allow-list with no organiser, coordinator or
+  registration fields (discussion #45 as guidance). Arrangements use SCRUM-139's meaning of
+  *confirmed*: venue requests that `safetyReadiness.js#venueState` calls booked (each shown as its
+  own section with only its `confirmed` slots), and `APPROVED` equipment.
+- **AC2 field mapping (no schema change, agreed 2026-10-14):**
+
+  | AC2 item | Shown from |
+  | --- | --- |
+  | Attendance | `events.expected_attendance`; per venue `venue_booking_requests.expected_attendees` |
+  | Venue capacity | `venues.capacity`, per venue |
+  | Layout | `venue_booking_requests.room_layout`, per venue |
+  | Accessibility | `events.accessibility_needs`; per venue the request's `accessibility_requirements` and the venue's `accessibility_features` |
+  | Emergency access, venue restrictions | `venues.notes`, labelled *Emergency access and restrictions (venue notes)* |
+  | Equipment placement | each reserved item's `equipment_requests.technical_requirement` |
+  | Crowd movement | `events.other_comments`, labelled *Crowd movement (organiser's comments)* |
+
+  Empty values show *Not provided*. Dedicated columns would need a form for someone to fill them
+  in, which no story covers yet.
+- Approving or rejecting the safety arrangement is SCRUM-141.
+
+| Status | When | Message |
+| --- | --- | --- |
+| 200 | Done | list `{ events }`; detail `{ event, venues, equipment }` |
+| 400 | Event id is not a UUID | "That event reference is not valid." |
+| 401 | No or invalid session | "Please sign in to continue." |
+| 403 | Not a Safety Officer, or any non-GET method | "You do not have permission to access this information." |
+| 404 | Event unknown or not `SAFETY_REVIEW` | "That event is not waiting for a safety review." |
+| 500 | Reading storage failed | "Something went wrong. Please try again." |
+| 503 | Event storage not configured | "Safety review is not configured." |
 
 ### Cancelling an event (SCRUM-148)
 

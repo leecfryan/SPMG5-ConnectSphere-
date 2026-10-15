@@ -46,9 +46,8 @@ SCRUM-142: `eventopsmanager.demo@example.com` remains the same account and now h
 metadata using the [manual Auth update](staff-access.md#schema-reference-manual-auth-metadata-update)
 before rerunning the seed; the seed will not overwrite a mismatched account.
 
-SCRUM-142 also adds `safety.demo@example.com` (Demo Safety Officer). It receives
-only basic staff access; safety review permissions are deferred to a separate
-story. The account is created only when an administrator runs the seed.
+SCRUM-142 also adds `safety.demo@example.com` (Demo Safety Officer). It has staff
+access plus, since SCRUM-140, the read-only safety review queue at `/safety-reviews`. The account is created only when an administrator runs the seed.
 
 ## Role data
 

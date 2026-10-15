@@ -20,6 +20,8 @@ import ManagedEventsPage from "./features/managedEvents/pages/ManagedEventsPage"
 import ManagedEventDetailPage from "./features/managedEvents/pages/ManagedEventDetailPage";
 import EventWorkspacePage from "./features/events/pages/EventWorkspacePage";
 import EventWorkspaceDetailPage from "./features/events/pages/EventWorkspaceDetailPage";
+import SafetyReviewListPage from "./features/events/pages/SafetyReviewListPage";
+import SafetyReviewDetailPage from "./features/events/pages/SafetyReviewDetailPage";
 import EventListPage from "./features/registrations/pages/EventListPage";
 import EventDetailPage from "./features/registrations/pages/EventDetailPage";
 import MyRegistrationsPage from "./features/registrations/pages/MyRegistrationsPage";
@@ -36,7 +38,7 @@ function Home() {
 
 export default function App() {
   const location = useLocation();
-  const fullWorkspace = ["/venues", "/equipment", "/technical-support", "/assigned-events", "/my-event-requests", "/event-management", "/events/assignments"].some(path => location.pathname === path || location.pathname.startsWith(path + "/"));
+  const fullWorkspace = ["/venues", "/equipment", "/technical-support", "/assigned-events", "/my-event-requests", "/event-management", "/events/assignments", "/safety-reviews"].some(path => location.pathname === path || location.pathname.startsWith(path + "/"));
   return (
     <AuthProvider>
       <div className="app-shell">
@@ -108,6 +110,11 @@ export default function App() {
                   {/* SCRUM-26: the Event Coordinator Lead's assignment queue. */}
                   <Route element={<RequirePermission permission="events.assign_coordinator" />}>
                     <Route path="/events/assignments" element={<AssignmentQueuePage />} />
+                  </Route>
+                  {/* SCRUM-140: the Safety Officer's read-only review queue. */}
+                  <Route element={<RequirePermission permission="events.safety.read" />}>
+                    <Route path="/safety-reviews" element={<SafetyReviewListPage />} />
+                    <Route path="/safety-reviews/:eventId" element={<SafetyReviewDetailPage />} />
                   </Route>
                   <Route path="/staff/responsibilities" element={<ResponsibilitiesPage />} />
                 </Route>

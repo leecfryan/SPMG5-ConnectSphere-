@@ -324,12 +324,13 @@ test("[SCRUM-142-UI-001] the account displays Event Coordinator Lead alongside a
 });
 
 
-test("[SCRUM-142-SAFETY-UI-001] Safety Officer sees its account label and basic staff navigation only", async () => {
+// SCRUM-140 adds the deferred safety review queue; nothing else is granted.
+test("[SCRUM-142-SAFETY-UI-001] Safety Officer sees its account label, basic staff navigation and the safety review queue only", async () => {
   setup(["safety_officer"]);
   render(<MemoryRouter initialEntries={["/account"]}><App /></MemoryRouter>);
   expect(await screen.findByText("Safety Officer", { exact: true })).toBeTruthy();
   const nav = screen.getByRole("navigation", { name: "Workspace" });
-  expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["Account", "Notifications", "Responsibilities"]);
+  expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["Account", "Notifications", "Safety reviews", "Responsibilities"]);
 });
 
 test("[SCRUM-142-SAFETY-UI-002] Safety Officer plus attendee displays both roles and keeps registration navigation", async () => {
@@ -341,11 +342,11 @@ test("[SCRUM-142-SAFETY-UI-002] Safety Officer plus attendee displays both roles
   expect(within(nav).queryByRole("link", { name: "Manage event requests" })).toBeNull();
 });
 
-test("[SCRUM-142-SAFETY-UI-003] officer staff access clearly reports no assigned feature responsibilities", async () => {
+test("[SCRUM-142-SAFETY-UI-003] officer staff access lists operational safety review as its only responsibility", async () => {
   setup(["safety_officer"]);
   renderStaffPage();
-  expect(await screen.findByText("No responsibilities are assigned to your current roles.")).toBeTruthy();
-  expect(screen.queryByRole("listitem")).toBeNull();
+  expect(await screen.findByText("Operational safety review")).toBeTruthy();
+  expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Operational safety review"]);
   expect(screen.queryByRole("alert")).toBeNull();
 });
 
