@@ -1,4 +1,5 @@
 const { ACTIVE_STATUSES } = require("./lifecycle");
+const { assignWithHistory } = require("./assignmentHistory.repository");
 const { WRITABLE_COLS } = require("./events.repository");
 const { normalise } = require("./events.service");
 const { validateUpdate } = require("./events.validation");
@@ -114,11 +115,11 @@ function createEventWorkspaceService(client) {
       if (error) throw error;
       return isCoordinator(data?.user);
     },
-    assign(id, coordinatorId, expectedCoordinatorId) {
-      let query = client.from("events").update({ coordinator_id: coordinatorId })
-        .eq("id", id).in("status", ACTIVE_STATUSES);
-      query = expectedCoordinatorId === null ? query.is("coordinator_id", null) : query.eq("coordinator_id", expectedCoordinatorId);
-      return unwrap(query.select(FIELDS).maybeSingle());
+    assign(id, coordinatorId, expectedCoordinatorId, actor) {
+      return unwrap(assignWithHistory(client, {
+        eventId: id, coordinatorId, expectedCoordinatorId,
+        allowedStatuses: ACTIVE_STATUSES, actor,
+      }).select(FIELDS).maybeSingle());
     },
   };
 }

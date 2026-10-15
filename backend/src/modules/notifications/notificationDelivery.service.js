@@ -24,6 +24,9 @@ function createNotificationDeliveryService({ repository, secretKey, fetchImpl = 
     if (running) return;
     running = true;
     try {
+      // SCRUM-155: assignment queueing failure must not stop existing decision deliveries.
+      try { await repository.prepareAssignments(); }
+      catch { warn(); }
       const rows = await repository.claim();
       for (const row of rows) {
         try { await deliver(row); }

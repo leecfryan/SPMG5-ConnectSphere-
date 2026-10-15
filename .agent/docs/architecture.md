@@ -256,3 +256,18 @@ Novu cache/socket state is disposed on unmount. No role capability is required.
 When a story's acceptance criteria require another outside service (email, calendar, payments, maps, …), record it
 here: the service, the story that needs it, where the key lives (backend `.env` only, added to `.env.example` without
 a value), which module calls it, and how tests fake it. No code calls out to a service that isn't recorded here.
+
+### SCRUM-155 assignment notifications (Novu setup pending)
+
+Both assignment APIs use the service-role-only assign_event_coordinator RPC to
+lock/compare responsibility, update coordinator_id and save event_assignment_history.
+The authenticated user supplies actor identity. Existing status/permission rules
+remain. Neither queueing nor Novu delivery runs in the assignment transaction.
+
+The worker separately calls enqueue_assignment_notifications before claiming
+outbox deliveries. Pending history is queued and marked processed atomically;
+failed preparation retries and does not prevent claiming existing decision
+notifications. History is retained. Outbox workflow selects event-decision or
+event-assignment; decision uniqueness stays per event. Ryan confirmed the revised
+SQL in docs/notifications.md succeeded on 2026-10-15. Novu setup and feature
+verification remain pending.

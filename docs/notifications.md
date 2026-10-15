@@ -341,15 +341,198 @@ after shared setup. Full live equipment/Supabase tests and PR CI remain pending.
 
 ## Coordinator notifications — SCRUM-155 checkpoint 1
 
-The delivery worker now uses the queue record's `workflow` when present, falling
-back to `event-decision` for existing records. Existing decision deliveries keep
-the same recipient, payload, retry and acknowledgement behaviour. No database
-change is required for this compatibility checkpoint.
+The worker selects each queued record's workflow and defaults to event-decision
+for older records. Assignment history and preparation are described below.
 
-Coordinator assignment/reassignment delivery is not active yet. The next
-checkpoint must persist the authenticated assigner's identity, enqueue distinct
-incoming/outgoing deliveries in the assignment transaction, and extend the
-current queue schema to support multiple notifications for one event. The
-`event-assignment` Novu workflow and message templates will be documented with
-that integration. No new tests were written or executed for checkpoint 1 at
-Ryan's request; this is not evidence that SCRUM-155 acceptance criteria pass.
+## Coordinator notifications — SCRUM-155 checkpoint 2 (revised)
+
+Ryan requires notification queueing and delivery to run independently of event
+actions. This replaces the earlier uncommitted direct-to-outbox proposal.
+
+Both assignment APIs call assign_event_coordinator through
+assignmentHistory.repository.js, passing the verified actor from requireAuth.
+The display name is trimmed full name, then email, then account ID. Actor identity
+and allowed statuses are never taken from HTTP body fields. Existing permissions,
+coordinator validation, allowed statuses and expected-coordinator checks remain.
+The legacy PUT still requires an unassigned SUBMITTED event.
+
+The function locks the event, updates coordinator_id and saves a snapshot in
+event_assignment_history. It never accesses notification_outbox or Novu. History
+contains event name, incoming/outgoing coordinator IDs, assigner ID/name and time.
+Event status is unchanged. Same-coordinator saves create no history. A stale
+expected coordinator returns no event and the existing API maps that to conflict.
+History is saved with the assignment: failure to save that business record still
+rolls back assignment. This is the agreed persistence boundary.
+
+The existing worker separately calls enqueue_assignment_notifications each poll.
+It locks up to ten pending history records using SKIP LOCKED, queues incoming and
+outgoing messages, then marks the history processed in the same transaction.
+Queueing failure rolls back only this background transaction; saved assignment
+and history remain, ready for retry. Concurrent workers cannot process the same
+history record. The committed marker prevents requeueing after successful delivery
+has removed outbox rows. Stable delivery IDs and the existing retry worker are
+reused; SCRUM-143 provider exactly-once limitations still apply.
+
+If preparation fails, the worker still claims existing notifications, including
+approval/rejection. Preparation has a ten-second deadline. Pending history
+survives restarts and disabled worker configuration. History is retained after
+delivery and intentionally has no cascading foreign keys, preserving snapshots.
+Deleted recipient accounts are skipped during preparation, since they no longer
+have an inbox. Messages describe each saved change even after later reassignments;
+they do not grant outgoing coordinators access to the event.
+
+History has RLS, no browser grants and no browser policies. New RPCs are restricted
+to service_role. Existing HTTP permissions remain the authorization boundary.
+Direct database edits or old application versions bypass history; no backfill is
+attempted. Approval/rejection actions and the existing decision trigger/claim/finish
+functions are unchanged. The shared queue gains a workflow field and supports
+multiple assignment messages while retaining unique-per-event decision messages.
+
+### Schema reference — SCRUM-155, revised, applied by Ryan
+
+**Applied:** Ryan reported successful execution of this revised block on 2026-10-15. Do not rerun it. This confirms setup, not functional or compatibility verification.
+
+Prepared from Ryan's supplied schema on 2026-10-15. This REPLACES the earlier
+SCRUM-155 SQL and expects that earlier block was NOT applied. If it was applied,
+stop and report that fact so an adjustment can be prepared; do not rerun it.
+
+Tell teammates before applying and again after success. In the shared project's
+Supabase SQL Editor, run the block below ONCE, before starting the changed backend.
+Do not rerun the original SCRUM-143 table-creation block. Expected: successful
+completion with no result rows. On error, stop and share the error; do not apply
+individual statements outside the transaction. Existing queued rows are retained.
+The agent has not executed this SQL against the shared database.
+
+The updated assignment APIs require the new function. Apply schema first, then
+run this backend. Older backend versions still work after the schema addition but
+do not record assignment history. The event-assignment Novu workflow remains the
+next checkpoint; pending deliveries retry until configured. No new dependency,
+environment variable, event status, endpoint or permission is introduced.
+
+```sql
+begin;
+
+create table public.event_assignment_history (
+  id uuid primary key default gen_random_uuid(),
+  event_id uuid not null,
+  event_name text not null,
+  incoming_coordinator_id uuid not null,
+  outgoing_coordinator_id uuid,
+  assigned_by_id uuid not null,
+  assigned_by_name text not null,
+  created_at timestamptz not null default now(),
+  notifications_queued_at timestamptz
+);
+create index event_assignment_history_pending
+  on public.event_assignment_history(created_at, id)
+  where notifications_queued_at is null;
+alter table public.event_assignment_history enable row level security;
+revoke all on public.event_assignment_history from public, anon, authenticated;
+grant all on public.event_assignment_history to service_role;
+
+alter table public.notification_outbox
+  add column workflow text not null default 'event-decision'
+  check (workflow in ('event-decision', 'event-assignment'));
+alter table public.notification_outbox
+  drop constraint notification_outbox_event_id_key;
+create unique index notification_outbox_decision_event_key
+  on public.notification_outbox(event_id) where workflow = 'event-decision';
+
+create function public.assign_event_coordinator(
+  p_event_id uuid,
+  p_coordinator_id uuid,
+  p_expected_coordinator_id uuid,
+  p_allowed_statuses text[],
+  p_actor_id uuid,
+  p_actor_name text
+) returns setof public.events
+language plpgsql security invoker set search_path = '' as $$
+declare
+  saved_event public.events%rowtype;
+  outgoing_id uuid;
+begin
+  if p_coordinator_id is null or p_actor_id is null
+     or nullif(btrim(p_actor_name), '') is null then
+    raise exception 'Assignment identity is required.';
+  end if;
+
+  -- SCRUM-155: lock and compare responsibility before recording the change.
+  select e.* into saved_event from public.events e
+    where e.id = p_event_id
+      and e.status = any(p_allowed_statuses)
+      and e.coordinator_id is not distinct from p_expected_coordinator_id
+    for update;
+  if not found then return; end if;
+  if saved_event.coordinator_id is not distinct from p_coordinator_id then
+    return next saved_event;
+    return;
+  end if;
+
+  outgoing_id := saved_event.coordinator_id;
+  update public.events set coordinator_id = p_coordinator_id
+    where id = p_event_id returning * into saved_event;
+  insert into public.event_assignment_history(
+    event_id, event_name, incoming_coordinator_id, outgoing_coordinator_id,
+    assigned_by_id, assigned_by_name
+  ) values (
+    saved_event.id, saved_event.name, p_coordinator_id, outgoing_id,
+    p_actor_id, btrim(p_actor_name)
+  );
+  return next saved_event;
+end;
+$$;
+revoke all on function public.assign_event_coordinator(uuid, uuid, uuid, text[], uuid, text)
+  from public, anon, authenticated;
+grant execute on function public.assign_event_coordinator(uuid, uuid, uuid, text[], uuid, text)
+  to service_role;
+
+create function public.enqueue_assignment_notifications() returns integer
+language plpgsql security definer set search_path = '' as $$
+declare
+  change_record public.event_assignment_history%rowtype;
+  queued_changes integer := 0;
+begin
+  for change_record in
+    select h.* from public.event_assignment_history h
+      where h.notifications_queued_at is null
+      order by h.created_at, h.id limit 10 for update skip locked
+  loop
+    -- SCRUM-155: retain history but skip accounts deleted since assignment.
+    insert into public.notification_outbox(event_id, recipient_id, workflow, payload)
+      select change_record.event_id, u.id, 'event-assignment', jsonb_build_object(
+        'assignmentChangeId', change_record.id,
+        'eventId', change_record.event_id,
+        'eventName', change_record.event_name,
+        'assignedById', change_record.assigned_by_id,
+        'assignedByName', change_record.assigned_by_name,
+        'assignmentType', case
+          when u.id = change_record.outgoing_coordinator_id then 'reassigned-away'
+          when change_record.outgoing_coordinator_id is null then 'assigned'
+          else 'reassigned' end
+      ) from auth.users u
+      where u.id in (change_record.incoming_coordinator_id, change_record.outgoing_coordinator_id);
+    update public.event_assignment_history set notifications_queued_at = now()
+      where id = change_record.id;
+    queued_changes := queued_changes + 1;
+  end loop;
+  return queued_changes;
+end;
+$$;
+revoke all on function public.enqueue_assignment_notifications() from public, anon, authenticated;
+grant execute on function public.enqueue_assignment_notifications() to service_role;
+
+commit;
+```
+
+## Revised checkpoint verification — 2026-10-15
+
+- Backend lint passed with the pre-existing generated .vitest directory excluded:
+  npm --prefix backend run check -- --ignore-pattern '.vitest/**'
+- Existing isolated worker regression suite: 22 passed, 0 failed:
+  npm --prefix backend run test:events -- tests/unit/notifications/notificationDelivery.test.js --pool=threads --maxWorkers=1
+- git diff --check passed. No new tests were authored; no existing tests changed.
+- These older worker fixtures do not implement prepareAssignments; its missing-method
+  error is caught and delivery continues. Their pass verifies existing delivery/retry
+  behaviour, NOT successful history preparation, SQL atomicity or full assignment
+  compatibility. New history/RPC tests and live assignment/inbox verification remain pending. Ryan subsequently confirmed successful SQL application.
+- No shared database changes, commits or pushes performed by the agent.
