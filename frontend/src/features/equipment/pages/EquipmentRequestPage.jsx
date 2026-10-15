@@ -232,6 +232,10 @@ function EquipmentRequestPage() {
                 <span className={`eq-status eq-status-${r.status.toLowerCase()}`}>
                   {r.status}
                 </span>
+                {/* SCRUM-150 AC2: same computed, read-only flag Technical Support sees. */}
+                {r.status === "REVIEW_REQUIRED" && r.available_for_window === false && (
+                  <span className="eq-status eq-status-unavailable">Not available for these dates</span>
+                )}
               </li>
             ))}
           </ul>

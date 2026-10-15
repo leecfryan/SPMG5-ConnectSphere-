@@ -6,8 +6,14 @@ import ClarificationThread from "./ClarificationThread";
 // equipment.validation.js's REVIEW_STATUSES), so "Unattended" stays a
 // disabled option: it can be the current value, never a choice. SCRUM-104:
 // RELEASED is the same - a request only ever reaches it when its event is
-// cancelled, never through this selector.
-const STATUS_LABEL = { PENDING: "Unattended", APPROVED: "Assigned", REJECTED: "Issues", RELEASED: "Released" };
+// cancelled, never through this selector. SCRUM-150: REVIEW_REQUIRED is the
+// same again - only a reschedule/postpone sets it, and it can only leave
+// that status via this same APPROVED/REJECTED decision (not a new value to
+// pick).
+const STATUS_LABEL = {
+  PENDING: "Unattended", APPROVED: "Assigned", REJECTED: "Issues", RELEASED: "Released",
+  REVIEW_REQUIRED: "Needs re-review",
+};
 
 function formatWindow(startIso, endIso) {
   const fmt = (iso) =>
@@ -69,6 +75,12 @@ function EventEquipmentCard({
                 <span className={`eq-status eq-status-${line.status.toLowerCase()}`}>
                   {STATUS_LABEL[line.status]}
                 </span>
+                {/* SCRUM-150 AC2: computed read-side only, never stored - see
+                    equipment.controller.js's withAvailabilityFlag. Only ever
+                    present on a REVIEW_REQUIRED line. */}
+                {line.status === "REVIEW_REQUIRED" && line.available_for_window === false && (
+                  <span className="eq-status eq-status-unavailable">Not available for these dates</span>
+                )}
                 <span className="eq-select-wrap">
                   <select
                     aria-label={`Status for ${line.equipment_type || line.equipment_id}`}
@@ -80,6 +92,7 @@ function EventEquipmentCard({
                     <option value="APPROVED">Assigned</option>
                     <option value="REJECTED">Issues</option>
                     <option value="RELEASED" disabled>Released</option>
+                    <option value="REVIEW_REQUIRED" disabled>Needs re-review</option>
                   </select>
                   <svg className="eq-field-icon" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
                     <path d="M5 7l5 5 5-5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
