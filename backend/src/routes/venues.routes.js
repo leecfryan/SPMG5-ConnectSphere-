@@ -35,5 +35,8 @@ module.exports = function createVenuesRoutes(service) {
   router.post("/:id/unavailability", requirePermission("venues.unavailability"), available, controller.postUnavailabilityPeriod);
   router.patch("/:id/unavailability/:periodId", requirePermission("venues.unavailability"), available, controller.patchUnavailabilityPeriod);
   router.delete("/:id/unavailability/:periodId", requirePermission("venues.unavailability"), available, controller.deleteUnavailabilityPeriod);
+  // SCRUM-146: Venue Staff place and view tentative holds.
+  router.post("/:id/holds", requirePermission("venues.holds"), available, controller.postHold);
+  router.get("/:id/holds", requirePermission("venues.holds"), available, controller.getHolds);
   return router;
 };

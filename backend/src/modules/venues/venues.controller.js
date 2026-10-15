@@ -67,6 +67,9 @@ function createVenuesController(service) {
     getUnavailabilityPeriodById,
     updateUnavailabilityPeriod,
     deleteUnavailabilityPeriod: removePeriod,
+    listActiveHoldsInRange,
+    listHolds,
+    createHold,
   } = service;
 
   // SCRUM-18: narrow the catalogue to potential venues.
@@ -229,9 +232,10 @@ function createVenuesController(service) {
       const venue = await getVenueById(id);
       if (!venue) return res.status(404).json({ error: "Venue not found" });
 
-      const [bookings, unavailability] = await Promise.all([
+      const [bookings, unavailability, holds] = await Promise.all([
         listBookingsInRange(id, from, to),
         listUnavailabilityInRange(id, from, to),
+        listActiveHoldsInRange(id, from, to),
       ]);
 
       // SCRUM-92, 93, 94, 95 are all decided inside this pure function
@@ -240,6 +244,8 @@ function createVenuesController(service) {
         // Planning needs occupied slots, not another coordinator's event name.
         bookings: req.user.roles.includes("venue_staff") ? bookings : bookings.map(row => ({ ...row, event_name: "Reserved event" })),
         unavailability,
+        // SCRUM-146: active holds show as tentative; expired holds excluded server-side
+        holds,
         from,
         to,
       });
@@ -372,14 +378,17 @@ function createVenuesController(service) {
 
       // 4. The slots against that day's calendar. 409 rather than 400: the
       // request is well formed, it just clashes with what is already booked.
-      const [slotRows, unavailability] = await Promise.all([
+      const [slotRows, unavailability, holds] = await Promise.all([
         listSlotRowsForDate(id, value.booking_date),
         listUnavailabilityInRange(id, value.booking_date, value.booking_date),
+        // SCRUM-146 AC3: active holds block requests for the same committed period
+        listActiveHoldsInRange(id, value.booking_date, value.booking_date),
       ]);
       const [calendarDay] = buildAvailabilityCalendar({
         operatingHours: venue.operating_hours,
         bookings: req.user.roles.includes("venue_staff") ? slotRows : slotRows.map(row => ({ ...row, event_name: "Reserved event" })),
         unavailability,
+        holds,
         from: value.booking_date,
         to: value.booking_date,
       });
@@ -617,6 +626,70 @@ function createVenuesController(service) {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // SCRUM-146: venue holds
+  // ---------------------------------------------------------------------------
+
+  const HOLD_SLOTS = ["am", "pm", "night"];
+
+  function validateHoldBody(body) {
+    const errors = [];
+    if (!body.event_name || typeof body.event_name !== "string" || !body.event_name.trim()) {
+      errors.push("event_name is required");
+    }
+    if (!isValidDateString(body.booking_date)) {
+      errors.push("booking_date must be a valid YYYY-MM-DD date");
+    }
+    if (!Array.isArray(body.slots) || body.slots.length === 0) {
+      errors.push("slots must be a non-empty array");
+    } else if (!body.slots.every((s) => HOLD_SLOTS.includes(s))) {
+      errors.push(`slots must only contain: ${HOLD_SLOTS.join(", ")}`);
+    }
+    if (!body.expires_at) {
+      errors.push("expires_at is required");
+    } else {
+      const exp = new Date(body.expires_at);
+      if (Number.isNaN(exp.getTime())) {
+        errors.push("expires_at must be a valid ISO timestamp");
+      } else if (exp <= new Date()) {
+        // AC2: expiry cannot be in the past
+        errors.push("expires_at must be in the future");
+      }
+    }
+    return errors;
+  }
+
+  async function postHold(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+
+      const errors = validateHoldBody(req.body);
+      if (errors.length > 0) return res.status(400).json({ error: "Validation failed", details: errors });
+
+      const venue = await getVenueById(id);
+      if (!venue) return res.status(404).json({ error: "Venue not found" });
+
+      const hold = await createHold(id, req.body, req.user.id);
+      res.status(201).json({ data: hold });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async function getHolds(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+      const venue = await getVenueById(id);
+      if (!venue) return res.status(404).json({ error: "Venue not found" });
+      const holds = await listHolds(id);
+      res.status(200).json({ data: holds });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   return {
     getVenues,
     getVenue,
@@ -632,6 +705,8 @@ function createVenuesController(service) {
     postUnavailabilityPeriod,
     patchUnavailabilityPeriod,
     deleteUnavailabilityPeriod,
+    postHold,
+    getHolds,
   };
 
 }
