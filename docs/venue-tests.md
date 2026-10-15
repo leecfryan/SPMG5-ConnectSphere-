@@ -3,7 +3,7 @@
 Test evidence for the Venue lane (epic SCRUM-6). Behaviour, API and the schema reference live in
 [Venue integration](venue-integration.md); this file is the catalogue of what is tested and where.
 
-**89 automated backend tests across five suites, all passing**, plus manual cases run against the shared Supabase
+**104 automated backend tests across six suites, all passing**, plus manual cases run against the shared Supabase
 database and recorded in the team's TESTS sheet.
 
 | Suite | File | Tests |
@@ -13,6 +13,7 @@ database and recorded in the team's TESTS sheet.
 | Storage and query scope | `backend/tests/integration/venues.storage.test.js` | 4 |
 | Unavailability periods | `backend/tests/integration/venues.unavailability.test.js` | 21 |
 | Setup and turnaround (committed period) | `backend/tests/integration/venues.turnaround.test.js` | 16 |
+| Tentative holds | `backend/tests/integration/venues.holds.test.js` | 15 |
 | Browser journeys | `tests/playwright/venues.browser.spec.cjs` | 6 |
 
 Run everything:
@@ -48,6 +49,7 @@ Test names lead with a bracketed tag, so the runner's output is the traceability
 | SCRUM-19 | Assess shortlisted venue suitability | `[SCRUM-19]` | TC-274 to TC-286 |
 | SCRUM-133 | Mark a venue temporarily unavailable | `[TC-SCRUM-133-01]` to `[TC-SCRUM-133-21]` | TC-SCRUM-133-01 to TC-SCRUM-133-21 |
 | SCRUM-134 | Setup and turnaround time in conflict checks | `[TC-SCRUM-134-01]` to `[TC-SCRUM-134-11]` | TC-SCRUM-134-01 to TC-SCRUM-134-11 |
+| SCRUM-146 | Tentative venue hold with expiry | `[TC-SCRUM-146-01]` to `[TC-SCRUM-146-15]` | TC-SCRUM-146-01 to TC-SCRUM-146-15 |
 
 Cross-cutting guards that apply to every story: `[VENUE-AUTH-001]` (seven identities against eight endpoints),
 `[VENUE-AUTH-002]`, `[VENUE-INPUT-001]` (forged ownership and role fields), `[VENUE-CONFIG-001]` (missing venue
@@ -277,7 +279,69 @@ for several events at once.
 
 ---
 
-## 5. Coverage note
+## 5. SCRUM-146 — Tentative venue hold with expiry
+
+**Acceptance criteria, word for word**
+
+1. A hold records the venue, event, period, who placed it and a mandatory expiry date/time.
+2. The expiry cannot be in the past.
+3. An active hold blocks other requests for the same committed period.
+4. Active holds are shown as tentative and are not treated as confirmed bookings.
+5. Once the expiry passes, the venue becomes available again and the expired hold remains in the booking history.
+
+### Traceability
+
+| AC | Criterion | Test cases | Where the rule lives |
+| --- | --- | --- | --- |
+| 1 | Hold created with all required fields; held_by from verified session | 01, 07, 08, 15 | `validateHoldBody` + `createHold` in `venues.controller.js` / `venues.service.js` |
+| 2 | Expiry in the future | 03, 04 | `validateHoldBody` in `venues.controller.js` |
+| 3 | Active hold blocks booking request for same slot | 09, 10 | `listActiveHoldsInRange` → `buildAvailabilityCalendar` → `findSlotProblems`; `tentative` not in `REQUESTABLE_STATUSES` |
+| 4 | Slot shown as tentative (precedence below booked, above pending) | 11, 12, 13, 14 | `buildAvailabilityCalendar` in `venues.availability.js` |
+| 5 | Expired hold absent from calendar; present in history list | 05, 06, 14 | `listActiveHoldsInRange` (`expires_at > now()`); `listHolds` (all hold rows) |
+
+### Test cases
+
+| ID | AC | Type | Scenario | Expected | Automated by | Last run |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-146-01 | 1 | Happy | POST /holds valid body as venue_staff | 201, array of hold records; createHold called with correct args | `[TC-SCRUM-146-01]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-02 | 1 | Negative | POST /holds as event_coordinator | 403; createHold not called | `[TC-SCRUM-146-02]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-03 | 2 | Boundary | expires_at far in past | 400, details name expires_at | `[TC-SCRUM-146-03]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-04 | 2 | Negative | expires_at one hour ago | 400 | `[TC-SCRUM-146-04]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-05 | 5 | Happy | GET /holds returns all holds including expired | 200, array length 2, expired row present | `[TC-SCRUM-146-05]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-06 | 5 | Negative | GET /holds as event_coordinator | 403 | `[TC-SCRUM-146-06]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-07 | 1 | Negative | POST /holds, venue not found | 404; createHold not called | `[TC-SCRUM-146-07]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-08 | 1 | Negative | POST /holds, missing event_name | 400, details name missing field | `[TC-SCRUM-146-08]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-09 | 3 | Happy | Booking request blocked by active hold on same slot | 409, details mention slot name | `[TC-SCRUM-146-09]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-10 | 3 | Happy | Expired hold (not in active list) → booking request succeeds | 201 | `[TC-SCRUM-146-10]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-11 | 4 | Unit | Active hold on am → slot.status = tentative, label = event name | `{ status: "tentative", label: "Charity Gala" }` | `[TC-SCRUM-146-11]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-12 | 4 | Unit | Confirmed booking and hold on same slot → booked outranks tentative | `{ status: "booked" }` | `[TC-SCRUM-146-12]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-13 | 4 | Unit | Hold and pending request on same slot → tentative outranks pending | `{ status: "tentative" }` | `[TC-SCRUM-146-13]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-14 | 4, 5 | Unit | No active holds → slot available | `{ status: "available" }` | `[TC-SCRUM-146-14]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-15 | 1 | Negative | POST /holds with invalid slot value ("morning") | 400, details mention slots | `[TC-SCRUM-146-15]` | 2026-10-15 ✅ |
+
+### Manual cases
+
+| ID | AC | Scenario | Expected |
+| --- | --- | --- | --- |
+| TC-SCRUM-146-M1 | 1, 4 | Sign in as venue_staff; open venue → Manage holds; place a hold; view the calendar | The held slot shows Tentative hold in blue |
+| TC-SCRUM-146-M2 | 3 | Sign in as event_coordinator; try to request the held slot | 409 — the request is blocked |
+| TC-SCRUM-146-M3 | 5 | Wait for the hold to expire (or set a near-future expiry); view the calendar | Slot returns to Available; the hold still appears in the Holds list under Expired |
+
+### Decisions
+
+- Holds stored in `venue_bookings` with `status='hold'` rather than a separate table. Keeps calendar and
+  conflict check unified — see *Tentative venue holds* in `venue-integration.md`.
+- `expires_at > now()` filtered in Postgres before data reaches the calendar. Calendar function stays pure.
+- `tentative` precedence below `booked` (a confirmed booking is harder to reverse) and above `pending`
+  (a hold is explicit staff intent; a request has not been decided).
+
+### Deliberately absent
+
+Coordinator-facing hold request flow; automatic hold cancellation; notify on expiry; delete/cancel a hold.
+
+---
+
+## 6. Coverage note
 
 `npm --prefix backend run test:cov` reports the whole backend. The venue modules are exercised through the three
 integration suites above rather than by unit tests of their own, so coverage of
