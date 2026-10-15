@@ -257,7 +257,7 @@ When a story's acceptance criteria require another outside service (email, calen
 here: the service, the story that needs it, where the key lives (backend `.env` only, added to `.env.example` without
 a value), which module calls it, and how tests fake it. No code calls out to a service that isn't recorded here.
 
-### SCRUM-155 assignment notifications (Novu setup pending)
+### SCRUM-155 assignment notifications
 
 Both assignment APIs use the service-role-only assign_event_coordinator RPC to
 lock/compare responsibility, update coordinator_id and save event_assignment_history.
@@ -269,5 +269,5 @@ outbox deliveries. Pending history is queued and marked processed atomically;
 failed preparation retries and does not prevent claiming existing decision
 notifications. History is retained. Outbox workflow selects event-decision or
 event-assignment; decision uniqueness stays per event. Ryan confirmed the revised
-SQL in docs/notifications.md succeeded on 2026-10-15. Novu setup and feature
-verification remain pending.
+SQL in docs/notifications.md succeeded on 2026-10-15. The event-assignment workflow is active in Development with three previewed
+message variants. Live delivery and full feature verification remain pending.

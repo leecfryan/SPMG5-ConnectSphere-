@@ -227,7 +227,7 @@ The worker processes history separately into incoming/outgoing notifications.
 Queueing/delivery failures cannot roll back assignment; failure to save its history
 can. History snapshots the event name and actor, with no new event columns.
 
-Ryan reported successful application of the revised SQL on 2026-10-15. Novu workflow setup remains
-the next checkpoint. See [schema and processing](notifications.md#coordinator-notifications--scrum-155-checkpoint-2-revised).
+Ryan reported successful application of the revised SQL on 2026-10-15. The event-assignment Novu workflow is now active in Development; live delivery
+verification remains pending. See [schema and processing](notifications.md#coordinator-notifications--scrum-155-checkpoint-2-revised).
 Earlier test results are historical; new feature tests are deferred at Ryan's
 request. Compatibility with the revised SQL has not yet been verified.

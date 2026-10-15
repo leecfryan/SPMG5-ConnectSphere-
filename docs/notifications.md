@@ -405,8 +405,8 @@ The agent has not executed this SQL against the shared database.
 
 The updated assignment APIs require the new function. Apply schema first, then
 run this backend. Older backend versions still work after the schema addition but
-do not record assignment history. The event-assignment Novu workflow remains the
-next checkpoint; pending deliveries retry until configured. No new dependency,
+do not record assignment history. The event-assignment Novu workflow is now active in Development; see checkpoint 3
+below for message configuration and preview evidence. No new dependency,
 environment variable, event status, endpoint or permission is introduced.
 
 ```sql
@@ -536,3 +536,112 @@ commit;
   behaviour, NOT successful history preparation, SQL atomicity or full assignment
   compatibility. New history/RPC tests and live assignment/inbox verification remain pending. Ryan subsequently confirmed successful SQL application.
 - No shared database changes, commits or pushes performed by the agent.
+
+## SCRUM-155 checkpoint 3 — Novu assignment workflow
+
+Status: configured and ACTIVE in Development on 2026-10-15. All three message
+variants were checked in the Novu editor preview. Live assignment-to-inbox
+delivery and full feature/regression tests remain pending.
+Use the US Novu environment already configured for the ConnectSphere backend and
+inbox. Do not copy API keys into documentation or chat. Reuse the existing In-App
+integration and leave the event-decision workflow unchanged.
+
+Create a workflow named **Event assignment**, identifier exactly
+**event-assignment**, with one **In-App** step. Use the text/Liquid content editor
+for the templates below. Set this transactional workflow to Critical so personal
+notification preferences cannot suppress assignment responsibility notices. Save
+all content and ensure the workflow and its In-App step are active. No email,
+SMS, digest, redirect URL or action button is required by this story.
+
+### Payload contract
+
+All six fields are required strings. assignmentType permits only assigned,
+reassigned and reassigned-away. Import the example payload below if using Novu's
+Import from JSON option, then constrain assignmentType to those three values and
+mark the fields required. Enable payload validation after defining the schema.
+These fields match enqueue_assignment_notifications exactly; recipients come
+from the worker's subscriberId, not the payload.
+
+```json
+{
+  "assignmentChangeId": "11111111-1111-4111-8111-111111111111",
+  "eventId": "22222222-2222-4222-8222-222222222222",
+  "eventName": "Community Open Day",
+  "assignedById": "33333333-3333-4333-8333-333333333333",
+  "assignedByName": "Alex Tan",
+  "assignmentType": "assigned"
+}
+```
+
+The IDs and names above are fictional editor-preview values, not real recipients.
+
+### In-App subject
+
+```liquid
+{% if payload.assignmentType == 'assigned' %}Event assigned to you{% elsif payload.assignmentType == 'reassigned' %}Event reassigned to you{% elsif payload.assignmentType == 'reassigned-away' %}Event reassigned from you{% endif %}
+```
+
+### In-App body
+
+```liquid
+{% if payload.assignmentType == 'assigned' %}{{payload.assignedByName | escape}} assigned the event "{{payload.eventName | escape}}" to you.{% elsif payload.assignmentType == 'reassigned' %}{{payload.assignedByName | escape}} reassigned the event "{{payload.eventName | escape}}" to you.{% elsif payload.assignmentType == 'reassigned-away' %}{{payload.assignedByName | escape}} reassigned the event "{{payload.eventName | escape}}" from you to another coordinator.{% endif %}
+```
+
+Both user-facing fields use the same assignmentType. The name and event text are
+escaped to render as content. Outgoing wording does not imply that the coordinator
+still has access to the event. Each message describes the historical action; it
+does not assert the recipient's current assignment after subsequent changes.
+
+Use the editor preview with each of the three assignmentType values to inspect
+the rendered wording before activation. A preview is not a real delivery. Do not
+record it as manual UAT or use the dashboard trigger to send to real users during
+configuration. Real assignment/inbox verification remains a later step.
+
+### Startup after configuration
+
+If the backend is already running with the updated source, the worker retries
+pending deliveries automatically. Otherwise restart it using the project's normal
+startup method. For Docker, Ryan runs the following in PowerShell from
+C:\Users\ryanl\OneDrive\Documents\GitHub\ConnectSphere:
+
+```powershell
+docker compose up --build --renew-anon-volumes
+```
+
+Expected: backend and frontend start successfully. If the command fails, share the
+error rather than installing dependencies or repeatedly rebuilding. The worker
+polls every 15 seconds while configured; retry backoff can delay already-failed
+items longer. Existing pending assignment messages may deliver when the workflow
+becomes active. Novu trigger acknowledgement alone does not prove inbox delivery;
+inspect Activity Feed and the recipient's ConnectSphere Notifications page later.
+
+References checked 2026-10-15:
+[Novu workflow configuration](https://docs.novu.co/platform/workflow/configure-workflow)
+and [workflow content support](https://docs.novu.co/platform/workflow).
+No new package, SQL, application-code change or test file is needed for this
+configuration checkpoint. Dashboard activation was observed on 2026-10-15.
+
+### Checkpoint 3 observed configuration — 2026-10-15
+
+Ryan signed in and confirmed Development is the environment used by the local app.
+Created [Event assignment](https://dashboard.novu.co/env/dev_env_gyXqS46qohE3Ooak/workflows/event-assignment_wf_gzWdxxR9wzg4tXnZ).
+The workflow is Active with one In-App step, Critical workflow enabled, enforced
+payload validation, six required fields and the three-value assignmentType enum.
+Content sanitization remains enabled. The Novu editor requires single-quoted
+strings inside Liquid conditions; the templates above match the saved version.
+
+Editor previews showed:
+
+- assigned: Event assigned to you — Alex Tan assigned the event "Community Open Day" to you.
+- reassigned: Event reassigned to you — Alex Tan reassigned the event "Community Open Day" to you.
+- reassigned-away: Event reassigned from you — Alex Tan reassigned the event "Community Open Day" from you to another coordinator.
+
+These were editor previews with fictional data, not sent notifications or human
+UAT. No dashboard Test Workflow trigger was used. No application code, SQL, test
+file, permission or event status changed in this checkpoint. Pending real messages
+can now be processed by an already-running worker; actual delivery is unverified.
+
+The existing Event Decision workflow already displayed Action required when the
+workflow list was first opened, before creating Event assignment. It was not
+modified; its configuration should be checked separately if decision delivery
+fails. No cause was established during this checkpoint.
