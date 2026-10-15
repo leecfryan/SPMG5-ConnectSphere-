@@ -148,3 +148,35 @@ describe("SCRUM-150: isRequestAvailableForWindow", () => {
     expect(await service.isRequestAvailableForWindow(flagged)).toBe(true);
   });
 });
+
+// SCRUM-150 AC3: a REVIEW_REQUIRED request never silently becomes APPROVED
+// through anything but Technical Support's own decision. Exhausts every
+// other mutating path this story touches on the same request, then uses the
+// explicit decision as a positive control to prove the test would actually
+// catch a regression that set APPROVED some other way.
+describe("SCRUM-150 AC3: nothing but the explicit decision sets APPROVED", () => {
+  test("[TC-150-09] re-flagging, an unrelated event's release, and a re-fetch all leave it REVIEW_REQUIRED - only the explicit decision flips it", async () => {
+    const OTHER_EVENT_ID = "99999999-9999-9999-9999-999999999999";
+    const flagged = request({ id: "req-flagged", status: "REVIEW_REQUIRED" });
+    const unrelated = request({ id: "req-unrelated", event_id: OTHER_EVENT_ID, equipment_id: "eq-other", status: "APPROVED" });
+    const service = createEquipmentService(fakeSupabase({
+      equipment_requests: [flagged, unrelated],
+      equipment: [{ id: "22222222-2222-2222-2222-222222222222", type: "Projector", status: "AVAILABLE" }, { id: "eq-other", type: "Speaker", status: "AVAILABLE" }],
+    }));
+
+    // Reschedule the same event again.
+    await service.flagReservationsForReview(EVENT_ID, { startTime: "2026-04-01T09:00:00Z", endTime: "2026-04-01T17:00:00Z", datesChanged: true });
+    expect((await service.findRequestById("req-flagged")).status).toBe("REVIEW_REQUIRED");
+
+    // Postpone/cancel sweep running against a different, unrelated event.
+    await service.releaseReservationsForEvent(OTHER_EVENT_ID);
+    expect((await service.findRequestById("req-flagged")).status).toBe("REVIEW_REQUIRED");
+
+    // A plain re-fetch changes nothing.
+    expect((await service.findRequestById("req-flagged")).status).toBe("REVIEW_REQUIRED");
+
+    // Positive control: only the explicit Technical Support decision flips it.
+    await service.updateStatus("req-flagged", "APPROVED");
+    expect((await service.findRequestById("req-flagged")).status).toBe("APPROVED");
+  });
+});
