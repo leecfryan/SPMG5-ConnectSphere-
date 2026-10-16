@@ -23,6 +23,7 @@ middleware and hardcoded development roles have been removed.
 | `/venues/booking-requests` decide controls | `bookings.decide` | Venue Staff |
 | `/venues/:id/unavailability` | `venues.unavailability` | Venue Staff |
 | `/venues/:id/holds` | `venues.holds` | Venue Staff |
+| `/venues/:id/booking-conflicts` | `venues.conflicts` | Venue Staff |
 
 These are React Router pages with direct links and browser Back/refresh support.
 Shared navigation and sign-out stay available. All calls use relative `/api/venues`
@@ -179,6 +180,44 @@ Example: requesting pm at Marina Grand Ballroom (setup=120, turnaround=60) → c
 **Where the rule applies.** Both places that decide whether a booking can be made use committed slots: `postBookingRequest` (AC2 conflict check) and `filterByAvailability` (SCRUM-18 catalogue date+slot search). The availability calendar display is unchanged — it shows what is actually booked, not what cannot be requested.
 
 Venues with `setup_minutes = 0` and `turnaround_minutes = 0` are unaffected: `committedSlots` returns exactly the requested slots, so the check is identical to pre-134 behaviour.
+
+## Conflict flags after a setup/turnaround change (SCRUM-135)
+
+When `setup_minutes` or `turnaround_minutes` is changed on a venue, any existing confirmed bookings that
+now require a buffer slot occupied by another booking are flagged for Venue Staff review.
+
+`GET /api/venues/:id/booking-conflicts` — returns 200 with a `{ data: [] }` array of flagged booking
+requests. Each item has the same shape as a booking request row plus a `conflict_flags` array:
+
+```json
+{
+  "slot": "am",
+  "type": "setup",
+  "conflicting_with": "Morning Session",
+  "reason": "am is needed for setup time but is occupied by \"Morning Session\""
+}
+```
+
+Requires `venues.conflicts`, held by Venue Staff only. Returns 404 if the venue does not exist.
+
+**How flags are written.** `recheckConflictsAfterUpdate(venueId, venue)` in `venues.service.js` is called
+after any `PATCH /api/venues/:id` that changes `setup_minutes` or `turnaround_minutes`. It:
+
+1. Fetches all future confirmed booking requests for the venue.
+2. Fetches all active holds (`status='hold'`, `expires_at > now()`).
+3. Passes both to `findBufferConflicts(confirmedRequests, allBookings, setupMinutes, turnaroundMinutes)` in
+   `venues.conflicts.js`. That pure function returns a `Map<request_id, conflict[]>` of every request whose
+   buffer slots are occupied by a different booking.
+4. Deletes all existing conflict flags for the venue and inserts the fresh set.
+
+Active holds are included as occupiers so a hold on a buffer slot generates the same flag a confirmed
+booking would. Hold rows carry `request_id: null`, so the `b.request_id !== request_id` guard in
+`findBufferConflicts` correctly excludes nothing that should be kept.
+
+**How flags are cleared.** The same recheck runs on every `GET /booking-conflicts` request, not only
+after a venue update. `listActiveHoldsInRange` filters `expires_at > now()` in Postgres, so expired
+holds are automatically absent from the recheck. When a hold expires or is released, the next GET
+rewrites the flags without it — no scheduled job required.
 
 ## Checking each venue booking independently (SCRUM-138)
 
