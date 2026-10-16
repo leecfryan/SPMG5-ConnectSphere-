@@ -36,8 +36,11 @@ module.exports = function venueStorage(accounts) {
       return expanded;
     },
     async getEventById(id, coordinatorId) { return events().find(event => event.id === id && event.coordinator_id === coordinatorId) || null; },
+    // SCRUM-138: the event behind a check report, under the same scope rule as
+    // the real service — a coordinator sees only their own event, staff see all.
+    async getEventForCheckReport(id, scope) { return events().find(event => event.id === id && (scope?.allVenues === true || event.coordinator_id === scope?.coordinatorId)) || null; },
     async listBookableEvents(coordinatorId) { return events().filter(event => event.coordinator_id === coordinatorId && ['APPROVED', 'CONFIRMED'].includes(event.status)); },
-    async listSlotRowsForDate(id, date) { return requests.filter(r => r.venue.id === id && r.booking_date === date).flatMap(r => r.slots.map(slot => ({ ...slot, booking_date: date, event_name: r.event.name, request: { event_id: r.event_id } }))); },
+    async listSlotRowsForDate(id, date) { return requests.filter(r => r.venue.id === id && r.booking_date === date).flatMap(r => r.slots.map(slot => ({ ...slot, booking_date: date, event_name: r.event.name, request: { id: r.id, event_id: r.event_id } }))); },
     async submitBookingRequest(id, name, value, requesterId) {
       const event = events().find(event => event.id === value.event_id && event.coordinator_id === requesterId);
       if (!event) throw new Error('Fixture assignment denied');
@@ -47,7 +50,7 @@ module.exports = function venueStorage(accounts) {
       return request.id;
     },
     async getBookingRequestById(id, scope) { return requests.find(r => r.id === id && visible(r, scope)) || null; },
-    async listBookingRequests(scope) { return requests.filter(r => visible(r, scope)); },
+    async listBookingRequests(scope, eventId) { return requests.filter(r => visible(r, scope) && (!eventId || r.event_id === eventId)); },
     // Same rule as decide_venue_booking_request: coordinator-cancelled slots stay cancelled.
     async decideBookingRequest(id, decision) { const r = requests.find(r => r.id === id); if (!r) return null; for (const slot of r.slots) if (slot.status !== 'cancelled') slot.status = decision; return id; },
     // SCRUM-148/149: mirror the production release RPC for cancellation and postponement.

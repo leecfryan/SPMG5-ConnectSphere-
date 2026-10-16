@@ -157,6 +157,7 @@ const BOOKING_REQUEST_FIELDS = [
   "required_facilities",
   "accessibility_requirements",
   "additional_requirements",
+  "purpose",
   "submitted_at",
   "decided_at",
   "decision_note",
@@ -172,6 +173,18 @@ async function getEventById(id, coordinatorId) {
     .eq("coordinator_id", coordinatorId)
     .eq("id", id)
     .maybeSingle();
+
+  if (error) throw new Error(`Failed to fetch event: ${error.message}`);
+  return data;
+}
+
+// SCRUM-138: the event behind a check report. Coordinators see their own events
+// only — the same relationship the booking list scopes by — while Venue Staff
+// review bookings across all locations.
+async function getEventForCheckReport(id, scope) {
+  let query = getSupabase().from("events").select(EVENT_FIELDS).eq("id", id);
+  if (scope?.coordinatorId) query = query.eq("coordinator_id", scope.coordinatorId);
+  const { data, error } = await query.maybeSingle();
 
   if (error) throw new Error(`Failed to fetch event: ${error.message}`);
   return data;
@@ -196,11 +209,13 @@ async function listBookableEvents(coordinatorId) {
 
 // Live slot rows for one venue on one day, with the event behind each request.
 // Seed bookings have no request, so `request` comes back null for those.
+// SCRUM-138: the request's own id comes back too, so a check can tell this
+// booking's rows apart from another request of the same event.
 async function listSlotRowsForDate(venueId, bookingDate) {
   const { data, error } = await getSupabase()
     .from("venue_bookings")
     .select(
-      "booking_date, slot, status, event_name, request:venue_booking_requests!request_id(event_id)"
+      "booking_date, slot, status, event_name, request:venue_booking_requests!request_id(id, event_id)"
     )
     .eq("venue_id", venueId)
     .eq("booking_date", bookingDate)
@@ -225,6 +240,7 @@ async function submitBookingRequest(venueId, eventName, value, requesterId) {
     p_required_facilities: value.required_facilities,
     p_accessibility_requirements: value.accessibility_requirements,
     p_additional_requirements: value.additional_requirements,
+    p_purpose: value.purpose,
   });
 
   if (error) throw new Error(`Failed to submit booking request: ${error.message}`);
@@ -247,13 +263,14 @@ async function getBookingRequestById(id, scope) {
 // Paging can come later if a real venue ever has more than this outstanding.
 const BOOKING_REQUEST_LIST_LIMIT = 200;
 
-async function listBookingRequests(scope) {
+async function listBookingRequests(scope, eventId) {
   let query = getSupabase()
     .from("venue_booking_requests")
     .select(BOOKING_REQUEST_FIELDS)
     .order("submitted_at", { ascending: false })
     .limit(BOOKING_REQUEST_LIST_LIMIT);
   query = applyBookingScope(query, scope);
+  if (eventId) query = query.eq("event_id", eventId);
   const { data, error } = await query;
 
   if (error) throw new Error(`Failed to list booking requests: ${error.message}`);
@@ -428,6 +445,7 @@ module.exports = {
   listBookingsInRange,
   listUnavailabilityInRange,
   getEventById,
+  getEventForCheckReport,
   listBookableEvents,
   listSlotRowsForDate,
   submitBookingRequest,

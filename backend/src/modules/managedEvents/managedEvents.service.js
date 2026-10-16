@@ -15,6 +15,9 @@ const {
 // constraint, so count is 0 until it lands. Confirm the final status name with
 // that story's owner.
 const WAITLIST_STATUS = "waitlisted";
+const VENUE_BOOKING_FIELDS =
+  "id, event_id, purpose, booking_date, venue:venues!venue_id(id, name, city, country), " +
+  "slots:venue_bookings!request_id(slot, status)";
 
 // Built from the verified session id, never from request input. Postgrest
 // splices this string into SQL, so the id is asserted to be a UUID before it
@@ -41,6 +44,41 @@ function createManagedEventsService(client) {
       .or(ownershipFilter(userId));
   }
 
+  async function venueBookingsForEvent(eventId) {
+    const bookingQuery = client
+      .from("venue_booking_requests")
+      .select(VENUE_BOOKING_FIELDS)
+      .eq("event_id", eventId);
+    const orderedBookingQuery = typeof bookingQuery.order === "function"
+      ? bookingQuery.order("booking_date", { ascending: true })
+      : bookingQuery;
+    const rows = unwrap(
+      await orderedBookingQuery,
+      "venueBookingsForEvent",
+    );
+    return rows
+      .filter((row) => row && (row.booking_date || row.venue))
+      .map((row) => ({
+        id: row.id,
+        event_id: row.event_id,
+        purpose: row.purpose ?? null,
+        booking_date: row.booking_date ?? null,
+        venue: row.venue ?? null,
+        slots: Array.isArray(row.slots)
+          ? row.slots.map((slot) => ({ slot: slot.slot, status: slot.status }))
+          : [],
+      }));
+  }
+
+  async function attachVenueBookings(events) {
+    const bookings = await Promise.all(events.map((event) => venueBookingsForEvent(event.id)));
+    return events.map((event, index) => (
+      bookings[index].length
+        ? { ...event, venueBookings: bookings[index] }
+        : event
+    ));
+  }
+
   async function listManagedEvents(userId) {
     const rows = await unwrap(
       await managedEvents(userId).order("start_time", {
@@ -49,14 +87,16 @@ function createManagedEventsService(client) {
       }),
       "listManagedEvents",
     );
-    return rows.map(toListItem);
+    return (await attachVenueBookings(rows)).map(toListItem);
   }
 
   async function findManagedEvent(eventId, userId) {
-    return unwrap(
+    const venueBookings = await venueBookingsForEvent(eventId);
+    const event = await unwrap(
       await managedEvents(userId).eq("id", eventId).maybeSingle(),
       "findManagedEvent",
     );
+    return event && venueBookings.length ? { ...event, venueBookings } : event;
   }
 
   // head: true asks Postgres for the count and no rows at all, so the

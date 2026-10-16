@@ -22,6 +22,7 @@ const {
   buildAvailabilityCalendar,
   committedSlots,
 } = require("./venues.availability");
+const { checkBooking, notCheckedResult } = require("./venueBookingChecks");
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -56,6 +57,7 @@ function createVenuesController(service) {
     listBookingsInRange,
     listUnavailabilityInRange,
     getEventById,
+    getEventForCheckReport,
     listBookableEvents,
     listSlotRowsForDate,
     submitBookingRequest,
@@ -428,7 +430,7 @@ function createVenuesController(service) {
   // SCRUM-88: submitted requests available to Venue Staff for review
   async function getBookingRequests(req, res, next) {
     try {
-      const { status } = req.query;
+      const { status, event_id: eventId } = req.query;
 
       if (status !== undefined && !REQUEST_STATUS_FILTERS.includes(status)) {
         return validationFailed(
@@ -437,7 +439,15 @@ function createVenuesController(service) {
         );
       }
 
-      const requests = (await listBookingRequests(req.bookingScope)).map(withStatus);
+      if (eventId !== undefined && !UUID_PATTERN.test(eventId)) {
+        return validationFailed(res, "event_id must be a valid event id");
+      }
+
+      const requests = (
+        eventId === undefined
+          ? await listBookingRequests(req.bookingScope)
+          : await listBookingRequests(req.bookingScope, eventId)
+      ).map(withStatus);
       const filtered =
         status === undefined
           ? requests
@@ -466,6 +476,92 @@ function createVenuesController(service) {
     } catch (err) {
       next(err);
     }
+  }
+
+  // SCRUM-138: every booking on one event, each checked on its own for
+  // suitability, availability and conflicts. Read-only: nothing here writes, so
+  // a failed check can never alter any booking's status.
+  async function getEventBookingChecks(req, res, next) {
+    try {
+      const { eventId } = req.params;
+
+      if (!UUID_PATTERN.test(eventId)) {
+        return validationFailed(res, "eventId must be a valid event id");
+      }
+
+      const [event, requests] = await Promise.all([
+        getEventForCheckReport(eventId, req.bookingScope),
+        listBookingRequests(req.bookingScope, eventId),
+      ]);
+      // An event outside the caller's scope is 404, the same answer as a
+      // missing event, so the report never reveals another coordinator's event.
+      if (!event) return res.status(404).json({ error: "Event not found" });
+
+      // Each booking is assessed in its own try/catch: one venue whose data
+      // cannot be read must not lose the other venues' results (SCRUM-138 AC1, AC3).
+      const results = [];
+      for (const request of requests) {
+        try {
+          results.push(await checkOneBooking(request, req.bookingScope));
+        } catch {
+          results.push(
+            notCheckedResult(
+              request,
+              "This venue could not be checked right now. The other venues are unaffected."
+            )
+          );
+        }
+      }
+
+      results.sort(
+        (a, b) =>
+          String(a.booking_date).localeCompare(String(b.booking_date)) ||
+          String(a.venue_name).localeCompare(String(b.venue_name))
+      );
+
+      res.status(200).json({
+        data: { event_id: event.id, event_name: event.name, results },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // SCRUM-138: one booking's three checks. The calendar excludes every row this
+  // event already holds, so a slot the event owns is not reported as its own
+  // conflict; other events' names are masked for coordinators exactly as at
+  // submission (SCRUM-21).
+  async function checkOneBooking(request, scope) {
+    const venueId = request.venue?.id;
+    if (!venueId) {
+      return notCheckedResult(request, "This booking has no venue recorded, so it could not be checked.");
+    }
+    if (!isValidDateString(request.booking_date)) {
+      return notCheckedResult(request, "This booking has no date recorded, so it could not be checked.");
+    }
+
+    const venue = await getVenueById(venueId);
+    if (!venue) {
+      return notCheckedResult(request, "This venue no longer exists, so the booking could not be checked.");
+    }
+
+    const [slotRows, unavailability] = await Promise.all([
+      listSlotRowsForDate(venue.id, request.booking_date),
+      listUnavailabilityInRange(venue.id, request.booking_date, request.booking_date),
+    ]);
+
+    const maskNames = scope?.allVenues !== true;
+    const [calendarDay] = buildAvailabilityCalendar({
+      operatingHours: venue.operating_hours,
+      bookings: slotRows
+        .filter((row) => row.request?.event_id !== request.event?.id)
+        .map((row) => (maskNames ? { ...row, event_name: "Reserved event" } : row)),
+      unavailability,
+      from: request.booking_date,
+      to: request.booking_date,
+    });
+
+    return checkBooking(request, venue, calendarDay, slotRows, request.event?.id);
   }
 
   // SCRUM-20: what the reviewer is told when the database refuses an approval.
@@ -700,6 +796,7 @@ function createVenuesController(service) {
     postBookingRequest,
     getBookingRequests,
     getBookingRequest,
+    getEventBookingChecks,
     patchBookingRequestDecision,
     getUnavailabilityPeriods,
     postUnavailabilityPeriod,
