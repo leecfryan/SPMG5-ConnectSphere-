@@ -22,6 +22,7 @@ middleware and hardcoded development roles have been removed.
 | `/venues/booking-requests` | `bookings.read` | Venue Staff, Event Coordinator |
 | `/venues/booking-requests` decide controls | `bookings.decide` | Venue Staff |
 | `/venues/:id/unavailability` | `venues.unavailability` | Venue Staff |
+| `/venues/:id/holds` | `venues.holds` | Venue Staff |
 
 These are React Router pages with direct links and browser Back/refresh support.
 Shared navigation and sign-out stay available. All calls use relative `/api/venues`
@@ -129,6 +130,43 @@ Venue Staff can block a venue from accepting new bookings for a defined date ran
 All four endpoints require `venues.unavailability`, held by Venue Staff only. The `created_by` field is set server-side from the verified session; it cannot be supplied in the request body.
 
 **How blocking works.** `listUnavailabilityInRange` reads from both `venue_unavailability` (legacy per-slot seed rows) and `venue_unavailability_periods` (new period records). Period records are expanded into per-slot rows matching the shape the availability calendar already reads. The calendar marks those slots `unavailable`, and `findSlotProblems` rejects any booking request that targets a non-`available`/`pending` slot.
+
+## Tentative venue holds (SCRUM-146)
+
+Venue Staff can place a time-limited tentative hold on one or more slots for a named event. A hold reserves
+the slot while the coordinator finalises arrangements without permanently consuming it.
+
+`POST /api/venues/:id/holds` — body: `{ event_name, booking_date, slots[], expires_at }`. `booking_date` is
+`YYYY-MM-DD`; `slots` is a non-empty subset of `["am", "pm", "night"]`; `expires_at` is an ISO 8601 timestamp
+that must be in the future (400 if not). Returns 201 with an array of the created slot rows.
+
+`GET /api/venues/:id/holds` — returns 200 with all hold rows for the venue, including expired ones, ordered
+by booking date and creation time descending. Expired holds are kept for history; they are never deleted.
+
+Both endpoints require `venues.holds`, held by Venue Staff only.
+
+**How the hold is stored.** Each hold is one row per slot in `venue_bookings` with `status = 'hold'` and an
+`expires_at` column. Reusing the existing table keeps the calendar query and conflict check unified;
+a separate table would need joins in three places. The `expires_at` column is `NULL` for all non-hold rows.
+
+**How active holds appear on the calendar.** `getVenueAvailability` calls `listActiveHoldsInRange` alongside
+the existing booking and unavailability queries. `listActiveHoldsInRange` filters `expires_at > now()` in
+Postgres, so expired holds are excluded before the data reaches the calendar. `buildAvailabilityCalendar`
+receives the active holds as an `input.holds` array and applies a `tentative` tier in the slot precedence:
+
+```
+closed > unavailable > booked > tentative > pending > available
+```
+
+A confirmed booking still outranks a hold (a booking is harder than a reservation). A hold outranks a pending
+request (a hold is explicit staff intent, a request has not yet been decided). The frontend calendar renders
+the `tentative` status with the label "Tentative hold" and a distinct blue colour.
+
+**How active holds block booking requests.** `postBookingRequest` runs `findSlotProblems`, which checks each
+committed slot against `REQUESTABLE_STATUSES = ["available", "pending"]`. Because `tentative` is not in that
+list, any slot covered by an active hold produces a 409 with the same error format as other conflicts.
+Once the hold expires, `listActiveHoldsInRange` returns nothing for that slot and a new booking request
+can proceed.
 
 ## Committed period: setup and turnaround time (SCRUM-134)
 
@@ -867,6 +905,24 @@ revoke execute on function public.decide_venue_booking_request(uuid, text, uuid,
   from public, anon, authenticated;
 grant execute on function public.decide_venue_booking_request(uuid, text, uuid, text)
   to service_role;
+```
+
+### Tentative holds schema (SCRUM-146)
+
+```sql
+-- SCRUM-146: extend venue_bookings to store tentative holds.
+-- Holds are rows in venue_bookings with status='hold'.
+-- expires_at is null for every non-hold row; the service only writes it for holds.
+-- Expired rows are kept for history; the service filters expires_at > now() for active holds.
+
+alter type public.booking_status add value if not exists 'hold';
+
+alter table public.venue_bookings
+  add column if not exists expires_at timestamptz;
+
+create index if not exists venue_bookings_expires_at
+  on public.venue_bookings (expires_at)
+  where status = 'hold';
 ```
 
 ### Releasing bookings on event cancellation (SCRUM-148)

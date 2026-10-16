@@ -37,6 +37,7 @@ read matrix below, which lists read permissions only. The Safety Officer's
 | --- | --- | --- |
 | `venues.update` | Venue Staff, Event Coordinators | Venue editing |
 | `venues.unavailability` | Venue Staff | Mark and manage venue unavailability periods (SCRUM-133) |
+| `venues.holds` | Venue Staff | Place and view tentative holds (SCRUM-146) |
 | `bookings.request` | Event Coordinators | Booking requests |
 | `events.submit` | Event Organisers | `POST /api/events`, `/events/new` |
 | `events.own.update` | Event Organisers | `PATCH /api/event-workspace/organiser/:id`; owner check in lookup and write; colleague events remain view only |

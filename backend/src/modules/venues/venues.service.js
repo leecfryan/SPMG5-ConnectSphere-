@@ -320,6 +320,61 @@ async function releaseBookingsForCancelledEvent(eventId) {
   return data;
 }
 // ---------------------------------------------------------------------------
+// SCRUM-146: venue holds
+// ---------------------------------------------------------------------------
+
+// SCRUM-146: rows where status='hold' and expires_at is in the future, for the
+// availability calendar and booking-request conflict check.
+async function listActiveHoldsInRange(venueId, from, to) {
+  const { data, error } = await getSupabase()
+    .from("venue_bookings")
+    .select("booking_date, slot, event_name")
+    .eq("venue_id", venueId)
+    .eq("status", "hold")
+    .gte("booking_date", from)
+    .lte("booking_date", to)
+    .gt("expires_at", new Date().toISOString());
+
+  if (error) throw new Error(`Failed to list active holds: ${error.message}`);
+  return data;
+}
+
+// SCRUM-146 AC5: all hold rows including expired — for the hold history list.
+async function listHolds(venueId) {
+  const { data, error } = await getSupabase()
+    .from("venue_bookings")
+    .select("id, booking_date, slot, event_name, requested_by, expires_at, created_at")
+    .eq("venue_id", venueId)
+    .eq("status", "hold")
+    .order("booking_date", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(`Failed to list holds: ${error.message}`);
+  return data;
+}
+
+// SCRUM-146: one row per slot, all in one insert so the hold is atomic.
+async function createHold(venueId, { event_name, booking_date, slots, expires_at }, heldBy) {
+  const rows = slots.map((slot) => ({
+    venue_id: venueId,
+    booking_date,
+    slot,
+    status: "hold",
+    event_name,
+    requested_by: heldBy,
+    expires_at,
+  }));
+
+  const { data, error } = await getSupabase()
+    .from("venue_bookings")
+    .insert(rows)
+    .select("id, booking_date, slot, event_name, requested_by, expires_at, created_at");
+
+  if (error) throw new Error(`Failed to create hold: ${error.message}`);
+  return data;
+}
+
+// ---------------------------------------------------------------------------
 // SCRUM-133: venue unavailability periods
 // ---------------------------------------------------------------------------
 
@@ -403,4 +458,7 @@ module.exports = {
   getUnavailabilityPeriodById,
   updateUnavailabilityPeriod,
   deleteUnavailabilityPeriod,
+  listActiveHoldsInRange,
+  listHolds,
+  createHold,
 };
