@@ -5,7 +5,7 @@ const require = createRequire(import.meta.url);
 const { createEventWorkspaceService } = require("../../../src/modules/events/eventWorkspace.service");
 const storage = require("../../../../tests/playwright/support/registration-storage.cjs");
 
-function setup() {
+function setup({ equipmentService = { flagReservationsForReview: vi.fn(async () => ({ flagged: [] })) } } = {}) {
   const users = [
     { id: "alice", app_metadata: { roles: ["event_organiser"], organisation_id: "alpha" }, user_metadata: {} },
     { id: "bob", app_metadata: { roles: ["event_organiser"], organisation_id: "alpha" }, user_metadata: {} },
@@ -16,6 +16,7 @@ function setup() {
     purpose: "Training", description: "Client workshop", expected_attendance: 20,
     start_time: "2099-01-01T01:00:12.345Z", end_time: "2099-01-01T03:00:12.345Z",
     status: "APPROVED", coordinator_id: "coordinator-one", other_comments: "Private requirements",
+    equipment_needs: "Projector and a lectern",
     submitted_at: "2026-01-0" + (index + 1) + "T00:00:00Z",
   }));
   const client = storage(new Map([["fixture", { events: records }]]));
@@ -31,7 +32,7 @@ function setup() {
     query.update = fields => { updates(fields); return update(fields); };
     return query;
   });
-  return { service: createEventWorkspaceService(client), client, users, records, updates };
+  return { service: createEventWorkspaceService(client, equipmentService), client, users, records, updates, equipmentService };
 }
 
 test("[SCRUM-100-UNIT-001] Organiser reads own and colleague records but no unrelated client record", async () => {
@@ -131,4 +132,46 @@ test("[SCRUM-100-UNIT-008] Current trusted affiliation replaces old colleague ac
   users[0].app_metadata.organisation_id = "beta";
   expect(await service.find("organiser", "alice", "event-bob")).toBeNull();
   expect((await service.list("organiser", "alice")).map(event => event.id).sort()).toEqual(["event-alice", "event-cara"]);
+});
+
+// SCRUM-150 AC1/AC3: the diff-detection half of the reschedule-review flag -
+// equipmentService.flagReservationsForReview itself is proven directly in
+// tests/unit/equipment-flag-review.test.js. These tests only prove *when*
+// updateOrganiserEvent decides to call it, and with what.
+test("[TC-150-01] changing start_time flags equipment, with the new window and datesChanged true", async () => {
+  const { service, equipmentService } = setup();
+  // Still before the fixture's unchanged end_time (2099-01-01T03:00:12.345Z) -
+  // only start_time moves, so the write itself stays valid.
+  const result = await service.updateOrganiserEvent("alice", "event-alice", { start_time: "2099-01-01T00:30:00.000Z" });
+  expect(result.ok).toBe(true);
+  expect(equipmentService.flagReservationsForReview).toHaveBeenCalledExactlyOnceWith("event-alice", {
+    startTime: "2099-01-01T00:30:00.000Z",
+    endTime: "2099-01-01T03:00:12.345Z",
+    datesChanged: true,
+  });
+});
+
+test("[TC-150-02] changing only equipment_needs flags equipment with datesChanged false", async () => {
+  const { service, equipmentService } = setup();
+  const result = await service.updateOrganiserEvent("alice", "event-alice", { equipment_needs: "Also a whiteboard" });
+  expect(result.ok).toBe(true);
+  expect(equipmentService.flagReservationsForReview).toHaveBeenCalledExactlyOnceWith("event-alice", expect.objectContaining({ datesChanged: false }));
+});
+
+test("[TC-150-03] resubmitting the same start_time/end_time/equipment_needs values is a no-op - no flagging call", async () => {
+  const { service, records, equipmentService } = setup();
+  const result = await service.updateOrganiserEvent("alice", "event-alice", {
+    start_time: records[0].start_time,
+    end_time: records[0].end_time,
+    equipment_needs: records[0].equipment_needs,
+  });
+  expect(result.ok).toBe(true);
+  expect(equipmentService.flagReservationsForReview).not.toHaveBeenCalled();
+});
+
+test("[TC-150-22] a change unrelated to date/time/equipment needs (name) does not flag equipment", async () => {
+  const { service, equipmentService } = setup();
+  const result = await service.updateOrganiserEvent("alice", "event-alice", { name: "Renamed only" });
+  expect(result.ok).toBe(true);
+  expect(equipmentService.flagReservationsForReview).not.toHaveBeenCalled();
 });

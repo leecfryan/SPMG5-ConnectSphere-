@@ -67,7 +67,7 @@ function createReviewService({ repository }) {
       return { ok: false, reason: existing ? "conflict" : "not_found" };
     }
 
-    await equipmentService?.releaseReservationsForCancelledEvent?.(eventId, actorId);
+    await equipmentService?.releaseReservationsForEvent?.(eventId, actorId);
     await releaseVenueBookingsForCancelledEvent?.(eventId);
 
     return { ok: true, event };
@@ -78,9 +78,15 @@ function createReviewService({ repository }) {
   // POSTPONABLE_STATUSES (not ACTIVE_STATUSES, so an already-postponed event
   // can't be postponed again). Reuses the same venue release call cancel()
   // uses, synchronously - it releases every venue_bookings row tied to the
-  // event regardless of why the event changed. Equipment is out of scope for
-  // this story (AC3 names only venue bookings and holds).
-  async function postpone(eventId, actorId, reason, { isCoordinatorLead = false, releaseVenueBookingsForCancelledEvent } = {}) {
+  // event regardless of why the event changed.
+  //
+  // SCRUM-150: postpone never carries a new date, so there is no window left
+  // to hold equipment against - unlike a reschedule (eventWorkspace.service.js),
+  // which flags reservations for review instead of releasing them. Equipment
+  // release on postpone reuses the exact same function cancel() calls above;
+  // releaseReservationsForEvent never reads events.status, so the same call
+  // is correct here without any new equipment-side code path.
+  async function postpone(eventId, actorId, reason, { isCoordinatorLead = false, equipmentService, releaseVenueBookingsForCancelledEvent } = {}) {
     const parsed = readNote(reason);
     // A distinct key from cancel's "reason_required" - same FAILURES map in
     // review.controller.js, different message ("postponing" vs "cancelling").
@@ -97,6 +103,7 @@ function createReviewService({ repository }) {
       return { ok: false, reason: existing ? "conflict" : "not_found" };
     }
 
+    await equipmentService?.releaseReservationsForEvent?.(eventId, actorId);
     await releaseVenueBookingsForCancelledEvent?.(eventId);
 
     return { ok: true, event };

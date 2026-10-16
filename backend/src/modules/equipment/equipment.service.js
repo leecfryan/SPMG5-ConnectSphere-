@@ -4,7 +4,7 @@
 // production, and equipment.functional.test.js binds it to an in-memory fake
 // so role gating, overlap rejection, and event scoping can be exercised
 // without touching the live database (see that test file's header for why).
-const { WRITABLE_COLS, BLOCKING_REQUEST_STATUSES, isBlockingOverlap } = require("./equipment.validation");
+const { WRITABLE_COLS, BLOCKING_REQUEST_STATUSES, isBlockingOverlap, isStatusAvailable } = require("./equipment.validation");
 
 const REQUESTS_TABLE = "equipment_requests";
 const EQUIPMENT_TABLE = "equipment";
@@ -250,14 +250,105 @@ function createEquipmentService(client) {
     );
   }
 
+  // SCRUM-150 AC1/AC3: moves every PENDING/APPROVED request on the event to
+  // REVIEW_REQUIRED when the organiser changes its date, time or equipment
+  // needs. Unlike releaseReservationsForEvent, the reservation isn't assumed
+  // gone - REVIEW_REQUIRED stays in BLOCKING_REQUEST_STATUSES, so it keeps
+  // holding the unit until Technical Support explicitly re-approves or
+  // rejects it (AC3: it can never silently read as APPROVED again).
+  // borrow_start/borrow_end are only re-derived from the event's new window
+  // when datesChanged is true - an equipment_needs-only edit has no new
+  // window to re-derive, so the existing one is left as-is. An
+  // already-REVIEW_REQUIRED request is re-flagged too (TC-150-04): a second
+  // reschedule before Technical Support has acted must update the window to
+  // the latest change, not leave it pointing at the first one. REJECTED/
+  // RELEASED requests are never touched - already-closed requests are never
+  // reopened.
+  async function flagReservationsForReview(eventId, { startTime, endTime, datesChanged = false } = {}) {
+    const requests = await listRequestsByEvent(eventId);
+    const flaggable = requests.filter((request) =>
+      request.status === "PENDING" || request.status === "APPROVED" || request.status === "REVIEW_REQUIRED");
+
+    const flagged = [];
+    for (const request of flaggable) {
+      const patch = { status: "REVIEW_REQUIRED" };
+      if (datesChanged) {
+        patch.borrow_start = startTime;
+        patch.borrow_end = endTime;
+      }
+      await unwrap(
+        await client.from(REQUESTS_TABLE).update(patch).eq("id", request.id).select().maybeSingle(),
+        "flagReservationsForReview",
+      );
+      flagged.push(request.id);
+    }
+    return { flagged };
+  }
+
+  // SCRUM-150 AC2: is this one REVIEW_REQUIRED request's own equipment unit
+  // still free for its own borrow window? Checked on demand (read time and
+  // at approval time), never stored, matching this lane's existing style of
+  // deriving availability live rather than caching a status that could go
+  // stale (see docs/equipment-integration.md's note on equipment.status).
+  // Only this one unit/window is checked - finding a different unit of the
+  // same type that could cover it instead is Technical Support's own manual
+  // re-review, not this function's job (see the task note's Deliberately
+  // absent list).
+  async function isRequestAvailableForWindow(request) {
+    const unit = await findEquipmentById(request.equipment_id);
+    if (!unit || !isStatusAvailable(unit)) return false;
+
+    const others = await unwrap(
+      await client
+        .from(REQUESTS_TABLE)
+        .select("id, borrow_start, borrow_end")
+        .eq("equipment_id", request.equipment_id)
+        .neq("id", request.id)
+        .in("status", BLOCKING_REQUEST_STATUSES),
+      "isRequestAvailableForWindow",
+    );
+    return !others.some((other) => isBlockingOverlap(other, request.borrow_start, request.borrow_end));
+  }
+
+  // SCRUM-150 AC4: equipment's contribution to a future "confirm event"
+  // readiness check - there is no caller yet, since nothing in this codebase
+  // ever transitions an event to CONFIRMED (see the task note's Found, not
+  // built). REVIEW_REQUIRED, PENDING and REJECTED all count as unresolved,
+  // deliberately aligned with safetyReadiness.js's existing
+  // "REJECTED still blocks because Technical Support can revise it" policy
+  // for the same equipment_requests data - two readiness gates over the same
+  // table should never silently disagree about the same request. RELEASED
+  // and APPROVED are resolved: a released reservation has nothing left to
+  // arrange, an approved one is settled. `description` is left generic
+  // (no equipment-type join exists at this layer); a future caller can
+  // enrich it the same way getTechSupportDashboard's controller already
+  // joins equipment type onto raw requests, if it wants to.
+  const UNRESOLVED_EQUIPMENT_REASONS = Object.freeze({
+    PENDING: "Waiting for Technical Support Staff to reserve it.",
+    REJECTED: "Technical Support Staff reported an issue with this request.",
+    REVIEW_REQUIRED: "This reservation needs to be reviewed again after the event was rescheduled.",
+  });
+  async function hasUnresolvedEquipment(eventId) {
+    const requests = await listRequestsByEvent(eventId);
+    return requests
+      .filter((request) => UNRESOLVED_EQUIPMENT_REASONS[request.status])
+      .map((request) => ({
+        type: "equipment",
+        request_id: request.id,
+        description: "Equipment reservation",
+        reason: UNRESOLVED_EQUIPMENT_REASONS[request.status],
+        essential: true,
+      }));
+  }
+
   // SCRUM-104 AC1/AC2: every APPROVED request tied to a cancelled event is
   // released, regardless of its borrow window - unlike SCRUM-103's
   // retire-flagging (which is "today only" because retire has no date
   // context beyond "now"), a cancelled event has a real start/end, so a
   // future-dated APPROVED request is just as moot as one covering today.
   // Re-running this for the same event is safe without an explicit
-  // "already RELEASED" guard: the APPROVED/PENDING filter below simply
-  // matches nothing the second time.
+  // "already RELEASED" guard: the releasable filter below simply matches
+  // nothing the second time.
   //
   // SCRUM-148 AC3: a PENDING request also has nothing left to serve once its
   // event is cancelled, so it moves to RELEASED too, not REJECTED - REJECTED
@@ -266,19 +357,37 @@ function createEquipmentService(client) {
   // request stopped mattering. AC3's wording ("equipment reservations are
   // released") applies the same to a reservation that was never approved.
   //
-  // AC3 (equipment unit): for each unit that lost an APPROVED reservation,
-  // only revert equipment.status to AVAILABLE when it is actually IN_USE and
-  // no other PENDING/APPROVED request still covers today - a unit a
-  // technician has deliberately set to DAMAGED/MAINTENANCE/UNDER_MAINTENANCE/
-  // UNAVAILABLE is left alone (that is a more specific problem than "this
-  // reservation ended"). There is no cancellation endpoint in SCRUM-104
-  // (events.status was set directly in the database there) so actingUserId
-  // defaults to null; equipment.updated_by is nullable and is left null
-  // rather than inventing a system user when called that way.
-  async function releaseReservationsForCancelledEvent(eventId, actingUserId = null) {
+  // SCRUM-150: also called from postpone() (review.service.js), not just
+  // cancel - this function never reads events.status, it only needs an
+  // eventId, so the same release logic is correct for both. A REVIEW_REQUIRED
+  // request (SCRUM-150's reschedule-review flag) is released the same way:
+  // whatever triggered the review no longer matters once the event itself is
+  // cancelled or postponed, and a cancelled/postponed event must never leave
+  // a request stranded in REVIEW_REQUIRED (it has no live reschedule to
+  // resolve against any more).
+  //
+  // AC3 (equipment unit): for each unit that lost an APPROVED or
+  // REVIEW_REQUIRED reservation (both can correspond to equipment.status
+  // IN_USE), only revert equipment.status to AVAILABLE when it is actually
+  // IN_USE and no other PENDING/APPROVED/REVIEW_REQUIRED request still covers
+  // today - a unit a technician has deliberately set to
+  // DAMAGED/MAINTENANCE/UNDER_MAINTENANCE/UNAVAILABLE is left alone (that is
+  // a more specific problem than "this reservation ended"). There is no
+  // cancellation endpoint in SCRUM-104 (events.status was set directly in the
+  // database there) so actingUserId defaults to null; equipment.updated_by is
+  // nullable and is left null rather than inventing a system user when called
+  // that way.
+  async function releaseReservationsForEvent(eventId, actingUserId = null) {
     const requests = await listRequestsByEvent(eventId);
-    const approved = requests.filter((request) => request.status === "APPROVED");
-    const releasable = requests.filter((request) => request.status === "APPROVED" || request.status === "PENDING");
+    const potentiallyInUse = requests.filter(
+      (request) => request.status === "APPROVED" || request.status === "REVIEW_REQUIRED",
+    );
+    const releasable = requests.filter(
+      (request) =>
+        request.status === "APPROVED" ||
+        request.status === "PENDING" ||
+        request.status === "REVIEW_REQUIRED",
+    );
 
     const released = [];
     for (const request of releasable) {
@@ -289,7 +398,7 @@ function createEquipmentService(client) {
     const now = new Date().toISOString();
     const equipmentReverted = [];
     const equipmentSkipped = [];
-    for (const equipmentId of new Set(approved.map((request) => request.equipment_id))) {
+    for (const equipmentId of new Set(potentiallyInUse.map((request) => request.equipment_id))) {
       const unit = await findEquipmentById(equipmentId);
       if (!unit || unit.status !== "IN_USE") continue;
 
@@ -323,7 +432,10 @@ function createEquipmentService(client) {
     listApprovedRequestsForEquipmentIds,
     createRequest,
     updateStatus,
-    releaseReservationsForCancelledEvent,
+    flagReservationsForReview,
+    isRequestAvailableForWindow,
+    hasUnresolvedEquipment,
+    releaseReservationsForEvent,
   };
 }
 
