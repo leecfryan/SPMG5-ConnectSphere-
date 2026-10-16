@@ -673,6 +673,9 @@ function createVenuesController(service) {
       }
       const venue = await getVenueById(id);
       if (!venue) return res.status(404).json({ error: "Venue not found" });
+      // SCRUM-135: recheck on every read so flags from expired or released holds
+      // are cleared before the response is sent, not just after a venue update.
+      await recheckConflictsAfterUpdate(id, venue);
       const requests = await listConflictingRequests(id);
       res.status(200).json({ data: requests.map(withStatus) });
     } catch (err) {

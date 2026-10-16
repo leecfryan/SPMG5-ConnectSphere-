@@ -311,6 +311,9 @@ test("[TC-SCRUM-135-12] GET /booking-conflicts as venue_staff returns flagged re
   expect(item.conflict_flags[0].type).toBe("setup");
   expect(item.conflict_flags[0].conflicting_with).toBe("Morning Session");
   expect(item.booking_date).toBe("2099-10-10");
+  // Recheck runs on every GET so expired/released holds are cleared first.
+  expect(service.recheckConflictsAfterUpdate).toHaveBeenCalledOnce();
+  expect(service.recheckConflictsAfterUpdate).toHaveBeenCalledWith(venueId, venueBase);
 });
 
 test("[TC-SCRUM-135-13] GET /booking-conflicts as event_coordinator returns 403", async () => {
@@ -323,6 +326,7 @@ test("[TC-SCRUM-135-14] GET /booking-conflicts for non-existent venue returns 40
   service.getVenueById.mockResolvedValue(null);
   const res = await get(`/${venueId}/booking-conflicts`, "venue_staff");
   expect(res.status).toBe(404);
+  expect(service.recheckConflictsAfterUpdate).not.toHaveBeenCalled();
 });
 
 test("[TC-SCRUM-135-15] GET /booking-conflicts with no flags returns empty array", async () => {
@@ -331,4 +335,5 @@ test("[TC-SCRUM-135-15] GET /booking-conflicts with no flags returns empty array
   expect(res.status).toBe(200);
   const body = await res.json();
   expect(body.data).toEqual([]);
+  expect(service.recheckConflictsAfterUpdate).toHaveBeenCalledOnce();
 });
