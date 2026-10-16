@@ -3,22 +3,27 @@
 Test evidence for the Venue lane (epic SCRUM-6). Behaviour, API and the schema reference live in
 [Venue integration](venue-integration.md); this file is the catalogue of what is tested and where.
 
-**89 automated backend tests across five suites, all passing**, plus manual cases run against the shared Supabase
-database and recorded in the team's TESTS sheet.
+**159 automated backend tests across eight suites, plus 7 browser journeys and 13 frontend component tests, all
+passing.** Manual cases are run against the shared Supabase database and recorded in the team's TESTS sheet.
 
 | Suite | File | Tests |
 | --- | --- | --- |
 | Decisions | `backend/tests/integration/venueDecisions.test.js` | 22 |
-| Catalogue, calendar, requests | `backend/tests/integration/venues.integration.test.js` | 26 |
-| Storage and query scope | `backend/tests/integration/venues.storage.test.js` | 4 |
+| Catalogue, calendar, requests | `backend/tests/integration/venues.integration.test.js` | 53 |
+| Storage and query scope | `backend/tests/integration/venues.storage.test.js` | 5 |
 | Unavailability periods | `backend/tests/integration/venues.unavailability.test.js` | 21 |
 | Setup and turnaround (committed period) | `backend/tests/integration/venues.turnaround.test.js` | 16 |
-| Browser journeys | `tests/playwright/venues.browser.spec.cjs` | 6 |
+| Release on event cancellation | `backend/tests/integration/venue-release-cancelled-event.test.js` | 3 |
+| Per-venue booking checks (SCRUM-138) | `backend/tests/integration/venueBookingChecks.test.js` | 22 |
+| Per-venue booking checks, unit (SCRUM-138) | `backend/tests/unit/venues/venueBookingChecks.test.js` | 17 |
+| Booking checks, report, button and entry link (SCRUM-138) | `frontend/src/features/venues/components/*.test.jsx` | 13 |
+| Browser journeys | `tests/playwright/venues.browser.spec.cjs` | 7 |
 
 Run everything:
 
 ```bash
-npm --prefix backend test                # all three backend suites
+npm --prefix backend test                # all backend suites
+npm --prefix frontend test -- --run      # frontend components
 npm run test:playwright                  # browser and API
 npm --prefix backend run check
 npm --prefix frontend run lint
@@ -42,16 +47,50 @@ Test names lead with a bracketed tag, so the runner's output is the traceability
 | SCRUM-17 | Availability calendar | `[SCRUM-17]` | TC-110, TC-124 to TC-127 |
 | SCRUM-21 | Submit a booking request | `[SCRUM-21]`, `[VENUE-SCOPE-001/002/003]` | TC-111 to TC-116, TC-128, TC-129 |
 | SCRUM-22 | Decide a venue booking request | `[SCRUM-22]`, `[VENUE-DECIDE-001]` to `[VENUE-DECIDE-004]` | TC-131 to TC-140 |
+
+## Multi-venue event coverage (SCRUM-137)
+
+The multi-venue implementation keeps one request and independent status per
+venue booking. New submissions require `purpose`; existing rows without a
+purpose remain readable as legacy data. The event-scoped request endpoint uses
+`event_id` without weakening coordinator ownership scope.
+
+Coverage includes:
+
+- Multiple venue requests for one event, including different dates or periods.
+- Per-booking venue, purpose, booking date and slot-period display.
+- Independent confirmation and rejection with mixed outcomes visible together.
+- Required purpose validation and legacy `Not recorded` display.
+- Invalid event filters and coordinator cross-event isolation.
+
+The confirmed-slot exclusion constraint remains the concurrency authority for
+venue conflicts. No registration, waitlist, event-capacity or equipment behavior
+is changed by this story.
+
+The shared `EventVenueBookings` component renders all related bookings together
+on Browse Event details, My Events cards and My Event details. Browse Events
+cards deliberately omit venues until the attendee opens an event. Each rendered
+booking includes venue, location, purpose, date, period and derived status.
+
+After the fixture correction and SCRUM-138 browser journey, the full Playwright
+verification on 2026-10-16 ran 186 tests: 186 passed and 0 failed.
+`[VENUE-E2E-002]` supplies `Planning and coordination session`, and
+`[VENUE-E2E-005]` verifies that one failed venue check does not alter the other
+booking results. This matches the current required-purpose contract; production
+behavior was not loosened.
+
 | SCRUM-20 | Block conflicting venue booking | `[SCRUM-20]` | TC-167 to TC-175 |
 | SCRUM-102 | Reject with a reason and suggested alternative | `[SCRUM-102]` | TC-220 to TC-229 |
 | SCRUM-18 | Search and filter potential venues | `[SCRUM-18]` | TC-260 to TC-273 |
 | SCRUM-19 | Assess shortlisted venue suitability | `[SCRUM-19]` | TC-274 to TC-286 |
 | SCRUM-133 | Mark a venue temporarily unavailable | `[TC-SCRUM-133-01]` to `[TC-SCRUM-133-21]` | TC-SCRUM-133-01 to TC-SCRUM-133-21 |
 | SCRUM-134 | Setup and turnaround time in conflict checks | `[TC-SCRUM-134-01]` to `[TC-SCRUM-134-11]` | TC-SCRUM-134-01 to TC-SCRUM-134-11 |
+| SCRUM-138 | Check each venue booking of an event independently | `[SCRUM-138]`, `[VENUE-CHECK-001/002]`, `[SCRUM-138-UI-001]` to `[SCRUM-138-UI-008]`, `[VENUE-E2E-005]` | TC-SCRUM-138-01 to TC-SCRUM-138-16 |
 
 Cross-cutting guards that apply to every story: `[VENUE-AUTH-001]` (seven identities against eight endpoints),
 `[VENUE-AUTH-002]`, `[VENUE-INPUT-001]` (forged ownership and role fields), `[VENUE-CONFIG-001]` (missing venue
-storage leaves sign-in working), `[VENUE-DB-001]` to `[VENUE-DB-004]`, and `[ACCESS-VENUE-001/002]` from the RBAC
+storage leaves sign-in working), `[VENUE-DB-001]` to `[VENUE-DB-005]`, `[VENUE-CHECK-001/002]` (the check report
+needs a verified token and `bookings.read`), and `[ACCESS-VENUE-001/002]` from the RBAC
 lane (event names redacted from coordinators; only accepted or approved events may request a venue).
 
 ---
@@ -277,9 +316,111 @@ for several events at once.
 
 ---
 
-## 5. Coverage note
+## 5. SCRUM-138 — Check each venue booking of an event independently
 
-`npm --prefix backend run test:cov` reports the whole backend. The venue modules are exercised through the three
+**Acceptance criteria, word for word**
+
+1. Suitability, availability and conflict checks run separately for each venue booking.
+2. The result is reported per venue, naming the venue that failed and why.
+3. A failed check on one venue does not alter the status of the other venue bookings.
+
+The gap this story fills: submission already checks one booking as it is made (`postBookingRequest`), but nothing
+re-read an event's existing bookings together and reported per venue. The endpoint is **read-only**, which is how
+AC3 is satisfied: it writes nothing, so a failure cannot change any booking's status.
+
+### Traceability
+
+| AC | Criterion | Test cases | Where the rule lives |
+| --- | --- | --- | --- |
+| 1 | Three checks run separately per booking | 01, 03, 05, 07, 08, 09, 15, 16 | `checkBooking` in `backend/src/modules/venues/venueBookingChecks.js`; the per-booking `try/catch` in `getEventBookingChecks` |
+| 2 | Per-venue result naming the venue and the reason | 02, 04, 15, 16, 17 | `venue_name` on every result and per-check `reasons`; `VenueBookingCheckReport.jsx` renders one card per venue; `EventVenueBookings.jsx` links from the coordinator's event page |
+| 3 | A failed check alters nothing | 06 | `GET .../booking-checks` calls no write function; each calendar excludes the event's own rows |
+| DoD | Who may run the check | 10, 11, 12, 13, 14 | `bookings.read` + `bookingScope` in `backend/src/routes/venues.routes.js` |
+
+### Test cases
+
+| ID | AC | Type | Scenario | Expected result | Automated by | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-138-01 | 1 | Happy | Every booking on the event is checked on its own | 200; one result per booking, ordered by date then venue; the fitting venue all passed, the over-capacity venue suitability failed | `[SCRUM-138] Each booking on the event gets its own verdicts` | 2026-10-15 ✅ |
+| TC-SCRUM-138-02 | 2 | Happy | The failing venue is named with a specific reason | `venue_name` is the failing venue; the reason names the numbers (`expected_attendees (100) exceeds the venue capacity of 50`) | same integration suite; `[SCRUM-138-UI-002]` | 2026-10-15 ✅ |
+| TC-SCRUM-138-03 | 1 | Negative | One venue's data cannot be read, or a booking's own row is incomplete | 200; only that venue is `not_checked` with a note; the other venue still reports | `[SCRUM-138] A venue whose data cannot be read is reported alone`; `[SCRUM-138] A booking whose own row is incomplete is reported, not crashed` | 2026-10-15 ✅ |
+| TC-SCRUM-138-04 | 2 | Boundary | An event with no bookings | 200; `results: []`; the event is still named | `[SCRUM-138] An event with no bookings reports an empty list`; `[SCRUM-138-UI-008]` | 2026-10-15 ✅ |
+| TC-SCRUM-138-05 | 1 | Boundary | A booking with nothing live (rejected or cancelled) | `overall: not_checked`, a note naming the status, all three checks `passed: null` | `[SCRUM-138] A booking with nothing live is reported, not checked`; `[SCRUM-138] a booking with no live slots reports not checked with its status` | 2026-10-15 ✅ |
+| TC-SCRUM-138-06 | 3 | Conflict | A failed check changes nothing | 200; every status identical before and after; no write function called | `[SCRUM-138] The check runs no write and leaves every booking as it was` | 2026-10-15 ✅ |
+| TC-SCRUM-138-07 | 1 | Boundary | A venue is never its own conflict | The event's own confirmed rows are excluded; conflicts passed | `[SCRUM-138] The event's own booking is not reported as its own conflict`; `[SCRUM-138] the booking's own rows are neither a conflict nor a duplicate` | 2026-10-15 ✅ |
+| TC-SCRUM-138-08 | 1 | Boundary | An occupied setup or turnaround buffer slot | The reason names the slot and the setup or turnaround time, for that venue only | `[SCRUM-138] an occupied setup buffer is reported against this booking`; `[SCRUM-138] an occupied turnaround buffer is reported against this booking` | 2026-10-15 ✅ |
+| TC-SCRUM-138-09 | 1 | Boundary | A recorded unavailability period | Availability fails quoting the recorded reason; conflicts still passed | `[SCRUM-138] a recorded unavailability fails availability and keeps its reason`; `[SCRUM-138] A recorded unavailability fails availability for that venue only` | 2026-10-15 ✅ |
+| TC-SCRUM-138-10 | DoD | Cross-cutting | No token, an invalid token | 401; nothing read | `[VENUE-CHECK-001]` (2 cases) | 2026-10-15 ✅ |
+| TC-SCRUM-138-11 | DoD | Cross-cutting | Roles without `bookings.read` | 403 for attendee, organiser, coordinator lead, safety officer, technical support; nothing read | `[VENUE-CHECK-002]` (5 cases) | 2026-10-15 ✅ |
+| TC-SCRUM-138-12 | DoD | Cross-cutting | Another coordinator's event | 404 `Event not found`, the same answer as a missing event; the scope reached the query | `[SCRUM-138] Another coordinator's event is not found, exactly like a missing one` | 2026-10-15 ✅ |
+| TC-SCRUM-138-13 | DoD | Negative | A malformed event id | 400 before any read | `[SCRUM-138] A malformed event id is refused before any read` | 2026-10-15 ✅ |
+| TC-SCRUM-138-14 | DoD | Failure | Missing venue storage | 503 | `[SCRUM-138] Missing venue storage answers 503, not a crash` | 2026-10-15 ✅ |
+| TC-SCRUM-138-15 | 1, 2 | Cross-cutting | The report in the browser and its failure states | One card per venue; the failing venue shows Failed with its reasons, the passing one Passed; a check failure offers Retry | `[SCRUM-138-UI-001]` to `[SCRUM-138-UI-008]` | 2026-10-15 ✅ |
+| TC-SCRUM-138-16 | 1, 2, 3 | Cross-cutting | Full journey through the real UI and backend | Per-venue report rendered; the blocked venue named with its reason; the request cards' statuses unchanged | `[VENUE-E2E-005]` | 2026-10-15 ✅ |
+| TC-SCRUM-138-17 | 2 | Cross-cutting | Reaching the check from the coordinator's own event page | The event's Venues section links to the check; a role without `bookings.read` sees the venues but no link; no link when there are no bookings, no event id, or no session | `[SCRUM-138-UI-009]` to `[SCRUM-138-UI-013]` | 2026-10-15 ✅ |
+
+### Executed results
+
+| Suite | Command | Result (2026-10-16) |
+| --- | --- | --- |
+| Backend unit + integration | `npm --prefix backend test` | 899 passed, 43 skipped, 0 failed |
+| Frontend | `npm --prefix frontend test -- --run --maxWorkers=3` | 456 passed across 45 files, 0 failed |
+| Playwright browser + API | `npm run test:playwright` | 186 passed, 0 failed |
+| Lint | `npm --prefix backend run check` · `npm --prefix frontend run lint` | clean |
+| Build | `npm --prefix frontend run build` | success |
+| Coverage | `npm --prefix backend run test:cov` · `npm --prefix frontend run test:cov -- src/features/venues` | `venueBookingChecks.js` 100% statements/branches/lines; every new controller, service, report and button line covered |
+
+The frontend suite is passed `--maxWorkers=3` locally: on a 20-core machine vitest tries to spawn 20 workers at
+once and Windows fails some of them, which costs `Timeout waiting for worker to respond`. With the limit it is
+reliably green; CI runs on its own runner.
+
+Thirteen frontend cases and the Playwright journey are new in this story; the earlier Playwright tests still pass after
+the fixture change noted under *Decisions*.
+
+### Manual cases
+
+1. Sign in as a seeded coordinator who owns an approved event with two venue bookings, one healthy.
+2. Open **My Events → that event** and click **Check each venue booking** under *Venues*. That opens the
+   event-scoped list `/venues/booking-requests?event=<event id>`, which can also be typed directly.
+3. Click **Check venue bookings**: one card per venue, each listing Suitability, Availability and Conflicts. The
+   problem venue reads Failed with a reason sentence; the other reads Passed.
+4. Have Venue Staff mark the problem booking's slot unavailable (or confirm another event into it), check again, and
+   confirm only that venue's card changes while the booking statuses below stay as they were.
+
+### Decisions
+
+- **Read-only** (AC3): the endpoint writes nothing, proven by asserting no write function runs and every status is
+  identical before and after.
+- **Suitability reuses SCRUM-87's `validateAgainstVenue`** on the booking's own requirements against the venue's
+  current catalogue. SCRUM-19's event-vs-venue assessment stays a pre-submission tool.
+- **Only live bookings are checked**; rejected and cancelled bookings are listed as `not_checked`.
+- **`findSlotProblems` is not reused**: it answers with display strings for the submission 409, while this story
+  classifies each outcome as availability or conflict. Both read the same calendar and `REQUESTABLE_STATUSES` rule.
+- **The Playwright fake storage gained three narrow changes** (`tests/playwright/support/venue-storage.cjs`):
+  `listSlotRowsForDate` returns the request `id` (a booking must not read as its own duplicate), `listBookingRequests`
+  honours the `eventId` argument it already accepted, and `getEventForCheckReport` was added with the real service's
+  scope rule. No production behaviour changed.
+- **The check is linked from the coordinator's own event page.** Nothing linked to
+  `/venues/booking-requests?event=<id>`, so `EventVenueBookings` (venue lane) now offers a **Check each venue
+  booking** link, shown only when it is given an event id and the caller holds `bookings.read`. `ManagedEventDetailPage`
+  passes the id; the *My Events* list does not, because it renders the component inside its own anchor and a second
+  anchor would be invalid. The server still authorises the check itself.
+
+### Deliberately absent
+
+Stored check results or a check history, which no AC asks for and which is why there is no schema change; re-checking
+whether `booking_date` still falls inside the event's dates, which the submission flow owns; overlap between two
+venues of the same event, because a multi-venue event may run parallel streams; remediation actions from the report;
+automatic re-checks on a decision; and equipment arrangements, which the Equipment lane's SCRUM-139 readiness covers.
+
+---
+
+## 6. Coverage note
+
+`npm --prefix backend run test:cov` reports the whole backend. Most venue modules are exercised through the
 integration suites above rather than by unit tests of their own, so coverage of
 `venues.availability.js`, `venues.validation.js` and `venues.bookingRequests.validation.js` is indirect. Those three
 files import nothing, which is what makes direct unit tests cheap to add; that gap is known and unowned.
+
+`venueBookingChecks.js` (SCRUM-138) is the exception: it has a direct unit suite and reports 100% on statements,
+branches and lines.

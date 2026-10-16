@@ -109,7 +109,12 @@ for setup, preserved functionality and combined test commands.
 Venue Staff and Event Coordinators can open `/venues` from the workspace.
 The catalogue, operating-information editor, availability calendar and booking
 request review are integrated with shared sign-in and RBAC. Coordinators request
-bookings for their assigned events. See [Venue integration](docs/venue-integration.md)
+bookings for their assigned events, and can check them one venue at a time:
+from an event under **My Events**, the Venues section links to an event-scoped
+booking list whose **Check venue bookings** button reports
+suitability, availability and conflicts for each venue separately, naming the
+venue and the reason when one fails without changing any booking. See
+[Venue integration](docs/venue-integration.md)
 for routes, role permissions and the venue schema reference. Schema changes are
 applied by hand in the Supabase dashboard. Earlier venue migrations are recorded
 in that guide; RBAC's existing event-review SQL reference 007 is retained (see

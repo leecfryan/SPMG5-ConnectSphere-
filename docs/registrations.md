@@ -174,7 +174,7 @@ New feature folder at `frontend/src/features/registrations/`.
 | File | Route | Scrum | Description |
 | --- | --- | --- | --- |
 | `pages/EventListPage.jsx` | /events | 32 | Lists events open for registration |
-| `pages/EventDetailPage.jsx` | /events/:eventId | 32 | Event info + registration form |
+| `pages/EventDetailPage.jsx` | /events/:eventId | 32 | Event info, all venue bookings + registration form |
 | `pages/MyRegistrationsPage.jsx` | /registrations/me | 33 | Attendee's registrations + statuses |
 | `pages/RegistrationDetailPage.jsx` | /registrations/me/:registrationId | 33, 34 | Single registration status + withdraw |
 
