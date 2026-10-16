@@ -234,6 +234,10 @@
 .eq-status-pending { background: #fff7e6; color: #92600a; }
 .eq-status-approved { background: #e6f4ea; color: #185c4b; }
 .eq-status-rejected { background: #fff2ee; color: #97372c; }
+/* SCRUM-150: flagged by a reschedule/postpone, needs Technical Support's attention again. */
+.eq-status-review_required { background: #eef2ff; color: #3730a3; }
+/* SCRUM-150 AC2: "not available for these dates" sub-label, review_required rows only. */
+.eq-status-unavailable { background: #fff2ee; color: #97372c; }
 
 /* --- Scrum-29 follow-up: equipment catalogue status badges (distinct from
    the request-status badges above, hence the "-equipment-" segment) --- */

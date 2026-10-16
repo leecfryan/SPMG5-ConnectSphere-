@@ -13,7 +13,7 @@ const LEAD_PERMISSIONS = [
 let roles, stored, server, base;
 const repository = { findById: vi.fn(), cancel: vi.fn(), postpone: vi.fn(), transitionStatus: vi.fn() };
 const releaseVenueBookingsForCancelledEvent = vi.fn();
-const equipmentService = { releaseReservationsForCancelledEvent: vi.fn() };
+const equipmentService = { releaseReservationsForEvent: vi.fn() };
 const queue = { findSubmittedUnassigned: vi.fn() };
 const authClient = { auth: { getUser: vi.fn(async () => ({
   data: { user: {
@@ -45,7 +45,7 @@ beforeEach(() => {
     return { ...stored };
   });
   releaseVenueBookingsForCancelledEvent.mockReset().mockResolvedValue([]);
-  equipmentService.releaseReservationsForCancelledEvent.mockReset().mockResolvedValue({});
+  equipmentService.releaseReservationsForEvent.mockReset().mockResolvedValue({});
   repository.transitionStatus.mockReset();
   queue.findSubmittedUnassigned.mockReset().mockResolvedValue([{ ...stored }]);
 });
@@ -139,9 +139,16 @@ test("[SCRUM-142-POLICY-001] the legacy identifier grants nothing directly outsi
   expect(getPermissions(["event_coordinator_lead"]).sort()).toEqual(LEAD_PERMISSIONS);
 });
 
+// SCRUM-150 (a later, unrelated story) changed what postpone() itself does:
+// it now releases equipment via equipmentService.releaseReservationsForEvent,
+// same as cancel. This test's original "no equipment release" assertion was
+// true for SCRUM-142's role rename verification at the time it was written,
+// and is updated here to match postpone's new behaviour - not a change to
+// anything this test actually verifies (venue release, the role rename
+// itself), just the one fact about postpone that moved under it.
 test.each([
   ["011", "event_coordinator_lead"], ["012", "event_ops_manager"],
-])("[SCRUM-142-INT-%s] %s retains postponement access with venue release and no equipment release", async (_id, role) => {
+])("[SCRUM-142-INT-%s] %s retains postponement access with venue release and equipment release", async (_id, role) => {
   roles = [role];
   const response = await send(`/api/internal/events/${EVENT_ID}/postpone`, "POST", { reason: "New date not yet known" });
   expect(response.status).toBe(200);
@@ -149,7 +156,7 @@ test.each([
   expect(repository.postpone).toHaveBeenCalledWith(EVENT_ID,
     expect.objectContaining({ postponed_by: "lead", postponement_reason: "New date not yet known" }), undefined);
   expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledWith(EVENT_ID);
-  expect(equipmentService.releaseReservationsForCancelledEvent).not.toHaveBeenCalled();
+  expect(equipmentService.releaseReservationsForEvent).toHaveBeenCalledWith(EVENT_ID, "lead");
 });
 
 test("[SCRUM-142-INT-013] forged lead claims cannot postpone or release arrangements", async () => {
@@ -161,7 +168,7 @@ test("[SCRUM-142-INT-013] forged lead claims cannot postpone or release arrangem
   expect(response.status).toBe(403);
   expect(repository.postpone).not.toHaveBeenCalled();
   expect(releaseVenueBookingsForCancelledEvent).not.toHaveBeenCalled();
-  expect(equipmentService.releaseReservationsForCancelledEvent).not.toHaveBeenCalled();
+  expect(equipmentService.releaseReservationsForEvent).not.toHaveBeenCalled();
   expect(stored).toEqual(before);
 });
 
@@ -227,7 +234,7 @@ test("[SCRUM-142-SAFETY-INT-005] officer-only business reads and writes are refu
   expect(repository.transitionStatus).not.toHaveBeenCalled();
   expect(queue.findSubmittedUnassigned).not.toHaveBeenCalled();
   expect(releaseVenueBookingsForCancelledEvent).not.toHaveBeenCalled();
-  expect(equipmentService.releaseReservationsForCancelledEvent).not.toHaveBeenCalled();
+  expect(equipmentService.releaseReservationsForEvent).not.toHaveBeenCalled();
   expect(stored).toEqual(before);
 });
 

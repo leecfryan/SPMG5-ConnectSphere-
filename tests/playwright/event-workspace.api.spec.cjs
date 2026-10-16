@@ -220,8 +220,16 @@ test('[EVENT-API-110] SCRUM-100: Invalid bodies and malformed references return 
   expect(await accounts.events(organiser)).toEqual(before);
 });
 
+// SCRUM-150 (a later, unrelated story) changed what postpone() itself does:
+// it now releases equipment via equipmentService.releaseReservationsForEvent,
+// same as cancel. This test's original title and assertion ("keeps equipment
+// until cancellation") were true for SCRUM-142's role rename verification at
+// the time it was written, and are updated here to match postpone's new
+// behaviour - not a change to anything this test actually verifies (venue
+// release, the lead/ops-manager postpone path itself), just the one fact
+// about postpone that moved under it.
 for (const [id, role] of [['001', 'event_coordinator_lead'], ['002', 'event_ops_manager']]) {
-  test(`[SCRUM-142-MERGE-API-${id}] ${role} postpones another coordinator's event and keeps equipment until cancellation`, async ({ accounts, request }) => {
+  test(`[SCRUM-142-MERGE-API-${id}] ${role} postpones another coordinator's event and releases its equipment`, async ({ accounts, request }) => {
     const { headers, event, first, date, update } = await setupWorkflow(accounts, request);
     expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
     await accounts.updateEvent(event.id, { status: 'APPROVED' });
@@ -248,7 +256,7 @@ for (const [id, role] of [['001', 'event_coordinator_lead'], ['002', 'event_ops_
     expect((await booking.json()).data.slots.map(slot => slot.status)).toEqual(['cancelled']);
     const equipment = await request.get(equipmentPath, { headers: headers.first });
     expect(equipment.status()).toBe(200);
-    expect((await equipment.json()).data.find(item => item.id === equipmentId).status).toBe('PENDING');
+    expect((await equipment.json()).data.find(item => item.id === equipmentId).status).toBe('RELEASED');
     expect((await request.post(`/api/internal/events/${event.id}/postpone`, { headers: leadHeaders, data: { reason: 'Repeat' } })).status()).toBe(409);
     const cancel = await request.post(`/api/internal/events/${event.id}/cancel`, { headers: leadHeaders, data: { reason: 'No replacement date' } });
     expect(cancel.status()).toBe(200);

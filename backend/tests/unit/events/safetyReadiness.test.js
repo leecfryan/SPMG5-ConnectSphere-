@@ -71,6 +71,15 @@ test.each([
   expect(findMissingArrangements({ venueRequests: [CONFIRMED_HALL_A], equipmentRequests })).toEqual([]);
 });
 
+test("SCRUM-150: a REVIEW_REQUIRED request (flagged by a reschedule) blocks, same as PENDING", () => {
+  expect(findMissingArrangements({
+    venueRequests: [CONFIRMED_HALL_A],
+    equipmentRequests: [equipmentRequest("Projector", "REVIEW_REQUIRED")],
+  })).toEqual([
+    { kind: "equipment", label: "Projector", reason: "This reservation needs to be reviewed again after the event was rescheduled." },
+  ]);
+});
+
 test("SCRUM-139 AC2: every missing item is listed together, venue first", () => {
   expect(findMissingArrangements({
     venueRequests: [],
