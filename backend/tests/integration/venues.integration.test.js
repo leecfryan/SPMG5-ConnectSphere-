@@ -15,6 +15,7 @@ const body = { event_id: eventId, booking_date: bookingDate, slots: ["am"], expe
   room_layout: "Theatre", required_facilities: ["Projector"], accessibility_requirements: ["Lift"] };
 const service = Object.fromEntries(["listVenues", "getVenueById", "updateVenue", "listBookingsInRange", "listUnavailabilityInRange",
   "listBookingsForVenuesOnDate", "listUnavailabilityForVenuesOnDate", "getEventById", "listBookableEvents", "listSlotRowsForDate", "submitBookingRequest", "getBookingRequestById", "listBookingRequests",
+  "recheckConflictsAfterUpdate", "listConflictingRequests",
   "listActiveHoldsInRange", "listHolds", "createHold"].map((name) => [name, vi.fn()]));
 const authClient = { auth: { getUser: async (token) => ({ data: { user: token === "invalid" ? null : {
   id: "verified-user", app_metadata: { roles: token.split(",") }, user_metadata: { roles: ["venue_staff"] },

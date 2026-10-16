@@ -69,6 +69,8 @@ function createVenuesController(service) {
     getUnavailabilityPeriodById,
     updateUnavailabilityPeriod,
     deleteUnavailabilityPeriod: removePeriod,
+    recheckConflictsAfterUpdate,
+    listConflictingRequests,
     listActiveHoldsInRange,
     listHolds,
     createHold,
@@ -180,6 +182,15 @@ function createVenuesController(service) {
       }
 
       const venue = await updateVenue(id, value);
+
+      // SCRUM-135: if setup or turnaround changed, recheck existing confirmed
+      // bookings at this venue and update their conflict_flags accordingly.
+      const setupChanged = "setup_minutes" in value && value.setup_minutes !== existing.setup_minutes;
+      const turnaroundChanged = "turnaround_minutes" in value && value.turnaround_minutes !== existing.turnaround_minutes;
+      if (setupChanged || turnaroundChanged) {
+        await recheckConflictsAfterUpdate(id, venue);
+      }
+
       res.status(200).json({ data: venue });
     } catch (err) {
       next(err);
@@ -651,6 +662,28 @@ function createVenuesController(service) {
   }
 
   // ---------------------------------------------------------------------------
+  // SCRUM-135: view booking conflict flags for a venue
+  // ---------------------------------------------------------------------------
+
+  async function getConflictFlags(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) {
+        return res.status(400).json({ error: "Invalid venue id" });
+      }
+      const venue = await getVenueById(id);
+      if (!venue) return res.status(404).json({ error: "Venue not found" });
+      // SCRUM-135: recheck on every read so flags from expired or released holds
+      // are cleared before the response is sent, not just after a venue update.
+      await recheckConflictsAfterUpdate(id, venue);
+      const requests = await listConflictingRequests(id);
+      res.status(200).json({ data: requests.map(withStatus) });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // SCRUM-133: venue unavailability periods
   // ---------------------------------------------------------------------------
 
@@ -798,6 +831,7 @@ function createVenuesController(service) {
     getBookingRequest,
     getEventBookingChecks,
     patchBookingRequestDecision,
+    getConflictFlags,
     getUnavailabilityPeriods,
     postUnavailabilityPeriod,
     patchUnavailabilityPeriod,

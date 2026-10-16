@@ -3,7 +3,7 @@
 Test evidence for the Venue lane (epic SCRUM-6). Behaviour, API and the schema reference live in
 [Venue integration](venue-integration.md); this file is the catalogue of what is tested and where.
 
-**174 automated backend tests across nine suites, plus 7 browser journeys and 13 frontend component tests, all
+**192 automated backend tests across ten suites, plus 7 browser journeys and 17 frontend component tests, all
 passing.** Manual cases are run against the shared Supabase database and recorded in the team's TESTS sheet.
 
 | Suite | File | Tests |
@@ -18,6 +18,8 @@ passing.** Manual cases are run against the shared Supabase database and recorde
 | Per-venue booking checks, unit (SCRUM-138) | `backend/tests/unit/venues/venueBookingChecks.test.js` | 17 |
 | Booking checks, report, button and entry link (SCRUM-138) | `frontend/src/features/venues/components/*.test.jsx` | 13 |
 | Tentative holds | `backend/tests/integration/venues.holds.test.js` | 15 |
+| Conflict flags (SCRUM-135) | `backend/tests/integration/venues.conflicts.test.js` | 18 |
+| Conflict flags page (SCRUM-135) | `frontend/src/features/venues/pages/VenueConflictsPage.test.jsx` | 4 |
 | Browser journeys | `tests/playwright/venues.browser.spec.cjs` | 7 |
 
 Run everything:
@@ -86,6 +88,7 @@ behavior was not loosened.
 | SCRUM-19 | Assess shortlisted venue suitability | `[SCRUM-19]` | TC-274 to TC-286 |
 | SCRUM-133 | Mark a venue temporarily unavailable | `[TC-SCRUM-133-01]` to `[TC-SCRUM-133-21]` | TC-SCRUM-133-01 to TC-SCRUM-133-21 |
 | SCRUM-134 | Setup and turnaround time in conflict checks | `[TC-SCRUM-134-01]` to `[TC-SCRUM-134-11]` | TC-SCRUM-134-01 to TC-SCRUM-134-11 |
+| SCRUM-135 | Flag bookings conflicting after setup/turnaround change | `[TC-SCRUM-135-01]` to `[TC-SCRUM-135-17]`, `[TC-SCRUM-135-UI-01]` to `[TC-SCRUM-135-UI-04]` | TC-SCRUM-135-01 to TC-SCRUM-135-17 |
 | SCRUM-138 | Check each venue booking of an event independently | `[SCRUM-138]`, `[VENUE-CHECK-001/002]`, `[SCRUM-138-UI-001]` to `[SCRUM-138-UI-008]`, `[VENUE-E2E-005]` | TC-SCRUM-138-01 to TC-SCRUM-138-16 |
 | SCRUM-146 | Tentative venue hold with expiry | `[TC-SCRUM-146-01]` to `[TC-SCRUM-146-15]` | TC-SCRUM-146-01 to TC-SCRUM-146-15 |
 
@@ -479,7 +482,79 @@ Coordinator-facing hold request flow; automatic hold cancellation; notify on exp
 
 ---
 
-## 7. Coverage note
+## 7. SCRUM-135 — Flag bookings conflicting after setup/turnaround change
+
+**Acceptance criteria, word for word**
+
+1. When setup or turnaround time is changed for a venue, any existing confirmed bookings that now conflict
+   with the new buffer requirements are flagged.
+2. The flag records which slot is problematic, whether it is a setup or turnaround buffer, and which booking
+   occupies it.
+3. Flags are automatically cleared when a booking is cancelled or rescheduled.
+4. Venue Staff can view the list of flagged bookings for a venue.
+
+### Traceability
+
+| AC | Criterion | Test cases | Where the rule lives |
+| --- | --- | --- | --- |
+| 1 | PATCH setup_minutes or turnaround_minutes triggers recheck | 05, 06, 07, 10, 11 | `patchVenue` in `venues.controller.js` calls `recheckConflictsAfterUpdate` only when buffer fields change |
+| 2 | Flag captures slot, type (setup/turnaround), conflicting event name and reason | 02, 03, 17 | `findBufferConflicts` in `venues.conflicts.js`; written to `venue_conflict_flags` via `recheckConflictsAfterUpdate` |
+| 3 | Expired or released holds cleared on every GET; recheck after update | 01, 04, 12, 15, 17 | `recheckConflictsAfterUpdate` fetches active holds (`expires_at > now()`); GET calls recheck before listing |
+| 4 | GET /booking-conflicts returns flags; 403 for wrong role; 404 for missing venue | 12, 13, 14, 15, UI-01–04 | `getConflictFlags` in `venues.controller.js`; `venues.conflicts` permission (venue_staff only) |
+
+### Test cases
+
+| ID | AC | Type | Scenario | Expected | Automated by | Last run |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-135-01 | 1 | Boundary | setup=0, turnaround=0 → no buffer expansion | Empty map | `[TC-SCRUM-135-01]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-02 | 2 | Happy | setup 90 min: pm booking, am occupied by confirmed | Setup conflict on am with conflicting_with | `[TC-SCRUM-135-02]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-03 | 2 | Happy | turnaround 60 min: pm booking, night occupied by pending | Turnaround conflict on night | `[TC-SCRUM-135-03]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-04 | 3 | Boundary | Buffer slot expanded but empty | Empty map | `[TC-SCRUM-135-04]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-05 | 1 | Happy | PATCH setup_minutes change as venue_staff | 200; recheck called once with updated venue | `[TC-SCRUM-135-05]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-06 | 1 | Happy | PATCH turnaround_minutes change as venue_staff | 200; recheck called once with updated venue | `[TC-SCRUM-135-06]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-07 | 1 | Happy | PATCH both setup and turnaround | 200; recheck called exactly once | `[TC-SCRUM-135-07]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-08 | 1 | Boundary | No confirmed requests at all | Empty map | `[TC-SCRUM-135-08]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-09 | — | Boundary | Input booking objects are not mutated | Original arrays unchanged after call | `[TC-SCRUM-135-09]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-10 | 1 | Negative | PATCH non-buffer field (notes) | 200; recheck not called | `[TC-SCRUM-135-10]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-11 | 1 | Boundary | PATCH setup_minutes with unchanged value | 200; recheck not called | `[TC-SCRUM-135-11]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-12 | 4 | Happy | GET /booking-conflicts as venue_staff with flags | 200; data array with flags; recheck called once | `[TC-SCRUM-135-12]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-13 | 4 | Negative | GET /booking-conflicts as event_coordinator | 403; listConflictingRequests not called | `[TC-SCRUM-135-13]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-14 | 4 | Negative | GET /booking-conflicts, venue not found | 404; recheck not called | `[TC-SCRUM-135-14]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-15 | 4 | Boundary | GET /booking-conflicts, no flags | 200; empty array; recheck called once | `[TC-SCRUM-135-15]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-16 | 2 | Boundary | Only conflicting request appears in map; clear request absent | result.has(reqId)=true, result.has(clearReqId)=false | `[TC-SCRUM-135-16]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-17 | 3 | Happy | Active hold in buffer slot is treated as an occupier | Setup conflict logged with hold's event name | `[TC-SCRUM-135-17]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-UI-01 | 4 | Happy | VenueConflictsPage shows event name, date and conflict reason | Event name, 10 Oct 2099, reason text visible | `[TC-SCRUM-135-UI-01]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-UI-02 | 4 | Boundary | No conflict flags | "No conflict flags." shown; no article elements | `[TC-SCRUM-135-UI-02]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-UI-03 | 4 | Failure | Load fails (network error) | Error message containing "Could not load conflict flags" | `[TC-SCRUM-135-UI-03]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-UI-04 | 4 | Boundary | Loading state before data arrives | "Loading conflict flags…" visible | `[TC-SCRUM-135-UI-04]` | 2026-10-16 ✅ |
+
+### Manual cases
+
+| ID | AC | Scenario | Expected |
+| --- | --- | --- | --- |
+| TC-SCRUM-135-M1 | 1, 4 | Sign in as venue_staff; open a venue with confirmed bookings; increase setup_minutes via Edit; open View conflict flags | Flagged bookings listed with slot and reason |
+| TC-SCRUM-135-M2 | 3 | Place a hold on a buffer slot; view conflict flags; let the hold expire; view again | Flag from the hold clears after expiry on the next page load |
+| TC-SCRUM-135-M3 | 4 | Sign in as event_coordinator; navigate to `/venues/:id/booking-conflicts` directly | Redirected or shown 403 |
+
+### Decisions
+
+- `recheckConflictsAfterUpdate` runs on every `GET /booking-conflicts` so flags from expired or released
+  holds are cleared without a cron job. The cost is one extra recheck per read; acceptable for an
+  infrequently visited staff page.
+- Active holds (`status='hold'`, `expires_at > now()`) are included as occupiers in `findBufferConflicts`
+  so a hold on a buffer slot generates the same flag a confirmed booking would. See SCRUM-146 decision
+  in `venue-integration.md`.
+- Flags are stored in `venue_conflict_flags` and rewritten wholesale on each recheck; there is no incremental
+  update. This keeps the logic simple: clear all → recompute → insert fresh rows.
+
+### Deliberately absent
+
+Coordinator notification when a flag is raised; auto-resolution when setup/turnaround is reverted;
+conflict flags for unavailability periods; per-booking flag dismissal.
+
+---
+
+## 8. Coverage note
 
 `npm --prefix backend run test:cov` reports the whole backend. Most venue modules are exercised through the
 integration suites above rather than by unit tests of their own, so coverage of

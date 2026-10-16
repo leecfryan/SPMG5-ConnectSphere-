@@ -2,6 +2,7 @@
 const getSupabase = () => require("../../supabase");
 const { eachDateInRange } = require("./venues.availability");
 const { PLANNING_STATUSES } = require("../events/lifecycle");
+const { findBufferConflicts } = require("./venues.conflicts");
 
 // SCRUM-82, 83, 84: everything a Coordinator needs to assess a venue
 const VENUE_FIELDS = [
@@ -436,6 +437,93 @@ async function deleteUnavailabilityPeriod(periodId, venueId) {
   return data;
 }
 
+// SCRUM-135: all confirmed + pending bookings at a venue from a given date
+// onwards, with request_id so they can be grouped per request.
+async function listFutureVenueBookings(venueId, fromDate) {
+  const { data, error } = await getSupabase()
+    .from("venue_bookings")
+    .select("request_id, booking_date, slot, status, event_name")
+    .eq("venue_id", venueId)
+    .gte("booking_date", fromDate)
+    .in("status", ["confirmed", "pending"]);
+  if (error) throw new Error(`Failed to list venue bookings: ${error.message}`);
+  return data;
+}
+
+// SCRUM-135: clears all conflict flags for the venue's requests then writes the
+// new ones. Called whenever setup_minutes or turnaround_minutes changes.
+async function recheckConflictsAfterUpdate(venueId, venue) {
+  const today = new Date().toISOString().slice(0, 10);
+  const bookings = await listFutureVenueBookings(venueId, today);
+
+  // SCRUM-146: active holds occupy buffer slots in the same way confirmed
+  // bookings do, so include them as potential occupiers.
+  const { data: holdRows, error: holdError } = await getSupabase()
+    .from("venue_bookings")
+    .select("booking_date, slot, event_name")
+    .eq("venue_id", venueId)
+    .eq("status", "hold")
+    .gte("booking_date", today)
+    .gt("expires_at", new Date().toISOString());
+  if (holdError) throw new Error(`Failed to list active holds for conflict check: ${holdError.message}`);
+
+  const allBookings = [
+    ...bookings,
+    ...holdRows.map((h) => ({ ...h, request_id: null, status: "hold" })),
+  ];
+
+  const confirmedByRequest = new Map();
+  for (const b of bookings) {
+    if (b.status !== "confirmed" || !b.request_id) continue;
+    if (!confirmedByRequest.has(b.request_id)) {
+      confirmedByRequest.set(b.request_id, {
+        request_id: b.request_id,
+        booking_date: b.booking_date,
+        slots: [],
+      });
+    }
+    confirmedByRequest.get(b.request_id).slots.push(b.slot);
+  }
+
+  const conflictMap = findBufferConflicts(
+    [...confirmedByRequest.values()],
+    allBookings,
+    venue.setup_minutes,
+    venue.turnaround_minutes
+  );
+
+  const supabase = getSupabase();
+
+  // clear stale flags for this venue before writing the new set
+  const { error: clearError } = await supabase
+    .from("venue_booking_requests")
+    .update({ conflict_flags: null })
+    .eq("venue_id", venueId)
+    .not("conflict_flags", "is", null);
+  if (clearError) throw new Error(`Failed to clear conflict flags: ${clearError.message}`);
+
+  for (const [requestId, conflicts] of conflictMap) {
+    const { error } = await supabase
+      .from("venue_booking_requests")
+      .update({ conflict_flags: conflicts })
+      .eq("id", requestId);
+    if (error) throw new Error(`Failed to set conflict flags: ${error.message}`);
+  }
+}
+
+// SCRUM-135: returns all booking requests at the venue that have an active
+// conflict flag, with their slot rows and standard request fields.
+async function listConflictingRequests(venueId) {
+  const { data, error } = await getSupabase()
+    .from("venue_booking_requests")
+    .select(BOOKING_REQUEST_FIELDS + ", conflict_flags")
+    .eq("venue_id", venueId)
+    .not("conflict_flags", "is", null)
+    .order("booking_date", { ascending: true });
+  if (error) throw new Error(`Failed to list conflicting requests: ${error.message}`);
+  return data;
+}
+
 module.exports = {
   listVenues,
   listBookingsForVenuesOnDate,
@@ -458,6 +546,9 @@ module.exports = {
   getUnavailabilityPeriodById,
   updateUnavailabilityPeriod,
   deleteUnavailabilityPeriod,
+  listFutureVenueBookings,
+  recheckConflictsAfterUpdate,
+  listConflictingRequests,
   listActiveHoldsInRange,
   listHolds,
   createHold,
