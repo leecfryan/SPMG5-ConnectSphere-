@@ -41,3 +41,19 @@ test("[VENUE-DB-004] Atomic booking RPC receives only the verified requester and
     p_requested_by: "verified-user", p_venue_id: "venue", p_event_id: "event", p_slots: ["am"],
   }));
 });
+test("[VENUE-DB-005] The check report's event lookup is coordinator-scoped, unscoped for Venue Staff, and slot rows carry their request id", async () => {
+  await service.getEventForCheckReport("event-id", { coordinatorId: "verified-coordinator" });
+  expect(query.eq).toHaveBeenCalledWith("coordinator_id", "verified-coordinator");
+
+  // Venue Staff review bookings across every location, so no coordinator filter.
+  query.eq.mockClear();
+  await service.getEventForCheckReport("event-id", { allVenues: true });
+  expect(query.eq).toHaveBeenCalledWith("id", "event-id");
+  expect(query.eq).not.toHaveBeenCalledWith("coordinator_id", expect.anything());
+
+  // SCRUM-138: the request id is read back so a check can tell this booking's
+  // own rows apart from another live request of the same event.
+  query.select.mockClear();
+  await service.listSlotRowsForDate("venue-id", "2099-10-10");
+  expect(query.select).toHaveBeenCalledWith(expect.stringContaining("request_id(id, event_id)"));
+});

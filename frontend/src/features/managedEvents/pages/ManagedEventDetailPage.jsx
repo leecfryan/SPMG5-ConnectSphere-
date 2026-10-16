@@ -64,7 +64,11 @@ export default function ManagedEventDetailPage() {
       <h1 id="managed-event-title">{summary.name}</h1>
       <section className="event-venues-section" aria-labelledby="managed-event-venues-title">
         <h2 id="managed-event-venues-title">Venues</h2>
-        <EventVenueBookings bookings={summary.venueBookings} />
+        <EventVenueBookings
+          bookings={summary.venueBookings}
+          eventId={summary.id}
+          canCheck={typeof hasPermission === "function" && hasPermission("bookings.read")}
+        />
       </section>
       <dl className="account-details managed-event-summary">
         <div>

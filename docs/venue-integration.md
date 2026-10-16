@@ -57,7 +57,8 @@ the selected event within the caller's existing scope. The event-scoped response
 is intentionally not limited to pending rows, so confirmed, rejected, cancelled
 and mixed slot outcomes remain visible together. The frontend venue request list
 uses this filter for the combined event booking view and displays each booking's
-venue, purpose, date and slot period.
+venue, purpose, date and slot period, and offers the per-venue check report below
+(`GET /api/venues/events/:eventId/booking-checks`).
 
 The public event APIs also attach related venue booking data for event details,
 while the Browse Events list UI intentionally hides venues until an attendee
@@ -140,6 +141,67 @@ Example: requesting pm at Marina Grand Ballroom (setup=120, turnaround=60) → c
 **Where the rule applies.** Both places that decide whether a booking can be made use committed slots: `postBookingRequest` (AC2 conflict check) and `filterByAvailability` (SCRUM-18 catalogue date+slot search). The availability calendar display is unchanged — it shows what is actually booked, not what cannot be requested.
 
 Venues with `setup_minutes = 0` and `turnaround_minutes = 0` are unaffected: `committedSlots` returns exactly the requested slots, so the check is identical to pre-134 behaviour.
+
+## Checking each venue booking independently (SCRUM-138)
+
+`GET /api/venues/events/:eventId/booking-checks` returns one verdict per venue
+booking on an event, so a problem with one venue is reported on its own rather
+than hidden behind a venue that passes. Required capability `bookings.read`
+(`venue_staff`, `event_coordinator`) with the same `bookingScope` resolver as the
+request list: another coordinator's event answers 404 `Event not found`, the same
+answer as a missing event, so the report never reveals an event the caller cannot
+see. Missing venue storage answers 503. A malformed event id answers 400 before
+any read.
+
+**The endpoint is read-only.** It writes nothing, so a failed check can never
+change a booking's status (AC3).
+
+Each booking is assessed on its own in `venueBookingChecks.js`, a pure module,
+reusing the submission flow's own rules so a booking cannot pass here and then be
+refused at submission for a reason this report never mentions:
+
+| Check | Rule | Source |
+| --- | --- | --- |
+| Suitability | The booking's own requirements (`expected_attendees`, `room_layout`, `required_facilities`, `accessibility_requirements`) against the venue's current catalogue | `validateAgainstVenue` (SCRUM-87), unchanged |
+| Availability | The venue's operating hours, a recorded unavailability period, and the venue no longer being active | The same calendar cells `findSlotProblems` reads, built by `buildAvailabilityCalendar` |
+| Conflicts | A slot another event already holds, and a slot already requested for this event at this venue | The same `REQUESTABLE_STATUSES` rule and the same calendar output |
+
+`findSlotProblems` is deliberately not called: it answers with display strings for
+the submission 409, while this story needs each outcome classified as availability
+or conflict. Both read the same calendar, so they cannot disagree about what is
+free. Setup and turnaround buffers (SCRUM-134) are checked through the same
+`committedSlots` rule, and the reason names the buffer ("needed for the event's
+setup time").
+
+**Own rows are excluded.** Each venue's calendar is built without the event's own
+rows, so a slot the event already holds is never reported as its own conflict.
+Other events' names are masked for coordinators as `Reserved event`, exactly as at
+submission; Venue Staff see the real name.
+
+**Bookings that are not checked.** A booking with no pending or confirmed slot
+(rejected or cancelled) is listed with `overall: "not_checked"` and a note, and its
+three checks carry `passed: null`. A booking whose venue data cannot be read is
+reported the same way, on its own, without losing the other venues' results: each
+booking is assessed in its own `try/catch`.
+
+Response: `{ data: { event_id, event_name, results: [...] } }`. Each result carries
+`booking_id`, `venue_id`, `venue_name`, `booking_date`, `slots` (the slots actually
+checked), `status`, `overall` (`passed` / `failed` / `not_checked`), `note`, and
+`suitability` / `availability` / `conflicts`, each `{ passed, reasons[] }`. Results
+are ordered by booking date, then venue name.
+
+The coordinator runs it from the event-scoped booking list
+(`/venues/booking-requests?event=<id>`) with the **Check venue bookings** button,
+which shows one card per venue: the venue's name and date, its three checks, and
+the reason for each check that failed.
+
+**Getting there:** **My Events → the event** shows the event's Venues section with a
+**Check each venue booking** link to that list, so the coordinator does not have to
+type an event id (`EventVenueBookings.jsx`, shown only to roles holding
+`bookings.read`). The *My Events* list renders the same component inside its own
+item link, so it is given no event id and shows no link — a link there would nest
+one anchor in another. The Venue Staff side still reaches the list from
+**Venues → Venue booking requests**.
 
 ## Rejecting with a reason (SCRUM-102)
 

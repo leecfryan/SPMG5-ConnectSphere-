@@ -1,7 +1,7 @@
 import { useAuth } from "../../auth/useAuth";
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router";
-import { decideBookingRequest, fetchBookingRequests } from "../../../lib/api";
+import { decideBookingRequest, fetchBookingRequests, fetchVenueBookingChecks } from "../../../lib/api";
 import {
   IconAlert,
   IconArrowLeft,
@@ -9,10 +9,12 @@ import {
   IconClock,
   IconInbox,
   IconMapPin,
+  IconSearch,
   IconUsers,
   IconCheck,
 } from "./VenueIcons";
 import { formatDate, formatDateTime } from "../venueFormat";
+import VenueBookingCheckReport from "./VenueBookingCheckReport";
 
 // SCRUM-88: submitted requests available to Venue Staff for review.
 // SCRUM-22: Venue Staff decide them here. Approving confirms every slot on the
@@ -322,6 +324,18 @@ function VenueBookingRequestList({ onBack }) {
   const isLoading = !current;
   const error = current ? result.error : null;
 
+  // SCRUM-138: the per-venue check report. It is asked for on demand, not
+  // fetched with the list, and starts empty so nothing is checked until the
+  // coordinator asks for it.
+  const [check, setCheck] = useState(null);
+
+  function runCheck() {
+    setCheck({ status: "loading" });
+    fetchVenueBookingChecks(eventId, token)
+      .then((report) => setCheck({ status: "ready", report }))
+      .catch((err) => setCheck({ status: "error", message: err.message }));
+  }
+
   useEffect(() => {
     let active = true;
     fetchBookingRequests({ status, eventId }, token)
@@ -365,6 +379,53 @@ function VenueBookingRequestList({ onBack }) {
           </select>
         </label>
       </header>
+
+      {/* SCRUM-138: one event's bookings, each checked on its own. Shown only
+          in the event-scoped view, which is the only place the event is known. */}
+      {eventId && (
+        <section className="v-check-report" aria-labelledby="venue-check-heading">
+          <div className="v-check-report-bar">
+            <div>
+              <h2 id="venue-check-heading" className="v-subheading">
+                Check each venue booking
+              </h2>
+              <p className="v-hint">
+                Suitability, availability and conflicts are checked separately for every venue on
+                this event. Checking changes nothing.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="v-btn v-btn-secondary"
+              onClick={runCheck}
+              disabled={check?.status === "loading"}
+            >
+              <IconSearch />
+              {check?.status === "loading" ? "Checking..." : "Check venue bookings"}
+            </button>
+          </div>
+
+          {check?.status === "loading" && (
+            <p className="v-hint" role="status">
+              Checking this event's venue bookings...
+            </p>
+          )}
+
+          {check?.status === "error" && (
+            <>
+              <p className="v-alert v-alert-error" role="alert">
+                <IconAlert />
+                <span>Could not check the venue bookings: {check.message}</span>
+              </p>
+              <button type="button" className="v-btn v-btn-secondary" onClick={runCheck}>
+                Try again
+              </button>
+            </>
+          )}
+
+          {check?.status === "ready" && <VenueBookingCheckReport report={check.report} />}
+        </section>
+      )}
 
       {error && (
         <p className="v-alert v-alert-error" role="alert">

@@ -6,12 +6,13 @@
 
 The root Playwright runner complements the frontend Vitest/React Testing Library
 suite and the existing backend Node integration tests. Every test has a unique
-ID and a descriptive title. The current run contains 185 tests across Chromium
+ID and a descriptive title. The current run contains 186 tests across Chromium
 browser and HTTP API projects.
 
-Latest local verification after the fixture correction on 2026-10-15:
-**185 passed, 0 failed, 0 skipped**. `[VENUE-E2E-002]` now enters the required
-purpose before submitting. The production behavior remains unchanged.
+Latest local verification after the fixture correction on 2026-10-16:
+**186 passed, 0 failed, 0 skipped**. `[VENUE-E2E-002]` enters the required
+purpose before submitting, and `[VENUE-E2E-005]` verifies independent
+per-booking checks. The production behavior remains unchanged.
 The backend suite passed **859 tests**, with 43 live Supabase tests skipped because
 they require live-database configuration.
 

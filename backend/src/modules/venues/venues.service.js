@@ -178,6 +178,18 @@ async function getEventById(id, coordinatorId) {
   return data;
 }
 
+// SCRUM-138: the event behind a check report. Coordinators see their own events
+// only — the same relationship the booking list scopes by — while Venue Staff
+// review bookings across all locations.
+async function getEventForCheckReport(id, scope) {
+  let query = getSupabase().from("events").select(EVENT_FIELDS).eq("id", id);
+  if (scope?.coordinatorId) query = query.eq("coordinator_id", scope.coordinatorId);
+  const { data, error } = await query.maybeSingle();
+
+  if (error) throw new Error(`Failed to fetch event: ${error.message}`);
+  return data;
+}
+
 // SCRUM-85: the events a coordinator can pick from. Only approved events may be
 // booked (SCRUM-99 AC1, see validateAgainstEvent), and events that have already
 // ended have nothing left to book.
@@ -197,11 +209,13 @@ async function listBookableEvents(coordinatorId) {
 
 // Live slot rows for one venue on one day, with the event behind each request.
 // Seed bookings have no request, so `request` comes back null for those.
+// SCRUM-138: the request's own id comes back too, so a check can tell this
+// booking's rows apart from another request of the same event.
 async function listSlotRowsForDate(venueId, bookingDate) {
   const { data, error } = await getSupabase()
     .from("venue_bookings")
     .select(
-      "booking_date, slot, status, event_name, request:venue_booking_requests!request_id(event_id)"
+      "booking_date, slot, status, event_name, request:venue_booking_requests!request_id(id, event_id)"
     )
     .eq("venue_id", venueId)
     .eq("booking_date", bookingDate)
@@ -376,6 +390,7 @@ module.exports = {
   listBookingsInRange,
   listUnavailabilityInRange,
   getEventById,
+  getEventForCheckReport,
   listBookableEvents,
   listSlotRowsForDate,
   submitBookingRequest,

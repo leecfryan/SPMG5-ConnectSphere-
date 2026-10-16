@@ -121,6 +121,12 @@ export function fetchBookingRequests({ status, eventId } = {}, token) {
   return request(`/api/venues/booking-requests${query}`, token);
 }
 
+// SCRUM-138: every booking on one event, each checked on its own. Read-only, so
+// it takes no body and changes nothing.
+export function fetchVenueBookingChecks(eventId, token) {
+  return request(`/api/venues/events/${encodeURIComponent(eventId)}/booking-checks`, token);
+}
+
 // Scrum-29 follow-up: with no window, the full catalogue (used for the
 // catalogue page and for labelling existing requests). With both start and
 // end, only equipment bookable for that period - used to filter the request
