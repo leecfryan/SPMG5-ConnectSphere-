@@ -53,6 +53,7 @@ function toggle(list, item) {
 
 function slotHint(cell) {
   if (cell.status === "pending") return `${cell.label}, already requested but still open`;
+  if (cell.status === "tentative") return `${cell.label}, held tentatively — cannot be requested`;
   if (cell.status === "booked" || cell.status === "unavailable") return cell.label;
   if (cell.status === "closed") return "Outside operating hours";
   return "Open for booking";
@@ -102,6 +103,7 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
   const [facilities, setFacilities] = useState([]);
   const [accessibility, setAccessibility] = useState([]);
   const [additional, setAdditional] = useState("");
+  const [purpose, setPurpose] = useState("");
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
@@ -172,6 +174,7 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
       required_facilities: facilities,
       accessibility_requirements: accessibility,
       additional_requirements: additional.trim() === "" ? null : additional.trim(),
+      purpose: purpose.trim(),
     }, token)
       .then((request) => setCreated(request))
       .catch((err) => setSubmitError(err.message))
@@ -436,6 +439,22 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
           <hr className="v-divider" />
 
           <label className="v-field">
+            <span className="v-label">Purpose <span aria-hidden="true">*</span></span>
+            <textarea
+              className="v-input"
+              rows="3"
+              value={purpose}
+              maxLength={2000}
+              onChange={(e) => setPurpose(e.target.value)}
+              aria-required="true"
+              required
+            />
+            <span className="v-hint">
+              Explain what this space is being booked for. {purpose.length}/2000
+            </span>
+          </label>
+
+          <label className="v-field">
             <span className="v-label">Anything else Venue Staff should know</span>
             <textarea
               className="v-input"
@@ -470,7 +489,7 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
               type="button"
               className="v-btn v-btn-primary"
               onClick={handleSubmit}
-              disabled={isSubmitting}
+              disabled={isSubmitting || purpose.trim() === ""}
             >
               {isSubmitting ? "Submitting..." : "Submit booking request"}
             </button>

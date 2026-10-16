@@ -56,6 +56,10 @@
   --v-closed-bg: #f6f7f7;
   --v-closed-fg: #929d98;
   --v-closed-bd: #e3e8e5;
+  /* SCRUM-146: tentative hold — distinct from pending (amber) and booked (red) */
+  --v-tentative-bg: #eff0fb;
+  --v-tentative-fg: #3d42a0;
+  --v-tentative-bd: #c9caf3;
 
   width: 100%;
   max-width: 1160px;
@@ -573,6 +577,12 @@
   color: var(--v-closed-fg);
   background: var(--v-closed-bg);
   border-color: var(--v-closed-bd);
+}
+
+.v-status-tentative {
+  color: var(--v-tentative-fg);
+  background: var(--v-tentative-bg);
+  border-color: var(--v-tentative-bd);
 }
 
 .v-tag {
@@ -1798,6 +1808,75 @@
 @media (max-width: 640px) {
   .v-decision-actions,
   .v-decision-actions .v-btn {
+    width: 100%;
+  }
+}
+
+/* --- SCRUM-138 check each venue booking independently --------------------- */
+
+.v-check-report {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.v-check-report-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--v-border);
+  border-radius: var(--v-radius-md);
+  background: var(--v-surface-muted);
+}
+
+.v-check-report-bar .v-hint {
+  margin: 4px 0 0;
+}
+
+.v-check-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.v-bcheck-list {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One check per row: its name, its verdict, and any reasons underneath. */
+.v-bcheck-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.v-bcheck-name {
+  font-weight: 600;
+}
+
+.v-bcheck-reasons {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--v-text-muted);
+  font-size: 14px;
+}
+
+@media (max-width: 480px) {
+  .v-check-report-bar {
+    align-items: stretch;
+  }
+
+  .v-check-report-bar .v-btn {
     width: 100%;
   }
 }

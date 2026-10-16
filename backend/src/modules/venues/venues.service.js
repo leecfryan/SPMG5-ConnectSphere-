@@ -158,6 +158,7 @@ const BOOKING_REQUEST_FIELDS = [
   "required_facilities",
   "accessibility_requirements",
   "additional_requirements",
+  "purpose",
   "submitted_at",
   "decided_at",
   "decision_note",
@@ -173,6 +174,18 @@ async function getEventById(id, coordinatorId) {
     .eq("coordinator_id", coordinatorId)
     .eq("id", id)
     .maybeSingle();
+
+  if (error) throw new Error(`Failed to fetch event: ${error.message}`);
+  return data;
+}
+
+// SCRUM-138: the event behind a check report. Coordinators see their own events
+// only — the same relationship the booking list scopes by — while Venue Staff
+// review bookings across all locations.
+async function getEventForCheckReport(id, scope) {
+  let query = getSupabase().from("events").select(EVENT_FIELDS).eq("id", id);
+  if (scope?.coordinatorId) query = query.eq("coordinator_id", scope.coordinatorId);
+  const { data, error } = await query.maybeSingle();
 
   if (error) throw new Error(`Failed to fetch event: ${error.message}`);
   return data;
@@ -197,11 +210,13 @@ async function listBookableEvents(coordinatorId) {
 
 // Live slot rows for one venue on one day, with the event behind each request.
 // Seed bookings have no request, so `request` comes back null for those.
+// SCRUM-138: the request's own id comes back too, so a check can tell this
+// booking's rows apart from another request of the same event.
 async function listSlotRowsForDate(venueId, bookingDate) {
   const { data, error } = await getSupabase()
     .from("venue_bookings")
     .select(
-      "booking_date, slot, status, event_name, request:venue_booking_requests!request_id(event_id)"
+      "booking_date, slot, status, event_name, request:venue_booking_requests!request_id(id, event_id)"
     )
     .eq("venue_id", venueId)
     .eq("booking_date", bookingDate)
@@ -226,6 +241,7 @@ async function submitBookingRequest(venueId, eventName, value, requesterId) {
     p_required_facilities: value.required_facilities,
     p_accessibility_requirements: value.accessibility_requirements,
     p_additional_requirements: value.additional_requirements,
+    p_purpose: value.purpose,
   });
 
   if (error) throw new Error(`Failed to submit booking request: ${error.message}`);
@@ -248,13 +264,14 @@ async function getBookingRequestById(id, scope) {
 // Paging can come later if a real venue ever has more than this outstanding.
 const BOOKING_REQUEST_LIST_LIMIT = 200;
 
-async function listBookingRequests(scope) {
+async function listBookingRequests(scope, eventId) {
   let query = getSupabase()
     .from("venue_booking_requests")
     .select(BOOKING_REQUEST_FIELDS)
     .order("submitted_at", { ascending: false })
     .limit(BOOKING_REQUEST_LIST_LIMIT);
   query = applyBookingScope(query, scope);
+  if (eventId) query = query.eq("event_id", eventId);
   const { data, error } = await query;
 
   if (error) throw new Error(`Failed to list booking requests: ${error.message}`);
@@ -303,6 +320,61 @@ async function releaseBookingsForCancelledEvent(eventId) {
   if (error) throw new Error(`Failed to release venue bookings: ${error.message}`);
   return data;
 }
+// ---------------------------------------------------------------------------
+// SCRUM-146: venue holds
+// ---------------------------------------------------------------------------
+
+// SCRUM-146: rows where status='hold' and expires_at is in the future, for the
+// availability calendar and booking-request conflict check.
+async function listActiveHoldsInRange(venueId, from, to) {
+  const { data, error } = await getSupabase()
+    .from("venue_bookings")
+    .select("booking_date, slot, event_name")
+    .eq("venue_id", venueId)
+    .eq("status", "hold")
+    .gte("booking_date", from)
+    .lte("booking_date", to)
+    .gt("expires_at", new Date().toISOString());
+
+  if (error) throw new Error(`Failed to list active holds: ${error.message}`);
+  return data;
+}
+
+// SCRUM-146 AC5: all hold rows including expired — for the hold history list.
+async function listHolds(venueId) {
+  const { data, error } = await getSupabase()
+    .from("venue_bookings")
+    .select("id, booking_date, slot, event_name, requested_by, expires_at, created_at")
+    .eq("venue_id", venueId)
+    .eq("status", "hold")
+    .order("booking_date", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(`Failed to list holds: ${error.message}`);
+  return data;
+}
+
+// SCRUM-146: one row per slot, all in one insert so the hold is atomic.
+async function createHold(venueId, { event_name, booking_date, slots, expires_at }, heldBy) {
+  const rows = slots.map((slot) => ({
+    venue_id: venueId,
+    booking_date,
+    slot,
+    status: "hold",
+    event_name,
+    requested_by: heldBy,
+    expires_at,
+  }));
+
+  const { data, error } = await getSupabase()
+    .from("venue_bookings")
+    .insert(rows)
+    .select("id, booking_date, slot, event_name, requested_by, expires_at, created_at");
+
+  if (error) throw new Error(`Failed to create hold: ${error.message}`);
+  return data;
+}
+
 // ---------------------------------------------------------------------------
 // SCRUM-133: venue unavailability periods
 // ---------------------------------------------------------------------------
@@ -384,6 +456,22 @@ async function recheckConflictsAfterUpdate(venueId, venue) {
   const today = new Date().toISOString().slice(0, 10);
   const bookings = await listFutureVenueBookings(venueId, today);
 
+  // SCRUM-146: active holds occupy buffer slots in the same way confirmed
+  // bookings do, so include them as potential occupiers.
+  const { data: holdRows, error: holdError } = await getSupabase()
+    .from("venue_bookings")
+    .select("booking_date, slot, event_name")
+    .eq("venue_id", venueId)
+    .eq("status", "hold")
+    .gte("booking_date", today)
+    .gt("expires_at", new Date().toISOString());
+  if (holdError) throw new Error(`Failed to list active holds for conflict check: ${holdError.message}`);
+
+  const allBookings = [
+    ...bookings,
+    ...holdRows.map((h) => ({ ...h, request_id: null, status: "hold" })),
+  ];
+
   const confirmedByRequest = new Map();
   for (const b of bookings) {
     if (b.status !== "confirmed" || !b.request_id) continue;
@@ -399,7 +487,7 @@ async function recheckConflictsAfterUpdate(venueId, venue) {
 
   const conflictMap = findBufferConflicts(
     [...confirmedByRequest.values()],
-    bookings,
+    allBookings,
     venue.setup_minutes,
     venue.turnaround_minutes
   );
@@ -445,6 +533,7 @@ module.exports = {
   listBookingsInRange,
   listUnavailabilityInRange,
   getEventById,
+  getEventForCheckReport,
   listBookableEvents,
   listSlotRowsForDate,
   submitBookingRequest,
@@ -460,4 +549,7 @@ module.exports = {
   listFutureVenueBookings,
   recheckConflictsAfterUpdate,
   listConflictingRequests,
+  listActiveHoldsInRange,
+  listHolds,
+  createHold,
 };

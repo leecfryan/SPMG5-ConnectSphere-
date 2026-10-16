@@ -30,18 +30,21 @@ const STATUS_LABELS = {
   available: "Available",
   booked: "Booked",
   pending: "Requested",
+  // SCRUM-146: active hold reserves the slot
+  tentative: "Tentative hold",
   unavailable: "Unavailable",
   closed: "Closed",
 };
 
 // a slot whose label repeats the status adds nothing to the cell
-const STATUSES_WITH_DETAIL = ["booked", "pending", "unavailable"];
+const STATUSES_WITH_DETAIL = ["booked", "pending", "tentative", "unavailable"];
 
-// SCRUM-89 closed, SCRUM-93 unavailable, SCRUM-94 booked vs requested
+// SCRUM-89 closed, SCRUM-93 unavailable, SCRUM-94 booked vs requested, SCRUM-146 tentative hold
 const LEGEND = [
   { status: "available", text: "Available, open for booking" },
   { status: "pending", text: "Requested, awaiting Venue Staff, still bookable" },
   { status: "booked", text: "Booked, confirmed booking" },
+  { status: "tentative", text: "Tentative hold, reserved for an event — cannot be requested" },
   { status: "unavailable", text: "Unavailable, recorded by Venue Staff" },
   { status: "closed", text: "Closed, outside operating hours" },
 ];

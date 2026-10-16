@@ -30,12 +30,14 @@ change the read responsibilities listed below or grant external roles access.
 Event writes use `events.submit` and `events.own.update` (Event Organisers, external),
 `events.assign_coordinator` (Event Coordinator Leads), and `events.decide` and
 `events.safety.submit` (the event's assigned Event Coordinator). None appears in the
-read matrix below, which lists read permissions only.
+read matrix below, which lists read permissions only. The Safety Officer's
+`events.safety.read` (SCRUM-140) is described under *SCRUM-142 — Safety Officer*.
 
 | Write capability | Holder | Guards |
 | --- | --- | --- |
 | `venues.update` | Venue Staff, Event Coordinators | Venue editing |
 | `venues.unavailability` | Venue Staff | Mark and manage venue unavailability periods (SCRUM-133) |
+| `venues.holds` | Venue Staff | Place and view tentative holds (SCRUM-146) |
 | `bookings.request` | Event Coordinators | Booking requests |
 | `events.submit` | Event Organisers | `POST /api/events`, `/events/new` |
 | `events.own.update` | Event Organisers | `PATCH /api/event-workspace/organiser/:id`; owner check in lookup and write; colleague events remain view only |
@@ -67,8 +69,9 @@ specification.
 | event_organisers.read | No | No | Yes | No | Yes |
 
 All five internal roles, including `event_coordinator_lead` and `safety_officer`, have `internal.access`.
-Safety Officer alone has no feature permissions or read responsibilities. It does
-not receive the assigned coordinator's `events.safety.submit` capability.
+Safety Officer's only feature permission is `events.safety.read` (SCRUM-140), its
+one responsibility. It does not receive the assigned coordinator's
+`events.safety.submit` capability or any write permission.
 Managers have `events.review` and `events.assign`, not venue/equipment booking
 permissions. Coordinators have `events.assigned.read`; organisers have
 `events.own.read`, `events.own.update` and `events.submit`. Only attendee responsibility grants
@@ -280,6 +283,13 @@ The 2026-10-13 staging integration also preserves SCRUM-149 postponement for
 canonical and legacy lead accounts, with venue release and equipment retention,
 while coordinator waitlist management remains coordinator-only. Verification
 adds SCRUM-142-INT-011/012/013 and SCRUM-142-MERGE-API/BROWSER-001/002 in the existing suites.
+
+**Updated 2026-10-16 (SCRUM-150):** the "equipment retention" half of this note no longer
+holds - postpone now releases equipment reservations the same way cancel does (see
+`.agent/docs/other/SCRUM-150-equipment-reschedule-review.md`). SCRUM-142-INT-011/012 and
+the equivalent Playwright cases (SCRUM-142-MERGE-API-001/002) had their one outdated
+assertion (and title) changed to match this new release behaviour; everything else they
+verify is unchanged.
 The frontend cancel/postpone controls include SAFETY_REVIEW to match the existing
 server status lists; POSTPONED is cancellable but not postponable again.
 
@@ -292,9 +302,12 @@ remain unexecuted until Ryan runs them.
 
 Ryan confirmed on 2026-10-13 that this story registers Safety Officer as staff;
 its safety review permissions and workflow belong to a separate story. The trusted
-identifier is `safety_officer`, displayed as **Safety Officer**. Its only capability
-is `internal.access`: Account, Notifications and Responsibilities are available,
-with an empty-state message when no feature responsibilities are assigned.
+identifier is `safety_officer`, displayed as **Safety Officer**. SCRUM-142 granted
+only `internal.access`. SCRUM-140 adds `events.safety.read` (label *Operational
+safety review*, no record check: officers are a pool, not assigned per event). It
+guards `GET /api/internal/safety-reviews` and `GET /api/internal/safety-reviews/:eventId`
+and the `/safety-reviews` pages; as a `*.read` permission it refuses every non-GET.
+Account, Notifications, Safety reviews and Responsibilities are available.
 Officer-only accounts cannot access lead, coordinator, venue, equipment or attendee
 business functions, including coordinator safety-check submission and withdrawal.
 
@@ -329,8 +342,11 @@ nor any shared Auth update has been run by the agent.
 - `tests/playwright/browser.spec.cjs`: SCRUM-142-SAFETY-BROWSER-001–002 exercise
   mobile sign-in, reload, navigation, direct URL denial, combined roles and removal.
 
+SCRUM-140 updated the expectations of SCRUM-142-SAFETY-INT-001–004, -UI-001 and -003,
+-API-009–010 and -BROWSER-001 to include `events.safety.read`; nothing else changed.
+
 Manual UAT is **Not Executed**. Assign officer-only, sign in and verify Account
-shows Safety Officer; open Responsibilities and refresh to see the empty message.
+shows Safety Officer; open Responsibilities and refresh to see *Operational safety review*.
 Open `/event-management`, `/events/assignments`, `/assigned-events`, `/venues` and
 `/technical-support` directly and expect Access denied. Then append officer to an
 attendee or existing staff account, sign out/in and verify both role labels and

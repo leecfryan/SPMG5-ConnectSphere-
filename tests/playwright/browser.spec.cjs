@@ -237,6 +237,7 @@ for (const [id, role] of [['001', 'event_coordinator_lead'], ['002', 'event_ops_
 }
 
 
+// SCRUM-140 adds the deferred safety review queue; every other business page stays closed.
 test('[SCRUM-142-SAFETY-BROWSER-001] officer signs in at mobile width, survives reload and cannot open business pages', async ({ page, accounts }) => {
   const account = await accounts.create(['safety_officer']);
   await page.setViewportSize({ width: 375, height: 812 });
@@ -246,10 +247,9 @@ test('[SCRUM-142-SAFETY-BROWSER-001] officer signs in at mobile width, survives 
   await page.reload();
   await expect(page.getByText('Safety Officer', { exact: true })).toBeVisible();
   const nav = page.getByRole('navigation', { name: 'Workspace' });
-  await expect(nav.getByRole('link')).toHaveText(['Account', 'Notifications', 'Responsibilities']);
+  await expect(nav.getByRole('link')).toHaveText(['Account', 'Notifications', 'Safety reviews', 'Responsibilities']);
   await nav.getByRole('link', { name: 'Responsibilities', exact: true }).click();
-  await expect(page.getByText('No responsibilities are assigned to your current roles.')).toBeVisible();
-  await expect(page.getByRole('listitem')).toHaveCount(0);
+  await expect(page.getByRole('listitem')).toHaveText(['Operational safety review']);
   for (const url of ['/event-management', '/events/assignments', '/venues', '/technical-support', '/assigned-events']) {
     await page.goto(url);
     await expect(page.getByRole('heading', { name: 'Access denied' })).toBeVisible();

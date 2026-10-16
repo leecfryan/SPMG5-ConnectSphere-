@@ -22,6 +22,7 @@ middleware and hardcoded development roles have been removed.
 | `/venues/booking-requests` | `bookings.read` | Venue Staff, Event Coordinator |
 | `/venues/booking-requests` decide controls | `bookings.decide` | Venue Staff |
 | `/venues/:id/unavailability` | `venues.unavailability` | Venue Staff |
+| `/venues/:id/holds` | `venues.holds` | Venue Staff |
 
 These are React Router pages with direct links and browser Back/refresh support.
 Shared navigation and sign-out stay available. All calls use relative `/api/venues`
@@ -38,8 +39,11 @@ occupied-slot labels instead of other events' names; venue staff keep event labe
 `GET /api/venues/booking-events` returns upcoming, approved (`APPROVED` or `CONFIRMED`, `PLANNING_STATUSES` in `events/lifecycle.js`) events assigned to
 the verified coordinator through the existing `events.coordinator_id` column.
 `POST /api/venues/:id/booking-requests` checks that same relationship, validates
-requirements and slot conflicts, and supplies the verified requester ID to the
-database. Submitted requests remain pending and do not consume confirmed slots.
+requirements and slot conflicts, requires a trimmed per-booking `purpose` (maximum
+2000 characters), and supplies the verified requester ID to the database. The
+database stores one request row per venue booking, so multiple venues may be
+requested for the same event. Submitted requests remain pending and do not consume
+confirmed slots.
 
 Venue Staff can review venue requests across locations. For coordinators, both
 `GET /api/venues/booking-requests` and `GET /api/venues/booking-requests/:id`
@@ -48,6 +52,19 @@ verified identity; the database service applies it using an inner event join.
 Responses select venue requirements and event name/timing/status, not whole
 client, attendee or internal planning records. Managers assign events through `/event-management`.
 An unassigned event will not appear in a coordinator's picker.
+
+`GET /api/venues/booking-requests?event_id=<uuid>` returns all booking rows for
+the selected event within the caller's existing scope. The event-scoped response
+is intentionally not limited to pending rows, so confirmed, rejected, cancelled
+and mixed slot outcomes remain visible together. The frontend venue request list
+uses this filter for the combined event booking view and displays each booking's
+venue, purpose, date and slot period, and offers the per-venue check report below
+(`GET /api/venues/events/:eventId/booking-checks`).
+
+The public event APIs also attach related venue booking data for event details,
+while the Browse Events list UI intentionally hides venues until an attendee
+opens the event. My Events cards and details show all related bookings together,
+including their independent statuses.
 
 ## Deciding a request (SCRUM-22)
 
@@ -114,6 +131,43 @@ All four endpoints require `venues.unavailability`, held by Venue Staff only. Th
 
 **How blocking works.** `listUnavailabilityInRange` reads from both `venue_unavailability` (legacy per-slot seed rows) and `venue_unavailability_periods` (new period records). Period records are expanded into per-slot rows matching the shape the availability calendar already reads. The calendar marks those slots `unavailable`, and `findSlotProblems` rejects any booking request that targets a non-`available`/`pending` slot.
 
+## Tentative venue holds (SCRUM-146)
+
+Venue Staff can place a time-limited tentative hold on one or more slots for a named event. A hold reserves
+the slot while the coordinator finalises arrangements without permanently consuming it.
+
+`POST /api/venues/:id/holds` — body: `{ event_name, booking_date, slots[], expires_at }`. `booking_date` is
+`YYYY-MM-DD`; `slots` is a non-empty subset of `["am", "pm", "night"]`; `expires_at` is an ISO 8601 timestamp
+that must be in the future (400 if not). Returns 201 with an array of the created slot rows.
+
+`GET /api/venues/:id/holds` — returns 200 with all hold rows for the venue, including expired ones, ordered
+by booking date and creation time descending. Expired holds are kept for history; they are never deleted.
+
+Both endpoints require `venues.holds`, held by Venue Staff only.
+
+**How the hold is stored.** Each hold is one row per slot in `venue_bookings` with `status = 'hold'` and an
+`expires_at` column. Reusing the existing table keeps the calendar query and conflict check unified;
+a separate table would need joins in three places. The `expires_at` column is `NULL` for all non-hold rows.
+
+**How active holds appear on the calendar.** `getVenueAvailability` calls `listActiveHoldsInRange` alongside
+the existing booking and unavailability queries. `listActiveHoldsInRange` filters `expires_at > now()` in
+Postgres, so expired holds are excluded before the data reaches the calendar. `buildAvailabilityCalendar`
+receives the active holds as an `input.holds` array and applies a `tentative` tier in the slot precedence:
+
+```
+closed > unavailable > booked > tentative > pending > available
+```
+
+A confirmed booking still outranks a hold (a booking is harder than a reservation). A hold outranks a pending
+request (a hold is explicit staff intent, a request has not yet been decided). The frontend calendar renders
+the `tentative` status with the label "Tentative hold" and a distinct blue colour.
+
+**How active holds block booking requests.** `postBookingRequest` runs `findSlotProblems`, which checks each
+committed slot against `REQUESTABLE_STATUSES = ["available", "pending"]`. Because `tentative` is not in that
+list, any slot covered by an active hold produces a 409 with the same error format as other conflicts.
+Once the hold expires, `listActiveHoldsInRange` returns nothing for that slot and a new booking request
+can proceed.
+
 ## Committed period: setup and turnaround time (SCRUM-134)
 
 Every booking request carries a **committed period** that extends beyond the requested slot(s): the venue's `setup_minutes` before the first slot starts and `turnaround_minutes` after the last slot ends. `committedSlots(requestedSlots, setupMinutes, turnaroundMinutes)` in `venues.availability.js` computes this by mapping slot names to their time windows (am 08:00–12:00, pm 12:00–18:00, night 18:00–23:00) and returning every slot whose window overlaps the extended range.
@@ -125,6 +179,67 @@ Example: requesting pm at Marina Grand Ballroom (setup=120, turnaround=60) → c
 **Where the rule applies.** Both places that decide whether a booking can be made use committed slots: `postBookingRequest` (AC2 conflict check) and `filterByAvailability` (SCRUM-18 catalogue date+slot search). The availability calendar display is unchanged — it shows what is actually booked, not what cannot be requested.
 
 Venues with `setup_minutes = 0` and `turnaround_minutes = 0` are unaffected: `committedSlots` returns exactly the requested slots, so the check is identical to pre-134 behaviour.
+
+## Checking each venue booking independently (SCRUM-138)
+
+`GET /api/venues/events/:eventId/booking-checks` returns one verdict per venue
+booking on an event, so a problem with one venue is reported on its own rather
+than hidden behind a venue that passes. Required capability `bookings.read`
+(`venue_staff`, `event_coordinator`) with the same `bookingScope` resolver as the
+request list: another coordinator's event answers 404 `Event not found`, the same
+answer as a missing event, so the report never reveals an event the caller cannot
+see. Missing venue storage answers 503. A malformed event id answers 400 before
+any read.
+
+**The endpoint is read-only.** It writes nothing, so a failed check can never
+change a booking's status (AC3).
+
+Each booking is assessed on its own in `venueBookingChecks.js`, a pure module,
+reusing the submission flow's own rules so a booking cannot pass here and then be
+refused at submission for a reason this report never mentions:
+
+| Check | Rule | Source |
+| --- | --- | --- |
+| Suitability | The booking's own requirements (`expected_attendees`, `room_layout`, `required_facilities`, `accessibility_requirements`) against the venue's current catalogue | `validateAgainstVenue` (SCRUM-87), unchanged |
+| Availability | The venue's operating hours, a recorded unavailability period, and the venue no longer being active | The same calendar cells `findSlotProblems` reads, built by `buildAvailabilityCalendar` |
+| Conflicts | A slot another event already holds, and a slot already requested for this event at this venue | The same `REQUESTABLE_STATUSES` rule and the same calendar output |
+
+`findSlotProblems` is deliberately not called: it answers with display strings for
+the submission 409, while this story needs each outcome classified as availability
+or conflict. Both read the same calendar, so they cannot disagree about what is
+free. Setup and turnaround buffers (SCRUM-134) are checked through the same
+`committedSlots` rule, and the reason names the buffer ("needed for the event's
+setup time").
+
+**Own rows are excluded.** Each venue's calendar is built without the event's own
+rows, so a slot the event already holds is never reported as its own conflict.
+Other events' names are masked for coordinators as `Reserved event`, exactly as at
+submission; Venue Staff see the real name.
+
+**Bookings that are not checked.** A booking with no pending or confirmed slot
+(rejected or cancelled) is listed with `overall: "not_checked"` and a note, and its
+three checks carry `passed: null`. A booking whose venue data cannot be read is
+reported the same way, on its own, without losing the other venues' results: each
+booking is assessed in its own `try/catch`.
+
+Response: `{ data: { event_id, event_name, results: [...] } }`. Each result carries
+`booking_id`, `venue_id`, `venue_name`, `booking_date`, `slots` (the slots actually
+checked), `status`, `overall` (`passed` / `failed` / `not_checked`), `note`, and
+`suitability` / `availability` / `conflicts`, each `{ passed, reasons[] }`. Results
+are ordered by booking date, then venue name.
+
+The coordinator runs it from the event-scoped booking list
+(`/venues/booking-requests?event=<id>`) with the **Check venue bookings** button,
+which shows one card per venue: the venue's name and date, its three checks, and
+the reason for each check that failed.
+
+**Getting there:** **My Events → the event** shows the event's Venues section with a
+**Check each venue booking** link to that list, so the coordinator does not have to
+type an event id (`EventVenueBookings.jsx`, shown only to roles holding
+`bookings.read`). The *My Events* list renders the same component inside its own
+item link, so it is given no event id and shows no link — a link there would nest
+one anchor in another. The Venue Staff side still reaches the list from
+**Venues → Venue booking requests**.
 
 ## Rejecting with a reason (SCRUM-102)
 
@@ -790,6 +905,24 @@ revoke execute on function public.decide_venue_booking_request(uuid, text, uuid,
   from public, anon, authenticated;
 grant execute on function public.decide_venue_booking_request(uuid, text, uuid, text)
   to service_role;
+```
+
+### Tentative holds schema (SCRUM-146)
+
+```sql
+-- SCRUM-146: extend venue_bookings to store tentative holds.
+-- Holds are rows in venue_bookings with status='hold'.
+-- expires_at is null for every non-hold row; the service only writes it for holds.
+-- Expired rows are kept for history; the service filters expires_at > now() for active holds.
+
+alter type public.booking_status add value if not exists 'hold';
+
+alter table public.venue_bookings
+  add column if not exists expires_at timestamptz;
+
+create index if not exists venue_bookings_expires_at
+  on public.venue_bookings (expires_at)
+  where status = 'hold';
 ```
 
 ### Releasing bookings on event cancellation (SCRUM-148)

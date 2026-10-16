@@ -103,6 +103,21 @@ describe("findBufferConflicts", () => {
     expect(result.has(clearReqId)).toBe(false);
   });
 
+  test("[TC-SCRUM-135-17] active hold in buffer slot is treated as an occupier", () => {
+    const requests = [{ request_id: reqId, booking_date: date, slots: ["pm"] }];
+    const bookings = [
+      { request_id: reqId, booking_date: date, slot: "pm", status: "confirmed", event_name: "My Event" },
+      // SCRUM-146: hold row has no request_id; status="hold"
+      { request_id: null, booking_date: date, slot: "am", status: "hold", event_name: "Charity Gala" },
+    ];
+    const result = findBufferConflicts(requests, bookings, 90, 0);
+    expect(result.has(reqId)).toBe(true);
+    const [conflict] = result.get(reqId);
+    expect(conflict.slot).toBe("am");
+    expect(conflict.type).toBe("setup");
+    expect(conflict.conflicting_with).toBe("Charity Gala");
+  });
+
   test("prefers confirmed occupier over pending when both hold the same buffer slot", () => {
     const pendingId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
     const requests = [{ request_id: reqId, booking_date: date, slots: ["pm"] }];

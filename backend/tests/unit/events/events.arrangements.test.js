@@ -41,3 +41,34 @@ test("SCRUM-139 failure: findArrangements throws when storage fails, so the call
 
   await expect(loadRepository().findArrangements("evt-1")).rejects.toThrow("findArrangements venue failed");
 });
+
+test("SCRUM-140 AC1: findAwaitingSafetyReview reads only SAFETY_REVIEW events, soonest first, without organiser details", async () => {
+  const rows = [{ id: "evt-1" }];
+  const { calls } = recorder(rows);
+
+  expect(await loadRepository().findAwaitingSafetyReview()).toEqual(rows);
+  expect(calls).toEqual([
+    ["from", "events"],
+    ["select", "id, name, start_time, end_time, expected_attendance"],
+    ["eq", "status", "SAFETY_REVIEW"],
+    ["order", "start_time", { ascending: true }],
+  ]);
+});
+
+test("SCRUM-140 AC2: findAwaitingSafetyReviewById matches the id and SAFETY_REVIEW together, selecting no organiser or coordinator column", async () => {
+  const { calls } = recorder({ id: "evt-1" });
+
+  await loadRepository().findAwaitingSafetyReviewById("evt-1");
+
+  expect(calls.filter(([name]) => name === "eq")).toEqual([["eq", "id", "evt-1"], ["eq", "status", "SAFETY_REVIEW"]]);
+  const [, columns] = calls.find(([name]) => name === "select");
+  expect(columns).not.toMatch(/\*|organiser|coordinator/);
+  expect(columns).toContain("expected_attendance");
+  expect(calls.some(([name]) => ["update", "insert", "delete", "upsert"].includes(name))).toBe(false);
+});
+
+test("SCRUM-140 failure: findAwaitingSafetyReview throws when storage fails", async () => {
+  recorder(null, { message: "connection refused" });
+
+  await expect(loadRepository().findAwaitingSafetyReview()).rejects.toThrow("findAwaitingSafetyReview failed");
+});

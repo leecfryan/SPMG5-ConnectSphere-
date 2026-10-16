@@ -15,6 +15,7 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const ADDITIONAL_REQUIREMENTS_MAX = 2000;
+const PURPOSE_MAX = 2000;
 
 // All current venues are in Singapore and Kuala Lumpur, both UTC+8. Event times
 // are stored as timestamps, so turning one into "which day is this" needs a
@@ -33,6 +34,7 @@ const ALLOWED_FIELDS = [
   "required_facilities",
   "accessibility_requirements",
   "additional_requirements",
+  "purpose",
 ];
 
 // Slots a request can be made on. "pending" is included on purpose: SCRUM-94
@@ -127,12 +129,20 @@ function validateBookingRequestShape(payload) {
         `additional_requirements must be ${ADDITIONAL_REQUIREMENTS_MAX} characters or fewer`
       );
     }
+
+    if (typeof payload.purpose !== "string" || payload.purpose.trim() === "") {
+      errors.push("purpose is required");
+    } else if (payload.purpose.trim().length > PURPOSE_MAX) {
+      errors.push(`purpose must be ${PURPOSE_MAX} characters or fewer`);
+    }
   }
 
   if (errors.length > 0) return { errors, value: null };
 
   const trimmedAdditional =
     typeof additional === "string" ? additional.trim() : "";
+  const trimmedPurpose =
+    typeof payload.purpose === "string" ? payload.purpose.trim() : "";
 
   // Slots are stored in am, pm, night order however the client sent them, so
   // the same request always reads the same way on review.
@@ -147,6 +157,7 @@ function validateBookingRequestShape(payload) {
       required_facilities: payload.required_facilities || [],
       accessibility_requirements: payload.accessibility_requirements || [],
       additional_requirements: trimmedAdditional === "" ? null : trimmedAdditional,
+      purpose: trimmedPurpose,
     },
   };
 }

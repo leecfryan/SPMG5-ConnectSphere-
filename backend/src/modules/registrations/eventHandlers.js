@@ -27,6 +27,27 @@ async function addAvailability(dataClient, events) {
   };
 }
 
+async function addVenueBookings(dataClient, events) {
+  if (!events.length) return { events, error: null };
+
+  const results = await Promise.all(events.map(async (event) => {
+    const { data, error } = await dataClient
+      .from("venue_booking_requests")
+      .select("id, event_id, purpose, booking_date, venue:venues!venue_id(id, name, city, country), slots:venue_bookings!request_id(slot, status)")
+      .eq("event_id", event.id);
+    return { event, data, error };
+  }));
+  const failed = results.find((result) => result.error);
+  if (failed) return { events: null, error: failed.error };
+
+  return {
+    events: results.map(({ event, data }) => (
+      data?.length ? { ...event, venue_booking_requests: data } : event
+    )),
+    error: null,
+  };
+}
+
 module.exports = function registrationEventRoutes(dataClient) {
   const router = express.Router();
   router.get("/registration-windows", async (req, res) => {
@@ -76,7 +97,12 @@ module.exports = function registrationEventRoutes(dataClient) {
       console.error("Event availability lookup error:", result.error.message);
       return res.status(500).json({ message: "Unable to load event availability. Please try again." });
     }
-    res.json({ events: result.events });
+    const withVenues = await addVenueBookings(dataClient, result.events);
+    if (withVenues.error) {
+      console.error("Event venue lookup error:", withVenues.error.message);
+      return res.status(500).json({ message: "Unable to load event venues. Please try again." });
+    }
+    res.json({ events: withVenues.events });
   });
 
   router.get("/:eventId", async (req, res) => {
@@ -98,7 +124,12 @@ module.exports = function registrationEventRoutes(dataClient) {
       console.error("Event availability lookup error:", result.error.message);
       return res.status(500).json({ message: "Unable to load event availability. Please try again." });
     }
-    res.json({ event: result.events[0] });
+    const withVenues = await addVenueBookings(dataClient, result.events);
+    if (withVenues.error) {
+      console.error("Event venue lookup error:", withVenues.error.message);
+      return res.status(500).json({ message: "Unable to load event venues. Please try again." });
+    }
+    res.json({ event: withVenues.events[0] });
   });
 
   return router;

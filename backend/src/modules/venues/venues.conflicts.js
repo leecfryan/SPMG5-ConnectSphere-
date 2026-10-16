@@ -34,10 +34,13 @@ function findBufferConflicts(confirmedRequests, allBookings, setupMinutes, turna
       const minOwn = Math.min(...slots.map((s) => SLOT_ORDER.indexOf(s)));
       const type = bufferIdx < minOwn ? "setup" : "turnaround";
 
+      // SCRUM-146: active holds block buffer slots in the same way confirmed
+      // and pending bookings do. Hold rows carry request_id=null, so the
+      // request_id !== request_id guard still excludes nothing it should keep.
       const occupiers = (byDateSlot.get(`${booking_date}|${bufferSlot}`) || []).filter(
         (b) =>
           b.request_id !== request_id &&
-          (b.status === "confirmed" || b.status === "pending")
+          (b.status === "confirmed" || b.status === "pending" || b.status === "hold")
       );
 
       // prefer a confirmed occupier over a pending one when both are present

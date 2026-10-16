@@ -174,6 +174,54 @@ There are two ways this runs:
 action existed) was removed once SCRUM-148 made the first path above the normal route to `CANCELLED` - the
 synchronous call and the read-time self-heal between them cover every case the script did.
 
+**SCRUM-150 rename:** `releaseReservationsForCancelledEvent` is now `releaseReservationsForEvent` - the function
+never actually reads `events.status`, it only needs an `eventId`, so the name no longer claimed something the
+function itself didn't check. `postpone()` (`POST /api/internal/events/:eventId/postpone`) now calls it too,
+right after the postpone write succeeds, since postponing an event never carries a new date (see below) and so
+has no window left to hold equipment against - the same release cancel already does. The releasable filter and
+the unit-reversion eligibility set both grew to also include `REVIEW_REQUIRED` (next section), so a cancelled or
+postponed event never leaves a reschedule-flagged request stranded.
+
+## Reviewing equipment on a reschedule (SCRUM-150)
+
+A reschedule is an organiser's `PATCH /api/event-workspace/organiser/:id` that actually changes `start_time`,
+`end_time` or `equipment_needs` (any real value change counts; resubmitting the same values is a no-op). This is
+a different action from postponing (above) - postpone never carries a new date at all, so it releases equipment
+outright; a reschedule still has a date, just a different one, so its equipment needs re-review instead of
+release.
+
+**New status: `REVIEW_REQUIRED`.** `equipment.service.js#flagReservationsForReview(eventId, { startTime, endTime,
+datesChanged })`, called by `eventWorkspace.service.js#updateOrganiserEvent` right after the event write succeeds,
+moves every `PENDING`/`APPROVED`/`REVIEW_REQUIRED` request on the event to `REVIEW_REQUIRED` (re-flagging an
+already-flagged request is deliberate - a second reschedule before Technical Support acts must update the window
+to the latest change, not leave it pointing at a stale one). `borrow_start`/`borrow_end` are only re-derived from
+the event's new window when the dates themselves changed; an `equipment_needs`-only edit leaves the window as-is,
+since there's nothing to re-derive it from. `REVIEW_REQUIRED` is in `BLOCKING_REQUEST_STATUSES` (it still holds
+the unit, since nobody has confirmed the reservation is actually gone) but **not** in `REVIEW_STATUSES` (Technical
+Support's own decision endpoint can never set it directly - only this flagging call does). It only ever leaves
+`REVIEW_REQUIRED` via that same decision endpoint, same as any other request.
+
+**Showing what's no longer available.** `GET /events/:eventId/equipment-requests` (coordinator and Technical
+Support both read this) and `GET /technical-support/equipment-requests` both run every `REVIEW_REQUIRED` row
+through `equipmentService.isRequestAvailableForWindow`, attaching a computed `available_for_window` field -
+`true`/`false`, present **only** on `REVIEW_REQUIRED` rows, never stored. It checks the row's own unit's status
+(an equipment unit that became `DAMAGED`/`MAINTENANCE`/etc. is never available) and whether any other active
+request on that same unit now overlaps its window, excluding the row being checked. `EventEquipmentCard.jsx`
+("Needs re-review" badge) and `EquipmentRequestPage.jsx` both render a "Not available for these dates" sub-label
+when it's `false`.
+
+**Approving a flagged request re-checks availability.** `PATCH /equipment-requests/:id/status` now re-runs
+`isRequestAvailableForWindow` before writing `APPROVED`, but **only** for the `REVIEW_REQUIRED → APPROVED`
+transition - it refuses with `409` if something now blocks it. A plain `PENDING → APPROVED` approval still has no
+such check (a pre-existing gap, not introduced or closed by this story).
+
+**A future "confirm event" gate.** `hasUnresolvedEquipment(eventId)` returns a list of
+`{ type: "equipment", request_id, description, reason, essential: true }` for every `REVIEW_REQUIRED`, `PENDING`,
+or `REJECTED` request on the event - deliberately aligned with the Safety Review stage's own
+`findMissingArrangements` (`safetyReadiness.js`), which already treats `REJECTED` as blocking for the same reason
+("Technical Support can revise it"). There is no caller for this yet: no code anywhere actually transitions an
+event to `CONFIRMED`, so this function is dormant until a future story builds that transition and wires it in.
+
 ## Database and deployment prerequisites
 
 This branch assumes existing Supabase tables; it did not include Equipment SQL
@@ -188,8 +236,8 @@ The existing application contracts require:
   status-changing write, server-side only).
 - `equipment_requests`: `id`, `event_id`, `equipment_id`, `requested_by`,
   `quantity_requested`, `technical_requirement`, `borrow_start`, `borrow_end`,
-  `status` (`PENDING`, `APPROVED`, `REJECTED`, and `RELEASED` - SCRUM-104, added to the check constraint by hand),
-  `created_at`; generated IDs/timestamps and appropriate foreign keys.
+  `status` (`PENDING`, `APPROVED`, `REJECTED`, `RELEASED` - SCRUM-104, and `REVIEW_REQUIRED` - SCRUM-150, all
+  added to the check constraint by hand), `created_at`; generated IDs/timestamps and appropriate foreign keys.
 - `messages`: `id`, `equipment_request_id`, `author_id`, `author_role`, `body`,
   `created_at`, `updated_at`, `deleted_at`; the existing timestamp trigger is used
   for edits. The author-role constraint must accept `tech_support` and
@@ -248,6 +296,18 @@ repo-wide change to live testing.
   self-heal itself (cancelling an event and going straight to `GET
   /equipment/availability`, with no call to
   the release function or the script at all).
+- SCRUM-150's backend tests are **doubles only, no live Supabase**, unlike the rest of this file's suites -
+  `backend/tests/unit/equipment-release-event.test.js` (the renamed `releaseReservationsForEvent`, including
+  postpone's new call and `REVIEW_REQUIRED` in both the releasable and unit-reversion filters),
+  `backend/tests/unit/equipment-flag-review.test.js` (`flagReservationsForReview` and
+  `isRequestAvailableForWindow`'s DAMAGED/self-exclusion cases), `backend/tests/unit/equipment-reschedule-review.routes.test.js`
+  (`available_for_window` and the approval overlap re-check, over real HTTP via `createApp` with a fake Supabase
+  client), `backend/tests/unit/equipment-unresolved.test.js` (`hasUnresolvedEquipment` in isolation - no caller
+  exists yet), and `backend/tests/unit/events/eventWorkspace.service.test.js`'s new cases (the reschedule
+  diff-detection in `updateOrganiserEvent`). Frontend: `EventEquipmentCard.test.jsx` and
+  `EquipmentRequestPage.test.jsx` (new files, scoped to the two new badge lines only - neither component had
+  prior test coverage, and building a harness for each one's full existing behaviour was judged disproportionate,
+  the same call SCRUM-149 made for its own TC-149-15).
 - `tests/playwright/equipment.api.spec.cjs` / `equipment.browser.spec.cjs`
   (the fake in-memory Auth+backend simulator's equipment coverage) are
   retired on staging. Their scenarios moved to `tests/e2e/` below. The small
@@ -263,8 +323,13 @@ repo-wide change to live testing.
   storage adapters and retains cross-feature equipment assignment/access
   checks; dedicated equipment workflows use the live suite below.
 
-`tests/e2e/` is the live-Supabase Playwright suite, separate from CI because
-it writes to a real development database:
+`tests/e2e/` is the live-Supabase Playwright suite. It writes to the shared
+development database, so it has its own `package.json` and its own CI job,
+`playwright-live` in `.github/workflows/ci.yml`. That job runs on every push
+and PR to `staging`, one run at a time (`concurrency: playwright-live-db`) so
+two PRs never race on the same rows. CI provides only the Supabase
+credentials, so `technical-support-review.spec.js` (below) skips itself
+there. Run it locally with `npm --prefix tests/e2e test`.
 
 - `equipment-request.spec.js`: the request page end-to-end (AC1-4), the
   Scrum-29 dropdown-filter and event-derived borrow-window behaviour, the

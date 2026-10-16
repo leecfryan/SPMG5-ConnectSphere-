@@ -44,6 +44,10 @@ const policies = Object.freeze({
   "venues.conflicts": {
     roles: ["venue_staff"],
   },
+  // SCRUM-146: placing and viewing tentative holds is Venue Staff work only.
+  "venues.holds": {
+    roles: ["venue_staff"],
+  },
   "bookings.request": {
     roles: ["event_coordinator"],
   },
@@ -62,6 +66,9 @@ const policies = Object.freeze({
   "events.decide": { roles: ["event_coordinator"], record: true },
   // SCRUM-139: only the assigned coordinator submits or withdraws the safety check.
   "events.safety.submit": { roles: ["event_coordinator"], record: true },
+  // SCRUM-140: Safety Officers are a shared pool, not assigned per event, so any
+  // of them may read any event awaiting review. Read-only: no record check needed.
+  "events.safety.read": { roles: ["safety_officer"], label: "Operational safety review" },
   // SCRUM-148/142: the lead may cancel any active event; coordinators must still be assigned.
   "events.cancel": { roles: ["event_coordinator", "event_coordinator_lead"], record: true },
   // SCRUM-149/142: postponement uses the same assigned-coordinator or lead access as cancellation.

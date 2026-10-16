@@ -9,12 +9,18 @@
 // Equipment: every request must be APPROVED ("Assigned"). REJECTED ("Issues")
 // still blocks because Technical Support can revise it. RELEASED is ignored.
 // An event with no equipment requests needs no technical arrangements.
+//
+// SCRUM-150: REVIEW_REQUIRED also blocks - a reservation flagged for
+// re-review after a reschedule is exactly as unsettled as a PENDING one, and
+// this gate must not disagree with hasUnresolvedEquipment's own policy
+// (equipment.service.js) about the same equipment_requests data.
 
 const VENUE_PENDING = "Waiting for Venue Staff to decide.";
 const NO_VENUE = "No venue booking has been approved yet.";
 const EQUIPMENT_REASONS = Object.freeze({
   PENDING: "Waiting for Technical Support Staff to reserve it.",
   REJECTED: "Technical Support Staff reported an issue with this request.",
+  REVIEW_REQUIRED: "This reservation needs to be reviewed again after the event was rescheduled.",
 });
 
 function venueState(request) {
@@ -49,4 +55,4 @@ function findMissingArrangements({ venueRequests, equipmentRequests }) {
   return missing;
 }
 
-module.exports = { findMissingArrangements };
+module.exports = { findMissingArrangements, venueState };

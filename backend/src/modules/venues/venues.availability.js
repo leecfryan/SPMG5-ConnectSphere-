@@ -80,6 +80,7 @@ function slotIsOpen(operatingHoursEntry, slot) {
 //   closed      venue is not open for that slot at all (SCRUM-84 / SCRUM-89)
 //   unavailable Venue Staff recorded the period as unavailable (SCRUM-93)
 //   booked      a confirmed booking consumes the slot (SCRUM-94)
+//   tentative   an active hold reserves the slot (SCRUM-146)
 //   pending     a request exists but has not been confirmed, slot still free
 //   available   nothing in the way
 function buildAvailabilityCalendar(input) {
@@ -104,6 +105,13 @@ function buildAvailabilityCalendar(input) {
     unavailableBySlot.set(`${period.unavailable_date}|${period.slot}`, period);
   }
 
+  // SCRUM-146: active holds (expires_at > now() filtered server-side before this call)
+  const tentativeBySlot = new Map();
+  for (const hold of input.holds || []) {
+    const key = `${hold.booking_date}|${hold.slot}`;
+    if (!tentativeBySlot.has(key)) tentativeBySlot.set(key, hold);
+  }
+
   return eachDateInRange(input.from, input.to).map((date) => {
     const dayKey = dayKeyFor(date);
     const hoursForDay = operatingHours[dayKey];
@@ -126,6 +134,12 @@ function buildAvailabilityCalendar(input) {
       const confirmed = confirmedBySlot.get(key);
       if (confirmed) {
         slots[slot] = { status: "booked", label: confirmed.event_name };
+        continue;
+      }
+
+      const tentative = tentativeBySlot.get(key);
+      if (tentative) {
+        slots[slot] = { status: "tentative", label: tentative.event_name };
         continue;
       }
 

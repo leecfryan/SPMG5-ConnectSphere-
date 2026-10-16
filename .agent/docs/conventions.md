@@ -96,7 +96,7 @@ For each AC, work through Week 4's five steps and write down the cases before wr
 
 | Step | Ask | ConnectSphere examples |
 |---|---|---|
-| 1. Visualise the workflow | What does each role see and click? What's on screen before and after? | The coordinator opens `/events/reviews`, picks an event, clicks *Start review* |
+| 1. Visualise the workflow | What does each role see and click? What's on screen before and after? | The coordinator opens `/assigned-events`, picks an event, clicks *Start review* |
 | 2. Happy path | The path with no errors. Test it first | Assigned coordinator approves an `UNDER_REVIEW` event → `APPROVED`, approver and time shown |
 | 3. Cross-cutting quality | Auth, role and relationship access, safe errors, accessibility, mobile (375px), consistent UI | Only write a story-specific test when the concern produces story-specific behaviour (e.g. *this* endpoint's record check). The generic bar lives in the Definition of Done |
 | 4. Negative | Wrong input, wrong role, wrong record, wrong state, dependency down | Unassigned coordinator → 403 and event unchanged; approve from `SUBMITTED` → 409; Supabase error → safe 500/503 |
@@ -126,7 +126,7 @@ Deliverable 3 document) and drafted in the task note first:
 | Test Case ID | `TC-SCRUM-<n>-NN` (unique, never reused) |
 | Test Scenario | One-line objective, e.g. "Unassigned coordinator cannot approve" |
 | Pre-conditions | Data and state needed, e.g. "Event E1 `UNDER_REVIEW`, assigned to coordinator.demo; signed in as coordinator2.demo" |
-| Test Steps | Exact actions a person could follow, e.g. "1. Open `/events/E1/review` 2. Click *Approve*" |
+| Test Steps | Exact actions a person could follow, e.g. "1. Open `/assigned-events/E1` 2. Click *Approve*" |
 | Test Data | Exact inputs (accounts, IDs, values). Not "a valid event" |
 | Expected Result | Specific observable outcome, e.g. "403 *You do not have permission…*; event status still `UNDER_REVIEW`" |
 | Created By* / Date of Creation* | Who wrote the case and when. Required fields (hence the `*`) |
@@ -153,6 +153,23 @@ The testing pyramid: many fast unit tests, fewer integration tests, a few end-to
 | Frontend component / flow | Vitest + React Testing Library + user-event (jsdom) | Next to the code: `features/<f>/**/X.test.jsx` | Real `App` + `AuthProvider` + router + guards: what each role sees, loading/empty/error states, form behaviour | `lib/supabase` (`vi.mock`) and `fetch` (`vi.stubGlobal`) |
 | API acceptance | Playwright `api` project | `tests/playwright/<feature>.api.spec.cjs` | The real Express app over HTTP with real Supabase SDKs against the local Auth simulator; role × endpoint matrices | Storage only (`tests/playwright/support/<f>-storage.cjs`) |
 | End-to-end | Playwright `chromium` project | `tests/playwright/<feature>.browser.spec.cjs` | A user's journey through the real UI, Vite proxy and backend | Storage only |
+| Live-DB smoke | Playwright (own `tests/e2e/package.json`) | `tests/e2e/<feature>.spec.js` | The real queries, constraints and RPCs behave as the fakes assume: a happy path through the real UI, backend and shared dev Supabase | None. Real rows, created and deleted by the test |
+
+`tests/playwright` is the default end-to-end suite. It is fast, parallel and touches nothing shared. The live-DB
+suite exists to catch what fakes can't (a wrong column name, a missing constraint, an RPC that behaves differently),
+and it is expensive: every test creates real Auth users and rows in the database the whole team uses, and the CI
+`playwright-live` job runs one PR at a time. So keep it small:
+
+- **1–3 live smoke tests per epic**, each a happy-path journey that crosses the database. Roles, denials, edge cases
+  and failure paths stay in the faster layers above.
+- **Every live test cleans up after itself.** Create throwaway accounts and rows with
+  `tests/e2e/support/live-equipment-fixtures.js` (or a sibling `support/<f>-fixtures.js`) and delete exactly what
+  was created in `finally` / `afterEach`. Never mutate the seeded demo accounts or rely on rows a person made by
+  hand.
+- **The agent never runs this suite.** It uses the secret key against the shared database, so the user runs
+  `npm --prefix tests/e2e test` locally, and CI runs it on the PR.
+- Live backend suites in `backend/tests/live/` follow the same rules and stay opt-in through their
+  `RUN_LIVE_*=true` flags.
 
 The older `auth`, `permissions` and `equipment` backend suites run on `node:test`; leave them as they are. All new
 tests use Vitest or Playwright.
@@ -164,7 +181,8 @@ tests use Vitest or Playwright.
 | An endpoint | Backend integration: success; 401 without a token; 403 for each wrong role; 403 for the right role on someone else's record; 400 for bad input; 404; 409 where state matters; 503 when the dependency is missing |
 | A permission | Update the role/permission matrices in `tests/playwright/api.spec.cjs` and any Vitest matrix; add a Playwright API case per role |
 | A page | Frontend: the permitted role sees it and its nav link; a denied role is redirected to `/forbidden` and sees no link; loading, empty, error + retry, success; server error text shown safely |
-| A user journey in an AC | Playwright browser: the journey end to end with seeded fixture accounts |
+| A user journey in an AC | Playwright browser (`tests/playwright`): the journey end to end with fixture accounts |
+| New queries, constraints or RPCs the fakes can't prove | A live-DB smoke test in `tests/e2e`, within the epic's 1–3 limit. Extend an existing one before adding another |
 | "X cannot see / change Y" | **API-level** denial test (integration or Playwright API). A hidden button is not evidence |
 | Cross-lane workflow (e.g. approve → venue booking sees it) | One Playwright test for the hand-off between lanes. The rubric grades coherent end-to-end workflows, not isolated features |
 
@@ -176,8 +194,8 @@ tests use Vitest or Playwright.
 - **Arrange, Act, Assert**, one behaviour per test, no logic in the assertions.
 - **Assert the full outcome**: the response *and* the state afterwards ("403 **and** the event is unchanged",
   "409 **and** no booking row was written").
-- **No real Supabase, network or secrets.** Fakes only at the boundary (Auth transport, storage). Guards,
-  controllers and validation stay real.
+- **No real Supabase, network or secrets**, except in the live-DB smoke suites (§3). Fakes only at the boundary
+  (Auth transport, storage). Guards, controllers and validation stay real.
 
 ### 5. Review every test before trusting it
 
@@ -230,6 +248,8 @@ stating the outcome ("…is refused and leaves the event unchanged"), not the ac
 - **Playwright**: `tests/playwright/events.api.spec.cjs` / `events.browser.spec.cjs`. Use the `accounts` fixture
   from `support/fixtures.cjs` to create disposable users with roles, and `signIn(page, account)`. New storage
   goes in a `support/<f>-storage.cjs` module that `support/server.cjs` passes to `createApp`.
+- **Live-DB smoke**: `tests/e2e/waitlist.spec.js`. Create throwaway accounts and rows with the live fixtures, run
+  one journey, and delete what was created in `finally`.
 
 ### 9. Regression and CI
 
@@ -250,13 +270,13 @@ and legible to humans and agents. Four kinds exist. Update each in the same chan
 | Lane guide (`<feature>-integration.md`, `<feature>.md`): routes, endpoints, permissions, statuses, setup | `docs/` | Any behaviour, route, endpoint, permission or schema change | Evidence for *Working software* and the Q&A |
 | Test guide: test case specs + AC → test traceability + coverage notes | `docs/<feature>-tests.md` or `docs/testing/` | Every story (§2 above) | **Deliverable 3** |
 | C4 model (C1 context, C2 containers; C3 only if a container needs explaining) as **Structurizr DSL text** | `docs/design/` | A change adds or removes a user role, an external system, a container (app, API, database) or a relationship between them | **Deliverable 2** |
-| Architecture Decision Record: context, decision, alternatives considered, consequences; one short file per decision | `docs/adr/NNNN-<title>.md` | A story makes a decision that is expensive to change later (a status model, a permission model, where a rule is enforced, a data-ownership choice) | *System design* rubric: "well-justified trade-offs" |
+| Architecture Decision Record: context, decision, alternatives considered, consequences; one short document per decision | The team's Google Drive, not the repo. The agent drafts it; the dev files it | A story makes a decision that is expensive to change later (a status model, a permission model, where a rule is enforced, a data-ownership choice) | *System design* rubric: "well-justified trade-offs" |
 
 - **Diagrams are text** (Structurizr DSL for C4; Mermaid inside Markdown for state and sequence diagrams) so they
   diff and review in PRs. Draw one only when it says something more clearly than the code, e.g. a status lifecycle
   as a Mermaid state diagram, or a multi-step flow with a failure branch as a sequence diagram.
-- `docs/design/` and `docs/adr/` don't exist yet. Create them the first time a story needs them, not before, and
-  tell the user, since the C4 model is a team deliverable.
+- `docs/design/` doesn't exist yet. Create it the first time a story needs it, not before, and tell the user, since
+  the C4 model is a team deliverable.
 - The README keeps a correct *how to run* and *how to test* section (Deliverable 6) and the repository link
   (Deliverable 7).
 - Scrum evidence (backlogs, burndowns, boards, retros, recordings, Deliverables 1 and 4) lives in the team's tracker and

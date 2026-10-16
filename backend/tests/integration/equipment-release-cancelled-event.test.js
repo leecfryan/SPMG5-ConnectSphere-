@@ -1,4 +1,4 @@
-// SCRUM-104: releaseReservationsForCancelledEvent is called by a script, not
+// SCRUM-104: releaseReservationsForEvent is called by a script, not
 // a route (there is no cancellation endpoint in this story - events.status
 // is set directly in Supabase). Same live-DB pattern as
 // equipment-status-change.test.js: real createEquipmentService(supabase)
@@ -118,7 +118,7 @@ describe("SCRUM-104 AC1: cancelling an event releases its equipment reservations
     const equipmentId = await insertEquipment({ type: freshType() });
     const requestId = await insertRequest({ eventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
-    const summary = await equipmentService.releaseReservationsForCancelledEvent(eventId);
+    const summary = await equipmentService.releaseReservationsForEvent(eventId);
 
     expect(summary.released).toEqual([requestId]);
     expect(await requestStatus(requestId)).toBe("RELEASED");
@@ -135,7 +135,7 @@ describe("SCRUM-104 AC1: cancelling an event releases its equipment reservations
     const pendingRequest = await insertRequest({ eventId, equipmentId: pendingUnit, status: "PENDING", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
     const rejectedRequest = await insertRequest({ eventId, equipmentId: rejectedUnit, status: "REJECTED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
-    const summary = await equipmentService.releaseReservationsForCancelledEvent(eventId);
+    const summary = await equipmentService.releaseReservationsForEvent(eventId);
 
     expect(summary.released).toEqual([pendingRequest]);
     expect(await requestStatus(pendingRequest)).toBe("RELEASED");
@@ -147,7 +147,7 @@ describe("SCRUM-104 AC1: cancelling an event releases its equipment reservations
     const equipmentId = await insertEquipment({ type: freshType() });
     const requestId = await insertRequest({ eventId, equipmentId, status: "APPROVED", borrowStart: isoNextWeek("00:00:00"), borrowEnd: isoNextWeek("23:59:59") });
 
-    const summary = await equipmentService.releaseReservationsForCancelledEvent(eventId);
+    const summary = await equipmentService.releaseReservationsForEvent(eventId);
 
     expect(summary.released).toEqual([requestId]);
     expect(await requestStatus(requestId)).toBe("RELEASED");
@@ -158,8 +158,8 @@ describe("SCRUM-104 AC1: cancelling an event releases its equipment reservations
     const equipmentId = await insertEquipment({ type: freshType() });
     const requestId = await insertRequest({ eventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
-    await equipmentService.releaseReservationsForCancelledEvent(eventId);
-    const second = await equipmentService.releaseReservationsForCancelledEvent(eventId);
+    await equipmentService.releaseReservationsForEvent(eventId);
+    const second = await equipmentService.releaseReservationsForEvent(eventId);
 
     expect(second.released).toEqual([]);
     expect(await requestStatus(requestId)).toBe("RELEASED");
@@ -168,7 +168,7 @@ describe("SCRUM-104 AC1: cancelling an event releases its equipment reservations
   test("[TC-SCRUM-104-09] a cancelled event with no reservations at all returns an empty summary", async () => {
     const eventId = await insertEvent();
 
-    const summary = await equipmentService.releaseReservationsForCancelledEvent(eventId);
+    const summary = await equipmentService.releaseReservationsForEvent(eventId);
 
     expect(summary).toEqual({ released: [], equipmentReverted: [], equipmentSkipped: [] });
   });
@@ -183,7 +183,7 @@ describe("SCRUM-104 AC1: cancelling an event releases its equipment reservations
     const otherPending = await insertRequest({ eventId: activeEventId, equipmentId: pendingUnit, status: "PENDING", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
     const otherApproved = await insertRequest({ eventId: activeEventId, equipmentId: approvedUnit, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
-    const summary = await equipmentService.releaseReservationsForCancelledEvent(cancelledEventId);
+    const summary = await equipmentService.releaseReservationsForEvent(cancelledEventId);
 
     expect(summary).toEqual({ released: [], equipmentReverted: [], equipmentSkipped: [] });
     expect(await requestStatus(otherPending)).toBe("PENDING");
@@ -225,7 +225,7 @@ describe("SCRUM-104 AC2: the released quantity is available for new reservations
     const equipmentId = await insertEquipment({ type });
     await insertRequest({ eventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
-    await equipmentService.releaseReservationsForCancelledEvent(eventId);
+    await equipmentService.releaseReservationsForEvent(eventId);
 
     const { base, server } = await startApp();
     try {
@@ -246,7 +246,7 @@ describe("SCRUM-104 AC2: the released quantity is available for new reservations
     await insertRequest({ eventId: cancelledEventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
     await insertRequest({ eventId: activeEventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
-    await equipmentService.releaseReservationsForCancelledEvent(cancelledEventId);
+    await equipmentService.releaseReservationsForEvent(cancelledEventId);
 
     const { base, server } = await startApp();
     try {
@@ -265,7 +265,7 @@ describe("SCRUM-104 AC2: the released quantity is available for new reservations
     const equipmentId = await insertEquipment({ type, status: "IN_USE" });
     const requestId = await insertRequest({ eventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
-    // No call to releaseReservationsForCancelledEvent here - that's the point.
+    // No call to releaseReservationsForEvent here - that's the point.
     const { base, server } = await startApp({ listCancelledEventIds: listLiveCancelledEventIds });
     try {
       const params = new URLSearchParams({ start: "2026-01-01T09:00:00Z", end: "2026-01-01T17:00:00Z", type, quantity: "1", location: "Test Room" });
@@ -286,7 +286,7 @@ describe("SCRUM-104 AC3: reserved equipment's status is automatically changed to
     const equipmentId = await insertEquipment({ type: freshType(), status: "IN_USE" });
     await insertRequest({ eventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
-    const summary = await equipmentService.releaseReservationsForCancelledEvent(eventId);
+    const summary = await equipmentService.releaseReservationsForEvent(eventId);
 
     expect(summary.equipmentReverted).toEqual([equipmentId]);
     const unit = await equipmentStatus(equipmentId);
@@ -302,7 +302,7 @@ describe("SCRUM-104 AC3: reserved equipment's status is automatically changed to
     await insertRequest({ eventId: cancelledEventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
     await insertRequest({ eventId: activeEventId, equipmentId, status: "APPROVED", borrowStart: today + "T00:00:00Z", borrowEnd: today + "T23:59:59Z" });
 
-    const summary = await equipmentService.releaseReservationsForCancelledEvent(cancelledEventId);
+    const summary = await equipmentService.releaseReservationsForEvent(cancelledEventId);
 
     expect(summary.equipmentSkipped).toEqual([equipmentId]);
     expect((await equipmentStatus(equipmentId)).status).toBe("IN_USE");
@@ -313,7 +313,7 @@ describe("SCRUM-104 AC3: reserved equipment's status is automatically changed to
     const equipmentId = await insertEquipment({ type: freshType(), status: "DAMAGED" });
     await insertRequest({ eventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
-    const summary = await equipmentService.releaseReservationsForCancelledEvent(eventId);
+    const summary = await equipmentService.releaseReservationsForEvent(eventId);
 
     expect(summary.equipmentReverted).toEqual([]);
     expect(summary.equipmentSkipped).toEqual([]); // never inspected - it was never IN_USE

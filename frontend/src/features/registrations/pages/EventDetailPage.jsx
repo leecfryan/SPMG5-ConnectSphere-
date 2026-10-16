@@ -7,6 +7,7 @@ import { getRegistrationAvailability, registrationAvailabilityLabel } from "../r
 import { useRegistrationWindow } from "../useRegistrationWindow";
 import RegistrationWindowNotice from "../components/RegistrationWindowNotice";
 import WaitlistPanel from "../components/WaitlistPanel";
+import EventVenueBookings from "../../venues/components/EventVenueBookings";
 
 function formatDate(iso) {
   if (!iso) return null;
@@ -84,6 +85,10 @@ function EventDetailPage() {
       </div>
 
       {event.description && <p className="event-description">{event.description}</p>}
+      <section className="event-venues-section" aria-labelledby="event-venues-title">
+        <h2 id="event-venues-title">Venues</h2>
+        <EventVenueBookings bookings={event.venue_booking_requests} />
+      </section>
 
       <div className="event-register-section">
         <RegistrationWindowNotice event={event} state={windowState} />

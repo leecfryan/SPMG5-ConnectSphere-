@@ -43,6 +43,7 @@ function toListItem(event) {
     status: event.status,
     enrolled: toCount(event.enrolled_attendees),
     maxEnrollment: toLimit(event.expected_attendance),
+    ...(event.venueBookings?.length ? { venueBookings: event.venueBookings } : {}),
   };
 }
 
@@ -51,6 +52,7 @@ function toSummary(event, waitingListCount) {
     ...toListItem(event),
     end_time: event.end_time ?? null,
     waitingList: toCount(waitingListCount),
+    ...(event.venueBookings?.length ? { venueBookings: event.venueBookings } : {}),
   };
 }
 

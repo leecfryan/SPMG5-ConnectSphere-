@@ -22,6 +22,7 @@ export default function WorkspaceLayout() {
         {hasPermission("internal.access") && hasPermission("equipment.review") && <NavLink to="/equipment/catalogue">Equipment catalogue</NavLink>}
         {hasPermission("internal.access") && hasPermission("equipment.review") && <NavLink to="/technical-support">Technical support</NavLink>}
         {hasPermission("internal.access") && hasPermission("venues.read") && <NavLink to="/venues">Venues</NavLink>}
+        {hasPermission("internal.access") && hasPermission("events.safety.read") && <NavLink to="/safety-reviews">Safety reviews</NavLink>}
         {hasPermission("internal.access") && <NavLink to="/staff/responsibilities">Responsibilities</NavLink>}
       </nav>
       <Outlet />
