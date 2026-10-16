@@ -54,7 +54,10 @@ test.describe("Scrum-27 AC1-4: equipment request page", () => {
     const row = page.locator(".eq-request-row", { hasText: requirementText });
     await expect(row).toBeVisible({ timeout: 10000 });
     await expect(row).toContainText("× 1");
-    await expect(row).toContainText("PENDING");
+    // SCRUM-150: the coordinator's page now shows the same friendly status
+    // label Technical Support's own view already used, not the raw PENDING
+    // status value.
+    await expect(row).toContainText("Unattended");
   });
 
   test("AC4: an unrelated coordinator has no assigned events and cannot read this event's requests", async ({ page }) => {
