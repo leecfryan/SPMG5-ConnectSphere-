@@ -9,6 +9,8 @@ module.exports = function venueStorage(accounts) {
   const requests = [];
   // SCRUM-133: in-memory unavailability periods for Playwright fixtures
   const periods = [];
+  // SCRUM-146: in-memory holds for Playwright fixtures
+  const holds = [];
   const events = () => [...accounts.values()].flatMap(account => account.events);
   const visible = (request, scope) => scope?.allVenues || (scope?.coordinatorId && events().some(event => event.id === request.event_id && event.coordinator_id === scope.coordinatorId));
   function eachDateInRange(from, to) {
@@ -84,6 +86,22 @@ module.exports = function venueStorage(accounts) {
       if (idx === -1) return null;
       const [removed] = periods.splice(idx, 1);
       return { id: removed.id };
+    },
+    // SCRUM-146: tentative holds
+    async listActiveHoldsInRange(id, from, to) {
+      const now = new Date().toISOString();
+      return holds.filter(h => h.venue_id === id && h.booking_date >= from && h.booking_date <= to && h.expires_at > now)
+        .map(h => ({ booking_date: h.booking_date, slot: h.slot, event_name: h.event_name }));
+    },
+    async listHolds(id) {
+      return holds.filter(h => h.venue_id === id)
+        .sort((a, b) => b.booking_date.localeCompare(a.booking_date) || b.created_at.localeCompare(a.created_at));
+    },
+    async createHold(id, { event_name, booking_date, slots, expires_at }, heldBy) {
+      const now = new Date().toISOString();
+      const rows = slots.map(slot => ({ id: randomUUID(), venue_id: id, booking_date, slot, event_name, requested_by: heldBy, expires_at, created_at: now }));
+      holds.push(...rows);
+      return rows;
     },
   };
 };
