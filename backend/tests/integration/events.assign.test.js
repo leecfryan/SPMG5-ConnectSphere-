@@ -150,15 +150,19 @@ test("SCRUM-26: assignment succeeds and does not move the event's status", async
   expect(event.coordinator_id).toBe("coord-1");
   // Clarification #1: no acceptance step, so there is no status transition here.
   expect(event.status).toBe("SUBMITTED");
-  expect(repository.assignCoordinator).toHaveBeenCalledWith(EVENT_ID, "coord-1");
+  expect(repository.assignCoordinator).toHaveBeenCalledWith(EVENT_ID, "coord-1", expect.objectContaining({
+    id: "verified-manager", fullName: "Coordinator Lead", email: "eventopsmanager.demo@example.com",
+  }));
 });
 
 test("SCRUM-26: a status or organiser smuggled into the body is ignored", async () => {
   await send(`/events/${EVENT_ID}/coordinator`, "event_coordinator_lead", "PUT",
-    { coordinatorId: "coord-1", status: "APPROVED", organiser_id: "someone-else", coordinator_id: "coord-2" });
+    { coordinatorId: "coord-1", status: "APPROVED", organiser_id: "someone-else", coordinator_id: "coord-2", assignedById: "forged-lead", assignedByName: "Forged Lead" });
 
-  // Only the two values the route is allowed to act on reach the repository.
-  expect(repository.assignCoordinator).toHaveBeenCalledWith(EVENT_ID, "coord-1");
+  // SCRUM-155: request fields cannot replace the authenticated assigner identity.
+  expect(repository.assignCoordinator).toHaveBeenCalledWith(EVENT_ID, "coord-1", expect.objectContaining({
+    id: "verified-manager", fullName: "Coordinator Lead", email: "eventopsmanager.demo@example.com",
+  }));
 });
 
 test("SCRUM-26: a missing coordinator is a 400 and writes nothing", async () => {

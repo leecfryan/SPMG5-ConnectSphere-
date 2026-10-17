@@ -645,3 +645,334 @@ The existing Event Decision workflow already displayed Action required when the
 workflow list was first opened, before creating Event assignment. It was not
 modified; its configuration should be checked separately if decision delivery
 fails. No cause was established during this checkpoint.
+
+## Equipment issue broadcasts — SCRUM-155 extension (live verification pending)
+
+Ryan authorised notification-only additions to the existing equipment operations.
+Notify all accounts with the trusted `technical_support_staff` role when an
+existing equipment request enters `REJECTED` (displayed as **Issues**). This is
+outside the original assignment AC, explicitly requested as an extension.
+The hooks cover the Technical Support dashboard status action and requests flagged
+by the existing equipment-retirement operation. The reporting actor is included
+among recipients if they hold that role. No venue staff broadcast is included.
+Cancellation/postponement notifications remain pending recipient ownership rules.
+
+The original validation, permission checks, status writes, reservation selection,
+retirement messages and response bodies remain. An optional notification service
+runs after the save (and after the existing retirement message for that path).
+A request already observed as REJECTED produces no repeat notification; saving
+APPROVED, releasing a reservation, editing catalogue condition, or posting a
+clarification message produces no equipment-issue broadcast. There is no separate
+issue-report form or structured issue-description field in the current code.
+The notification therefore describes the saved arrangement status, without
+mistaking `technical_requirement` or an ordinary thread message for issue details.
+
+The backend-only RPC snapshots the event name, equipment type and reporter name,
+then inserts one outbox row per technical staff account in a single transaction.
+Recipients come from Auth app metadata, never from browser inputs. The existing
+15-second worker routes `equipment-issue` rows and retries failed Novu delivery
+using the same row ID. No extra worker, endpoint, environment setting or package
+is added. The equipment service and frontend are unchanged.
+
+**Independence limit:** enqueue is a separate, best-effort call, bounded by a
+10-second database timeout. Errors are logged with a fixed warning and do not
+change the equipment operation's success response or undo its save. A failed
+enqueue, or a process exit between save and enqueue, can lose that notification;
+there is no automatic reconstruction of that missing queue entry. Once queued,
+delivery is durable under the existing worker contract. Concurrent original
+status writes can still produce duplicate broadcasts because the original
+operation has no atomic transition-history check. Preserving that operation
+means this addition makes no exactly-once claim. A successful issue response
+may take up to ten extra seconds while enqueue is attempted.
+
+### Schema reference — equipment issue broadcast (applied by Ryan)
+
+Tell teammates before applying this notification-only change and after it is done.
+It extends the allowed outbox workflows and creates one backend-only function;
+it does not alter equipment/event tables, triggers, statuses or permissions.
+Ryan confirmed successful manual application after verifying the constraint and columns on 2026-10-15. The inspection used was:
+
+Inspect the current notification
+constraint and the existing request columns in Supabase SQL Editor:
+
+```sql
+select conname, pg_get_constraintdef(oid)
+from pg_constraint
+where conrelid = 'public.notification_outbox'::regclass;
+
+select table_name, column_name, data_type
+from information_schema.columns
+where table_schema = 'public'
+  and table_name in ('equipment_requests', 'equipment', 'events')
+  and column_name in ('id', 'event_id', 'equipment_id', 'name', 'type');
+```
+
+The block below assumes the existing SCRUM-155 schema, including the constraint
+name `notification_outbox_workflow_check`. If the inspection differs, stop and
+adapt this block rather than dropping unrelated constraints. This is not a reset
+or backfill: old Issues requests do not automatically send notifications.
+
+```sql
+begin;
+
+alter table public.notification_outbox
+  drop constraint notification_outbox_workflow_check;
+alter table public.notification_outbox
+  add constraint notification_outbox_workflow_check
+  check (workflow in ('event-decision', 'event-assignment', 'equipment-issue'));
+
+create function public.enqueue_equipment_issue_notifications(
+  p_request_id uuid,
+  p_actor_id uuid
+) returns integer
+language plpgsql security definer set search_path = '' as $$
+declare
+  recipient_count integer;
+begin
+  insert into public.notification_outbox(event_id, recipient_id, workflow, payload)
+  select r.event_id, recipient.id, 'equipment-issue', jsonb_build_object(
+    'equipmentRequestId', r.id,
+    'equipmentType', equipment.type,
+    'eventId', event.id,
+    'eventName', event.name,
+    'reportedById', reporter.id,
+    'reportedByName', coalesce(
+      nullif(btrim(reporter.raw_user_meta_data ->> 'full_name'), ''),
+      nullif(reporter.email, ''), reporter.id::text
+    )
+  )
+  from public.equipment_requests r
+  join public.equipment equipment on equipment.id = r.equipment_id
+  join public.events event on event.id = r.event_id
+  join auth.users reporter on reporter.id = p_actor_id
+  cross join auth.users recipient
+  where r.id = p_request_id
+    and jsonb_typeof(recipient.raw_app_meta_data -> 'roles') = 'array'
+    and (recipient.raw_app_meta_data -> 'roles') @> '["technical_support_staff"]'::jsonb;
+  get diagnostics recipient_count = row_count;
+  return recipient_count;
+end;
+$$;
+revoke all on function public.enqueue_equipment_issue_notifications(uuid, uuid)
+  from public, anon, authenticated;
+grant execute on function public.enqueue_equipment_issue_notifications(uuid, uuid)
+  to service_role;
+
+commit;
+```
+
+The API hook supplies only a request ID returned by the existing successful save
+and the authenticated actor ID. The RPC is not exposed to browser roles and must
+not be granted to them. It does not infer an issue from the current row's status:
+the API observed that issue save; a later concurrent resolution must not relabel
+that earlier action. Names are captured at enqueue time, not at delivery time.
+
+### Novu workflow — equipment-issue (active in Development)
+
+Use the same Development environment as the current app. Create an active Critical
+workflow with identifier **equipment-issue** and one In-App step. Require all six
+payload fields above as strings. Subject:
+
+```liquid
+Equipment issue raised
+```
+
+Body:
+
+```liquid
+{{payload.reportedByName | escape}} marked the equipment arrangement for "{{payload.equipmentType | escape}}" as Issues for the event "{{payload.eventName | escape}}". Please review the Technical Support dashboard.
+```
+
+Escape all displayed names. No actual broadcast has been sent. Ryan confirmed SQL application succeeded on 2026-10-15. The equipment-issue
+workflow is active in Development with one In-App step, all six strings required,
+schema validation enforced, Critical enabled and content sanitization enabled.
+The preview rendered the event/equipment/reporter message using fictional values
+(Alex Tan, Wireless microphone, Community Open Day). No real broadcast was sent.
+Restart and live inbox verification remain pending. The existing Publish changes
+control was not used; no Production configuration was changed.
+
+Workflow: [Equipment issue](https://dashboard.novu.co/env/dev_env_gyXqS46qohE3Ooak/workflows/equipment-issue_wf_gzYltJy8SahC5pwP/).
+Screenshots are outside the application checkout in the ConnectSphere 2 workspace,
+outputs/SCRUM-155-novu/equipment-issue-preview.jpg, equipment-issue-preferences.jpg
+and equipment-issue-active.jpg.
+
+### Verification status
+
+No tests were written or run for this extension, at Ryan's request. Syntax, lint
+and whitespace checks are reported separately from live verification. Manual
+verification remains **Not Executed**: mark an arrangement Issues, check the
+inboxes of two technical staff accounts for the event/equipment/reporter names,
+and confirm an account without that role receives nothing. Saving Issues again
+should produce no new item in a normal sequential flow. Resolve and raise Issues
+again to verify a new report is sent. Also check an equipment retirement that
+flags today's reservation, and confirm the original status and thread message
+are still saved. These are supporting walkthrough steps, not extra original AC.
+
+
+## SCRUM-155 notification-only tests — 2026-10-17
+
+Ryan requested notification-focused tests and restoration of the event suites.
+The earlier event-test edits and SCRUM-155 addition to event-assignment-tests.md
+were undone. No assignment/lifecycle/permission tests are changed by this step.
+The previous 119-test combined report is historical, superseded for this scope.
+
+| Supplied acceptance criterion | Notification-specific automated evidence |
+| --- | --- |
+| The assigned Event Coordinator is notified when an event is assigned to them. | SQL S01 starts from an initial saved assignment snapshot and queues exactly one incoming notice. Integration N01 sends that notice through the real worker/outbox repository and a local HTTP provider substitute, asserting the single subscriber, workflow and message payload. |
+| The incoming and outgoing coordinators are notified on reassignment. | SQL S02 compares the exact two-recipient message set. Unit U03 and integration N02 verify both deliveries and their reassigned/reassigned-away variants; a second poll sends no completed deliveries again. |
+| The notification names the event and who made the assignment. | SQL S01/S02 assert literal saved event/assigner names and IDs. S02 changes the current event fixture name to prove queueing uses history. N01/N02 compare complete received HTTP payloads with independent expected names. |
+
+### Supporting notification risks
+
+- U04: failed assignment preparation must not stop existing decision delivery.
+- U05/N03: a failed recipient remains pending, the other completes, and a new
+  worker retries only the failed delivery with the same body/idempotency key.
+- S03: already-queued history is not prepared again and retained history is not lost.
+- S04: induced queue insertion failure preserves pending notification history;
+  later recovery queues exactly the two expected new deliveries.
+- S05: authenticated browser roles cannot read history/outbox or call preparation.
+
+These are supporting checks, not extra acceptance criteria. The SQL suite seeds
+history snapshots; it never invokes assign_event_coordinator or verifies the
+original assignment operation. HTTP integration starts at saved delivery work,
+uses the real notification worker/repository, a fake RPC storage boundary and a
+real local HTTP provider stub. Real SQL behavior is checked separately. The
+assignment-to-history connection, live Supabase and actual Novu inbox rendering
+remain outside these unit/integration tests. Browser coverage and the reported
+manual UAT result are recorded below.
+
+### Test files and command
+
+- backend/tests/unit/notifications/notificationDelivery.test.js: existing delivery
+  tests plus U03–U05 and preparation-aware fixtures.
+- backend/tests/integration/notifications.assignment.test.js: three focused cases
+  N01 initial notice, N02 incoming/outgoing notices and N03 failed-recipient retry.
+- backend/tests/integration/notifications.delivery.test.js: existing approval/
+  rejection delivery regression fixture supplies the preparation method.
+- tests/sql/assignmentNotifications.assertions.sql: five notification-only SQL
+  scenarios S01–S05, executed after the existing local notification SQL fixtures
+  and exact schema blocks from this guide. Never run fixture files in Supabase.
+
+Run from the repository root:
+
+```powershell
+npm --prefix backend run test:events -- tests/unit/notifications/notificationDelivery.test.js tests/integration/notifications.assignment.test.js tests/integration/notifications.delivery.test.js --pool=threads --maxWorkers=1
+```
+
+The existing script name test:events is the general Vitest runner; the explicit
+file arguments select only notification files. No event test files run here.
+Executed 2026-10-17: **37/37 tests passed** (25 unit, 12 integration including
+existing decision regressions). All five local SQL scenarios passed. Targeted
+ESLint and whitespace checks passed. NotificationDelivery.service.js and
+notificationOutbox.repository.js report 100% statement/branch/function/line
+coverage; this is not event-module or SQL coverage.
+
+SQL tests are included in `tests/sql/`. With Node.js 22, Docker running and the
+`postgres:17-alpine` image available, run from the repository root:
+
+```sh
+node tests/sql/run-assignment-notifications.cjs
+```
+
+See [the SQL test instructions](../tests/sql/README.md) for image preparation,
+scenario IDs and expected output. The runner uses only files in this repository,
+reads the exact schema blocks from this guide and removes its temporary database
+container afterwards. It does not need Python, application credentials or the
+backend server. A successful run prints five assignment scenario PASS lines.
+The existing decision-notification SQL assertions also run as regression checks.
+
+The backend CI job prepares the PostgreSQL image and runs the same SQL command.
+This is an isolated database test, not a migration or a shared Supabase check.
+Historical mutation, repeatability and coverage results below are supplementary;
+the submitted test suites can be run without the earlier local evidence helper.
+
+
+Notification-only benchmark: all three shuffled 37-test runs (seeds 155, 271,
+997) and three fresh local SQL runs passed. Eight of eight sampled faults were
+caught by assertions: wrong subscriber, wrong assigner name, skipped preparation,
+wrong workflow, omitted outgoing, omitted incoming, wrong event name, and repeated
+history processing. Final unmutated JavaScript/SQL controls passed. No production
+source file was mutated. This is a sampled benchmark, not a whole-codebase score
+or a guarantee of no future flakiness. Three verification gates met, none unmet
+or abandoned; all temporary database containers were removed.
+
+
+## Assignment notification browser tests — SCRUM-155
+
+Run from the repository root, with the existing Playwright dependencies and
+Chromium available:
+
+```sh
+npm run test:e2e -- tests/playwright/assignment-notifications.browser.spec.cjs
+```
+
+| Source test ID | AC | Journey and observable result |
+| --- | --- | --- |
+| TC-SCRUM-155-E01 | 1, 3 | Lead signs in and assigns an event through Event management. The assigned coordinator sees the event and assigner names in the real Notifications page. Another coordinator's inbox is empty and the organiser receives no assignment notice. Stored event status remains Submitted. |
+| TC-SCRUM-155-E02 | 2, 3 | After an initial assignment, a different lead reassigns the event through Event management. Outgoing and incoming coordinators see their respective messages with the new lead's name. Initial history remains visible, an unrelated attendee receives nothing, and processing again creates no duplicate notices. |
+
+The tests run the real React application, Express authentication/permission
+checks, assignment service and history repository helper, notification worker,
+and Novu React inbox. Test-only adapters replace database RPC storage and remote
+Novu responses. Inbox messages must come from the worker's emitted requests;
+they are not inserted directly by the browser tests. The signed subscriber ID
+and HMAC are checked when each inbox opens.
+
+Queue processing is triggered explicitly through the existing private fixture
+endpoint. These browser tests do not measure the background poll interval or
+verify deployed Supabase functions and cloud Novu templates. The isolated SQL
+suite checks the real PostgreSQL notification preparation separately.
+
+Only test files and test-only support changed: a notification browser spec, an
+assignment RPC storage adapter, an extension to notification-storage.cjs and a
+one-line dataClient argument in support/server.cjs. Existing event test files and
+production event/equipment operations were not edited. The new spec is included
+automatically by the existing Chromium CI project.
+
+Executed 17 Oct 2026: both new journeys passed. The combined browser regression
+run passed 17/17 tests across assignment notifications, existing notifications
+and the event workspace. A three-repeat check passed 6/6 executions with retries
+disabled. The first repeat check exposed a test navigation race after sign-in;
+the spec now waits for the signed-in page before opening the reassignment URL.
+No timing failures were observed in the final limited repeat sample.
+
+Repeat the timing check:
+
+```sh
+npm run test:e2e -- tests/playwright/assignment-notifications.browser.spec.cjs --repeat-each=3 --workers=2
+```
+
+Run the related regression checks:
+
+```sh
+npm run test:e2e -- tests/playwright/assignment-notifications.browser.spec.cjs tests/playwright/notifications.browser.spec.cjs tests/playwright/event-workspace.browser.spec.cjs
+```
+
+Playwright writes its HTML report to `playwright-report/index.html` and JSON
+results to `test-results/results.json`. On failure it retains screenshots and
+traces. To view the latest report, run `npm run test:playwright:report` from the
+repository root. An assertion failure produces a nonzero exit status; inspect
+the failed scenario and trace before rerunning. Do not install dependencies or
+browsers as part of the test command.
+
+Manual UAT: Ryan reported successful completion of the story's manual UAT on
+17 Oct 2026. This is a user-reported result, separate from automated execution.
+The actual manual execution date and individual observations were not supplied.
+
+
+## Assignment test compatibility correction — 17 Oct 2026
+
+With approval to update the existing event test fixtures, the eight failures
+found during review are resolved. Only tests and their documentation changed.
+The original guards and access checks remain; assertions now include the verified
+actor and the fixture supports `assign_event_coordinator`.
+
+The same six-file selection now passes **119/119**: 19 assignment unit tests,
+22 assignment API tests, 41 workspace integration tests and the existing
+37 notification tests. No tests were added, removed or skipped in this correction.
+Targeted ESLint and whitespace checks passed. The broader result is separate
+from the previously recorded 17/17 browser regression and 6/6 repeated browser
+executions. The complete backend/CI pipeline was not run by this correction.
+
+The command and repository-test mapping are in
+[the assignment test guide](event-assignment-tests.md#scrum-155-compatibility-verification--17-oct-2026).

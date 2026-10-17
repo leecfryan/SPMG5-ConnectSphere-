@@ -271,3 +271,19 @@ notifications. History is retained. Outbox workflow selects event-decision or
 event-assignment; decision uniqueness stays per event. Ryan confirmed the revised
 SQL in docs/notifications.md succeeded on 2026-10-15. The event-assignment workflow is active in Development with three previewed
 message variants. Live delivery and full feature verification remain pending.
+
+### Equipment issue notification extension — live verification pending
+
+SCRUM-155 adds optional, post-save notification hooks for equipment requests
+marked REJECTED (Issues), including the existing retirement flagging path.
+Equipment dependency construction supplies a notification-only service. Its
+separate enqueue_equipment_issue_notifications RPC fans out saved name snapshots
+to all trusted technical_support_staff accounts using workflow equipment-issue.
+The existing worker delivers/retries those queue rows without changes. Queueing
+errors never fail the original equipment operation, but a failure before enqueue
+can lose that notice; there is no durable transition history for this path.
+No equipment storage, validation, permissions or status logic changes. Applied SQL
+and the workflow contract are in docs/notifications.md. Ryan confirmed SQL success
+on 2026-10-15; equipment-issue is active in Development with one previewed In-App
+step, required payload validation and Critical enabled. Restart/live inbox
+verification remain pending. Tests are deferred at Ryan's request.

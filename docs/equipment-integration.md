@@ -322,3 +322,20 @@ auth/equipment Node suites and Vitest with
 `npm --prefix backend run test:events -- --exclude tests/integration/equipment.availability.test.js`.
 This explicitly leaves the live integration suite unverified locally; it is not
 a replacement for its CI result or the manual live Playwright run.
+
+## Notification-only connection — SCRUM-155 (live verification pending)
+
+The existing Issues status action and the retirement path's existing flagged
+requests call an optional notification service after saving. That service broadcasts
+the event, equipment and reporter names to all Technical Support Staff accounts.
+Validation, access rules, status updates, retirement selection/messages, equipment
+storage and frontend behavior are unchanged. A notification enqueue error is caught
+outside the equipment operation; its successful response remains successful, with
+up to a ten-second enqueue delay. Missing enqueue records are not retried; saved
+outbox rows are retried by the existing worker.
+
+Ryan confirmed successful manual SQL application on 2026-10-15, and the Novu
+`equipment-issue` workflow is active in Development. Restart and live verification
+remain pending. See [equipment issue broadcast setup and limits](notifications.md#equipment-issue-broadcasts--scrum-155-extension-live-verification-pending).
+Catalogue condition edits and ordinary thread messages do not send issue alerts.
+No new tests were authored; live verification remains pending.

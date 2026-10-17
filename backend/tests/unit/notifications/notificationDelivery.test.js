@@ -5,7 +5,7 @@ const { createNotificationDeliveryService } = require("../../../src/modules/noti
 const { createNotificationOutboxRepository } = require("../../../src/modules/notifications/notificationOutbox.repository");
 const row = { id: "delivery-id", recipient_id: "organiser", lease_token: "lease-one", payload: { eventName: "Literacy", outcome: "approved" } };
 function fixture() {
-  const repository = { claim: vi.fn(async () => [row]), complete: vi.fn(async () => true), retry: vi.fn(async () => true) };
+  const repository = { prepareAssignments: vi.fn(async () => 0), claim: vi.fn(async () => [row]), complete: vi.fn(async () => true), retry: vi.fn(async () => true) };
   const fetchImpl = vi.fn(async () => ({ ok: true, json: async () => ({ data: { acknowledged: true, status: "processed", transactionId: row.id } }) }));
   const logger = { warn: vi.fn() };
   return { repository, fetchImpl, logger, service: createNotificationDeliveryService({ repository, fetchImpl, logger, secretKey: "fixture-only-key" }) };
@@ -80,9 +80,11 @@ test("[TC-SCRUM-143-25] Repository uses fenced claim/finish RPCs and normalises 
   const abortSignal = vi.fn(async () => ({ data: [row], error: null }));
   const client = { rpc: vi.fn(() => ({ abortSignal })) };
   const repository = createNotificationOutboxRepository(client);
+  await repository.prepareAssignments();
   expect(await repository.claim()).toEqual([row]);
   await repository.complete(row); await repository.retry(row);
   expect(client.rpc.mock.calls).toEqual([
+    ["enqueue_assignment_notifications", {}],
     ["claim_notification_outbox", {}],
     ["finish_notification_outbox", { delivery_id: row.id, claim_token: "lease-one", succeeded: true }],
     ["finish_notification_outbox", { delivery_id: row.id, claim_token: "lease-one", succeeded: false }],
@@ -90,4 +92,48 @@ test("[TC-SCRUM-143-25] Repository uses fenced claim/finish RPCs and normalises 
   expect(abortSignal.mock.calls[0][0]).toBeInstanceOf(AbortSignal);
   abortSignal.mockResolvedValue({ data: null, error: { message: "PRIVATE db" } });
   await expect(repository.claim()).rejects.toThrow("Notification queue is unavailable.");
+});
+
+
+test("[TC-SCRUM-155-U03] Preparation makes both reassignment notices deliverable with their own recipient and saved attribution", async () => {
+  const f = fixture(); let pending = [];
+  const payload = { eventId: "event-1", eventName: "Saved event", assignedById: "lead", assignedByName: "Ada Lead", assignmentChangeId: "change-1" };
+  const deliveries = [
+    { ...row, id: "incoming-delivery", workflow: "event-assignment", recipient_id: "incoming", payload: { ...payload, assignmentType: "reassigned" } },
+    { ...row, id: "outgoing-delivery", workflow: "event-assignment", recipient_id: "outgoing", payload: { ...payload, assignmentType: "reassigned-away" } },
+  ];
+  f.repository.prepareAssignments.mockImplementation(async () => { pending = deliveries; });
+  f.repository.claim.mockImplementation(async () => pending);
+  f.fetchImpl.mockImplementation(async (_url, args) => ({ ok: true, json: async () => ({ acknowledged: true, status: "processed", transactionId: JSON.parse(args.body).transactionId }) }));
+  await f.service.runOnce();
+  expect(f.fetchImpl.mock.calls.map(([, args]) => JSON.parse(args.body))).toEqual(deliveries.map(delivery => ({
+    name: "event-assignment", to: { subscriberId: delivery.recipient_id }, transactionId: delivery.id, payload: delivery.payload,
+  })));
+  expect(f.repository.complete.mock.calls.map(([delivery]) => delivery.id)).toEqual(["incoming-delivery", "outgoing-delivery"]);
+  expect(f.repository.retry).not.toHaveBeenCalled();
+});
+
+test("[TC-SCRUM-155-U04] Preparation failure does not block existing decision notifications", async () => {
+  const f = fixture(); f.repository.prepareAssignments.mockRejectedValueOnce(new Error("history unavailable"));
+  await f.service.runOnce();
+  expect(f.repository.prepareAssignments).toHaveBeenCalledTimes(1);
+  expect(f.repository.complete).toHaveBeenCalledWith(row);
+  expect(f.logger.warn).toHaveBeenCalledTimes(1);
+});
+
+test("[TC-SCRUM-155-U05] One failed reassignment recipient retries with the same delivery identity while the other completes", async () => {
+  const f = fixture();
+  const incoming = { ...row, workflow: "event-assignment", id: "incoming", recipient_id: "coordinator-b", payload: { eventName: "Literacy", assignedByName: "Ada Lead", assignmentType: "reassigned" } };
+  const outgoing = { ...incoming, id: "outgoing", recipient_id: "coordinator-a", payload: { ...incoming.payload, assignmentType: "reassigned-away" } };
+  f.repository.claim.mockResolvedValueOnce([incoming, outgoing]).mockResolvedValueOnce([incoming]);
+  f.fetchImpl.mockImplementationOnce(async () => ({ ok: false, status: 503 }))
+    .mockImplementation(async (_url, args) => ({ ok: true, json: async () => ({ acknowledged: true, status: "processed", transactionId: JSON.parse(args.body).transactionId }) }));
+  await f.service.runOnce();
+  expect(f.repository.retry).toHaveBeenCalledExactlyOnceWith(incoming);
+  expect(f.repository.complete).toHaveBeenCalledExactlyOnceWith(outgoing);
+  await f.service.runOnce();
+  expect(f.repository.complete).toHaveBeenLastCalledWith(incoming);
+  expect(f.fetchImpl.mock.calls[0][1].body).toBe(f.fetchImpl.mock.calls[2][1].body);
+  expect(f.fetchImpl.mock.calls[0][1].headers["Idempotency-Key"]).toBe("incoming");
+  expect(f.fetchImpl.mock.calls[2][1].headers["Idempotency-Key"]).toBe("incoming");
 });

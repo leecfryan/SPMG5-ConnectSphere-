@@ -58,6 +58,7 @@ function createEquipmentController({
   findEventsByIds,
   getUserDisplayName,
   listCancelledEventIds,
+  equipmentIssueNotifications,
 }) {
   const {
     listEquipment,
@@ -122,7 +123,7 @@ function createEquipmentController({
 
     for (const request of affected) {
       const eventName = eventById.get(request.event_id)?.name || "this event";
-      await updateStatus(request.id, "REJECTED");
+      const updated = await updateStatus(request.id, "REJECTED");
       await createMessage(
         {
           equipment_request_id: request.id,
@@ -131,6 +132,7 @@ function createEquipmentController({
         actingUserId,
         "tech_support",
       );
+      await equipmentIssueNotifications?.notifyIssue(request, updated, actingUserId);
     }
   }
 
@@ -411,6 +413,7 @@ function createEquipmentController({
       // equipment.service.js's updateStatus for the matching data-layer
       // change).
       const updated = await updateStatus(id, value.status);
+      await equipmentIssueNotifications?.notifyIssue(existing, updated, req.user.id);
       res.status(200).json({ data: updated });
     } catch (err) {
       next(err);
