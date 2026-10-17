@@ -72,6 +72,9 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
 
+      - run: docker pull postgres:17-alpine
+      - run: node tests/sql/run-assignment-notifications.cjs
+
   docker:
     name: Docker Checks
     runs-on: ubuntu-latest

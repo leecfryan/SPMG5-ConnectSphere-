@@ -13,6 +13,7 @@ module.exports = function createEquipmentDependencies() {
   }
   return {
     equipmentService: createEquipmentService(client),
+    equipmentIssueNotifications: require("../notifications/equipmentIssueNotifications.service").createEquipmentIssueNotificationsService({ client }),
     messagesService: createMessagesService(client),
     findEventById: (id) => unwrap(client.from("events").select(fields).eq("id", id).maybeSingle()),
     findEventsByIds: (ids) => ids.length ? unwrap(client.from("events").select("id, name").in("id", ids)) : Promise.resolve([]),
