@@ -88,7 +88,7 @@ function Stat({ icon, label, value, unit }) {
   );
 }
 
-function VenueDetail({ venue, onBack, onEdit, onViewAvailability, onManageUnavailability, canAssess }) {
+function VenueDetail({ venue, onBack, onEdit, onViewAvailability, onManageUnavailability, onManageHolds, canAssess }) {
   return (
     <div className="venue-detail">
       <button type="button" className="v-back" onClick={onBack}>
@@ -117,6 +117,13 @@ function VenueDetail({ venue, onBack, onEdit, onViewAvailability, onManageUnavai
           {onManageUnavailability && (
             <button type="button" className="v-btn v-btn-secondary" onClick={onManageUnavailability}>
               Manage unavailability
+            </button>
+          )}
+
+          {/* SCRUM-146: Venue Staff place and view tentative holds */}
+          {onManageHolds && (
+            <button type="button" className="v-btn v-btn-secondary" onClick={onManageHolds}>
+              Manage holds
             </button>
           )}
 

@@ -61,6 +61,7 @@ const service = Object.fromEntries(
     "createUnavailabilityPeriod", "listUnavailabilityPeriods",
     "getUnavailabilityPeriodById", "updateUnavailabilityPeriod",
     "deleteUnavailabilityPeriod",
+    "listActiveHoldsInRange", "listHolds", "createHold",
   ].map((name) => [name, vi.fn()])
 );
 
@@ -100,6 +101,7 @@ beforeEach(() => {
   service.listSlotRowsForDate.mockResolvedValue([]);
   service.getEventById.mockResolvedValue(event);
   service.listBookableEvents.mockResolvedValue([event]);
+  service.listActiveHoldsInRange.mockResolvedValue([]);
 });
 
 function send(path, role = "venue_staff", method = "GET", data) {

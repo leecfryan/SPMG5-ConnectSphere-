@@ -77,22 +77,38 @@ function createEquipmentController({
     listApprovedRequestsForEquipmentIds,
     createRequest,
     updateStatus,
-    releaseReservationsForCancelledEvent,
+    releaseReservationsForEvent,
+    isRequestAvailableForWindow,
   } = equipmentService;
   const { create: createMessage } = messagesService;
 
-  // SCRUM-104: there is no cancellation endpoint (events.status is set
-  // directly in the database - see docs/equipment-integration.md), so
-  // nothing writes RELEASED/AVAILABLE at the moment an event is cancelled.
-  // Equipment reads self-heal instead: before computing a catalogue or
-  // availability response, sweep every CANCELLED event for still-APPROVED
-  // requests and release them. Safe to call on every read -
-  // releaseReservationsForCancelledEvent is a no-op once a given event's
-  // requests are already RELEASED (see its own comment in equipment.service.js).
+  // SCRUM-104: a safety net for any CANCELLED event whose synchronous release
+  // (review.service.js#cancel, SCRUM-148) didn't run or didn't complete -
+  // e.g. historical data from before SCRUM-148 existed, or a release call
+  // that threw after the status write already committed. Equipment reads
+  // self-heal: before computing a catalogue or availability response, sweep
+  // every CANCELLED event for still-active requests and release them. Safe
+  // to call on every read - releaseReservationsForEvent is a no-op once a
+  // given event's requests are already RELEASED (see its own comment in
+  // equipment.service.js).
+  // SCRUM-150 AC2: available_for_window is computed only for REVIEW_REQUIRED
+  // rows, never stored - Technical Support and the coordinator both read it
+  // through this same helper, so they can never see different answers for
+  // the same request (TC-150-07). Every other status is returned unchanged -
+  // a PENDING/APPROVED/REJECTED/RELEASED row is never marked unavailable just
+  // because a flagged sibling's new window now happens to overlap it
+  // (TC-150-08).
+  async function withAvailabilityFlag(requests) {
+    return Promise.all(requests.map(async (request) => {
+      if (request.status !== "REVIEW_REQUIRED") return request;
+      return { ...request, available_for_window: await isRequestAvailableForWindow(request) };
+    }));
+  }
+
   async function releaseCancelledEventReservations() {
     const cancelledEventIds = await listCancelledEventIds();
     for (const eventId of cancelledEventIds) {
-      await releaseReservationsForCancelledEvent(eventId);
+      await releaseReservationsForEvent(eventId);
     }
   }
 
@@ -298,7 +314,7 @@ function createEquipmentController({
       }
 
       const requests = await listRequestsByEvent(eventId);
-      res.status(200).json({ data: requests });
+      res.status(200).json({ data: await withAvailabilityFlag(requests) });
     } catch (err) {
       next(err);
     }
@@ -325,14 +341,14 @@ function createEquipmentController({
       const equipmentById = new Map(equipment.map((e) => [e.id, e]));
       const nameById = new Map(requesterIds.map((id, i) => [id, requesterNames[i]]));
 
-      const data = requests.map((r) => ({
+      const enriched = requests.map((r) => ({
         ...r,
         event_name: eventById.get(r.event_id)?.name ?? null,
         equipment_type: equipmentById.get(r.equipment_id)?.type ?? null,
         requested_by_name: nameById.get(r.requested_by) ?? null,
       }));
 
-      res.status(200).json({ data });
+      res.status(200).json({ data: await withAvailabilityFlag(enriched) });
     } catch (err) {
       next(err);
     }
@@ -412,6 +428,19 @@ function createEquipmentController({
       // revised - no precondition on the current status here (see
       // equipment.service.js's updateStatus for the matching data-layer
       // change).
+      //
+      // SCRUM-150 AC2: approving a REVIEW_REQUIRED request re-checks that its
+      // unit is still free for its own borrow window first - showing
+      // available_for_window as false on the read side would otherwise be
+      // purely cosmetic if this endpoint let the approval through anyway.
+      // Deliberately scoped to REVIEW_REQUIRED only: a plain PENDING request
+      // has never had this re-check (pre-existing gap, not this story's to
+      // close - see the task note's Found, not built).
+      if (existing.status === "REVIEW_REQUIRED" && value.status === "APPROVED" &&
+        !(await isRequestAvailableForWindow(existing))) {
+        return res.status(409).json({ error: "This equipment is no longer available for the rescheduled dates." });
+      }
+
       const updated = await updateStatus(id, value.status);
       await equipmentIssueNotifications?.notifyIssue(existing, updated, req.user.id);
       res.status(200).json({ data: updated });

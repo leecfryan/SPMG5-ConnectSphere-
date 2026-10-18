@@ -1,6 +1,7 @@
 import { useAuth } from "../../auth/useAuth";
 import { useState, useEffect } from "react";
-import { decideBookingRequest, fetchBookingRequests } from "../../../lib/api";
+import { useSearchParams } from "react-router";
+import { decideBookingRequest, fetchBookingRequests, fetchVenueBookingChecks } from "../../../lib/api";
 import {
   IconAlert,
   IconArrowLeft,
@@ -8,10 +9,12 @@ import {
   IconClock,
   IconInbox,
   IconMapPin,
+  IconSearch,
   IconUsers,
   IconCheck,
 } from "./VenueIcons";
 import { formatDate, formatDateTime } from "../venueFormat";
+import VenueBookingCheckReport from "./VenueBookingCheckReport";
 
 // SCRUM-88: submitted requests available to Venue Staff for review.
 // SCRUM-22: Venue Staff decide them here. Approving confirms every slot on the
@@ -257,6 +260,12 @@ function RequestCard({ request, canDecide, onDecided }) {
 
         <div className="v-request-requirements">
           <div>
+            <p className="v-subheading">Purpose</p>
+            <p className={request.purpose ? "v-notes" : "v-none"}>
+              {request.purpose || "Not recorded"}
+            </p>
+          </div>
+          <div>
             <p className="v-subheading">Facilities</p>
             <ChipsOrNone items={request.required_facilities} />
           </div>
@@ -303,23 +312,37 @@ function RequestCard({ request, canDecide, onDecided }) {
 
 function VenueBookingRequestList({ onBack }) {
   const { token, hasPermission } = useAuth();
+  const [searchParams] = useSearchParams();
+  const eventId = searchParams.get("event") || searchParams.get("event_id");
   const canDecide = hasPermission("bookings.decide");
-  const [status, setStatus] = useState("pending");
+  const [status, setStatus] = useState(eventId ? "" : "pending");
   const [result, setResult] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const queryKey = JSON.stringify([status, token, refreshKey]);
+  const queryKey = JSON.stringify([status, eventId, token, refreshKey]);
   const current = result?.key === queryKey;
   const requests = current ? result.requests : [];
   const isLoading = !current;
   const error = current ? result.error : null;
 
+  // SCRUM-138: the per-venue check report. It is asked for on demand, not
+  // fetched with the list, and starts empty so nothing is checked until the
+  // coordinator asks for it.
+  const [check, setCheck] = useState(null);
+
+  function runCheck() {
+    setCheck({ status: "loading" });
+    fetchVenueBookingChecks(eventId, token)
+      .then((report) => setCheck({ status: "ready", report }))
+      .catch((err) => setCheck({ status: "error", message: err.message }));
+  }
+
   useEffect(() => {
     let active = true;
-    fetchBookingRequests({ status }, token)
+    fetchBookingRequests({ status, eventId }, token)
       .then((requests) => { if (active) setResult({ key: queryKey, requests }); })
       .catch((err) => { if (active) setResult({ key: queryKey, requests: [], error: err.message }); });
     return () => { active = false; };
-  }, [status, token, queryKey]);
+  }, [status, eventId, token, queryKey]);
 
   return (
     <div className="venue-booking-requests">
@@ -331,7 +354,9 @@ function VenueBookingRequestList({ onBack }) {
       <header className="v-page-header">
         <div>
           <p className="v-eyebrow">For Venue Staff to review</p>
-          <h1 className="v-title">Venue booking requests</h1>
+          <h1 className="v-title">
+            {eventId ? "Venue bookings for this event" : "Venue booking requests"}
+          </h1>
           <p className="v-subtitle">
             Requests submitted by event coordinators, with the event timing and
             venue requirements needed to assess them.
@@ -342,8 +367,9 @@ function VenueBookingRequestList({ onBack }) {
           Show
           <select
             className="v-input"
-            value={status}
+            value={eventId ? "" : status}
             onChange={(e) => setStatus(e.target.value)}
+            disabled={Boolean(eventId)}
           >
             {STATUS_FILTERS.map((filter) => (
               <option key={filter.value} value={filter.value}>
@@ -353,6 +379,53 @@ function VenueBookingRequestList({ onBack }) {
           </select>
         </label>
       </header>
+
+      {/* SCRUM-138: one event's bookings, each checked on its own. Shown only
+          in the event-scoped view, which is the only place the event is known. */}
+      {eventId && (
+        <section className="v-check-report" aria-labelledby="venue-check-heading">
+          <div className="v-check-report-bar">
+            <div>
+              <h2 id="venue-check-heading" className="v-subheading">
+                Check each venue booking
+              </h2>
+              <p className="v-hint">
+                Suitability, availability and conflicts are checked separately for every venue on
+                this event. Checking changes nothing.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="v-btn v-btn-secondary"
+              onClick={runCheck}
+              disabled={check?.status === "loading"}
+            >
+              <IconSearch />
+              {check?.status === "loading" ? "Checking..." : "Check venue bookings"}
+            </button>
+          </div>
+
+          {check?.status === "loading" && (
+            <p className="v-hint" role="status">
+              Checking this event's venue bookings...
+            </p>
+          )}
+
+          {check?.status === "error" && (
+            <>
+              <p className="v-alert v-alert-error" role="alert">
+                <IconAlert />
+                <span>Could not check the venue bookings: {check.message}</span>
+              </p>
+              <button type="button" className="v-btn v-btn-secondary" onClick={runCheck}>
+                Try again
+              </button>
+            </>
+          )}
+
+          {check?.status === "ready" && <VenueBookingCheckReport report={check.report} />}
+        </section>
+      )}
 
       {error && (
         <p className="v-alert v-alert-error" role="alert">

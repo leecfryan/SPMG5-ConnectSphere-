@@ -37,6 +37,7 @@ read matrix below, which lists read permissions only. The Safety Officer's
 | --- | --- | --- |
 | `venues.update` | Venue Staff, Event Coordinators | Venue editing |
 | `venues.unavailability` | Venue Staff | Mark and manage venue unavailability periods (SCRUM-133) |
+| `venues.holds` | Venue Staff | Place and view tentative holds (SCRUM-146) |
 | `bookings.request` | Event Coordinators | Booking requests |
 | `events.submit` | Event Organisers | `POST /api/events`, `/events/new` |
 | `events.own.update` | Event Organisers | `PATCH /api/event-workspace/organiser/:id`; owner check in lookup and write; colleague events remain view only |
@@ -282,6 +283,13 @@ The 2026-10-13 staging integration also preserves SCRUM-149 postponement for
 canonical and legacy lead accounts, with venue release and equipment retention,
 while coordinator waitlist management remains coordinator-only. Verification
 adds SCRUM-142-INT-011/012/013 and SCRUM-142-MERGE-API/BROWSER-001/002 in the existing suites.
+
+**Updated 2026-10-16 (SCRUM-150):** the "equipment retention" half of this note no longer
+holds - postpone now releases equipment reservations the same way cancel does (see
+`.agent/docs/other/SCRUM-150-equipment-reschedule-review.md`). SCRUM-142-INT-011/012 and
+the equivalent Playwright cases (SCRUM-142-MERGE-API-001/002) had their one outdated
+assertion (and title) changed to match this new release behaviour; everything else they
+verify is unchanged.
 The frontend cancel/postpone controls include SAFETY_REVIEW to match the existing
 server status lists; POSTPONED is cancellable but not postponable again.
 

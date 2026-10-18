@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { useAuth } from "../../auth/useAuth";
 import { fetchManagedEvents } from "../managedEventsService";
 import "../../events/events.css";
+import EventVenueBookings from "../../venues/components/EventVenueBookings";
 
 // Result state is keyed by token, so signing out or switching accounts drops the
 // previous list before the next request settles.
@@ -49,6 +50,7 @@ export default function ManagedEventsPage() {
                   {event.status} · {event.enrolled}/{event.maxEnrollment ?? "-"} registered
                   {isAtCapacity(event) && " · Full"}
                 </span>
+                <EventVenueBookings bookings={event.venueBookings} />
               </Link>
             </li>
           ))}

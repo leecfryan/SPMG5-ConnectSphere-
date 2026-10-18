@@ -14,7 +14,8 @@ const event = { id: eventId, name: "Assigned conference", status: "APPROVED", st
 const body = { event_id: eventId, booking_date: bookingDate, slots: ["am"], expected_attendees: 100,
   room_layout: "Theatre", required_facilities: ["Projector"], accessibility_requirements: ["Lift"] };
 const service = Object.fromEntries(["listVenues", "getVenueById", "updateVenue", "listBookingsInRange", "listUnavailabilityInRange",
-  "listBookingsForVenuesOnDate", "listUnavailabilityForVenuesOnDate", "getEventById", "listBookableEvents", "listSlotRowsForDate", "submitBookingRequest", "getBookingRequestById", "listBookingRequests"].map((name) => [name, vi.fn()]));
+  "listBookingsForVenuesOnDate", "listUnavailabilityForVenuesOnDate", "getEventById", "listBookableEvents", "listSlotRowsForDate", "submitBookingRequest", "getBookingRequestById", "listBookingRequests",
+  "listActiveHoldsInRange", "listHolds", "createHold"].map((name) => [name, vi.fn()]));
 const authClient = { auth: { getUser: async (token) => ({ data: { user: token === "invalid" ? null : {
   id: "verified-user", app_metadata: { roles: token.split(",") }, user_metadata: { roles: ["venue_staff"] },
 } }, error: null }) } };
@@ -32,7 +33,7 @@ beforeEach(() => {
   service.updateVenue.mockImplementation(async (_id, changes) => ({ ...venue, ...changes }));
   service.getEventById.mockResolvedValue(event);
   service.listBookableEvents.mockResolvedValue([event]);
-  for (const name of ["listBookingsInRange", "listUnavailabilityInRange", "listSlotRowsForDate", "listBookingRequests", "listBookingsForVenuesOnDate", "listUnavailabilityForVenuesOnDate"]) service[name].mockResolvedValue([]);
+  for (const name of ["listBookingsInRange", "listUnavailabilityInRange", "listSlotRowsForDate", "listBookingRequests", "listBookingsForVenuesOnDate", "listUnavailabilityForVenuesOnDate", "listActiveHoldsInRange", "listHolds"]) service[name].mockResolvedValue([]);
   service.submitBookingRequest.mockResolvedValue(requestId);
   service.getBookingRequestById.mockResolvedValue({ id: requestId, event, venue, slots: [{ slot: "am", status: "pending" }] });
 });

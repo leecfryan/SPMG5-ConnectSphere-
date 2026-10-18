@@ -9,6 +9,7 @@ import {
 } from "../../../lib/api";
 import EquipmentRequestForm from "../components/EquipmentRequestForm";
 import ClarificationThread from "../components/ClarificationThread";
+import { STATUS_LABEL } from "../equipmentStatusLabels";
 import ErrorModal from "../../../components/ui/ErrorModal";
 import "../equipment.css";
 
@@ -230,8 +231,12 @@ function EquipmentRequestPage() {
                   )}
                 </div>
                 <span className={`eq-status eq-status-${r.status.toLowerCase()}`}>
-                  {r.status}
+                  {STATUS_LABEL[r.status] || r.status}
                 </span>
+                {/* SCRUM-150 AC2: same computed, read-only flag Technical Support sees. */}
+                {r.status === "REVIEW_REQUIRED" && r.available_for_window === false && (
+                  <span className="eq-status eq-status-unavailable">Not available for these dates</span>
+                )}
               </li>
             ))}
           </ul>

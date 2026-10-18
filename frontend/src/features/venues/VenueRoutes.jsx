@@ -10,6 +10,7 @@ import VenueAvailabilityCalendar from "./components/VenueAvailabilityCalendar";
 import VenueBookingRequestForm from "./components/VenueBookingRequestForm";
 import VenueBookingRequestList from "./components/VenueBookingRequestList";
 import VenueUnavailabilityPage from "./pages/VenueUnavailabilityPage";
+import VenueHoldsPage from "./pages/VenueHoldsPage";
 import "./venues.css";
 
 function VenueRecordPage({ mode = "detail" }) {
@@ -62,10 +63,14 @@ function VenueRecordPage({ mode = "detail" }) {
   // SCRUM-133: Venue Staff manage unavailability periods
   if (mode === "unavailability") return <VenueUnavailabilityPage venue={venue}
     onBack={() => navigate(detailPath)} />;
+  // SCRUM-146: Venue Staff place and view tentative holds
+  if (mode === "holds") return <VenueHoldsPage venue={venue}
+    onBack={() => navigate(detailPath)} />;
   return <VenueDetail venue={venue} onBack={() => navigate("/venues")}
     onEdit={hasPermission("venues.update") ? () => navigate(`${detailPath}/edit`) : undefined}
     onViewAvailability={() => navigate(availabilityPath)}
     onManageUnavailability={hasPermission("venues.unavailability") ? () => navigate(`${detailPath}/unavailability`) : undefined}
+    onManageHolds={hasPermission("venues.holds") ? () => navigate(`${detailPath}/holds`) : undefined}
     canAssess={hasPermission("bookings.request")} />;
 }
 
@@ -87,6 +92,9 @@ export default function VenueRoutes() {
       </Route>
       <Route element={<RequirePermission permission="venues.unavailability" />}>
         <Route path=":id/unavailability" element={<VenueRecordPage key="unavailability" mode="unavailability" />} />
+      </Route>
+      <Route element={<RequirePermission permission="venues.holds" />}>
+        <Route path=":id/holds" element={<VenueRecordPage key="holds" mode="holds" />} />
       </Route>
       <Route path="*" element={<><h1>Page not found</h1><Link to="/venues">Back to venues</Link></>} />
     </Routes>

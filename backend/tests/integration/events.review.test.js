@@ -25,7 +25,7 @@ const ACTIVE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW
 const POSTPONABLE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED"];
 
 const repository = { findById: vi.fn(), transitionStatus: vi.fn(), cancel: vi.fn(), postpone: vi.fn() };
-const equipmentService = { releaseReservationsForCancelledEvent: vi.fn() };
+const equipmentService = { releaseReservationsForEvent: vi.fn() };
 const releaseVenueBookingsForCancelledEvent = vi.fn();
 let stored;
 
@@ -75,7 +75,7 @@ beforeEach(() => {
     stored = { ...stored, ...extra, status: "POSTPONED" };
     return { ...stored };
   });
-  equipmentService.releaseReservationsForCancelledEvent.mockReset()
+  equipmentService.releaseReservationsForEvent.mockReset()
     .mockResolvedValue({ released: [], equipmentReverted: [], equipmentSkipped: [] });
   releaseVenueBookingsForCancelledEvent.mockReset().mockResolvedValue([]);
 });
@@ -300,7 +300,7 @@ test("[TC-148-01] the assigned coordinator cancels their own event; release runs
   const { event } = await response.json();
   expect(event).toMatchObject({ status: "CANCELLED", cancelled_by: ASSIGNED, cancellation_reason: "Venue flooded" });
   expect(Date.parse(event.cancelled_at)).toBeGreaterThanOrEqual(before - 1000);
-  expect(equipmentService.releaseReservationsForCancelledEvent).toHaveBeenCalledWith(EVENT_ID, ASSIGNED);
+  expect(equipmentService.releaseReservationsForEvent).toHaveBeenCalledWith(EVENT_ID, ASSIGNED);
   expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledWith(EVENT_ID);
 });
 
@@ -347,7 +347,7 @@ test("[TC-148-07] cancel is refused from a terminal stage (COMPLETED)", async ()
 
   expect(response.status).toBe(409);
   expect(stored.status).toBe("COMPLETED");
-  expect(equipmentService.releaseReservationsForCancelledEvent).not.toHaveBeenCalled();
+  expect(equipmentService.releaseReservationsForEvent).not.toHaveBeenCalled();
 });
 
 test.each([{}, { reason: "" }])("[TC-148-08] cancel without a reason (%j) is a 400, nothing recorded", async (body) => {
@@ -413,7 +413,13 @@ test("[TC-149-03] a coordinator not assigned to the event cannot postpone it", a
   expect(stored.status).toBe("SUBMITTED");
 });
 
-test("[TC-149-01] the assigned coordinator postpones their own event; venue release runs synchronously, equipment is untouched", async () => {
+// SCRUM-150: postpone now also releases equipment (reusing the same
+// releaseReservationsForEvent call cancel makes), since postpone never
+// carries a new date to hold a reservation against. Title/assertion updated
+// from "equipment is untouched" accordingly - this test's main job (status
+// fields, venue release) is unaffected, only this one fact about postpone
+// changed.
+test("[TC-149-01] the assigned coordinator postpones their own event; venue and equipment release both run synchronously", async () => {
   const before = Date.now();
 
   const response = await post("postpone", undefined, { reason: "New date not yet known" });
@@ -423,7 +429,7 @@ test("[TC-149-01] the assigned coordinator postpones their own event; venue rele
   expect(event).toMatchObject({ status: "POSTPONED", postponed_by: ASSIGNED, postponement_reason: "New date not yet known" });
   expect(Date.parse(event.postponed_at)).toBeGreaterThanOrEqual(before - 1000);
   expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledWith(EVENT_ID);
-  expect(equipmentService.releaseReservationsForCancelledEvent).not.toHaveBeenCalled();
+  expect(equipmentService.releaseReservationsForEvent).toHaveBeenCalledWith(EVENT_ID, ASSIGNED);
 });
 
 test("[TC-149-02] the coordinator lead postpones an event not assigned to them", async () => {
