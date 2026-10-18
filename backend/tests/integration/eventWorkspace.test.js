@@ -18,6 +18,7 @@ async function setup(t) {
   ];
   const accounts = new Map([[users.organiser.id, { events: records }]]);
   const client = storage(accounts);
+  require("../../../tests/playwright/support/assignment-notification-storage.cjs")(client, new Map());
   client.auth = { admin: {
     async listUsers() { return { data: { users: Object.values(users) }, error: null }; },
     async getUserById(id) { return { data: { user: Object.values(users).find(user => user.id === id) }, error: null }; },
