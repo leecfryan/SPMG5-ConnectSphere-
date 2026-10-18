@@ -58,7 +58,7 @@ module.exports = function createEventWorkspaceRoutes(client, equipmentService) {
     if (!(await service.isCoordinator(req.body.coordinatorId))) {
       return res.status(400).json({ message: "This account is not an active event coordinator." });
     }
-    changed(res, await service.assign(req.params.id, req.body.coordinatorId, req.body.expectedCoordinatorId));
+    changed(res, await service.assign(req.params.id, req.body.coordinatorId, req.body.expectedCoordinatorId, req.user));
   });
   return router;
 };

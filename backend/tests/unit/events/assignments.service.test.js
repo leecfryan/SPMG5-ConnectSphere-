@@ -103,10 +103,11 @@ test("SCRUM-26: a guarded write that matches nothing is a 404 when the event doe
 test("SCRUM-26: a successful assignment returns the updated event", async () => {
   const { service, repository } = build({ assigned: { id: "evt-1", coordinator_id: "coord-1", status: "SUBMITTED" } });
 
-  const result = await service.assign("evt-1", "coord-1");
+  const actor = { id: "verified-lead", fullName: "Coordinator Lead" };
+  const result = await service.assign("evt-1", "coord-1", actor);
 
   expect(result).toEqual({ ok: true, event: { id: "evt-1", coordinator_id: "coord-1", status: "SUBMITTED" } });
-  expect(repository.assignCoordinator).toHaveBeenCalledWith("evt-1", "coord-1");
+  expect(repository.assignCoordinator).toHaveBeenCalledWith("evt-1", "coord-1", actor);
 });
 
 // Empty is a real state, not a placeholder: on a fresh environment nobody has
@@ -148,25 +149,32 @@ function recorder(result) {
     if (name === "maybeSingle" || name === "single") return async () => settled;
     return (...args) => { calls.push([name, ...args]); return chain; };
   } });
-  stubSupabase({ from: (table) => { calls.push(["from", table]); return chain; } });
+  stubSupabase({
+    from: (table) => { calls.push(["from", table]); return chain; },
+    rpc: (name, args) => { calls.push(["rpc", name, args]); return chain; },
+  });
   return { calls, chain };
 }
 
 beforeEach(() => { vi.resetModules(); });
 
-test("SCRUM-26: assignCoordinator writes only coordinator_id, and only to a submitted, unassigned event", async () => {
-  const { calls } = recorder({ id: "evt-1", coordinator_id: "coord-1" });
+test("SCRUM-26 / SCRUM-155: assignCoordinator sends first-assignment guards and verified actor to history storage", async () => {
+  const { calls } = recorder({ id: "evt-1", coordinator_id: "coord-1", status: "SUBMITTED" });
   const repository = require("../../../src/modules/events/events.repository");
+  const actor = { id: "verified-lead", fullName: "Coordinator Lead" };
 
-  await repository.assignCoordinator("evt-1", "coord-1");
+  const event = await repository.assignCoordinator("evt-1", "coord-1", actor);
 
-  // Clarification #1: no acceptance step, so assignment does not move status.
-  expect(calls).toContainEqual(["update", { coordinator_id: "coord-1" }]);
-  expect(calls.find(([name]) => name === "update")[1]).not.toHaveProperty("status");
-  expect(calls).toContainEqual(["eq", "id", "evt-1"]);
-  expect(calls).toContainEqual(["eq", "status", "SUBMITTED"]);
-  // Re-assignment is US-50. Until that story exists, the database refuses it.
-  expect(calls).toContainEqual(["is", "coordinator_id", null]);
+  // SCRUM-155: the RPC now owns the submitted/unassigned guard; no lifecycle transition is requested.
+  expect(calls).toEqual([["rpc", "assign_event_coordinator", {
+    p_event_id: "evt-1",
+    p_coordinator_id: "coord-1",
+    p_expected_coordinator_id: null,
+    p_allowed_statuses: ["SUBMITTED"],
+    p_actor_id: "verified-lead",
+    p_actor_name: "Coordinator Lead",
+  }]]);
+  expect(event).toEqual({ id: "evt-1", coordinator_id: "coord-1", status: "SUBMITTED" });
 });
 
 test("SCRUM-26: the queue is submitted, unassigned, oldest first, with a created_at tiebreak", async () => {

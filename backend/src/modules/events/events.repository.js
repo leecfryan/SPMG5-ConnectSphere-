@@ -2,6 +2,8 @@
 const getSupabase = () => require("../../supabase");
 const { canTransition, ACTIVE_STATUSES, POSTPONABLE_STATUSES } = require("./lifecycle");
 
+const { assignWithHistory } = require("./assignmentHistory.repository");
+
 const TABLE = "events";
 
 const WRITABLE_COLS = [
@@ -137,16 +139,12 @@ async function postpone(id, extra = {}, coordinatorId) {
   return unwrap(await query.select().maybeSingle(), "postpone");
 }
 
-async function assignCoordinator(id, coordinatorId) {
+async function assignCoordinator(id, coordinatorId, actor) {
   return unwrap(
-    await getSupabase()
-      .from(TABLE)
-      .update({ coordinator_id: coordinatorId })
-      .eq("id", id)
-      .eq("status", "SUBMITTED")
-      .is("coordinator_id", null)
-      .select()
-      .maybeSingle(),
+    await assignWithHistory(getSupabase(), {
+      eventId: id, coordinatorId, expectedCoordinatorId: null,
+      allowedStatuses: ["SUBMITTED"], actor,
+    }).maybeSingle(),
     "assignCoordinator",
   );
 }

@@ -33,7 +33,7 @@ function createAssignmentsService({ repository, directory }) {
     };
   }
 
-  async function assign(eventId, coordinatorId) {
+  async function assign(eventId, coordinatorId, actor) {
     if (typeof coordinatorId !== "string" || coordinatorId.trim() === "") {
       return { ok: false, reason: "invalid_coordinator" };
     }
@@ -43,7 +43,7 @@ function createAssignmentsService({ repository, directory }) {
       return { ok: false, reason: "unknown_coordinator" };
     }
 
-    const event = await repository.assignCoordinator(eventId, coordinatorId);
+    const event = await repository.assignCoordinator(eventId, coordinatorId, actor);
     if (event) return { ok: true, event };
 
     const existing = await repository.findById(eventId);

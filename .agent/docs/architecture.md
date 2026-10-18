@@ -262,3 +262,34 @@ Novu cache/socket state is disposed on unmount. No role capability is required.
 When a story's acceptance criteria require another outside service (email, calendar, payments, maps, …), record it
 here: the service, the story that needs it, where the key lives (backend `.env` only, added to `.env.example` without
 a value), which module calls it, and how tests fake it. No code calls out to a service that isn't recorded here.
+
+### SCRUM-155 assignment notifications
+
+Both assignment APIs use the service-role-only assign_event_coordinator RPC to
+lock/compare responsibility, update coordinator_id and save event_assignment_history.
+The authenticated user supplies actor identity. Existing status/permission rules
+remain. Neither queueing nor Novu delivery runs in the assignment transaction.
+
+The worker separately calls enqueue_assignment_notifications before claiming
+outbox deliveries. Pending history is queued and marked processed atomically;
+failed preparation retries and does not prevent claiming existing decision
+notifications. History is retained. Outbox workflow selects event-decision or
+event-assignment; decision uniqueness stays per event. Ryan confirmed the revised
+SQL in docs/notifications.md succeeded on 2026-10-15. The event-assignment workflow is active in Development with three previewed
+message variants. Live delivery and full feature verification remain pending.
+
+### Equipment issue notification extension — live verification pending
+
+SCRUM-155 adds optional, post-save notification hooks for equipment requests
+marked REJECTED (Issues), including the existing retirement flagging path.
+Equipment dependency construction supplies a notification-only service. Its
+separate enqueue_equipment_issue_notifications RPC fans out saved name snapshots
+to all trusted technical_support_staff accounts using workflow equipment-issue.
+The existing worker delivers/retries those queue rows without changes. Queueing
+errors never fail the original equipment operation, but a failure before enqueue
+can lose that notice; there is no durable transition history for this path.
+No equipment storage, validation, permissions or status logic changes. Applied SQL
+and the workflow contract are in docs/notifications.md. Ryan confirmed SQL success
+on 2026-10-15; equipment-issue is active in Development with one previewed In-App
+step, required payload validation and Critical enabled. Restart/live inbox
+verification remain pending. Tests are deferred at Ryan's request.
