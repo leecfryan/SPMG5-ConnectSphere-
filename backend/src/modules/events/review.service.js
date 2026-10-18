@@ -112,4 +112,4 @@ function createReviewService({ repository }) {
   return { startReview, approve, reject, cancel, postpone };
 }
 
-module.exports = { createReviewService };
+module.exports = { createReviewService, readNote };

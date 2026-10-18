@@ -175,3 +175,47 @@ test("[TC-150-22] a change unrelated to date/time/equipment needs (name) does no
   expect(result.ok).toBe(true);
   expect(equipmentService.flagReservationsForReview).not.toHaveBeenCalled();
 });
+
+test("[SCRUM-141 AC4] The event detail carries its own activity history, newest first, without naming the officer (no user_id)", async () => {
+  const { service, client } = setup();
+  client.activity.push(
+    // Stored in the live event_activity_log shape: user_id, and the move and note in details.
+    { id: "act-1", event_id: "event-alice", user_id: "officer-1", action: "SAFETY_REJECTED", details: { from_status: "SAFETY_REVIEW", to_status: "APPROVED", note: "One exit only" }, created_at: "2026-10-18T01:00:00.000Z" },
+    { id: "act-2", event_id: "event-bob", user_id: "officer-1", action: "SAFETY_APPROVED", details: { from_status: "SAFETY_REVIEW", to_status: "PREPARATION", note: null }, created_at: "2026-10-18T02:00:00.000Z" },
+    { id: "act-3", event_id: "event-alice", user_id: "officer-2", action: "SAFETY_APPROVED", details: { from_status: "SAFETY_REVIEW", to_status: "PREPARATION", note: null }, created_at: "2026-10-18T03:00:00.000Z" },
+  );
+
+  const event = await service.find("organiser", "alice", "event-alice");
+
+  expect(event.activity).toEqual([
+    { id: "act-3", action: "SAFETY_APPROVED", from_status: "SAFETY_REVIEW", to_status: "PREPARATION", note: null, created_at: "2026-10-18T03:00:00.000Z" },
+    { id: "act-1", action: "SAFETY_REJECTED", from_status: "SAFETY_REVIEW", to_status: "APPROVED", note: "One exit only", created_at: "2026-10-18T01:00:00.000Z" },
+  ]);
+});
+
+// details defaults to {} in the live table, so a row written without it still reads.
+test("[SCRUM-141 AC4] A history row with empty details reads with null move and note", async () => {
+  const { service, client } = setup();
+  client.activity.push({ id: "act-9", event_id: "event-alice", user_id: null, action: "SOMETHING_NEW", details: {}, created_at: "2026-10-18T04:00:00.000Z" });
+
+  expect((await service.find("organiser", "alice", "event-alice")).activity).toEqual([
+    { id: "act-9", action: "SOMETHING_NEW", from_status: null, to_status: null, note: null, created_at: "2026-10-18T04:00:00.000Z" },
+  ]);
+});
+
+test("[SCRUM-141 AC4] An event with no recorded activity has an empty history", async () => {
+  const { service } = setup();
+  expect((await service.find("organiser", "alice", "event-alice")).activity).toEqual([]);
+});
+
+test("[SCRUM-141 AC4] A failed history read still loads the event, with the history unknown", async () => {
+  const { service, client } = setup();
+  const from = client.from;
+  client.from = table => table === "event_activity_log"
+    ? { select: () => ({ eq: () => ({ order: async () => ({ data: null, error: { message: "relation does not exist" } }) }) }) }
+    : from(table);
+
+  const event = await service.find("organiser", "alice", "event-alice");
+
+  expect(event).toMatchObject({ id: "event-alice", activity: null });
+});

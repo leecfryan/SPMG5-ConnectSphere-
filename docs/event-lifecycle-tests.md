@@ -5,7 +5,7 @@ Historical acceptance criteria and customer quotations retain their original wor
 Earlier execution results are historical evidence; rename verification is recorded separately.
 
 **Deliverable evidence for SCRUM-97 (Progress an event through its status lifecycle), epic Event Lifecycle &
-Approval.** SCRUM-98 (review) and SCRUM-99 (approve) are in §8; SCRUM-139 (safety check) is in §9. Branch: `feature/eventLifecycleStatus` · **15 documented cases, 43 automated tests, all passing**
+Approval.** SCRUM-98 (review) and SCRUM-99 (approve) are in §8; SCRUM-139 (safety check) is in §9, SCRUM-140 (safety review) in §10 and SCRUM-141 (safety decision) in §11. Branch: `feature/eventLifecycleStatus` · **15 documented cases, 43 automated tests, all passing**
 — 34 backend unit, 9 frontend component, plus 1 manual database case.
 
 Story context — the eight statuses, the permitted moves, who sets each status and the schema change — is in
@@ -448,12 +448,12 @@ change: the AC2 facts without their own column are read from existing fields (ma
 | TC-SCRUM-140-07 | 3 | Happy | Each venue shown separately | Hall A (200) and Hall B (90) both booked | Two venue sections, each with its own capacity, notes and confirmed slots | `[SCRUM-140] AC3: each booked venue is returned separately…`; `[SCRUM-140-UI-004]`; `[E2E-SAFETY-REVIEW-001]` | 2026-10-14 · pass · local |
 | TC-SCRUM-140-08 | 3 | Negative | Only confirmed arrangements are shown | pending and rejected venue requests; `PENDING`, `REJECTED`, `RELEASED` equipment; cancelled slot | Only the booked venue (confirmed slots only) and `APPROVED` equipment | `[SCRUM-140] AC3: pending and rejected venue requests…`; `[SCRUM-140] AC2/AC3: only reserved (APPROVED) equipment…`; `[SAFETY-REVIEW-API-001]` | 2026-10-14 · pass · local |
 | TC-SCRUM-140-09 | 2–3 | Negative | Detail only for events awaiting review | `APPROVED` event; unknown UUID; `not-a-uuid` | 404 "That event is not waiting for a safety review." with no arrangement read; 400 "That event reference is not valid." | `[SCRUM-140] an event still in planning…`, `…an unknown event…`, `…a malformed event reference…`; `[SCRUM-140-UI-008]` | 2026-10-14 · pass · local |
-| TC-SCRUM-140-10 | 4 | Happy | The page offers no way to edit | detail page | No form, input or button; "Read only." note; back link only | `[SCRUM-140-UI-006]`; `[E2E-SAFETY-REVIEW-001]` | 2026-10-14 · pass · local |
+| TC-SCRUM-140-10 | 4 | Happy | The page offers no way to edit | detail page | No form, input or button outside SCRUM-141's *Safety decision* section, which holds only the note, *Approve* and *Reject*; "Read only." note; back link | `[SCRUM-140-UI-006]`; `[E2E-SAFETY-REVIEW-001]` | 2026-10-14 · pass · local |
 | TC-SCRUM-140-11 | 4 | Negative | The officer cannot change the event through the API | POST/PUT/PATCH/DELETE on both paths; lifecycle actions; workspace PATCH; venue decision | 403 on every one; nothing written; event still awaiting review | `[SCRUM-140] AC4: … is refused for the Safety Officer` (4); `[SCRUM-140] AC4: the Safety Officer cannot change the event…`; `[SAFETY-REVIEW-API-001]` | 2026-10-14 · pass · local |
 | TC-SCRUM-140-12 | 2 | Cross-cutting | Only safety-relevant fields leave the server (#45) | stored row with `organiser_id`, `coordinator_id` | Neither id nor `status` in the response; repository selects no organiser/coordinator column | `[SCRUM-140] #45: the detail carries no organiser, coordinator or status field`; `SCRUM-140 AC2: findAwaitingSafetyReviewById…` | 2026-10-14 · pass · local |
 | TC-SCRUM-140-13 | 1–3 | Failure | Storage down or not configured | repository throws; no `eventsRepository` | 500 "Something went wrong. Please try again."; 503 "Safety review is not configured." after the permission check; page shows the message and *Try again* recovers | `[SCRUM-140] failure: …` (2); `SCRUM-140 failure: findAwaitingSafetyReview throws…`; `[SCRUM-140-UI-007]` | 2026-10-14 · pass · local |
 | TC-SCRUM-140-14 | 1 | Happy | Navigation follows the permission | coordinator, lead, venue staff | No *Safety reviews* link; direct URL shows Access denied without an API call | `[SCRUM-140-UI-009]`–`011`; `[SCRUM-142-SAFETY-UI-001]` | 2026-10-14 · pass · local |
-| TC-SCRUM-140-15 | 1–3 | Happy | Journey at 375 px: coordinator submits, officer reviews | Playwright accounts; Integration Hall | Event in the queue; detail shows one venue section and no buttons but *Sign out*; no sideways scroll | `[E2E-SAFETY-REVIEW-001]` | 2026-10-14 · pass · local |
+| TC-SCRUM-140-15 | 1–3 | Happy | Journey at 375 px: coordinator submits, officer reviews | Playwright accounts; Integration Hall | Event in the queue; detail shows one venue section and no buttons but *Approve*, *Reject* (SCRUM-141) and *Sign out*; no sideways scroll | `[E2E-SAFETY-REVIEW-001]` | 2026-10-14 · pass · local |
 | TC-SCRUM-140-16 | 3 | Boundary | No confirmed venue and no equipment | empty `venues` and `equipment` | "No confirmed venue booking." and "No equipment is reserved for this event." | `[SCRUM-140-UI-012]` | 2026-10-14 · pass · local |
 
 **Coverage (2026-10-14):** `safetyReview.service.js`, `safetyReview.controller.js`, `safetyReview.routes.js` and
@@ -466,7 +466,61 @@ decisions in the code. Every real branch (loading, error, empty, present, *Not p
 fails). The SCRUM-142 role tests that pinned the officer to `internal.access` only were updated, not loosened: they
 still assert the exact permission list.
 
-## 11. Requirements sources
+## 11. SCRUM-141 — approve or reject the safety arrangement
+
+A Safety Officer approves (to `PREPARATION`) or rejects with a reason (back to `APPROVED`); each decision is written
+to the new `event_activity_log` table and shown on the event's page. Rules and SQL in
+[event-requests.md](event-requests.md#approve-or-reject-the-safety-arrangement-scrum-141).
+
+> **SCRUM-141:** As a Safety Officer, I want to approve or reject an event's safety arrangement so that only events
+> with a safe arrangement proceed to preparation.
+>
+> 1. The Safety Officer can approve or reject an event under safety review.
+> 2. A rejection must carry a reason.
+> 3. An approved event can move to preparation; a rejected event cannot.
+> 4. The decision is recorded in the event's activity history.
+
+| Layer | File | Pre-conditions |
+| --- | --- | --- |
+| Service (unit) | `backend/tests/unit/events/safetyReview.service.test.js` (`[SCRUM-141] approve and reject`) | Repository faked; `transitionStatus` answers the moved row |
+| Repository (unit) | `backend/tests/unit/events/events.transition.test.js` | `recorder()` as in §2 |
+| Workspace (unit) | `backend/tests/unit/events/eventWorkspace.service.test.js` | Fake data client with an `event_activity_log` list in the live table's shape (`user_id`, `details`) |
+| HTTP (integration) | `backend/tests/integration/events.safetyReview.test.js` | As §10; `transitionStatus` moves the stored row only from its current status |
+| Lifecycle (unit) | `backend/tests/unit/events/lifecycle.test.js` | Typed table with `PREPARATION` |
+| Frontend (pages) | `frontend/src/features/events/SafetyReview.test.jsx`, `pages/EventWorkspaceDetailPage.test.jsx` | As §10 and §8 |
+| Playwright | `tests/playwright/safety-review.api.spec.cjs`, `safety-review.browser.spec.cjs` | `submittedForSafety` fixture: approved event, one confirmed venue, submitted through SCRUM-139, 49 and 50 days ahead |
+
+| ID | AC | Type | Scenario | Test data | Expected result | Automated test | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-141-01 | 1, 3 | Happy | Officer approves | `SAFETY_REVIEW` event; note "Stewards confirmed" | 200 `{ id, status: PREPARATION }`; write filtered on `SAFETY_REVIEW` with no coordinator filter | `[SCRUM-141] approve and reject > AC1/AC3: approval moves…`; `[SCRUM-141] AC1/AC3/AC4: the Safety Officer approves…`; `[SAFETY-REVIEW-API-002]`; `[SCRUM-141-UI-001]` | 2026-10-18 · pass · local |
+| TC-SCRUM-141-02 | 2, 3 | Happy | Officer rejects with a reason | reason "Only one exit for 180 people" | 200 `{ id, status: APPROVED }`; not `PREPARATION`; reason trimmed | `…AC2/AC3/AC4: rejection with a reason sends the event back to planning…`; `[SCRUM-141] AC2/AC3/AC4: the Safety Officer rejects…`; `[SAFETY-REVIEW-API-002]`; `[SCRUM-141-UI-003]`; `[E2E-SAFETY-REVIEW-002]` | 2026-10-18 · pass · local |
+| TC-SCRUM-141-03 | 2 | Negative | Reject without a reason | missing, `null`, `""`, `"   "`, `42`, `["reason"]`, reason in `note` | 400 "Give a reason for rejecting this safety arrangement."; nothing written | `…AC2: a rejection without a text reason (%j)…` (×6); `[SCRUM-141] AC2: rejecting without a reason (%j)…` (×4); `[SAFETY-REVIEW-API-002]`; `[SCRUM-141-UI-002]`; `[E2E-SAFETY-REVIEW-002]` | 2026-10-18 · pass · local |
+| TC-SCRUM-141-04 | 1 | Negative | Approval note not text | `{ note: ["x"] }` | 400 "The note must be text."; nothing written | `…an approval note that is not text is refused…`; `[SCRUM-141] an approval note that is not text is a 400` | 2026-10-18 · pass · local |
+| TC-SCRUM-141-05 | 3 | Conflict | Decide an event not under review, or decided twice | `APPROVED` event; second decision after the first | 409 refresh message; no history row | `…conflict: %s is refused and no history is written`; `[SCRUM-141] conflict: %s on an event not under safety review…` (×2); `[SAFETY-REVIEW-API-002]`; `[SCRUM-141-UI-004]` | 2026-10-18 · pass · local |
+| TC-SCRUM-141-06 | 1 | Negative | Unknown or malformed event | unknown UUID; `not-a-uuid` | 404 "That event no longer exists."; 400 "That event reference is not valid."; no history | `…not_found…`; `[SCRUM-141] an unknown event is a 404 and a malformed reference a 400…` | 2026-10-18 · pass · local |
+| TC-SCRUM-141-07 | 1 | Negative | Only Safety Officers decide | no token; coordinator (assigned too), lead, venue staff, tech support, organiser, attendee | 401; 403 on both paths; status untouched | `[SCRUM-141] access: no token…`; `[SCRUM-141] access: %s cannot approve or reject…` (×6); `[SAFETY-REVIEW-API-002]` | 2026-10-18 · pass · local |
+| TC-SCRUM-141-08 | 4 | Happy | Decision recorded | approve and reject | One `event_activity_log` row each: action, `user_id` the officer, `details` with `SAFETY_REVIEW` → new status and note/reason; insert only | `…AC4: approval records who decided…`; `SCRUM-141 AC4: recordActivity inserts one event_activity_log row…`; HTTP approve/reject tests | 2026-10-18 · pass · local |
+| TC-SCRUM-141-09 | 4 | Happy | History visible on the event | rejection then approval | Coordinator, organiser and lead see both, newest first, with the reason; no `user_id` | `[SCRUM-141 AC4] The event detail carries its own activity history…`; `[SAFETY-REVIEW-API-002]`; `[SCRUM-141-UI-006]` (×3); `[SCRUM-141-UI-009]`; `[E2E-SAFETY-REVIEW-002]` | 2026-10-18 · pass · local |
+| TC-SCRUM-141-10 | 4 | Boundary | No history, or unreadable history | `[]`; read error | "No activity recorded yet."; event still loads with `activity: null` and "Activity history is unavailable right now…" | `[SCRUM-141 AC4] An event with no recorded activity…`; `…A history row with empty details…`; `…A failed history read still loads the event…`; `[SCRUM-141-UI-007]` | 2026-10-18 · pass · local |
+| TC-SCRUM-141-11 | 4 | Failure | History write fails | `recordActivity` throws | Status move undone (`undoTransition`); 500 "Something went wrong. Please try again." | `…failure: when the history row cannot be written the move is undone…`; `[SCRUM-141] failure: if the history cannot be written…`; `SCRUM-141 AC4: undoTransition restores…` | 2026-10-18 · pass · local |
+| TC-SCRUM-141-12 | 1 | Failure | Storage not configured | no `eventsRepository` | 403 for a coordinator, then 503 for the officer | `[SCRUM-141] failure: without event storage the decisions answer 503…` | 2026-10-18 · pass · local |
+| TC-SCRUM-141-13 | 3 | Happy | Lifecycle table | — | Only `SAFETY_REVIEW → PREPARATION`; `PREPARATION → CANCELLED`; active, not planning, not postponable | `lifecycle.test.js` (SCRUM-141 tests); `[TC-149-13]` (`PREPARATION`) | 2026-10-18 · pass · local |
+| TC-SCRUM-141-14 | 3 | Happy | Coordinator's page in preparation | `PREPARATION` event | Badge "Preparation"; no arrangement links or safety-check section; *Cancel event* offered | `[SCRUM-141-UI-008]`; `StatusBadge.test.jsx`; `[TC-148-18 / TC-149-14 / SCRUM-141]` | 2026-10-18 · pass · local |
+| TC-SCRUM-141-15 | 1–2 | Cross-cutting | Controls, phone width, busy state, #45 | 375 px; in-flight decision; stored row with organiser/coordinator ids | Buttons disabled in flight; no sideways scroll; response carries id and status only | `[SCRUM-141-UI-005]`; `[E2E-SAFETY-REVIEW-002]`; `[SCRUM-141] #45: a decision answers with the id and status only` | 2026-10-18 · pass · local |
+
+**Coverage (2026-10-18):** `safetyReview.service.js`, `safetyReview.controller.js`, `safetyReview.routes.js`,
+`lifecycle.js`, `safetyService.js`, `SafetyDecisionControls.jsx`, `EventActivityHistory.jsx` and `StatusBadge.jsx`
+100% lines and branches; `recordActivity`, `undoTransition` and `activityFor` fully covered (the uncovered lines in
+`events.repository.js` and `eventWorkspace.service.js` predate this story). `SafetyReviewDetailPage.jsx` 100% lines;
+its branch count is V8's dev-mode JSX entries, as in §10, and every real branch (decided, loading, error, data, with
+and without `events.safety.decide`) has a test.
+
+**Test review:** three deliberate mutations were each caught: rejection moving to `PREPARATION` (3 tests fail),
+granting `events.safety.decide` to coordinators (2 fail), and dropping the undo after a failed history write
+(2 fail). Pinned lists in SCRUM-97/139/142/148/149 tests were updated with `PREPARATION` and `events.safety.decide`,
+not loosened. `[SCRUM-140-UI-006]` was narrowed to its intent: no control outside the decision section.
+
+## 12. Requirements sources
 
 | Ref | What it says |
 | --- | --- |
@@ -474,4 +528,5 @@ still assert the exact permission list.
 | Team-agreed lifecycle table | The 8 statuses and 10 permitted moves; recorded in `.agent/docs/architecture.md` §Database. `APPROVED` is the stored value for "approved / planning" because Registration and Venue already query it. |
 | **SCRUM-98**, **SCRUM-99** (backlog US-36, US-38) | Review and approve: the actions that use this lifecycle. See §8. |
 | **SCRUM-139** (backlog US-83) | Submit for the Operational Safety Check, 3 SP. See §9. |
+| **SCRUM-141** (backlog US-85) | Approve or reject the safety arrangement, 2 SP. See §11. Rejection back to `APPROVED` is roadmap decision 4; history is optional in Release 1 (#33) but this story's AC4 requires it. |
 | Discussions #80, #94, #95, #101, #125 | The assigned coordinator decides; the manager only assigns; assignment doesn't start review; `approved_rejected_by` kept apart from `coordinator_id`; who sees the outcome |

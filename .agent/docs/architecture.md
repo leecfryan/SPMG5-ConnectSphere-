@@ -95,7 +95,7 @@ and managed events under `/api/managed-events`. Inside any router, declare stati
 - `requireAuth` maps a verified legacy `event_ops_manager` claim to `event_coordinator_lead` (SCRUM-142). Policies
   and role checks use only the canonical name. The Auth metadata update that retires the legacy claim is in
   [../../docs/staff-access.md](../../docs/staff-access.md).
-- `safety_officer` holds both `internal.access` and `events.safety.read`.
+- `safety_officer` holds `internal.access`, `events.safety.read` and `events.safety.decide`.
 - `backend/src/auth/permissions.js` is the single policy table: `"<area>.<action>": { roles: [...], label?, record? }`.
   - `*.read` permissions are refused for anything but GET/HEAD. A write needs its own action permission
     (`events.submit`, `bookings.decide`, `equipment.review`, …). Never reuse a read permission for a write.
@@ -146,6 +146,7 @@ and managed events under `/api/managed-events`. Inside any router, declare stati
 | Cancellation, postponement | `POST /api/internal/events/:eventId/cancel`, `POST /api/internal/events/:eventId/postpone` | `internal.access` + `events.cancel` / `events.postpone`; assigned coordinator or Event Coordinator Lead |
 | Safety check | `GET /api/internal/events/:eventId/safety-readiness`, `POST /api/internal/events/:eventId/{submit-safety-check,withdraw-safety-check}` | `internal.access` + `events.safety.submit`, assigned coordinator only |
 | Safety review | `GET /api/internal/safety-reviews`, `GET /api/internal/safety-reviews/:eventId` | `internal.access` + `events.safety.read` (Safety Officer); `SAFETY_REVIEW` events only |
+| Safety decision | `POST /api/internal/safety-reviews/:eventId/{approve,reject}` | `internal.access` + `events.safety.decide` (Safety Officer); `SAFETY_REVIEW` events only; writes `event_activity_log` |
 | Event workspaces | `GET /api/event-workspace/organiser[/<id>]`, `GET /api/event-workspace/coordinator[/<id>]`, `GET /api/event-workspace/manager[/<id>]`, `GET /api/event-workspace/coordinators`; `PATCH /api/event-workspace/organiser/<id>`, `/<id>/coordinator` | `events.own.read` / `events.own.update` / `events.assigned.read` / `events.review` / `events.assign`, with organisation, ownership and state checks |
 | Managed events | `GET /api/managed-events`, `GET /api/managed-events/:eventId`, `GET|PATCH /api/managed-events/:eventId/registration-window` | `events.managed.read` / `events.registrations.read` / `events.registration-window.update`; the caller's own or assigned event |
 | Coordinator waitlist | `GET /api/managed-events/:eventId/waitlist`, `GET|PATCH /api/managed-events/:eventId/waitlist/settings`, `POST /api/managed-events/:eventId/waitlist/:entryId/promote` | `events.waitlist.manage`; assigned coordinator only |
@@ -211,12 +212,17 @@ shares the database.
     from information_schema.columns where table_schema = 'public' and table_name = 'events';
   ```
 - Event statuses (confirmed by the team; don't add, rename or drop one without the team agreeing):
-  `DRAFT` · `SUBMITTED` · `UNDER_REVIEW` · `APPROVED` · `SAFETY_REVIEW` · `CONFIRMED` · `COMPLETED` · `CANCELLED` ·
-  `REJECTED` · `POSTPONED`. `APPROVED` is the stored value for "approved / planning". `SAFETY_REVIEW` (SCRUM-139) is active but
-  not a planning status, so venue and equipment requests are refused while it holds. The permitted moves are in
+  `DRAFT` · `SUBMITTED` · `UNDER_REVIEW` · `APPROVED` · `SAFETY_REVIEW` · `PREPARATION` · `CONFIRMED` · `COMPLETED` ·
+  `CANCELLED` · `REJECTED` · `POSTPONED`. `APPROVED` is the stored value for "approved / planning". `SAFETY_REVIEW`
+  (SCRUM-139) and `PREPARATION` (SCRUM-141) are active but not planning statuses, so venue and equipment requests are
+  refused while they hold. The permitted moves are in
   `backend/src/modules/events/lifecycle.js`. Status is written only by `events.repository.js` (`createSubmitted`,
-  `markSubmitted`, `transitionStatus`, `cancel`, `postpone`), each guarded by the expected current status, and by
-  `seedData.js`; never through `WRITABLE_COLS`.
+  `markSubmitted`, `transitionStatus`, `cancel`, `postpone`, and `undoTransition`, which only reverts a safety
+  decision whose history row failed), each guarded by the expected current status, and by `seedData.js`; never
+  through `WRITABLE_COLS`.
+- `event_activity_log` (SCRUM-141): append-only event history (`user_id`, `action`, `details` jsonb); RLS on, no
+  policies, and only `service_role` may select or insert. SQL in
+  [../../docs/event-requests.md](../../docs/event-requests.md) under SCRUM-141's *Schema reference*.
 - Roles are not in a table. They're in Supabase Auth `app_metadata.roles`, set by `backend/scripts/seedUsers.js`.
 - Relationships used for record checks: `events.organiser_id`, `events.coordinator_id`,
   `registrations.attendee_id` / `registrations.event_id`, `venue_booking_requests.event_id`,

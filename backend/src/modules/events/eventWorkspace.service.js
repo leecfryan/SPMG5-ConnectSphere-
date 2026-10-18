@@ -77,6 +77,19 @@ function createEventWorkspaceService(client, equipmentService) {
     const name = data.user.user_metadata?.full_name;
     return typeof name === "string" && name.trim() ? name.trim() : data.user.email;
   }
+  // SCRUM-141 AC4: the event's activity history, newest first, for everyone who
+  // may see the event. user_id stays out: the officer pool is not named (#45).
+  // Like approverName, a failed read leaves the history unknown (null) instead
+  // of hiding the event itself.
+  async function activityFor(eventId) {
+    const { data, error } = await client.from("event_activity_log")
+      .select("id, action, details, created_at")
+      .eq("event_id", eventId).order("created_at", { ascending: false });
+    if (error) return null;
+    return data.map(({ id, action, details, created_at }) => ({
+      id, action, from_status: details.from_status ?? null, to_status: details.to_status ?? null, note: details.note ?? null, created_at,
+    }));
+  }
   async function read(scope, userId, id) {
     const organiserIds = scope === "organiser" ? await organiserIdsFor(userId) : undefined;
     const query = scopedQuery(scope, userId, organiserIds);
@@ -92,6 +105,7 @@ function createEventWorkspaceService(client, equipmentService) {
         // SCRUM-148 AC4: same "name, else unknown" treatment as the approve/reject outcome.
         cancelled_by_name: await approverName(event.cancelled_by),
         postponed_by_name: await approverName(event.postponed_by),
+        activity: await activityFor(event.id),
       };
     },
     async updateOrganiserEvent(userId, id, input) {
