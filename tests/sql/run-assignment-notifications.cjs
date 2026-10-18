@@ -56,13 +56,14 @@ function run() {
     started = true;
 
     const deadline = Date.now() + 15000;
-    while (docker(["exec", name, "pg_isready", "-U", "postgres"]).status !== 0) {
+    // The image's temporary initialization server accepts sockets before the final TCP server starts.
+    while (docker(["exec", name, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]).status !== 0) {
       if (Date.now() >= deadline) throw new Error("Temporary PostgreSQL did not become ready.");
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
     }
 
     const output = requireSuccess(docker([
-      "exec", "-i", name, "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-U", "postgres",
+      "exec", "-i", name, "psql", "-h", "127.0.0.1", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-U", "postgres",
     ], script), "SQL assertions failed. The failing test ID appears below.");
     if (!output.includes("ASSIGNMENT SQL ASSERTIONS PASSED")) {
       throw new Error("The SQL run ended without the assignment test completion marker.");

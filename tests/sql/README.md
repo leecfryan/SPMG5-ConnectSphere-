@@ -21,7 +21,9 @@ The runner creates an empty PostgreSQL container, loads the existing notificatio
 fixtures and the schema blocks from `docs/notifications.md`, then executes
 `assignmentNotifications.assertions.sql`. The container has no network access,
 published ports or persistent data volume and is removed when the run finishes.
-The tests never contact Supabase or Novu.
+The tests never contact Supabase or Novu. Readiness and SQL execution both use
+TCP loopback inside the container, so the temporary socket-only initialization
+server cannot be mistaken for the final PostgreSQL server.
 
 Do not run the fixture or assertion files in the Supabase SQL editor or an
 existing database. They clear and replace fixture data.
