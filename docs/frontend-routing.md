@@ -15,6 +15,7 @@ same frontend port (Docker: 5173); routing does not start another Vite process.
 | `/event-management` and `/:eventId` | Manager review, assignment and opening registration; requires `events.review`. |
 | `/events/new` | Requires `events.submit`; organiser event form. |
 | `/venues/*` | Internal venue pages; see [Venue integration](venue-integration.md) for child routes. |
+| `/venues/booking-requests/:requestId/replacement` | Event Coordinator replacement search for an affected booking; requires `bookings.request`. |
 | `/equipment/requests?event=<uuid>` | Assigned coordinator Equipment request page; requires `equipment.request`. |
 | `/technical-support` | Technical dashboard; requires `equipment.review`. |
 | `/events/assignments` | Requires `events.assign_coordinator`; the Event Coordinator Lead's queue for routing submitted requests to coordinators. See [Coordinator assignment](event-assignment.md). |

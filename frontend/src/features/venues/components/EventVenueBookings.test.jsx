@@ -5,11 +5,13 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { MemoryRouter } from "react-router";
+import { AuthContext } from "../../auth/useAuth";
 import EventVenueBookings from "./EventVenueBookings";
 
 afterEach(cleanup);
 
 const EVENT_ID = "aaaaaaaa-1111-4111-8111-111111111111";
+const TOKEN = "test-token";
 
 const BOOKINGS = [
   {
@@ -24,7 +26,9 @@ const BOOKINGS = [
 function renderBookings({ bookings = BOOKINGS, eventId = EVENT_ID, canCheck = true } = {}) {
   return render(
     <MemoryRouter>
-      <EventVenueBookings bookings={bookings} eventId={eventId} canCheck={canCheck} />
+      <AuthContext.Provider value={{ token: TOKEN }}>
+        <EventVenueBookings bookings={bookings} eventId={eventId} canCheck={canCheck} />
+      </AuthContext.Provider>
     </MemoryRouter>,
   );
 }
@@ -59,4 +63,30 @@ test("[SCRUM-138-UI-012] without an event id the list stands alone, with no link
 
   expect(screen.getByText("Marina Grand Ballroom")).toBeTruthy();
   expect(screen.queryByRole("link", { name: "Check each venue booking" })).toBeNull();
+});
+
+// SCRUM-145: the coordinator has no manual "Mark as affected" — it's auto-marked on page load.
+test("[SCRUM-145-UI-001] a live booking that is not affected shows no manual mark action", () => {
+  renderBookings();
+
+  expect(screen.getByText("Marina Grand Ballroom")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Mark as affected" })).toBeNull();
+  expect(screen.queryByRole("link", { name: "Find replacement venue" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Release this booking" })).toBeNull();
+});
+
+test("[SCRUM-145-UI-002] an affected booking shows replacement and release actions", () => {
+  const affected = [
+    {
+      ...BOOKINGS[0],
+      is_affected: true,
+      affected_reason: "Venue under maintenance",
+      slots: [{ slot: "am", status: "confirmed" }],
+    },
+  ];
+  renderBookings({ bookings: affected });
+
+  expect(screen.getByText("Affected - needs alternative")).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Find replacement venue" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Release this booking" })).toBeTruthy();
 });

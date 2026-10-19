@@ -121,6 +121,29 @@ export function fetchBookingRequests({ status, eventId } = {}, token) {
   return request(`/api/venues/booking-requests${query}`, token);
 }
 
+export function searchReplacementVenues(requestId, filters = {}, token) {
+  const params = new URLSearchParams();
+  if (filters.minCapacity) params.set("minCapacity", filters.minCapacity);
+  if (filters.facilities?.length) params.set("facilities", filters.facilities.join(","));
+  if (filters.accessibility?.length) params.set("accessibility", filters.accessibility.join(","));
+  if (filters.roomLayout) params.set("roomLayout", filters.roomLayout);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return request(`/api/venues/booking-requests/${encodeURIComponent(requestId)}/replacement-search${query}`, token);
+}
+
+export function releaseAffectedVenueBooking(requestId, token) {
+  return request(`/api/venues/booking-requests/${encodeURIComponent(requestId)}/release`, token, {
+    method: "POST",
+  });
+}
+
+export function markVenueBookingAffected(requestId, reason, token) {
+  return apiFetch(`/api/venues/booking-requests/${encodeURIComponent(requestId)}/mark-affected`, token, {
+    method: "POST",
+    body: { reason },
+  });
+}
+
 // SCRUM-138: every booking on one event, each checked on its own. Read-only, so
 // it takes no body and changes nothing.
 export function fetchVenueBookingChecks(eventId, token) {

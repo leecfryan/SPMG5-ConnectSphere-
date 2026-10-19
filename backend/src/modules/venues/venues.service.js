@@ -159,11 +159,15 @@ const BOOKING_REQUEST_FIELDS = [
   "accessibility_requirements",
   "additional_requirements",
   "purpose",
+  "is_affected",
+  "affected_at",
+  "affected_reason",
+  "replaces_booking_id",
   "submitted_at",
   "decided_at",
   "decision_note",
   "venue:venues!venue_id(id, name, city, country, capacity)",
-  "event:events!event_id!inner(id, name, status, start_time, end_time)",
+  "event:events!event_id!inner(id, name, status, start_time, end_time, coordinator_id)",
   "slots:venue_bookings!request_id(slot, status)",
 ].join(", ");
 
@@ -241,7 +245,8 @@ async function submitBookingRequest(venueId, eventName, value, requesterId) {
     p_required_facilities: value.required_facilities,
     p_accessibility_requirements: value.accessibility_requirements,
     p_additional_requirements: value.additional_requirements,
-    p_purpose: value.purpose,
+    p_purpose: value.purpose || null,
+    p_replaces_booking_id: value.replaces_booking_id || null,
   });
 
   if (error) throw new Error(`Failed to submit booking request: ${error.message}`);
@@ -552,4 +557,7 @@ module.exports = {
   listActiveHoldsInRange,
   listHolds,
   createHold,
+  markVenueBookingAffected: require("./venueReplacement.service").markVenueBookingAffected,
+  releaseAffectedVenueBooking: require("./venueReplacement.service").releaseAffectedVenueBooking,
+  searchReplacementVenues: require("./venueReplacement.service").searchReplacementVenues,
 };

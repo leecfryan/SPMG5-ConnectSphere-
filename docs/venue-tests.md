@@ -563,3 +563,24 @@ files import nothing, which is what makes direct unit tests cheap to add; that g
 
 `venueBookingChecks.js` (SCRUM-138) is the exception: it has a direct unit suite and reports 100% on statements,
 branches and lines.
+# SCRUM-145 replacement venue coverage
+
+The replacement flow uses the existing venue request and decision pipeline.
+Apply the manual SQL in [`venue-integration.md`](./venue-integration.md) before
+running live database checks.
+
+| Test case | Expected behavior | Automated coverage |
+| --- | --- | --- |
+| `TC-SCRUM-145-01` | Original requirements are returned and the affected venue is excluded. | `backend/tests/unit/venues/venueReplacement.test.js` |
+| `TC-SCRUM-145-02` | Same-event overlapping bookings and unavailable slots are excluded. | `backend/tests/unit/venues/venueReplacement.test.js` |
+| `TC-SCRUM-145-03` | Search overrides relax filters without mutating the original. | `backend/tests/unit/venues/venueReplacement.test.js` |
+| `TC-SCRUM-145-04` | A different coordinator cannot search or release the booking. | Backend integration test after SQL is applied. |
+| `TC-SCRUM-145-05` | Only one active replacement can exist. | SQL/RPC integration test after SQL is applied. |
+| `TC-SCRUM-145-06` | Approval resolves the original and repeats safety review when required. | SQL/RPC integration test after SQL is applied. |
+| `TC-SCRUM-145-07` | Release cancels the affected booking and pending replacement. | SQL/RPC integration test after SQL is applied. |
+| `TC-SCRUM-145-08` | Affected badge and replacement action are visible in the managed event UI. | `frontend/src/features/venues/components/EventVenueBookings.test.jsx` |
+
+Latest local execution: frontend component tests and lifecycle regression
+passed. The supplied replacement unit test still needs its Supabase mock
+factory aligned with Vitest's CommonJS loading behavior before it can be used
+as a green signal; production lint/build checks passed.

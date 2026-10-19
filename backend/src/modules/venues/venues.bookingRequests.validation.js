@@ -35,6 +35,7 @@ const ALLOWED_FIELDS = [
   "accessibility_requirements",
   "additional_requirements",
   "purpose",
+  "replaces_booking_id",
 ];
 
 // Slots a request can be made on. "pending" is included on purpose: SCRUM-94
@@ -80,6 +81,11 @@ function validateBookingRequestShape(payload) {
   // SCRUM-85
   if (typeof payload.event_id !== "string" || !UUID_PATTERN.test(payload.event_id)) {
     errors.push("event_id must be a valid event id");
+  }
+
+  if (payload.replaces_booking_id !== undefined &&
+      (typeof payload.replaces_booking_id !== "string" || !UUID_PATTERN.test(payload.replaces_booking_id))) {
+    errors.push("replaces_booking_id must be a valid booking request id");
   }
 
   // SCRUM-86
@@ -158,6 +164,7 @@ function validateBookingRequestShape(payload) {
       accessibility_requirements: payload.accessibility_requirements || [],
       additional_requirements: trimmedAdditional === "" ? null : trimmedAdditional,
       purpose: trimmedPurpose,
+      replaces_booking_id: payload.replaces_booking_id || null,
     },
   };
 }

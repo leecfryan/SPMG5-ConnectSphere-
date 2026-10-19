@@ -1,4 +1,7 @@
 import { Link } from "react-router";
+import { useContext, useState } from "react";
+import { AuthContext } from "../../auth/useAuth";
+import { releaseAffectedVenueBooking } from "../../../lib/api";
 
 const SLOT_LABELS = { am: "AM", pm: "PM", night: "Night" };
 const SLOT_ORDER = ["am", "pm", "night"];
@@ -19,6 +22,36 @@ function period(booking) {
     .join(", ") || "No period recorded";
 }
 
+function ReleaseAffectedBookingButton({ booking }) {
+  const auth = useContext(AuthContext);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  if (!auth) return null;
+  const { token } = auth;
+
+  async function release() {
+    setBusy(true);
+    setError(null);
+    try {
+      await releaseAffectedVenueBooking(booking.id, token);
+      window.location.reload();
+    } catch (reason) {
+      setError(reason.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <button type="button" className="btn btn-secondary" onClick={release} disabled={busy}>
+        {busy ? "Releasing…" : "Release this booking"}
+      </button>
+      {error && <p role="alert">{error}</p>}
+    </>
+  );
+}
+
 export default function EventVenueBookings({ bookings = [], eventId, canCheck = false }) {
   if (bookings.length === 0) {
     return <p className="event-venues__empty">No venue bookings recorded.</p>;
@@ -31,8 +64,15 @@ export default function EventVenueBookings({ bookings = [], eventId, canCheck = 
           <li key={booking.id} className="event-venues__item">
             <div className="event-venues__heading">
               <strong>{booking.venue?.name || "Venue not recorded"}</strong>
-              <span className="event-venues__status">{bookingStatus(booking)}</span>
+              <span className="event-venues__status">
+                {booking.is_affected ? "Affected - needs alternative" : bookingStatus(booking)}
+              </span>
             </div>
+            {booking.is_affected && (
+              <p role="alert">
+                Venue arrangement unresolved{booking.affected_reason ? `: ${booking.affected_reason}` : "."}
+              </p>
+            )}
             {booking.venue?.city && (
               <p className="event-venues__location">
                 {booking.venue.city}{booking.venue.country ? `, ${booking.venue.country}` : ""}
@@ -48,6 +88,14 @@ export default function EventVenueBookings({ bookings = [], eventId, canCheck = 
                 <dd>{booking.booking_date || "Date not recorded"} · {period(booking)}</dd>
               </div>
             </dl>
+            {booking.is_affected ? (
+              <>
+                <Link className="btn btn-secondary" to={`/venues/booking-requests/${booking.id}/replacement`}>
+                  Find replacement venue
+                </Link>
+                <ReleaseAffectedBookingButton booking={booking} />
+              </>
+            ) : null}
           </li>
         ))}
       </ul>

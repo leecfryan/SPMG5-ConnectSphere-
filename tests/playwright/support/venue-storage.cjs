@@ -106,5 +106,10 @@ module.exports = function venueStorage(accounts) {
       holds.push(...rows);
       return rows;
     },
+    // SCRUM-135: no-op for test fixture - recheckConflictsAfterUpdate is called after
+    // venue updates but the fake storage doesn't track conflict flags
+    async recheckConflictsAfterUpdate() {
+      return;
+    },
   };
 };
