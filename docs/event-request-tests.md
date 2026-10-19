@@ -442,7 +442,8 @@ values come from the AC: "incomplete" means only the name (the one `NOT NULL` fo
 the organiser" includes colleagues in the same client organisation, who otherwise share request visibility
 (SCRUM-100).
 
-**Latest execution (all cases):** 2026-10-19 · pass · local, Javen (agent run). Backend 1086 passed; frontend 496
+**Latest execution:** TC-01 to 14: 2026-10-19 · pass · local, Javen (agent run). TC-15: 2026-10-19 · pass ·
+local, shared dev database (run by Javen; `npm --prefix tests/e2e test -- draft-request`). Backend 1086 passed; frontend 496
 passed; Playwright 197 passed, 1 failed (`VENUE-E2E-001`, Venue lane, unrelated and already failing on `staging`).
 
 ### 10.1 Test case specifications
@@ -463,6 +464,7 @@ passed; Playwright 197 passed, 1 failed (`VENUE-E2E-001`, Venue lane, unrelated 
 | TC-SCRUM-147-12 | 4 | Security | Attendee, venue staff, technical support, coordinator, coordinator lead, safety officer; no token; forged token | 403 / 401 on all five routes; nothing read or written | `SCRUM-147-API-001`; `DRAFT-API-003`…`-007` |
 | TC-SCRUM-147-13 | 3 | Conflict | The draft is submitted or changed between the read and the write; then edited again | 409; afterwards 404 (no longer a draft) | `SCRUM-147-UNIT-012`, `-API-011`; `DRAFT-API-001` |
 | TC-SCRUM-147-14 | — | Failure | Malformed id; storage error; storage not configured; slow and failed loads in the UI; no session | 400 "Invalid draft id."; 500 safe message (no database detail); 503; loading and error states, buttons locked while saving; nothing sent without a session | `SCRUM-147-API-007`, `-API-012`, `-API-013`, `-REPO-006`, `-UI-003`, `-UI-010`, `-SERVICE-001`…`-003` |
+| TC-SCRUM-147-15 | 1, 4 | Live DB | Real Supabase: throwaway organiser saves a name-only draft, reads the workspace, edits, submits | Row stored `DRAFT` with every other form column and `submitted_at` null; absent from the workspace list; then `SUBMITTED` with `submitted_at` set; rows and account deleted afterwards | `LIVE-DRAFT-001` (`tests/e2e/draft-request.spec.js`) |
 
 ### 10.2 Coverage
 
@@ -476,3 +478,7 @@ registration-window check to draft saves fails `SCRUM-147-UI-011`.
 ### 10.3 Not built
 
 Deleting a draft, auto-save, and draft expiry (#116) are outside the AC.
+
+**Why one live test.** It is the only check that the real `events` table accepts a draft with only a name and that
+PostgREST's `neq` filter really hides `DRAFT` rows from the workspace — both depend on the real schema, which the
+fakes cannot prove.
