@@ -69,6 +69,8 @@ const policies = Object.freeze({
   // SCRUM-140: Safety Officers are a shared pool, not assigned per event, so any
   // of them may read any event awaiting review. Read-only: no record check needed.
   "events.safety.read": { roles: ["safety_officer"], label: "Operational safety review" },
+  // SCRUM-141: deciding is a separate write grant; same pool, so no record check.
+  "events.safety.decide": { roles: ["safety_officer"] },
   // SCRUM-148/142: the lead may cancel any active event; coordinators must still be assigned.
   "events.cancel": { roles: ["event_coordinator", "event_coordinator_lead"], record: true },
   // SCRUM-149/142: postponement uses the same assigned-coordinator or lead access as cancellation.

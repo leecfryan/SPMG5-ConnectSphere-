@@ -204,8 +204,9 @@ for (const [index, permission] of permissions.entries()) {
   });
 }
 
-// SCRUM-140 adds the deferred safety review read; nothing else is granted.
-test('[SCRUM-142-SAFETY-API-009] verified officer is internal with safety review reading as its only feature permission', async ({ request, accounts }) => {
+// SCRUM-140 adds the deferred safety review read and SCRUM-141 the safety decision; nothing else is granted.
+// The decision has no label, so the responsibilities list is unchanged.
+test('[SCRUM-142-SAFETY-API-009] verified officer is internal with safety review as its only feature', async ({ request, accounts }) => {
   const account = await accounts.create(['safety_officer', 'safety_officer', 'unknown']);
   const headers = bearer(await accounts.session(account));
   const identity = await request.get('/api/auth/me', { headers });
@@ -213,7 +214,7 @@ test('[SCRUM-142-SAFETY-API-009] verified officer is internal with safety review
   const body = await identity.json();
   expect(body.user.roles).toEqual(['safety_officer']);
   expect(body.user.accountTypes).toEqual(['internal']);
-  expect(body.permissions).toEqual(['events.safety.read', 'internal.access']);
+  expect(body.permissions).toEqual(['events.safety.read', 'events.safety.decide', 'internal.access']);
   const access = await request.get('/api/internal/access', { headers });
   expect(access.status()).toBe(200);
   expect(await access.json()).toEqual({ responsibilities: [
@@ -227,7 +228,7 @@ test('[SCRUM-142-SAFETY-API-010] officer can accompany attendee and Venue Staff 
   const body = await (await request.get('/api/auth/me', { headers })).json();
   expect(body.user.roles).toEqual(['safety_officer', 'attendee', 'venue_staff']);
   expect(body.user.accountTypes).toEqual(['internal', 'external']);
-  expect(body.permissions.sort()).toEqual(['bookings.decide', 'bookings.read', 'events.browse', 'events.safety.read', 'internal.access', 'registrations.manage', 'venues.conflicts', 'venues.holds', 'venues.read', 'venues.unavailability', 'venues.update']);
+  expect(body.permissions.sort()).toEqual(['bookings.decide', 'bookings.read', 'events.browse', 'events.safety.decide', 'events.safety.read', 'internal.access', 'registrations.manage', 'venues.conflicts', 'venues.holds', 'venues.read', 'venues.unavailability', 'venues.update']);
   expect((await request.get('/api/venues', { headers })).status()).toBe(200);
   expect((await request.get('/api/event-workspace/manager', { headers })).status()).toBe(403);
   await accounts.update(account, { roles: ['safety_officer', 'attendee'] });

@@ -105,7 +105,7 @@ test("SCRUM-148/149 AC2: cancel writes CANCELLED, restricted to the active stage
     cancelled_by: "coord-1", cancelled_at: "2026-10-08T00:00:00.000Z", cancellation_reason: "Venue flooded", status: "CANCELLED",
   }]);
   expect(calls).toContainEqual(["eq", "id", "evt-1"]);
-  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED", "POSTPONED"]]);
+  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED", "POSTPONED"]]);
   expect(event).toEqual({ id: "evt-1", status: "CANCELLED" });
 });
 
@@ -199,4 +199,38 @@ test("SCRUM-149 failure: a Supabase error is thrown with the action named", asyn
   recorder(null, { message: "boom" });
 
   await expect(loadRepository().postpone("evt-1", {})).rejects.toThrow("events.repository: postpone failed - boom");
+});
+
+test("SCRUM-141 AC4: recordActivity inserts one event_activity_log row, with the move and note in details", async () => {
+  const { calls } = recorder({ id: "act-1" });
+
+  const row = await loadRepository().recordActivity({
+    eventId: "evt-1", actorId: "officer-1", action: "SAFETY_REJECTED", fromStatus: "SAFETY_REVIEW", toStatus: "APPROVED", note: "No fire marshal",
+  });
+
+  expect(calls).toContainEqual(["from", "event_activity_log"]);
+  expect(calls).toContainEqual(["insert", {
+    event_id: "evt-1", user_id: "officer-1", action: "SAFETY_REJECTED",
+    details: { from_status: "SAFETY_REVIEW", to_status: "APPROVED", note: "No fire marshal" },
+  }]);
+  expect(calls.some(([name]) => name === "update" || name === "delete")).toBe(false);
+  expect(row).toEqual({ id: "act-1" });
+});
+
+test("SCRUM-141 AC4: a failed activity insert is thrown with the action named", async () => {
+  recorder(null, { message: "relation does not exist" });
+
+  await expect(loadRepository().recordActivity({ eventId: "evt-1", actorId: "officer-1", action: "SAFETY_APPROVED" }))
+    .rejects.toThrow("recordActivity failed - relation does not exist");
+});
+
+test("SCRUM-141 AC4: undoTransition restores the old status only where the event still holds the new one", async () => {
+  const { calls } = recorder({ id: "evt-1" });
+
+  await loadRepository().undoTransition("evt-1", "SAFETY_REVIEW", "PREPARATION");
+
+  expect(calls).toContainEqual(["from", "events"]);
+  expect(calls).toContainEqual(["update", { status: "SAFETY_REVIEW" }]);
+  expect(calls).toContainEqual(["eq", "id", "evt-1"]);
+  expect(calls).toContainEqual(["eq", "status", "PREPARATION"]);
 });

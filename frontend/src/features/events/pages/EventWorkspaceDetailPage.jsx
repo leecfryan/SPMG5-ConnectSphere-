@@ -6,6 +6,7 @@ import { workspaces } from "../workspaces";
 import EventReviewControls from "../components/EventReviewControls";
 import EventDecisionControls from "../components/EventDecisionControls";
 import EventDecisionSummary from "../components/EventDecisionSummary";
+import EventActivityHistory from "../components/EventActivityHistory";
 import EventCancelControl from "../components/EventCancelControl";
 import EventCancellationSummary from "../components/EventCancellationSummary";
 import EventPostponeControl from "../components/EventPostponeControl";
@@ -50,6 +51,7 @@ function Detail({ scope, eventId }) {
       <EventDecisionSummary event={event} />
       <EventCancellationSummary event={event} />
       <EventPostponeSummary event={event} />
+      <EventActivityHistory activity={event.activity} />
       {scope === "coordinator" && event.coordinator_id === user.id && <EventDecisionControls event={event} onDecided={reload} />}
       {scope === "coordinator" && event.coordinator_id === user.id && <SafetyCheckControls key={event.status} event={event} onChanged={reload} />}
       {scope === "manager" && <EventReviewControls key={`${event.id}:${event.status}:${event.coordinator_id}`} event={event} onUpdated={reload} />}

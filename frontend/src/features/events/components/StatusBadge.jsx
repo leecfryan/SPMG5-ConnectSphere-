@@ -8,6 +8,7 @@ const LABELS = Object.freeze({
   UNDER_REVIEW: "Under review",
   APPROVED: "Approved – planning",
   SAFETY_REVIEW: "Safety review",
+  PREPARATION: "Preparation",
   CONFIRMED: "Confirmed",
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",

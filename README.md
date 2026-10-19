@@ -84,8 +84,9 @@ equipment/technical reads, and Event Coordinators coordination reads. External
 roles grant no internal access. The staff responsibilities page displays responsibilities
 returned by GET /api/internal/access. SCRUM-142 also recognises Safety Officer
 (`safety_officer`) as internal staff; SCRUM-140 gives it a read-only safety review
-queue at `/safety-reviews`; approving or rejecting the safety arrangement is
-SCRUM-141. Other assigned
+queue at `/safety-reviews`; SCRUM-141 lets it approve (to preparation) or reject
+(with a reason, back to planning) the safety arrangement, and each decision appears
+in the event's activity history. Other assigned
 roles continue to grant their own capabilities.
 
 Feature owners must attach requirePermission to their data endpoints. Sensitive

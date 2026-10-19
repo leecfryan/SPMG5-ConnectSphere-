@@ -150,6 +150,19 @@ const eventsRepository = {
     const { name, description, start_time, end_time, expected_attendance, accessibility_needs, other_comments } = event;
     return { id, name, description, start_time, end_time, expected_attendance, accessibility_needs, other_comments };
   },
+  // SCRUM-141: same guards as the real writes. Rows land in the data client's
+  // event_activity_log list, in the live table's shape, which the event workspace reads back.
+  async undoTransition(id, from, to) {
+    const event = findEvent(id);
+    if (event?.status !== to) return null;
+    event.status = from;
+    return { id };
+  },
+  async recordActivity({ eventId, actorId, action, fromStatus, toStatus, note }) {
+    const row = { id: randomUUID(), event_id: eventId, user_id: actorId, action, details: { from_status: fromStatus, to_status: toStatus, note }, created_at: new Date().toISOString() };
+    dataClient.activity.push(row);
+    return row;
+  },
   // SCRUM-148: same guard as the real write - any of the four active stages,
   // and, when given, the coordinator still holding the event.
   async cancel(id, extra = {}, coordinatorId) {

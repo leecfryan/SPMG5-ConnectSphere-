@@ -78,7 +78,8 @@ create table events (
 ### Status values
 
 SCRUM-97 defines the statuses and the permitted moves between them in
-`backend/src/modules/events/lifecycle.js`; SCRUM-139 adds `SAFETY_REVIEW` and SCRUM-149 adds `POSTPONED`. The
+`backend/src/modules/events/lifecycle.js`; SCRUM-139 adds `SAFETY_REVIEW`, SCRUM-149 adds `POSTPONED` and SCRUM-141
+implements `PREPARATION` (already allowed by the live constraint, so no status SQL was needed). The
 live `events_status_check` constraint was changed by hand in the Supabase
 dashboard (no migration file): the eight SCRUM-97 statuses on 2026-09-27,
 `SAFETY_REVIEW` on 2026-10-08, and `POSTPONED` with `PREPARATION` kept as already live, with:
@@ -110,6 +111,7 @@ stateDiagram-v2
     UNDER_REVIEW --> REJECTED
     APPROVED --> SAFETY_REVIEW
     SAFETY_REVIEW --> APPROVED
+    SAFETY_REVIEW --> PREPARATION
     APPROVED --> CONFIRMED
     CONFIRMED --> COMPLETED
     SUBMITTED --> CANCELLED
@@ -117,6 +119,7 @@ stateDiagram-v2
     APPROVED --> CANCELLED
     SAFETY_REVIEW --> CANCELLED
     CONFIRMED --> CANCELLED
+    PREPARATION --> CANCELLED
     SUBMITTED --> POSTPONED
     UNDER_REVIEW --> POSTPONED
     APPROVED --> POSTPONED
@@ -130,8 +133,9 @@ stateDiagram-v2
 | `DRAFT` | Draft | nothing (column default; US-13) |
 | `SUBMITTED` | Submitted | `createSubmitted`, at insert |
 | `UNDER_REVIEW` | Under review | the assigned coordinator's *Start review* (SCRUM-98) |
-| `APPROVED` | Approved – planning | the assigned coordinator's *Approve* (SCRUM-99), or *Withdraw from safety check* (SCRUM-139); read by registration and venue |
+| `APPROVED` | Approved – planning | the assigned coordinator's *Approve* (SCRUM-99), *Withdraw from safety check* (SCRUM-139), or a Safety Officer's *Reject* (SCRUM-141); read by registration and venue |
 | `SAFETY_REVIEW` | Safety review | the assigned coordinator's *Submit for safety check* (SCRUM-139); not open to new venue or equipment requests |
+| `PREPARATION` | Preparation | a Safety Officer's *Approve* (SCRUM-141); active (workload, reassignable, cancellable) but not a planning status, so arrangements stay locked; not postponable and not yet confirmable (SCRUM-144) |
 | `CONFIRMED` | Confirmed | not yet (confirm story) |
 | `COMPLETED` | Completed | not yet (complete story) |
 | `CANCELLED` | Cancelled | the assigned coordinator's or the coordinator lead's *Cancel event* (SCRUM-148) |
@@ -360,7 +364,7 @@ reuses `review.routes.js#assignedToCaller`.
 
   Empty values show *Not provided*. Dedicated columns would need a form for someone to fill them
   in, which no story covers yet.
-- Approving or rejecting the safety arrangement is SCRUM-141.
+- Approving or rejecting the safety arrangement is SCRUM-141 (next section).
 
 | Status | When | Message |
 | --- | --- | --- |
@@ -371,6 +375,70 @@ reuses `review.routes.js#assignedToCaller`.
 | 404 | Event unknown or not `SAFETY_REVIEW` | "That event is not waiting for a safety review." |
 | 500 | Reading storage failed | "Something went wrong. Please try again." |
 | 503 | Event storage not configured | "Safety review is not configured." |
+
+### Approve or reject the safety arrangement (SCRUM-141)
+
+`safetyReview.service.js#approve` / `#reject`, `safetyReview.controller.js`, `routes/safetyReview.routes.js`,
+`events.repository.js#recordActivity` and `#undoTransition`; the history read is
+`eventWorkspace.service.js#activityFor`. Pages: `SafetyDecisionControls.jsx` on `/safety-reviews/:eventId` and
+`EventActivityHistory.jsx` on every event workspace detail page.
+
+- **Who:** `events.safety.decide`, Safety Officer only, no record check (the officer pool again). It is a separate
+  write grant; `events.safety.read` still refuses every non-GET, so only the two decision paths accept a POST.
+- **Approve (AC1, AC3):** `POST /api/internal/safety-reviews/:eventId/approve`, optional `{ note }`.
+  `SAFETY_REVIEW → PREPARATION`, the only edge into `PREPARATION`.
+- **Reject (AC1–AC3):** `POST /api/internal/safety-reviews/:eventId/reject`, required `{ reason }` (trimmed text).
+  `SAFETY_REVIEW → APPROVED`: the event goes back to planning, the coordinator's arrangements reopen, and it can only
+  reach `PREPARATION` by being resubmitted and approved (roadmap decision 4).
+- **History (AC4):** each decision writes one append-only `event_activity_log` row: `action` `SAFETY_APPROVED` or
+  `SAFETY_REJECTED`, `user_id` the officer, and `details` `{ from_status: "SAFETY_REVIEW", to_status, note }`
+  (the note or reason). The status moves
+  first with a conditional write, so a lost race (409) writes no row; if the row then fails, `undoTransition` puts
+  the status back and the caller gets a 500, so a decision never stands unrecorded.
+- **Who sees the history:** the event workspace detail (`GET /api/event-workspace/<scope>/:id`) returns
+  `activity`, newest first, to everyone already allowed to see the event (organiser and colleagues, assigned
+  coordinator, coordinator lead), flattened to `{ id, action, from_status, to_status, note, created_at }`.
+  `user_id` is not returned, so the officer is not named (#45 as guidance).
+  A failed history read returns `activity: null` and the page says the history is unavailable; the event still
+  loads.
+- **Response:** `{ event: { id, status } }` only, so the officer sees no organiser or coordinator details.
+
+| Status | When | Message |
+| --- | --- | --- |
+| 200 | Decided | `{ event: { id, status } }` |
+| 400 | Not a UUID / reject without a reason / approval note not text | "That event reference is not valid." / "Give a reason for rejecting this safety arrangement." / "The note must be text." |
+| 401 | No or invalid session | "Please sign in to continue." |
+| 403 | Not a Safety Officer | "You do not have permission to access this information." |
+| 404 | Unknown event | "That event no longer exists." |
+| 409 | Event not (or no longer) `SAFETY_REVIEW` | "This event is no longer waiting for a safety review. Refresh to see its current status." |
+| 500 | Storage failed, including the history write (the move is undone) | "Something went wrong. Please try again." |
+| 503 | Event storage not configured | "Safety review is not configured." |
+
+**Schema reference.** `event_activity_log` was created by hand in the Supabase SQL editor on 2026-10-18 (no
+migration file). Row level security is on with no policies, and only `service_role` (the backend's secret key) may
+select or insert, so rows cannot be changed or deleted through the API:
+
+```sql
+create table public.event_activity_log (
+  id uuid primary key default gen_random_uuid(),
+  event_id uuid not null references public.events (id) on delete cascade,
+  user_id uuid references auth.users (id),
+  action text not null,
+  details jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index event_activity_log_event_idx
+  on public.event_activity_log (event_id, created_at desc);
+
+alter table public.event_activity_log enable row level security;
+
+revoke all on public.event_activity_log from public, anon, authenticated;
+grant select, insert on public.event_activity_log to service_role;
+```
+
+`action` is free text and `details` free-form JSON, so later stories (US-75's history) can add their own actions
+and fields without another schema change.
 
 ### Cancelling an event (SCRUM-148)
 
@@ -595,6 +663,8 @@ Feature folder at `frontend/src/features/events/`.
 | `components/StatusBadge.jsx` | Event request, assignment and workspace screens | Displays the stored status value as words ("Approved – planning" for `APPROVED`) |
 | `components/EventDecisionControls.jsx` | EventWorkspaceDetailPage (assigned coordinator only) | *Start review* on `SUBMITTED`; note + *Approve* / *Reject* on `UNDER_REVIEW`; nothing otherwise |
 | `components/EventDecisionSummary.jsx` | EventWorkspaceDetailPage (every scope) | Outcome, approver ("Not recorded" when unknown), time, and note or reason; hidden until `approved_rejected_at` is set |
+| `components/EventActivityHistory.jsx` | EventWorkspaceDetailPage (every scope) | SCRUM-141: recorded decisions newest first, with the note or rejection reason; empty and unavailable states |
+| `components/SafetyDecisionControls.jsx` | SafetyReviewDetailPage (`events.safety.decide`) | SCRUM-141: note + *Approve* / *Reject*; reject needs a reason |
 
 ### Services
 
@@ -747,9 +817,8 @@ the Week 12 release and is not part of this sprint.
 - Event list and detail endpoints are not implemented here. New read endpoints
   need permission and event-relationship checks before returning protected data.
 - The `events_status_check` constraint was widened by hand to the eight
-  SCRUM-97 statuses on 2026-09-27, then to eleven on 2026-10-11 — nine the app
-  implements plus two (`SAFETY_REVIEW`, `PREPARATION`) already live from unmerged work elsewhere (SQL and the
-  merge checklist under *Status values*).
+  SCRUM-97 statuses on 2026-09-27, then to eleven on 2026-10-11 (SQL and the merge checklist under *Status
+  values*). Since SCRUM-141 the app implements all eleven.
 - There is no migration file for `events`. Schema changes are made in the
   Supabase dashboard and need to be reflected in this document in the same
   sitting.
@@ -760,5 +829,8 @@ the Week 12 release and is not part of this sprint.
   in the shared database (SQL under *Schema reference*) before review works; the cancellation columns
   (`cancelled_by`, `cancelled_at`, `cancellation_reason`) must exist before cancel works outside the tests; the
   postponement columns (`postponed_by`, `postponed_at`, `postponement_reason`) must exist before postpone works
-  outside the tests.
+  outside the tests; the `event_activity_log` table (SCRUM-141 *Schema reference*, created 2026-10-18) must exist before safety decisions
+  work: without it every decision is undone with a 500, and event pages say the history is unavailable.
+- `PREPARATION` has no way forward but cancel until SCRUM-144 adds confirmation; it is not postponable until the
+  PO agrees it.
 - US-13 has no Jira issue, so `US-13` remains the label in code and tests.

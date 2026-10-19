@@ -293,3 +293,50 @@ test("[SCRUM-100-UI-006] Late event data cannot restore a previous account's rec
   expect(screen.queryByRole("heading", { name: "Own event" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Edit event" })).toBeNull();
 });
+
+// SCRUM-141 AC4: the activity history on the event's own page.
+const REJECTION = { id: "act-1", action: "SAFETY_REJECTED", from_status: "SAFETY_REVIEW", to_status: "APPROVED", note: "Only one exit for 180 people", created_at: "2099-10-06T02:30:00Z" };
+const APPROVAL = { id: "act-2", action: "SAFETY_APPROVED", from_status: "SAFETY_REVIEW", to_status: "PREPARATION", note: null, created_at: "2099-10-07T02:30:00Z" };
+
+test.each([["coordinator", "coord-1"], ["organiser", "org-1"], ["manager", "manager-1"]])(
+  "[SCRUM-141-UI-006] AC4: the %s sees each safety decision, newest first, with the rejection reason", async (scope, userId) => {
+    setup(scope, { status: "PREPARATION", activity: [APPROVAL, REJECTION] }, { userId });
+
+    const history = await screen.findByRole("region", { name: "Activity history" });
+    const entries = within(history).getAllByRole("listitem").map((item) => item.textContent);
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatch(/^Safety arrangement approved · .*(7 Oct|Oct 7),? 2099/);
+    expect(entries[0]).not.toContain("Note");
+    expect(entries[1]).toMatch(/^Safety arrangement rejected · .*(6 Oct|Oct 6),? 2099/);
+    expect(entries[1]).toContain("Reason: Only one exit for 180 people");
+  });
+
+test("[SCRUM-141-UI-007] AC4: an event with no decisions says so, and an unreadable history says it is unavailable", async () => {
+  setup("coordinator", { status: "APPROVED", activity: [] });
+  expect(await screen.findByText("No activity recorded yet.")).toBeInTheDocument();
+  cleanup();
+
+  setup("coordinator", { status: "APPROVED", activity: null });
+  expect(await screen.findByText("Activity history is unavailable right now. Refresh the event to try again.")).toBeInTheDocument();
+});
+
+test("[SCRUM-141-UI-008] AC3: a coordinator's event in preparation shows Preparation, with arrangements and the safety check closed", async () => {
+  const { fetchMock } = setup("coordinator", { status: "PREPARATION", activity: [APPROVAL] });
+
+  expect(await screen.findByText("Preparation", { selector: ".status-badge" })).toBeInTheDocument();
+  expect(screen.queryByRole("navigation", { name: "Event arrangements" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Operational Safety Check" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Cancel event" })).toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([url]) => url.includes("safety"))).toBe(false);
+});
+
+test("[SCRUM-141-UI-009] AC4: an approval note is labelled Note, and an action the page does not know is shown as recorded", async () => {
+  setup("coordinator", { status: "PREPARATION", activity: [
+    { ...APPROVAL, note: "Second exit opened" },
+    { id: "act-9", action: "SOMETHING_NEW", note: null, created_at: "2099-10-08T02:30:00Z" },
+  ] });
+
+  const entries = within(await screen.findByRole("region", { name: "Activity history" })).getAllByRole("listitem").map((item) => item.textContent);
+  expect(entries[0]).toContain("Note: Second exit opened");
+  expect(entries[1]).toMatch(/^SOMETHING_NEW · /);
+});

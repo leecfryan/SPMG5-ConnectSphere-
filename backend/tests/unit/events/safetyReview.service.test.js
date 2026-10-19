@@ -1,4 +1,4 @@
-import { test, expect, beforeEach, vi } from "vitest";
+import { describe, test, expect, beforeEach, vi } from "vitest";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -93,4 +93,71 @@ test("[SCRUM-140] an event not awaiting review is not found, and its arrangement
 
   expect(await safetyReview.detail("evt-9")).toEqual({ ok: false, reason: "not_found" });
   expect(repository.findArrangements).not.toHaveBeenCalled();
+});
+
+describe("[SCRUM-141] approve and reject", () => {
+  const MOVED = { id: "evt-1", status: "PREPARATION", organiser_id: "org-1", coordinator_id: "coord-1" };
+
+  beforeEach(() => {
+    repository.transitionStatus = vi.fn(async (_id, _from, to) => ({ ...MOVED, status: to }));
+    repository.findById = vi.fn(async () => ({ id: "evt-1", status: "PREPARATION" }));
+    repository.recordActivity = vi.fn(async () => ({ id: "act-1" }));
+    repository.undoTransition = vi.fn(async () => ({ id: "evt-1" }));
+  });
+
+  test("AC1/AC3: approval moves the event from safety review to preparation, with no coordinator filter", async () => {
+    const result = await safetyReview.approve("evt-1", "officer-1");
+
+    expect(result).toEqual({ ok: true, event: { id: "evt-1", status: "PREPARATION" } });
+    expect(repository.transitionStatus).toHaveBeenCalledExactlyOnceWith("evt-1", "SAFETY_REVIEW", "PREPARATION");
+  });
+
+  test("AC4: approval records who decided, the move and an optional note", async () => {
+    await safetyReview.approve("evt-1", "officer-1", "  Stewards briefed  ");
+    await safetyReview.approve("evt-1", "officer-1");
+
+    expect(repository.recordActivity.mock.calls).toEqual([
+      [{ eventId: "evt-1", actorId: "officer-1", action: "SAFETY_APPROVED", fromStatus: "SAFETY_REVIEW", toStatus: "PREPARATION", note: "Stewards briefed" }],
+      [{ eventId: "evt-1", actorId: "officer-1", action: "SAFETY_APPROVED", fromStatus: "SAFETY_REVIEW", toStatus: "PREPARATION", note: null }],
+    ]);
+  });
+
+  test("AC2/AC3/AC4: rejection with a reason sends the event back to planning, not preparation, and records the reason", async () => {
+    const result = await safetyReview.reject("evt-1", "officer-1", "  No fire marshal for 180 people  ");
+
+    expect(result).toEqual({ ok: true, event: { id: "evt-1", status: "APPROVED" } });
+    expect(repository.transitionStatus).toHaveBeenCalledExactlyOnceWith("evt-1", "SAFETY_REVIEW", "APPROVED");
+    expect(repository.recordActivity).toHaveBeenCalledExactlyOnceWith({
+      eventId: "evt-1", actorId: "officer-1", action: "SAFETY_REJECTED", fromStatus: "SAFETY_REVIEW", toStatus: "APPROVED", note: "No fire marshal for 180 people",
+    });
+  });
+
+  test.each([undefined, null, "", "   ", 42, ["reason"]])("AC2: a rejection without a text reason (%j) is refused and nothing is written", async (reason) => {
+    expect(await safetyReview.reject("evt-1", "officer-1", reason)).toEqual({ ok: false, reason: "reason_required" });
+    expect(repository.transitionStatus).not.toHaveBeenCalled();
+    expect(repository.recordActivity).not.toHaveBeenCalled();
+  });
+
+  test("an approval note that is not text is refused and nothing is written", async () => {
+    expect(await safetyReview.approve("evt-1", "officer-1", { note: "x" })).toEqual({ ok: false, reason: "invalid_note" });
+    expect(repository.transitionStatus).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ["an event no longer under review", { id: "evt-1", status: "PREPARATION" }, "conflict"],
+    ["an unknown event", null, "not_found"],
+  ])("conflict: %s is refused and no history is written", async (_label, existing, reason) => {
+    repository.transitionStatus.mockResolvedValue(null);
+    repository.findById.mockResolvedValue(existing);
+
+    expect(await safetyReview.approve("evt-1", "officer-1")).toEqual({ ok: false, reason });
+    expect(repository.recordActivity).not.toHaveBeenCalled();
+  });
+
+  test("failure: when the history row cannot be written the move is undone and the error surfaces", async () => {
+    repository.recordActivity.mockRejectedValue(new Error("events.repository: recordActivity failed"));
+
+    await expect(safetyReview.reject("evt-1", "officer-1", "Blocked exit")).rejects.toThrow("recordActivity failed");
+    expect(repository.undoTransition).toHaveBeenCalledExactlyOnceWith("evt-1", "SAFETY_REVIEW", "APPROVED");
+  });
 });

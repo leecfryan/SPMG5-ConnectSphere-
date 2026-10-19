@@ -31,7 +31,8 @@ Event writes use `events.submit` and `events.own.update` (Event Organisers, exte
 `events.assign_coordinator` (Event Coordinator Leads), and `events.decide` and
 `events.safety.submit` (the event's assigned Event Coordinator). None appears in the
 read matrix below, which lists read permissions only. The Safety Officer's
-`events.safety.read` (SCRUM-140) is described under *SCRUM-142 — Safety Officer*.
+`events.safety.read` (SCRUM-140) and `events.safety.decide` (SCRUM-141) are described under
+*SCRUM-142 — Safety Officer*.
 
 | Write capability | Holder | Guards |
 | --- | --- | --- |
@@ -46,6 +47,7 @@ read matrix below, which lists read permissions only. The Safety Officer's
 | `events.waitlist.manage` | Event Coordinators assigned to the event | Coordinator waitlist listing, offer settings and manual promotion; leads do not gain this capability (SCRUM-142 staging integration) |
 | `events.decide` | Event Coordinators, **assigned event only** (record check on `coordinator_id`) | `POST /api/internal/events/:eventId/{start-review,approve,reject}` |
 | `events.safety.submit` | Event Coordinators, **assigned event only** (same record check) | `GET /api/internal/events/:eventId/safety-readiness`, `POST /api/internal/events/:eventId/{submit-safety-check,withdraw-safety-check}` |
+| `events.safety.decide` | Safety Officers (a pool; no record check) | `POST /api/internal/safety-reviews/:eventId/{approve,reject}` (SCRUM-141) |
 
 A capability name ending in `.read` is refused for every non-GET by
 `requirePermission`, which is why the assignment capability is not named
@@ -69,9 +71,10 @@ specification.
 | event_organisers.read | No | No | Yes | No | Yes |
 
 All five internal roles, including `event_coordinator_lead` and `safety_officer`, have `internal.access`.
-Safety Officer's only feature permission is `events.safety.read` (SCRUM-140), its
-one responsibility. It does not receive the assigned coordinator's
-`events.safety.submit` capability or any write permission.
+Safety Officer's feature permissions are `events.safety.read` (SCRUM-140), its
+one listed responsibility, and `events.safety.decide` (SCRUM-141, unlabelled, so the
+responsibilities list is unchanged). It does not receive the assigned coordinator's
+`events.safety.submit` capability or any other write permission.
 Managers have `events.review` and `events.assign`, not venue/equipment booking
 permissions. Coordinators have `events.assigned.read`; organisers have
 `events.own.read`, `events.own.update` and `events.submit`. Only attendee responsibility grants
@@ -307,6 +310,9 @@ only `internal.access`. SCRUM-140 adds `events.safety.read` (label *Operational
 safety review*, no record check: officers are a pool, not assigned per event). It
 guards `GET /api/internal/safety-reviews` and `GET /api/internal/safety-reviews/:eventId`
 and the `/safety-reviews` pages; as a `*.read` permission it refuses every non-GET.
+SCRUM-141 adds `events.safety.decide` (no label, no record check) for
+`POST /api/internal/safety-reviews/:eventId/{approve,reject}`; it changes only the
+event's status and writes its activity history, never the event's details.
 Account, Notifications, Safety reviews and Responsibilities are available.
 Officer-only accounts cannot access lead, coordinator, venue, equipment or attendee
 business functions, including coordinator safety-check submission and withdrawal.
@@ -344,6 +350,8 @@ nor any shared Auth update has been run by the agent.
 
 SCRUM-140 updated the expectations of SCRUM-142-SAFETY-INT-001–004, -UI-001 and -003,
 -API-009–010 and -BROWSER-001 to include `events.safety.read`; nothing else changed.
+SCRUM-141 updated SCRUM-142-SAFETY-INT-001–004 and -API-009–010 the same way to include
+`events.safety.decide`; they still assert the exact permission list.
 
 Manual UAT is **Not Executed**. Assign officer-only, sign in and verify Account
 shows Safety Officer; open Responsibilities and refresh to see *Operational safety review*.

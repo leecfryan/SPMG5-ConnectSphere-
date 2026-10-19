@@ -56,13 +56,13 @@ function setup(roles = ["safety_officer"], routes = {}) {
     }),
     signOut: vi.fn().mockResolvedValue({ error: null }),
   } });
-  const fetchMock = vi.fn(async (url) => {
+  const fetchMock = vi.fn(async (url, init) => {
     if (url === "/api/auth/me") return ok({
       user: { id: "officer-1", email: "safety@connectsphere.sg", fullName: "Safety Officer", roles, accountTypes: ["internal"] },
       // The REAL policy decides, so this test fails if the permission is removed.
       permissions: getPermissions(roles),
     });
-    if (routes[url]) return routes[url]();
+    if (routes[url]) return routes[url](init);
     throw new Error("Unexpected test request: " + url);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -146,6 +146,8 @@ test("[SCRUM-140-UI-005] missing safety facts read 'Not provided' rather than bl
   expect(screen.getByRole("region", { name: "Reserved equipment" }).textContent).toContain("Placement and requirements: Not provided");
 });
 
+// SCRUM-141 adds the safety decision; it may hold only the note and the two
+// decision buttons, and nothing outside it may be a control.
 test("[SCRUM-140-UI-006] the detail offers no way to edit the event", async () => {
   setup(["safety_officer"], { [DETAIL_URL]: () => ok(REVIEW) });
   open(`/safety-reviews/${EVENT_ID}`);
@@ -153,8 +155,11 @@ test("[SCRUM-140-UI-006] the detail offers no way to edit the event", async () =
   await screen.findByRole("heading", { name: "Community Health Fair" });
   expect(screen.getByText("Read only. This page shows the event as submitted for its safety review.")).toBeTruthy();
   const page = screen.getByRole("heading", { name: "Community Health Fair" }).closest("section");
-  expect(page.querySelector("form, input, textarea, select")).toBeNull();
-  expect(within(page).queryAllByRole("button")).toEqual([]);
+  const decision = within(page).getByRole("region", { name: "Safety decision" });
+  const controlsOutside = [...page.querySelectorAll("form, input, textarea, select, button")].filter((control) => !decision.contains(control));
+  expect(controlsOutside).toEqual([]);
+  expect(within(decision).getAllByRole("button").map((button) => button.textContent)).toEqual(["Approve", "Reject"]);
+  expect(within(decision).getAllByRole("textbox").map((box) => box.id)).toEqual(["safety-decision-note"]);
   expect(within(page).getByRole("link", { name: "Back to safety reviews" })).toBeTruthy();
 });
 
@@ -200,4 +205,80 @@ test("[SCRUM-140-UI-012] an event with no confirmed venue or reserved equipment 
   expect(venues.textContent).toContain("No confirmed venue booking.");
   expect(within(venues).queryAllByRole("region")).toEqual([]);
   expect(screen.getByRole("region", { name: "Reserved equipment" }).textContent).toContain("No equipment is reserved for this event.");
+});
+
+// SCRUM-141: the decision on the detail page.
+const APPROVE_URL = `${DETAIL_URL}/approve`;
+const REJECT_URL = `${DETAIL_URL}/reject`;
+
+test("[SCRUM-141-UI-001] approving sends the optional note and confirms the move to preparation", async () => {
+  const approve = vi.fn(() => ok({ event: { id: EVENT_ID, status: "PREPARATION" } }));
+  setup(["safety_officer"], { [DETAIL_URL]: () => ok(REVIEW), [APPROVE_URL]: approve });
+  const user = userEvent.setup();
+  open(`/safety-reviews/${EVENT_ID}`);
+
+  await user.type(await screen.findByLabelText("Decision note"), "Stewards briefed");
+  await user.click(screen.getByRole("button", { name: "Approve" }));
+
+  expect((await screen.findByRole("status")).textContent).toBe("Safety arrangement approved. The event has moved to preparation.");
+  expect(approve).toHaveBeenCalledOnce();
+  expect(approve.mock.calls[0][0]).toMatchObject({ method: "POST" });
+  expect(JSON.parse(approve.mock.calls[0][0].body)).toEqual({ note: "Stewards briefed" });
+  expect(screen.queryByRole("region", { name: "Safety decision" })).toBeNull();
+  expect(screen.getByRole("link", { name: "Back to safety reviews" })).toBeTruthy();
+});
+
+test("[SCRUM-141-UI-002] rejecting without a reason is stopped on the page and nothing is sent", async () => {
+  const reject = vi.fn();
+  setup(["safety_officer"], { [DETAIL_URL]: () => ok(REVIEW), [REJECT_URL]: reject });
+  const user = userEvent.setup();
+  open(`/safety-reviews/${EVENT_ID}`);
+
+  await user.type(await screen.findByLabelText("Decision note"), "   ");
+  await user.click(screen.getByRole("button", { name: "Reject" }));
+
+  expect(screen.getByText("Give a reason for rejecting this safety arrangement.")).toBeTruthy();
+  expect(screen.getByLabelText("Decision note").getAttribute("aria-invalid")).toBe("true");
+  expect(reject).not.toHaveBeenCalled();
+});
+
+test("[SCRUM-141-UI-003] rejecting with a reason sends it and confirms the event went back to its coordinator", async () => {
+  const reject = vi.fn(() => ok({ event: { id: EVENT_ID, status: "APPROVED" } }));
+  setup(["safety_officer"], { [DETAIL_URL]: () => ok(REVIEW), [REJECT_URL]: reject });
+  const user = userEvent.setup();
+  open(`/safety-reviews/${EVENT_ID}`);
+
+  await user.type(await screen.findByLabelText("Decision note"), "Only one exit for 180 people");
+  await user.click(screen.getByRole("button", { name: "Reject" }));
+
+  expect((await screen.findByRole("status")).textContent).toBe("Safety arrangement rejected. The event is back with its coordinator, with your reason.");
+  expect(JSON.parse(reject.mock.calls[0][0].body)).toEqual({ reason: "Only one exit for 180 people" });
+});
+
+test("[SCRUM-141-UI-004] a refused decision shows the server's message and keeps the controls", async () => {
+  setup(["safety_officer"], {
+    [DETAIL_URL]: () => ok(REVIEW),
+    [APPROVE_URL]: () => fail(409, "This event is no longer waiting for a safety review. Refresh to see its current status."),
+  });
+  const user = userEvent.setup();
+  open(`/safety-reviews/${EVENT_ID}`);
+
+  await user.click(await screen.findByRole("button", { name: "Approve" }));
+
+  expect((await screen.findByRole("alert")).textContent).toBe("This event is no longer waiting for a safety review. Refresh to see its current status.");
+  expect(screen.getByRole("button", { name: "Approve" }).disabled).toBe(false);
+});
+
+test("[SCRUM-141-UI-005] both decision buttons are disabled while a decision is in flight", async () => {
+  let answer;
+  setup(["safety_officer"], { [DETAIL_URL]: () => ok(REVIEW), [APPROVE_URL]: () => new Promise((resolve) => { answer = resolve; }) });
+  const user = userEvent.setup();
+  open(`/safety-reviews/${EVENT_ID}`);
+
+  await user.click(await screen.findByRole("button", { name: "Approve" }));
+
+  expect(screen.getByRole("button", { name: "Approve" }).disabled).toBe(true);
+  expect(screen.getByRole("button", { name: "Reject" }).disabled).toBe(true);
+  answer(ok({ event: { id: EVENT_ID, status: "PREPARATION" } }));
+  expect(await screen.findByRole("status")).toBeTruthy();
 });

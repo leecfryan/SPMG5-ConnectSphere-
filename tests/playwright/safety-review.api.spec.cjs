@@ -1,5 +1,5 @@
 const { test, expect } = require('./support/fixtures.cjs');
-const { setupWorkflow } = require('./support/event-workspace-fixtures.cjs');
+const { setupWorkflow, submittedForSafety } = require('./support/event-workspace-fixtures.cjs');
 const venueId = '11111111-1111-4111-8111-111111111111';
 
 // SCRUM-140: the Safety Officer's read-only view, fed by the coordinator's
@@ -69,4 +69,54 @@ test('[SAFETY-REVIEW-API-001] SCRUM-140 AC1-AC4: the officer lists and reads a s
   // Withdrawing takes it out of the queue again.
   expect((await request.post(`/api/internal/events/${event.id}/withdraw-safety-check`, { headers: headers.first })).status()).toBe(200);
   expect(await queued()).toBe(false);
+});
+
+
+test('[SAFETY-REVIEW-API-002] SCRUM-141 AC1-AC4: a rejection needs a reason and returns the event to planning; after resubmission an approval moves it to preparation; both are in its history', async ({ accounts, request }) => {
+  const { event, headers } = await submittedForSafety(accounts, request, 49);
+  const decide = (action, data, as = headers.officer) => request.post(`/api/internal/safety-reviews/${event.id}/${action}`, { headers: as, data });
+  const seenBy = async (scope, as) => (await (await request.get(`/api/event-workspace/${scope}/${event.id}`, { headers: as })).json()).event;
+
+  // Access: no one but the Safety Officer decides, and nothing is recorded for them.
+  for (const role of ['first', 'second', 'organiser', 'manager', 'dual', 'attendee']) {
+    expect((await decide('approve', {}, headers[role])).status(), role).toBe(403);
+    expect((await decide('reject', { reason: 'x' }, headers[role])).status(), role).toBe(403);
+  }
+  expect((await decide('approve', {}, null)).status()).toBe(401);
+
+  // AC2: a rejection without a reason is refused and the event stays under review.
+  const unexplained = await decide('reject', { reason: '  ' });
+  expect(unexplained.status()).toBe(400);
+  expect(await unexplained.json()).toEqual({ message: 'Give a reason for rejecting this safety arrangement.' });
+  expect((await seenBy('coordinator', headers.first)).status).toBe('SAFETY_REVIEW');
+
+  // AC3: the rejected event goes back to planning, not to preparation.
+  const rejected = await decide('reject', { reason: 'Only one exit for 30 people' });
+  expect(rejected.status()).toBe(200);
+  expect(await rejected.json()).toEqual({ event: { id: event.id, status: 'APPROVED' } });
+  expect((await decide('approve', {})).status()).toBe(409);
+
+  // AC4: the coordinator and the organiser both see the decision with its reason.
+  for (const [scope, as] of [['coordinator', headers.first], ['organiser', headers.organiser], ['manager', headers.manager]]) {
+    const seen = await seenBy(scope, as);
+    expect(seen.status, scope).toBe('APPROVED');
+    expect(seen.activity, scope).toEqual([expect.objectContaining({
+      action: 'SAFETY_REJECTED', from_status: 'SAFETY_REVIEW', to_status: 'APPROVED', note: 'Only one exit for 30 people',
+    })]);
+    expect(seen.activity[0], scope).not.toHaveProperty('user_id');
+  }
+
+  // AC1/AC3: resubmitted, then approved into preparation.
+  expect((await request.post(`/api/internal/events/${event.id}/submit-safety-check`, { headers: headers.first })).status()).toBe(200);
+  const approved = await decide('approve', { note: 'Second exit opened' });
+  expect(approved.status()).toBe(200);
+  expect(await approved.json()).toEqual({ event: { id: event.id, status: 'PREPARATION' } });
+  expect((await decide('reject', { reason: 'Too late' })).status()).toBe(409);
+  expect((await (await request.get('/api/internal/safety-reviews', { headers: headers.officer })).json()).events.some((row) => row.id === event.id)).toBe(false);
+
+  const history = (await seenBy('coordinator', headers.first)).activity;
+  expect(history.map((entry) => [entry.action, entry.to_status, entry.note])).toEqual([
+    ['SAFETY_APPROVED', 'PREPARATION', 'Second exit opened'],
+    ['SAFETY_REJECTED', 'APPROVED', 'Only one exit for 30 people'],
+  ]);
 });

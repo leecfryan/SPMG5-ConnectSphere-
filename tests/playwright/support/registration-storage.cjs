@@ -3,6 +3,8 @@ const { randomUUID } = require('node:crypto');
 module.exports = function registrationStorage(accounts) {
   const registrations = [];
   const waitlistEntries = [];
+  // SCRUM-141: event activity history, written by the events fixture in server.cjs.
+  const activity = [];
   const events = () => [...accounts.values()].flatMap(account => account.events);
   function project(row, selection) {
     if (!selection || selection === '*') return { ...row };
@@ -14,6 +16,7 @@ module.exports = function registrationStorage(accounts) {
   }
   return {
     registrations,
+    activity,
     async rpc(name, args) {
       if (name === 'registration_availability_for_events') {
         const availability = args.p_event_ids.map(eventId => {
@@ -70,7 +73,9 @@ module.exports = function registrationStorage(accounts) {
           ? events()
           : table === 'event_waitlist_entries'
             ? waitlistEntries
-            : registrations;
+            : table === 'event_activity_log'
+              ? activity
+              : registrations;
         let result = rows.filter(row => filters.every(test => test(row)));
         if (insertion) {
           if (rows.some(row => row.attendee_id === insertion.attendee_id && row.event_id === insertion.event_id)) {

@@ -43,4 +43,24 @@ async function setupOrganiserAccess(accounts, request) {
   }
   return { ...people, headers, events, alpha, beta };
 }
-module.exports = { setupWorkflow, setupOrganiserAccess };
+const FIXTURE_VENUE_ID = '11111111-1111-4111-8111-111111111111';
+// SCRUM-141: shared setup - an approved event with one confirmed venue,
+// submitted for the safety check by its assigned coordinator.
+async function submittedForSafety(accounts, request, dayOffset) {
+  const workflow = await setupWorkflow(accounts, request);
+  const { event, first, headers, update } = workflow;
+  headers.officer = { Authorization: 'Bearer ' + (await accounts.session(await accounts.create(['safety_officer']))).access_token };
+  expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
+  // A day no other spec books, so the shared fixture venue's confirmed slots never clash.
+  const date = new Date(Date.now() + dayOffset * 86400000).toISOString().slice(0, 10);
+  // Stands in for the assigned coordinator's approval (SCRUM-99).
+  await accounts.updateEvent(event.id, { status: 'APPROVED', start_time: date + 'T00:00:00Z', end_time: date + 'T15:00:00Z' });
+  const venue = await request.post(`${backendURL}/api/venues/${FIXTURE_VENUE_ID}/booking-requests`, { headers: headers.first, data: {
+    event_id: event.id, booking_date: date, slots: ['am'], expected_attendees: 30, room_layout: 'Theatre', required_facilities: ['Projector'],
+  } });
+  expect(venue.status()).toBe(201);
+  expect((await request.patch(`${backendURL}/api/venues/booking-requests/${(await venue.json()).data.id}/decision`, { headers: headers.dual, data: { decision: 'confirmed' } })).status()).toBe(200);
+  expect((await request.post(`${backendURL}/api/internal/events/${event.id}/submit-safety-check`, { headers: headers.first })).status()).toBe(200);
+  return { ...workflow, date };
+}
+module.exports = { setupWorkflow, setupOrganiserAccess, submittedForSafety };

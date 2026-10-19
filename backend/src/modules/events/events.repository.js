@@ -228,6 +228,29 @@ async function findArrangements(eventId) {
   };
 }
 
+// SCRUM-141: undoes a transition whose activity row could not be written, so
+// a decision never stands without its history. Bypasses canTransition on
+// purpose: it restores the status the event had a moment ago.
+async function undoTransition(id, from, to) {
+  return unwrap(
+    await getSupabase().from(TABLE).update({ status: from }).eq("id", id).eq("status", to).select("id").maybeSingle(),
+    "undoTransition",
+  );
+}
+
+// SCRUM-141 AC4: event_activity_log is append-only (the table grants the backend
+// select and insert only). The status move and note go in its details column.
+async function recordActivity({ eventId, actorId, action, fromStatus, toStatus, note }) {
+  return unwrap(
+    await getSupabase()
+      .from("event_activity_log")
+      .insert({ event_id: eventId, user_id: actorId, action, details: { from_status: fromStatus, to_status: toStatus, note } })
+      .select()
+      .single(),
+    "recordActivity",
+  );
+}
+
 module.exports = {
   WRITABLE_COLS,
   ACTIVE_STATUSES,
@@ -245,4 +268,6 @@ module.exports = {
   findArrangements,
   findAwaitingSafetyReview,
   findAwaitingSafetyReviewById,
+  undoTransition,
+  recordActivity,
 };
