@@ -58,7 +58,7 @@ what is specific to that case.
 | Layer | File | Tests | Pre-conditions for every case in that file |
 | --- | --- | --- | --- |
 | Directory (unit) | `backend/tests/unit/events/coordinators.directory.test.js` | 22 | None beyond a hand-built `{ auth: { admin: { listUsers } } }` client passed to the factory. No `stubSupabase` — the module takes its client as an argument. |
-| Service and repository (unit) | `backend/tests/unit/events/assignments.service.test.js` | 19 | `build()` returns the service with `repository` and `directory` as `vi.fn()` stubs. The repository-filter cases use `recorder()`, a Proxy chain that records every PostgREST builder call. |
+| Service and repository (unit) | `backend/tests/unit/events/assignments.service.test.js` | 19 | `build()` returns the service with `repository` and `directory` as `vi.fn()` stubs. The repository cases use `recorder()`, which records PostgREST builder calls and history RPC arguments. |
 | API (integration) | `backend/tests/integration/events.assign.test.js` | 22 | Express app on an ephemeral port (`listen(0)`); the bearer token **is** the comma-separated role list, so each case states the identity it exercises. Repository and directory both faked. |
 | Page (frontend) | `frontend/src/features/events/AssignmentQueuePage.test.jsx` | 14 | jsdom; `getAuthClient` mocked and `fetch` stubbed, both reset in `afterEach`. The page is rendered through the real `App` and router, so the route guard is exercised rather than bypassed. Permissions come from the **real** `backend/src/auth/permissions.js`, loaded with `createRequire` — removing the manager's capability fails these tests. |
 
@@ -81,7 +81,7 @@ Permission coverage for `event_coordinator_lead` beyond this feature lives in
 | AS-H08 | The queue endpoint returns the repository's order | 2 seeded requests | `200`; both names in order; all SUBMITTED and unassigned | `the queue returns submitted, unassigned requests in the repository's order` |
 | AS-H09 | The coordinator endpoint carries each workload figure | 2 coordinators, 1 assignment | `200`; `activeEvents` 1 and 0; `nextEventStart` ISO and `null` | `the coordinator table carries each coordinator's active workload` |
 | AS-H10 | Assignment succeeds and does not move the event's status | `PUT` with a valid coordinator | `200`; `coordinator_id` set; `status` still `SUBMITTED` | `assignment succeeds and does not move the event's status` |
-| AS-H11 | The write is guarded to first-assignment-only, in the database | `assignCoordinator("evt-1","coord-1")` | `update` carries **only** `coordinator_id`, never `status`; filters are `eq id`, `eq status SUBMITTED`, `is coordinator_id null` | `assignCoordinator writes only coordinator_id, and only to a submitted, unassigned event` |
+| AS-H11 | The repository forwards first-assignment guards and the verified actor to history storage | `assignCoordinator("evt-1","coord-1", actor)` | Calls `assign_event_coordinator` with the event/coordinator IDs, expected coordinator `null`, allowed status `["SUBMITTED"]`, and verified actor ID/name. No lifecycle transition is requested. | `SCRUM-26 / SCRUM-155: assignCoordinator sends first-assignment guards and verified actor to history storage` |
 
 ---
 
@@ -180,8 +180,9 @@ specs, so the guard is proven by AS-UI-002 in jsdom and by the route tests in
 [Playwright acceptance](testing/playwright-acceptance.md) §Remaining evidence.
 
 **Nothing here proves the database enforces the guard.** AS-H11 asserts the
-filters the repository *sends* — `eq status SUBMITTED`, `is coordinator_id null`
-— against a recording Proxy, not against Postgres. The 409 path (AS-N09) is
+first-assignment parameters sent to `assign_event_coordinator` — allowed status
+`SUBMITTED` and expected coordinator `null` — against a recording client, not
+against Postgres. The 409 path (AS-N09) is
 therefore evidence that the code handles a zero-row update correctly, not that
 two concurrent managers actually produce one. The two-tab step in
 [Coordinator assignment](event-assignment.md) §Manual verification is what
@@ -229,3 +230,29 @@ place.
   green.** Move it when the branch merges, or the board understates the lane.
 - **The Sprint 1 mockup contradicts Clarification #42** on who assigns
   (roadmap D6). The implementation follows the clarification.
+
+
+## SCRUM-155 compatibility verification — 17 Oct 2026
+
+The assignment notification feature passes the verified assigner to history
+storage. The existing service/API assertions now include that identity, and the
+repository test checks the history RPC's first-assignment guards instead of the
+superseded direct-update query. The tampered-body case also supplies forged
+assigner fields and verifies that the authenticated actor still reaches storage.
+The workspace integration fixture reuses the existing assignment RPC adapter.
+
+No original test was removed or skipped. Workspace checks still require unchanged
+lifecycle status, revoked outgoing-coordinator access, refusal of stale changes,
+postponed-event reassignment and refusal of rejected events. Production event
+logic was not changed by this compatibility correction.
+
+The same six-file regression selection that previously had eight failures now
+passes **119/119**, with no failures or skipped tests. It comprises 82 existing
+assignment/workspace tests and 37 notification tests. This is a targeted regression
+result, not a claim that the entire backend or CI pipeline was run.
+
+Run from the repository root:
+
+```sh
+npm --prefix backend run test:events -- tests/unit/events/assignments.service.test.js tests/integration/events.assign.test.js tests/integration/eventWorkspace.test.js tests/unit/notifications/notificationDelivery.test.js tests/integration/notifications.assignment.test.js tests/integration/notifications.delivery.test.js --pool=threads --maxWorkers=1
+```

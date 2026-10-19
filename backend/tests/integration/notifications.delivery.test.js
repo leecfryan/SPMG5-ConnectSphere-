@@ -23,7 +23,7 @@ const authClient = { auth: { getUser: async token => ({ data: { user: token === 
   id: token, app_metadata: { roles: token === "organiser" ? ["event_organiser"] : ["event_coordinator"] },
 } }, error: null }) } };
 const worker = createNotificationDeliveryService({
-  repository: { claim: async () => [...queue], complete: async row => { queue = queue.filter(q => q.id !== row.id); }, retry: async () => {} },
+  repository: { prepareAssignments: async () => 0, claim: async () => [...queue], complete: async row => { queue = queue.filter(q => q.id !== row.id); }, retry: async () => {} },
   secretKey: "dummy-key", logger: { warn: vi.fn() },
   fetchImpl: async (_url, args) => {
     const request = JSON.parse(args.body);

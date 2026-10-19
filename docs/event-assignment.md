@@ -215,3 +215,19 @@ Seed accounts are listed in [seed users](seed-users.md); run
 Reassignment (US-50), search and filtering on the queue (US-49), notifying the
 coordinator (US-29 to US-32) and review or approval of a request (US-36 to
 US-39) are later stories and are not implemented here.
+
+## SCRUM-155 — assignment history and background notifications
+
+Both assignment APIs save through assign_event_coordinator, passing the verified
+actor. It saves responsibility and history together without accessing the queue
+or provider. Permissions, status restrictions and expected-coordinator checks
+remain. Status is unchanged; same-coordinator saves create no history.
+
+The worker processes history separately into incoming/outgoing notifications.
+Queueing/delivery failures cannot roll back assignment; failure to save its history
+can. History snapshots the event name and actor, with no new event columns.
+
+Ryan reported successful application of the revised SQL on 2026-10-15. The event-assignment Novu workflow is now active in Development; live delivery
+verification remains pending. See [schema and processing](notifications.md#coordinator-notifications--scrum-155-checkpoint-2-revised).
+Earlier test results are historical; new feature tests are deferred at Ryan's
+request. Compatibility with the revised SQL has not yet been verified.

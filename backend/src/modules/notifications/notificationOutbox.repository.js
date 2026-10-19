@@ -8,6 +8,7 @@ function createNotificationOutboxRepository(client) {
     delivery_id: row.id, claim_token: row.lease_token, succeeded,
   });
   return {
+    prepareAssignments: () => rpc("enqueue_assignment_notifications", {}),
     claim: () => rpc("claim_notification_outbox", {}),
     complete: row => finish(row, true),
     retry: row => finish(row, false),
