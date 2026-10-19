@@ -183,6 +183,7 @@ const service = Object.fromEntries(
     "getUnavailabilityPeriodById", "updateUnavailabilityPeriod",
     "deleteUnavailabilityPeriod",
     "recheckConflictsAfterUpdate", "listConflictingRequests",
+    "listAffectedBookingRequests",
   ].map((name) => [name, vi.fn()])
 );
 

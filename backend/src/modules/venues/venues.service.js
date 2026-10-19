@@ -1,6 +1,6 @@
 // Lazy construction keeps sign-in available when venue storage is not configured.
 const getSupabase = () => require("../../supabase");
-const { eachDateInRange } = require("./venues.availability");
+const { eachDateInRange, committedSlots } = require("./venues.availability");
 const { PLANNING_STATUSES } = require("../events/lifecycle");
 const { findBufferConflicts } = require("./venues.conflicts");
 
@@ -163,7 +163,7 @@ const BOOKING_REQUEST_FIELDS = [
   "decided_at",
   "decision_note",
   "venue:venues!venue_id(id, name, city, country, capacity)",
-  "event:events!event_id!inner(id, name, status, start_time, end_time)",
+  "event:events!event_id!inner(id, name, status, start_time, end_time, coordinator_id)",
   "slots:venue_bookings!request_id(slot, status)",
 ].join(", ");
 
@@ -524,6 +524,31 @@ async function listConflictingRequests(venueId) {
   return data;
 }
 
+// SCRUM-136: confirmed booking requests whose committed slots (including setup /
+// turnaround buffer) overlap the slots of a newly created unavailability period.
+// Only confirmed slot rows are checked — pending requests are not yet scheduled.
+// AC4: no data is modified; this is a read-only query.
+async function listAffectedBookingRequests(venueId, period, venue) {
+  const { data, error } = await getSupabase()
+    .from("venue_booking_requests")
+    .select(BOOKING_REQUEST_FIELDS)
+    .eq("venue_id", venueId)
+    .gte("booking_date", period.start_date)
+    .lte("booking_date", period.end_date);
+  if (error) throw new Error(`Failed to list booking requests in range: ${error.message}`);
+
+  const periodSlotSet = new Set(period.slots);
+
+  return data.filter((request) => {
+    const confirmedSlots = request.slots
+      .filter((s) => s.status === "confirmed")
+      .map((s) => s.slot);
+    if (confirmedSlots.length === 0) return false;
+    const expanded = committedSlots(confirmedSlots, venue.setup_minutes, venue.turnaround_minutes);
+    return expanded.some((slot) => periodSlotSet.has(slot));
+  });
+}
+
 module.exports = {
   listVenues,
   listBookingsForVenuesOnDate,
@@ -549,6 +574,7 @@ module.exports = {
   listFutureVenueBookings,
   recheckConflictsAfterUpdate,
   listConflictingRequests,
+  listAffectedBookingRequests,
   listActiveHoldsInRange,
   listHolds,
   createHold,

@@ -71,6 +71,7 @@ function createVenuesController(service) {
     deleteUnavailabilityPeriod: removePeriod,
     recheckConflictsAfterUpdate,
     listConflictingRequests,
+    listAffectedBookingRequests,
     listActiveHoldsInRange,
     listHolds,
     createHold,
@@ -709,7 +710,11 @@ function createVenuesController(service) {
       const venue = await getVenueById(id);
       if (!venue) return res.status(404).json({ error: "Venue not found" });
       const period = await createUnavailabilityPeriod(id, value, req.user.id);
-      res.status(201).json({ data: period });
+      // SCRUM-136: identify confirmed bookings that now overlap the unavailability
+      // period (including setup/turnaround buffer) so the caller can arrange alternatives.
+      // AC4: read-only — no booking is modified.
+      const affected = await listAffectedBookingRequests(id, period, venue);
+      res.status(201).json({ data: period, affected });
     } catch (err) {
       next(err);
     }
@@ -750,6 +755,24 @@ function createVenuesController(service) {
       const deleted = await removePeriod(periodId, id);
       if (!deleted) return res.status(404).json({ error: "Unavailability period not found" });
       res.status(204).end();
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // SCRUM-136: re-fetch affected bookings for an existing period so the list
+  // remains accessible after the creation panel is dismissed or the page reloads.
+  async function getUnavailabilityPeriodAffected(req, res, next) {
+    try {
+      const { id, periodId } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+      if (!UUID_PATTERN.test(periodId)) return res.status(400).json({ error: "Invalid period id" });
+      const venue = await getVenueById(id);
+      if (!venue) return res.status(404).json({ error: "Venue not found" });
+      const period = await getUnavailabilityPeriodById(periodId, id);
+      if (!period) return res.status(404).json({ error: "Unavailability period not found" });
+      const affected = await listAffectedBookingRequests(id, period, venue);
+      res.status(200).json({ data: affected });
     } catch (err) {
       next(err);
     }
@@ -836,6 +859,7 @@ function createVenuesController(service) {
     postUnavailabilityPeriod,
     patchUnavailabilityPeriod,
     deleteUnavailabilityPeriod,
+    getUnavailabilityPeriodAffected,
     postHold,
     getHolds,
   };

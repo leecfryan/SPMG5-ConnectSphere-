@@ -158,7 +158,7 @@ export default function VenueHoldsPage({ venue, onBack }) {
   useEffect(() => {
     let active = true;
     fetchHolds(venue.id, token)
-      .then((data) => { if (active) { setHolds(data); setLoadError(null); } })
+      .then((data) => { if (active) { setHolds(data.data); setLoadError(null); } })
       .catch((err) => { if (active) setLoadError(err.message); });
     return () => { active = false; };
   }, [venue.id, token, reloadKey]);

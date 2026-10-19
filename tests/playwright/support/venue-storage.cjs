@@ -72,6 +72,17 @@ module.exports = function venueStorage(accounts) {
       periods.push(period);
       return period;
     },
+    // SCRUM-136: confirmed booking requests whose committed slots overlap the period.
+    // The fake uses a simple slot-intersection check without setup/turnaround buffers
+    // (those are zero in the test venue fixture), which is sufficient for Playwright AC coverage.
+    async listAffectedBookingRequests(venueId, period) {
+      const periodSlotSet = new Set(period.slots);
+      return requests.filter(r => {
+        if (r.venue.id !== venueId) return false;
+        if (r.booking_date < period.start_date || r.booking_date > period.end_date) return false;
+        return r.slots.some(s => s.status === 'confirmed' && periodSlotSet.has(s.slot));
+      });
+    },
     async listUnavailabilityPeriods(venueId) {
       return periods.filter(p => p.venue_id === venueId).sort((a, b) => a.start_date.localeCompare(b.start_date));
     },
@@ -106,5 +117,8 @@ module.exports = function venueStorage(accounts) {
       holds.push(...rows);
       return rows;
     },
+    // SCRUM-135: no-op in fake storage — conflict flag updates rely on Supabase
+    // queries (getSupabase()) that have no in-memory equivalent here.
+    async recheckConflictsAfterUpdate() {},
   };
 };
