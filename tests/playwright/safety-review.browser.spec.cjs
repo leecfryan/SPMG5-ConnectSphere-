@@ -1,5 +1,5 @@
 const { test, expect, signIn } = require('./support/fixtures.cjs');
-const { setupWorkflow } = require('./support/event-workspace-fixtures.cjs');
+const { setupWorkflow, submittedForSafety } = require('./support/event-workspace-fixtures.cjs');
 const venueId = '11111111-1111-4111-8111-111111111111';
 
 test('[E2E-SAFETY-REVIEW-001] SCRUM-140: the Safety Officer opens the queue on a phone and reads a submitted event, venue by venue', async ({ page, accounts, request }) => {
@@ -29,6 +29,37 @@ test('[E2E-SAFETY-REVIEW-001] SCRUM-140: the Safety Officer opens the queue on a
   await expect(venues.getByRole('heading', { level: 3 })).toContainText('Integration Hall');
   await expect(venues.getByText('Venue capacity')).toBeVisible();
   await expect(page.getByRole('region', { name: 'Reserved equipment' })).toContainText('No equipment is reserved for this event.');
-  await expect(page.getByRole('button')).toHaveText(['Sign out']);
+  // SCRUM-141: the only controls beyond Sign out are the two safety decisions.
+  await expect(page.getByRole('button')).toHaveText(['Approve', 'Reject', 'Sign out']);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test('[E2E-SAFETY-REVIEW-002] SCRUM-141: on a phone the Safety Officer rejects with a reason, and the coordinator reads it in the activity history', async ({ page, accounts, request }) => {
+  const { event, first } = await submittedForSafety(accounts, request, 50);
+  const officer = await accounts.create(['safety_officer']);
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto('/sign-in');
+  await signIn(page, officer);
+  // Confirm authentication has finished before navigating.
+  await expect(page.getByRole('link', { name: 'Safety reviews', exact: true })).toBeVisible();
+  await page.goto(`/safety-reviews/${event.id}`);
+  await page.getByRole('button', { name: 'Reject' }).click();
+  await expect(page.getByText('Give a reason for rejecting this safety arrangement.')).toBeVisible();
+  await page.getByLabel('Decision note').fill('Only one exit for 30 people');
+  await page.getByRole('button', { name: 'Reject' }).click();
+  await expect(page.getByRole('status')).toHaveText('Safety arrangement rejected. The event is back with its coordinator, with your reason.');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.getByRole('button', { name: 'Sign out' }).click();
+
+  await page.goto('/sign-in');
+  await signIn(page, first);
+  await expect(page.getByRole('link', { name: 'My assigned events', exact: true })).toBeVisible();
+  await page.goto(`/assigned-events/${event.id}`);
+  await expect(page.locator('.status-badge')).toHaveText('Approved – planning');
+  const history = page.getByRole('region', { name: 'Activity history' });
+  await expect(history.getByRole('listitem')).toHaveCount(1);
+  await expect(history).toContainText('Safety arrangement rejected');
+  await expect(history).toContainText('Reason: Only one exit for 30 people');
+  await expect(page.getByRole('button', { name: 'Submit for safety check' })).toBeVisible();
 });

@@ -1,5 +1,8 @@
+import { useState } from "react";
 import { Link, useParams } from "react-router";
+import { useAuth } from "../../auth/useAuth";
 import { useApiResource } from "../../../hooks/useApiResource";
+import SafetyDecisionControls from "../components/SafetyDecisionControls";
 import { formatDay, formatWhen } from "../eventFormat";
 import "../workspace.css";
 
@@ -10,9 +13,7 @@ import "../workspace.css";
 // organiser's comments, emergency access and restrictions are the venue's
 // notes, and equipment placement is each reserved item's technical requirement.
 // The labels say where each fact comes from so the officer isn't misled.
-//
-// Deliberately absent:
-//   approving or rejecting the safety arrangement   SCRUM-141
+// SCRUM-141 adds the decision below the facts; the facts stay read-only.
 const SLOT_LABELS = Object.freeze({ am: "AM", pm: "PM", night: "Night" });
 
 function shown(value) {
@@ -74,16 +75,30 @@ function Detail({ review }) {
   </>;
 }
 
+// SCRUM-141: once decided the event leaves the queue, so the page says what
+// happened instead of reloading a review that no longer exists.
+const OUTCOMES = Object.freeze({
+  PREPARATION: "Safety arrangement approved. The event has moved to preparation.",
+  APPROVED: "Safety arrangement rejected. The event is back with its coordinator, with your reason.",
+});
+
 export default function SafetyReviewDetailPage() {
   const { eventId } = useParams();
+  const { hasPermission } = useAuth();
+  const [decided, setDecided] = useState(null);
   const { data, loading, error, reload } = useApiResource(`/api/internal/safety-reviews/${encodeURIComponent(eventId)}`);
   return <section className="card event-workspace">
     <Link to="/safety-reviews">Back to safety reviews</Link>
-    {loading && <p role="status">Loading event…</p>}
-    {error && <>
-      <p role="alert">{error}</p>
-      <button type="button" onClick={reload}>Try again</button>
+    {decided ? <p role="status">{OUTCOMES[decided.status]}</p> : <>
+      {loading && <p role="status">Loading event…</p>}
+      {error && <>
+        <p role="alert">{error}</p>
+        <button type="button" onClick={reload}>Try again</button>
+      </>}
+      {data && <>
+        <Detail review={data} />
+        {hasPermission("events.safety.decide") && <SafetyDecisionControls eventId={data.event.id} onDecided={setDecided} />}
+      </>}
     </>}
-    {data && <Detail review={data} />}
   </section>;
 }

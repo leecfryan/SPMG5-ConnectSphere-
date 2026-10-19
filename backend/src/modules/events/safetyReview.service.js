@@ -1,4 +1,5 @@
 const { venueState } = require("./safetyReadiness");
+const { readNote } = require("./review.service");
 
 // SCRUM-140 AC3: only arrangements already confirmed are shown, using the same
 // meaning as the SCRUM-139 readiness check, so the Safety Officer reviews
@@ -50,7 +51,41 @@ function createSafetyReviewService({ repository }) {
     };
   }
 
-  return { list, detail };
+  // SCRUM-141 AC4: the status moves first, so a lost race (409) writes no
+  // history. If the history row then fails, the move is undone: a decision
+  // never stands unrecorded. No coordinator filter: any officer may decide.
+  async function decide(eventId, officerId, to, action, note) {
+    const moved = await repository.transitionStatus(eventId, "SAFETY_REVIEW", to);
+    if (!moved) {
+      const existing = await repository.findById(eventId);
+      return { ok: false, reason: existing ? "conflict" : "not_found" };
+    }
+    try {
+      await repository.recordActivity({ eventId, actorId: officerId, action, fromStatus: "SAFETY_REVIEW", toStatus: to, note });
+    } catch (error) {
+      await repository.undoTransition(eventId, "SAFETY_REVIEW", to);
+      throw error;
+    }
+    // Only id and status go back: the officer sees no organiser or coordinator details (#45).
+    return { ok: true, event: { id: moved.id, status: moved.status } };
+  }
+
+  // SCRUM-141 AC1/AC3: approval is the only way into PREPARATION.
+  async function approve(eventId, officerId, note) {
+    const parsed = readNote(note);
+    if (!parsed.ok) return { ok: false, reason: "invalid_note" };
+    return decide(eventId, officerId, "PREPARATION", "SAFETY_APPROVED", parsed.note);
+  }
+
+  // SCRUM-141 AC2/AC3: a rejection needs a reason and returns the event to
+  // planning (APPROVED), where the coordinator can fix it and resubmit.
+  async function reject(eventId, officerId, reason) {
+    const parsed = readNote(reason);
+    if (!parsed.ok || parsed.note === null) return { ok: false, reason: "reason_required" };
+    return decide(eventId, officerId, "APPROVED", "SAFETY_REJECTED", parsed.note);
+  }
+
+  return { list, detail, approve, reject };
 }
 
 module.exports = { createSafetyReviewService };

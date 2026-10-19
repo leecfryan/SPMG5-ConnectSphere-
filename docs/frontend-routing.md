@@ -21,7 +21,7 @@ same frontend port (Docker: 5173); routing does not start another Vite process.
 | `/account` | Backend-verified identity for every signed-in role. |
 | `/notifications` | Own Novu inbox and unread count for every signed-in account, including accounts without roles; no role capability required. |
 | `/safety-reviews` | Requires `internal.access` + `events.safety.read` (Safety Officer); events awaiting safety review (SCRUM-140). |
-| `/safety-reviews/:eventId` | Same permission; read-only safety facts for one event, one section per confirmed venue (SCRUM-140). |
+| `/safety-reviews/:eventId` | Same permission; read-only safety facts for one event, one section per confirmed venue (SCRUM-140). With `events.safety.decide`, the *Safety decision* section: *Approve*, or *Reject* with a reason (SCRUM-141). |
 | `/staff/responsibilities` | Requires `internal.access`; lists responsibilities from the protected staff API, or an empty-state message when none are assigned. Safety Officer's one responsibility is *Operational safety review* (SCRUM-140). |
 | `/forbidden` | Signed-in access-denied page. |
 | Other URLs | Not-found page with a home link. |

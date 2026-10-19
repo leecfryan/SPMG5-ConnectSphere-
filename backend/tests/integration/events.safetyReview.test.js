@@ -1,6 +1,7 @@
 // SCRUM-140 over real HTTP: the /api/internal gate, the events.safety.read
 // guard (GET only), and the safety review list and detail. Only the
 // repository is faked; the service's arrangement filtering runs for real.
+// SCRUM-141 adds the events.safety.decide guard and the approve/reject decisions.
 
 import { test, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { createRequire } from "node:module";
@@ -41,6 +42,8 @@ const repository = {
   findAwaitingSafetyReview: vi.fn(),
   findAwaitingSafetyReviewById: vi.fn(),
   findArrangements: vi.fn(),
+  recordActivity: vi.fn(),
+  undoTransition: vi.fn(),
 };
 
 // The token is "<user id>:<roles>", so each case states the identity it exercises.
@@ -70,6 +73,8 @@ beforeEach(() => {
   repository.findAwaitingSafetyReviewById.mockReset().mockImplementation(async (id) =>
     STORED[id]?.status === "SAFETY_REVIEW" ? pick(STORED[id], SAFE_COLUMNS) : null);
   repository.findArrangements.mockReset().mockResolvedValue({ venueRequests: [BOOKED, PENDING], equipmentRequests: [PROJECTOR] });
+  repository.recordActivity.mockReset().mockResolvedValue({ id: "act-1" });
+  repository.undoTransition.mockReset().mockResolvedValue({ id: EVENT_ID });
 });
 
 function call(path, token = OFFICER, method = "GET") {
@@ -210,6 +215,136 @@ test("[SCRUM-140] failure: without event storage the paths answer 503, after the
     expect(denied.status).toBe(403);
     expect(officer.status).toBe(503);
     expect(await officer.json()).toEqual({ message: "Safety review is not configured." });
+  } finally {
+    await new Promise((resolve) => bare.close(resolve));
+  }
+});
+
+// SCRUM-141: the decisions. transitionStatus answers as the real conditional
+// write would: the stored row moved, or null when it is not under review.
+function decide(action, body, token = OFFICER, id = EVENT_ID) {
+  return fetch(`${base}${LIST}/${id}/${action}`, {
+    method: "POST",
+    headers: { ...(token ? { Authorization: "Bearer " + token } : {}), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+const movesStoredRow = () => repository.transitionStatus.mockImplementation(async (id, from, to) =>
+  STORED[id]?.status === from ? { ...STORED[id], status: to } : null);
+
+test("[SCRUM-141] AC1/AC3/AC4: the Safety Officer approves; the event moves to preparation and the decision is recorded", async () => {
+  movesStoredRow();
+
+  const response = await decide("approve", { note: "Stewards confirmed", status: "CONFIRMED", actor_id: "someone-else" });
+
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({ event: { id: EVENT_ID, status: "PREPARATION" } });
+  expect(repository.transitionStatus).toHaveBeenCalledExactlyOnceWith(EVENT_ID, "SAFETY_REVIEW", "PREPARATION");
+  expect(repository.recordActivity).toHaveBeenCalledExactlyOnceWith({
+    eventId: EVENT_ID, actorId: "officer-1", action: "SAFETY_APPROVED", fromStatus: "SAFETY_REVIEW", toStatus: "PREPARATION", note: "Stewards confirmed",
+  });
+});
+
+test("[SCRUM-141] AC2/AC3/AC4: the Safety Officer rejects with a reason; the event returns to planning, not preparation", async () => {
+  movesStoredRow();
+
+  const response = await decide("reject", { reason: "Only one exit for 180 people" });
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ event: { id: EVENT_ID, status: "APPROVED" } });
+  expect(repository.recordActivity).toHaveBeenCalledExactlyOnceWith({
+    eventId: EVENT_ID, actorId: "officer-1", action: "SAFETY_REJECTED", fromStatus: "SAFETY_REVIEW", toStatus: "APPROVED", note: "Only one exit for 180 people",
+  });
+});
+
+test("[SCRUM-141] #45: a decision answers with the id and status only", async () => {
+  movesStoredRow();
+
+  const body = JSON.stringify(await (await decide("approve", {})).json());
+
+  for (const leaked of ["organiser_id", "coordinator_id", "org-1", "coord-1"]) expect(body).not.toContain(leaked);
+});
+
+test.each([{}, { reason: "   " }, { reason: 7 }, { note: "Reason in the wrong field" }])(
+  "[SCRUM-141] AC2: rejecting without a reason (%j) is a 400 and nothing is written", async (body) => {
+    const response = await decide("reject", body);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ message: "Give a reason for rejecting this safety arrangement." });
+    expect(repository.transitionStatus).not.toHaveBeenCalled();
+    expect(repository.recordActivity).not.toHaveBeenCalled();
+  });
+
+test("[SCRUM-141] an approval note that is not text is a 400", async () => {
+  const response = await decide("approve", { note: ["x"] });
+
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ message: "The note must be text." });
+});
+
+test.each(["approve", "reject"])("[SCRUM-141] conflict: %s on an event not under safety review is a 409 with no history", async (action) => {
+  movesStoredRow();
+
+  const response = await decide(action, { reason: "Late decision" }, OFFICER, PLANNING_ID);
+
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({ message: "This event is no longer waiting for a safety review. Refresh to see its current status." });
+  expect(repository.recordActivity).not.toHaveBeenCalled();
+});
+
+test("[SCRUM-141] an unknown event is a 404 and a malformed reference a 400, with no history", async () => {
+  movesStoredRow();
+
+  const missing = await decide("approve", {}, OFFICER, MISSING_ID);
+  const malformed = await decide("approve", {}, OFFICER, "not-a-uuid");
+
+  expect(missing.status).toBe(404);
+  expect(await missing.json()).toEqual({ message: "That event no longer exists." });
+  expect(malformed.status).toBe(400);
+  expect(await malformed.json()).toEqual({ message: "That event reference is not valid." });
+  expect(repository.recordActivity).not.toHaveBeenCalled();
+});
+
+test("[SCRUM-141] access: no token is a 401 for both decisions", async () => {
+  for (const action of ["approve", "reject"]) expect((await decide(action, { reason: "x" }, null)).status, action).toBe(401);
+  expect(repository.transitionStatus).not.toHaveBeenCalled();
+});
+
+test.each([
+  "event_coordinator", "event_coordinator_lead", "venue_staff", "technical_support_staff", "event_organiser", "attendee",
+])("[SCRUM-141] access: %s cannot approve or reject a safety arrangement", async (role) => {
+  for (const action of ["approve", "reject"]) {
+    const response = await decide(action, { reason: "x" }, `user-1:${role}`);
+    expect(response.status, action).toBe(403);
+    expect(await response.json()).toEqual({ message: "You do not have permission to access this information." });
+  }
+  expect(repository.transitionStatus).not.toHaveBeenCalled();
+});
+
+test("[SCRUM-141] failure: if the history cannot be written the move is undone and a safe 500 answers", async () => {
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  movesStoredRow();
+  repository.recordActivity.mockRejectedValue(new Error("events.repository: recordActivity failed - relation does not exist"));
+
+  const response = await decide("approve", {});
+
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ message: "Something went wrong. Please try again." });
+  expect(repository.undoTransition).toHaveBeenCalledExactlyOnceWith(EVENT_ID, "SAFETY_REVIEW", "PREPARATION");
+  errors.mockRestore();
+});
+
+test("[SCRUM-141] failure: without event storage the decisions answer 503, after the permission check", async () => {
+  const bare = createApp({ authClient }).listen(0, "127.0.0.1");
+  await once(bare, "listening");
+  const url = `http://127.0.0.1:${bare.address().port}${DETAIL}/approve`;
+  try {
+    const denied = await fetch(url, { method: "POST", headers: { Authorization: "Bearer user-1:event_coordinator" } });
+    const officer = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${OFFICER}` } });
+
+    expect(denied.status).toBe(403);
+    expect(officer.status).toBe(503);
   } finally {
     await new Promise((resolve) => bare.close(resolve));
   }

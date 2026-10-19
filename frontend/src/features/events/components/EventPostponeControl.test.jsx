@@ -31,7 +31,8 @@ const sent = (fetchMock, call = 0) => {
   return { url, method: options.method, auth: options.headers.Authorization, body: options.body && JSON.parse(options.body) };
 };
 
-test.each(["DRAFT", "COMPLETED", "REJECTED", "CANCELLED", "POSTPONED"])(
+// SCRUM-141: PREPARATION is not postponable until the PO agrees it.
+test.each(["DRAFT", "COMPLETED", "REJECTED", "CANCELLED", "POSTPONED", "PREPARATION"])(
   "[TC-149-13] a %s event offers no postpone action", (status) => {
     setup(status);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
