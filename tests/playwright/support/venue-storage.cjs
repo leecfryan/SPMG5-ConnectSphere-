@@ -1,5 +1,6 @@
 // Test-only storage. Production auth, venue controllers and validation stay real.
 const { randomUUID } = require('node:crypto');
+const { committedSlots } = require('../../../backend/src/modules/venues/venues.availability');
 const venueId = '11111111-1111-4111-8111-111111111111';
 module.exports = function venueStorage(accounts) {
   let venue = { id: venueId, name: 'Integration Hall', address: '1 Test Street', city: 'Singapore', country: 'Singapore',
@@ -51,6 +52,17 @@ module.exports = function venueStorage(accounts) {
     },
     async getBookingRequestById(id, scope) { return requests.find(r => r.id === id && visible(r, scope)) || null; },
     async listBookingRequests(scope, eventId) { return requests.filter(r => visible(r, scope) && (!eventId || r.event_id === eventId)); },
+    // SCRUM-136: mirrors the production read-only affected-booking query for
+    // unavailability periods, including setup and turnaround buffer slots.
+    async listAffectedBookingRequests(id, period, venueDetail) {
+      const unavailableSlots = new Set(period.slots);
+      return requests.filter((request) => {
+        if (request.venue.id !== id || request.booking_date < period.start_date || request.booking_date > period.end_date) return false;
+        const confirmedSlots = request.slots.filter((slot) => slot.status === 'confirmed').map((slot) => slot.slot);
+        return committedSlots(confirmedSlots, venueDetail.setup_minutes, venueDetail.turnaround_minutes)
+          .some((slot) => unavailableSlots.has(slot));
+      });
+    },
     // SCRUM-145: the browser fixture must preserve the production route's
     // affected state so a failed booking check does not produce a test-server 500.
     async markVenueBookingAffected(id, userId, reason, isVenueStaff) {

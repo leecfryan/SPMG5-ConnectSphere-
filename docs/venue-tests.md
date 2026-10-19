@@ -689,6 +689,11 @@ Story: as Venue Staff, I want to see which bookings are affected when I mark a v
 
 UI to display the affected list (the 201 JSON is the delivery channel for this story); coordinator notification; cancellation or rescheduling of affected bookings.
 
+Latest local execution (2026-10-20): the Playwright venue browser suite passed
+all 8 tests after its in-memory venue fixture gained the same read-only
+`listAffectedBookingRequests` behaviour as the production service. This was a
+merge-integration repair; it does not alter production SCRUM-136 behaviour.
+
 ---
 
 ## 8. Coverage note
