@@ -1,6 +1,6 @@
 // Field rules for an event request. Two gates:
 //   validateDraft          - a draft may be almost empty; only `name` is required.
-//                            Not called yet: drafts arrive with US-13.
+//                            Used by SCRUM-147 when a draft is saved.
 //   validateForSubmission  - a strict superset; everything US-14 needs to submit.
 //
 // Both return { ok: boolean, errors: [{ field, message }] }. `errors` lists EVERY

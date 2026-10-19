@@ -60,7 +60,9 @@ function createEventWorkspaceService(client, equipmentService) {
   }
   function scopedQuery(scope, userId, organiserIds) {
     let query = client.from("events").select(FIELDS);
-    if (scope === "organiser") query = query.in("organiser_id", organiserIds);
+    // SCRUM-147 AC4: drafts stay out of the shared organisation view, the
+    // owner's included; they are reached only through /api/events/drafts.
+    if (scope === "organiser") query = query.in("organiser_id", organiserIds).neq("status", "DRAFT");
     // SCRUM-98 AC3: a coordinator keeps seeing the requests they rejected, with the outcome they recorded.
     // SCRUM-148 AC4: and the ones they (or the coordinator lead) cancelled, with its history.
     else if (scope === "coordinator") query = query.eq("coordinator_id", userId).in("status", [...ACTIVE_STATUSES, "REJECTED", "CANCELLED"]);

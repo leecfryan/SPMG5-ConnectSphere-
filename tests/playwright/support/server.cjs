@@ -185,6 +185,30 @@ const eventsRepository = {
     account.events.push(event);
     return event;
   },
+  // SCRUM-147: same scoping as the real draft queries - the caller's own DRAFT rows only.
+  async createDraft(fields, organiserId) {
+    const account = accounts.get(organiserId);
+    if (!account || account.submissionFailure) throw new Error('Fixture event storage unavailable');
+    const event = { ...fields, id: randomUUID(), organiser_id: organiserId, enrolled_attendees: 0, status: 'DRAFT', created_at: new Date().toISOString() };
+    account.events.push(event);
+    return { ...event };
+  },
+  async findOwnDrafts(organiserId) {
+    return (accounts.get(organiserId)?.events || []).filter(event => event.status === 'DRAFT')
+      .sort((a, b) => b.created_at.localeCompare(a.created_at)).map(event => ({ ...event }));
+  },
+  async findOwnDraft(id, organiserId) {
+    const event = findEvent(id);
+    return event && event.organiser_id === organiserId && event.status === 'DRAFT' ? { ...event } : null;
+  },
+  async updateDraft(id, organiserId, fields) {
+    const event = await this.findOwnDraft(id, organiserId) && findEvent(id);
+    return event ? { ...Object.assign(event, fields) } : null;
+  },
+  async markSubmitted(id, organiserId, fields) {
+    const event = await this.findOwnDraft(id, organiserId) && findEvent(id);
+    return event ? { ...Object.assign(event, fields, { status: 'SUBMITTED', submitted_at: new Date().toISOString() }) } : null;
+  },
 };
 const venuesService = require('./venue-storage.cjs')(accounts);
 const equipmentDependencies = require('./equipment-storage.cjs')(accounts);
