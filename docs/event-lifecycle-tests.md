@@ -5,7 +5,7 @@ Historical acceptance criteria and customer quotations retain their original wor
 Earlier execution results are historical evidence; rename verification is recorded separately.
 
 **Deliverable evidence for SCRUM-97 (Progress an event through its status lifecycle), epic Event Lifecycle &
-Approval.** SCRUM-98 (review) and SCRUM-99 (approve) are in §8; SCRUM-139 (safety check) is in §9, SCRUM-140 (safety review) in §10 and SCRUM-141 (safety decision) in §11. Branch: `feature/eventLifecycleStatus` · **15 documented cases, 43 automated tests, all passing**
+Approval.** SCRUM-98 (review) and SCRUM-99 (approve) are in §8; SCRUM-139 (safety check) is in §9, SCRUM-140 (safety review) in §10, SCRUM-141 (safety decision) in §11 and SCRUM-144 (confirmation) in §12. Branch: `feature/eventLifecycleStatus` · **15 documented cases, 43 automated tests, all passing**
 — 34 backend unit, 9 frontend component, plus 1 manual database case.
 
 Story context — the eight statuses, the permitted moves, who sets each status and the schema change — is in
@@ -520,7 +520,61 @@ granting `events.safety.decide` to coordinators (2 fail), and dropping the undo 
 (2 fail). Pinned lists in SCRUM-97/139/142/148/149 tests were updated with `PREPARATION` and `events.safety.decide`,
 not loosened. `[SCRUM-140-UI-006]` was narrowed to its intent: no control outside the decision section.
 
-## 12. Requirements sources
+## 12. SCRUM-144 — confirm an event once essential arrangements are complete
+
+The assigned coordinator confirms an event in `PREPARATION` when nothing essential is outstanding; an outstanding
+venue booking or equipment request can be marked non-essential (`is_essential`) so it doesn't block. Rules and SQL in
+[event-requests.md](event-requests.md#confirm-an-event-scrum-144).
+
+> **SCRUM-144:** As an Event Coordinator, I want to confirm an event only when the arrangements essential to that
+> event are complete, so that ConnectSphere never confirms an event it cannot deliver.
+>
+> 1. An event can only be confirmed once its essential arrangements are complete and it has passed the safety check.
+> 2. On a multi-venue event, every essential venue booking must be approved.
+> 3. If anything essential is outstanding, confirmation is blocked and the outstanding items are shown.
+> 4. Non-essential outstanding actions do not block confirmation.
+
+| Layer | File | Pre-conditions |
+| --- | --- | --- |
+| Rule (unit) | `backend/tests/unit/events/safetyReadiness.test.js` | Pure `checkArrangements`; requests built per test with ids and flags |
+| Lifecycle (unit) | `backend/tests/unit/events/lifecycle.test.js` | Typed table: `PREPARATION → CONFIRMED`, no `APPROVED → CONFIRMED` |
+| Repository (unit) | `backend/tests/unit/events/events.arrangements.test.js` | `recorder()` as in §2 |
+| HTTP (integration) | `backend/tests/integration/events.safetyCheck.test.js` | As §9; in-memory event; `setArrangementEssential` answers only for request `cccccccc-0001-…` |
+| Frontend (component) | `frontend/src/features/events/components/ConfirmEventControls.test.jsx` | Real components, service, hook and `apiFetch`; `fetch` stubbed |
+| Frontend (page) | `frontend/src/features/events/pages/EventWorkspaceDetailPage.test.jsx` | As §8; the in-memory event answers `/confirm` |
+| Playwright | `tests/playwright/confirm-event.api.spec.cjs`, `confirm-event.browser.spec.cjs` | Real Express app and UI; arrangements through the venue and equipment lanes' endpoints, submitted through SCRUM-139 and approved through SCRUM-141, 51–53 days ahead |
+
+| ID | AC | Type | Scenario | Test data | Expected result | Automated test | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-144-01 | 1 | Happy | Confirm after the safety pass | `PREPARATION`, nothing essential outstanding | 200, `CONFIRMED`; write filtered on `PREPARATION` and the caller; badge *Confirmed* | `SCRUM-144 AC1: the assigned coordinator confirms an event in preparation…`; `[SCRUM-144-UI-002]`; `[SCRUM-144-UI-011]`; `[CONFIRM-API-001]`; `[E2E-CONFIRM-001]` | 2026-10-19 · pass · local |
+| TC-SCRUM-144-02 | 1 | Negative | No safety pass, or already confirmed | `APPROVED`, `SAFETY_REVIEW`, `CONFIRMED`, `CANCELLED`, `POSTPONED` | 409 refresh message; nothing written; no *Confirm event* section | `SCRUM-144 AC1: an event in %s … cannot be confirmed` (×5); `SCRUM-144 AC1: only an event that passed the safety check…` (lifecycle); `[SCRUM-144-UI-013]` (×3); `[CONFIRM-API-001]` | 2026-10-19 · pass · local |
+| TC-SCRUM-144-03 | 2 | Negative | Multi-venue: every essential booking listed | two pending essential booking requests beside a confirmed one | Each listed on its own line with its request id | `SCRUM-144 AC2: on a multi-venue event every essential venue still pending is listed…`; `[SCRUM-144-UI-001]`; `[CONFIRM-API-001]` (two days, one booking each) | 2026-10-19 · pass · local |
+| TC-SCRUM-144-04 | 3 | Negative | Blocked, and the items shown | essential venue still pending | 409 "This event cannot be confirmed yet…" with `missing`; status unchanged; *Confirm event* disabled; a refused confirm reloads the list | `SCRUM-144 AC2/AC3: an essential venue still pending blocks confirmation…`; `[SCRUM-144-UI-001]`, `[SCRUM-144-UI-003]`; `[CONFIRM-API-001]`; `[E2E-CONFIRM-001]` | 2026-10-19 · pass · local |
+| TC-SCRUM-144-05 | 4 | Happy | Non-essential does not block | outstanding venue and equipment marked `is_essential = false` | Listed under `optional`; confirm 200; the items stay outstanding | `SCRUM-144 AC4: outstanding requests marked non-essential do not block…`; `…an essential item still blocks beside a non-essential one`; `SCRUM-144 AC4: a non-essential outstanding request does not block confirmation…`; `[SCRUM-144-UI-004]`; `[CONFIRM-API-001]`; `[E2E-CONFIRM-001]` | 2026-10-19 · pass · local |
+| TC-SCRUM-144-06 | 4 | Happy | Coordinator marks and unmarks | `APPROVED` and `PREPARATION` | PATCH writes only `is_essential` on that request of that event; lists move; Confirm / Submit follow | `SCRUM-144 AC4: the assigned coordinator marks a request non-essential while the event is %s` (×2); `…setArrangementEssential writes only is_essential…` (×2); `…findArrangements reads each request's is_essential flag`; `[SCRUM-144-UI-004]`, `-005`, `-010` | 2026-10-19 · pass · local |
+| TC-SCRUM-144-07 | 4 | Boundary | A venue is always required; default is essential | only pending venue marked non-essential; request without the flag | "No venue booking has been approved yet." still blocks, with no mark button; an unflagged request blocks | `SCRUM-144 boundary: with no booked venue…`; `SCRUM-144: a request without the flag (column default) counts as essential`; `[SCRUM-144-UI-006]` | 2026-10-19 · pass · local |
+| TC-SCRUM-144-08 | 4 | Negative | Flag locked outside planning and preparation | `SAFETY_REVIEW`, `CONFIRMED`, `CANCELLED` | 409 "Arrangements can only be marked…"; nothing written; message shown on the page | `SCRUM-144 AC4: the flag cannot change while the event is %s` (×3); `[SCRUM-144-UI-007]`; `[CONFIRM-API-001]` | 2026-10-19 · pass · local |
+| TC-SCRUM-144-09 | 4 | Negative | Bad flag input | missing / `"no"` flag; kind `catering`; `not-a-uuid`; another event's request | 400 "Choose whether…"; 400 "That arrangement reference is not valid."; 404 "That arrangement is not part of this event." | `SCRUM-144 AC4: %s is a 400 and nothing is written` (×3); `…a malformed request id is a 400, and a request of another event is a 404`; `[CONFIRM-API-001]` | 2026-10-19 · pass · local |
+| TC-SCRUM-144-10 | 1, 4 | Negative | Only the assigned coordinator | no token; other coordinator, lead, Safety Officer, venue, tech support, organiser, attendee | 401; 403 on confirm and on the flag; nothing written; no section for them on the page | `SCRUM-144 access: …`; `[CONFIRM-API-001]`; `[SCRUM-144-UI-012]` (×3) | 2026-10-19 · pass · local |
+| TC-SCRUM-144-11 | 1 | Conflict | Status changed between check and write | lost race | 409 | `SCRUM-144 conflict: a lost race…` | 2026-10-19 · pass · local |
+| TC-SCRUM-144-12 | 1–4 | Failure | Storage down | readiness or flag write throws; readiness GET fails | 500 "Something went wrong. Please try again."; page shows it with *Try again* | `SCRUM-144 failure: storage errors answer a safe 500…`; `[SCRUM-144-UI-008]` | 2026-10-19 · pass · local |
+| TC-SCRUM-144-13 | 1–4 | Cross-cutting | Phone width and busy states | 375 px; confirm or mark in flight | No sideways scroll; *Confirming…* disabled; every mark button disabled while saving | `[E2E-CONFIRM-001]`; `[SCRUM-144-UI-009]`, `[SCRUM-144-UI-014]` | 2026-10-19 · pass · local |
+| TC-SCRUM-144-14 | 4 | Regression | SCRUM-139 safety check follows the same rule | outstanding items marked non-essential during planning | Submit for safety check allowed; SCRUM-139 readiness answers carry `id` and `optional` | `[SCRUM-144-UI-010]`; `[CONFIRM-API-001]`; `[SAFETY-E2E-API-001]`, `[E2E-SAFETY-001]` (updated) | 2026-10-19 · pass · local |
+
+**Coverage (2026-10-19):** `safetyReadiness.js`, `safetyCheck.controller.js`, `safetyCheck.routes.js`, `lifecycle.js`,
+`safetyService.js` and `ConfirmEventControls.jsx` 100% lines and branches; `setArrangementEssential` fully covered
+(the uncovered lines in `events.repository.js` predate this story). `safetyCheck.service.js` 100% lines; the two
+uncovered branches are `confirm` / `setEssential` finding no event, which HTTP cannot reach because the access check
+already answers 403 for an unknown event (same shape as SCRUM-139's `submit`). `ArrangementChecklist.jsx` 100% lines;
+its branch count is V8's dev-mode JSX entries, as in §10, and every real branch (with and without an id, busy,
+error, empty lists) has a test.
+
+**Test review:** removing the server's readiness re-check makes `[CONFIRM-API-001]` fail (the browser journey still
+passes because the page also disables *Confirm event*, which is why the API journey exists). Pinned lists in
+SCRUM-97/139/141 tests were updated for `PREPARATION → CONFIRMED`, the readiness `optional` list and item ids, not
+loosened.
+
+## 13. Requirements sources
 
 | Ref | What it says |
 | --- | --- |
@@ -529,4 +583,5 @@ not loosened. `[SCRUM-140-UI-006]` was narrowed to its intent: no control outsid
 | **SCRUM-98**, **SCRUM-99** (backlog US-36, US-38) | Review and approve: the actions that use this lifecycle. See §8. |
 | **SCRUM-139** (backlog US-83) | Submit for the Operational Safety Check, 3 SP. See §9. |
 | **SCRUM-141** (backlog US-85) | Approve or reject the safety arrangement, 2 SP. See §11. Rejection back to `APPROVED` is roadmap decision 4; history is optional in Release 1 (#33) but this story's AC4 requires it. |
+| **SCRUM-144** (backlog US-41) | Confirm an event once essential arrangements are complete, 1 SP. See §12. Discussions #106 (the coordinator decides with Technical Support whether an item is essential) and #80 (essential arrangements are event-specific; non-essential follow-ups may remain). |
 | Discussions #80, #94, #95, #101, #125 | The assigned coordinator decides; the manager only assigns; assignment doesn't start review; `approved_rejected_by` kept apart from `coordinator_id`; who sees the outcome |

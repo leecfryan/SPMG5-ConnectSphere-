@@ -86,7 +86,10 @@ returned by GET /api/internal/access. SCRUM-142 also recognises Safety Officer
 (`safety_officer`) as internal staff; SCRUM-140 gives it a read-only safety review
 queue at `/safety-reviews`; SCRUM-141 lets it approve (to preparation) or reject
 (with a reason, back to planning) the safety arrangement, and each decision appears
-in the event's activity history. Other assigned
+in the event's activity history. SCRUM-144 lets the assigned Event Coordinator
+confirm an event once it has passed the safety check and nothing essential is
+outstanding; an outstanding venue booking or equipment request can be marked
+non-essential so it does not block. Other assigned
 roles continue to grant their own capabilities.
 
 Feature owners must attach requirePermission to their data endpoints. Sensitive
