@@ -72,3 +72,26 @@ test("SCRUM-140 failure: findAwaitingSafetyReview throws when storage fails", as
 
   await expect(loadRepository().findAwaitingSafetyReview()).rejects.toThrow("findAwaitingSafetyReview failed");
 });
+
+test("SCRUM-144 AC4: findArrangements reads each request's is_essential flag", async () => {
+  const { calls } = recorder([]);
+
+  await loadRepository().findArrangements("evt-1");
+
+  const selects = calls.filter(([name]) => name === "select").map(([, columns]) => columns);
+  expect(selects).toHaveLength(2);
+  for (const columns of selects) expect(columns).toContain("is_essential");
+});
+
+test.each([["venue", "venue_booking_requests"], ["equipment", "equipment_requests"]])(
+  "SCRUM-144 AC4: setArrangementEssential writes only is_essential on a %s request of this event", async (kind, table) => {
+    const { calls } = recorder({ id: "req-1", is_essential: false });
+
+    const row = await loadRepository().setArrangementEssential(kind, "req-1", "evt-1", false);
+
+    expect(calls).toContainEqual(["from", table]);
+    expect(calls).toContainEqual(["update", { is_essential: false }]);
+    expect(calls).toContainEqual(["eq", "id", "req-1"]);
+    expect(calls).toContainEqual(["eq", "event_id", "evt-1"]);
+    expect(row).toEqual({ id: "req-1", is_essential: false });
+  });
