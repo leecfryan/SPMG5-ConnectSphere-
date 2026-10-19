@@ -143,6 +143,7 @@ and managed events under `/api/managed-events`. Inside any router, declare stati
 | Event requests | `POST /api/events` | `events.submit` |
 | Assignment | `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` | `internal.access` + `events.assign_coordinator` |
 | Review | `POST /api/internal/events/:eventId/{start-review,approve,reject}` | `internal.access` + `events.decide`; assigned coordinator only |
+| Confirmation | `POST /api/internal/events/:eventId/confirm`, `PATCH /api/internal/events/:eventId/arrangements/:kind/:requestId` | `internal.access` + `events.decide`; assigned coordinator only; confirm only from `PREPARATION` (SCRUM-144) |
 | Cancellation, postponement | `POST /api/internal/events/:eventId/cancel`, `POST /api/internal/events/:eventId/postpone` | `internal.access` + `events.cancel` / `events.postpone`; assigned coordinator or Event Coordinator Lead |
 | Safety check | `GET /api/internal/events/:eventId/safety-readiness`, `POST /api/internal/events/:eventId/{submit-safety-check,withdraw-safety-check}` | `internal.access` + `events.safety.submit`, assigned coordinator only |
 | Safety review | `GET /api/internal/safety-reviews`, `GET /api/internal/safety-reviews/:eventId` | `internal.access` + `events.safety.read` (Safety Officer); `SAFETY_REVIEW` events only |
@@ -220,6 +221,10 @@ shares the database.
   `markSubmitted`, `transitionStatus`, `cancel`, `postpone`, and `undoTransition`, which only reverts a safety
   decision whose history row failed), each guarded by the expected current status, and by `seedData.js`; never
   through `WRITABLE_COLS`.
+- `venue_booking_requests.is_essential` and `equipment_requests.is_essential` (SCRUM-144, boolean, default true):
+  written only by the Event Lifecycle lane's `setArrangementEssential`; a non-essential outstanding request does
+  not block the safety check or confirmation. SQL under SCRUM-144's *Schema reference* in
+  [../../docs/event-requests.md](../../docs/event-requests.md). `CONFIRMED` is reached only from `PREPARATION`.
 - `event_activity_log` (SCRUM-141): append-only event history (`user_id`, `action`, `details` jsonb); RLS on, no
   policies, and only `service_role` may select or insert. SQL in
   [../../docs/event-requests.md](../../docs/event-requests.md) under SCRUM-141's *Schema reference*.

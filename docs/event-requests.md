@@ -112,13 +112,13 @@ stateDiagram-v2
     APPROVED --> SAFETY_REVIEW
     SAFETY_REVIEW --> APPROVED
     SAFETY_REVIEW --> PREPARATION
-    APPROVED --> CONFIRMED
     CONFIRMED --> COMPLETED
     SUBMITTED --> CANCELLED
     UNDER_REVIEW --> CANCELLED
     APPROVED --> CANCELLED
     SAFETY_REVIEW --> CANCELLED
     CONFIRMED --> CANCELLED
+    PREPARATION --> CONFIRMED
     PREPARATION --> CANCELLED
     SUBMITTED --> POSTPONED
     UNDER_REVIEW --> POSTPONED
@@ -135,8 +135,8 @@ stateDiagram-v2
 | `UNDER_REVIEW` | Under review | the assigned coordinator's *Start review* (SCRUM-98) |
 | `APPROVED` | Approved – planning | the assigned coordinator's *Approve* (SCRUM-99), *Withdraw from safety check* (SCRUM-139), or a Safety Officer's *Reject* (SCRUM-141); read by registration and venue |
 | `SAFETY_REVIEW` | Safety review | the assigned coordinator's *Submit for safety check* (SCRUM-139); not open to new venue or equipment requests |
-| `PREPARATION` | Preparation | a Safety Officer's *Approve* (SCRUM-141); active (workload, reassignable, cancellable) but not a planning status, so arrangements stay locked; not postponable and not yet confirmable (SCRUM-144) |
-| `CONFIRMED` | Confirmed | not yet (confirm story) |
+| `PREPARATION` | Preparation | a Safety Officer's *Approve* (SCRUM-141); active (workload, reassignable, cancellable) but not a planning status, so arrangements stay locked; not postponable; the assigned coordinator's *Confirm event* moves it on (SCRUM-144) |
+| `CONFIRMED` | Confirmed | the assigned coordinator's *Confirm event* (SCRUM-144), only from `PREPARATION` and only with nothing essential outstanding; still a planning status (see *Current limitations*) |
 | `COMPLETED` | Completed | not yet (complete story) |
 | `CANCELLED` | Cancelled | the assigned coordinator's or the coordinator lead's *Cancel event* (SCRUM-148) |
 | `REJECTED` | Rejected | the assigned coordinator's *Reject* (SCRUM-98) |
@@ -203,9 +203,11 @@ Module at `backend/src/modules/events/`.
 | POST | /api/internal/events/:eventId/start-review | requireAuth + internal.access + events.decide (assigned coordinator) | `SUBMITTED → UNDER_REVIEW` |
 | POST | /api/internal/events/:eventId/approve | same | `UNDER_REVIEW → APPROVED`; body `{ "note"?: string }` |
 | POST | /api/internal/events/:eventId/reject | same | `UNDER_REVIEW → REJECTED`; body `{ "note": string }` (required) |
-| GET | /api/internal/events/:eventId/safety-readiness | requireAuth + internal.access + events.safety.submit (assigned coordinator) | `{ ready, missing[] }` |
+| GET | /api/internal/events/:eventId/safety-readiness | requireAuth + internal.access + events.safety.submit (assigned coordinator) | `{ ready, missing[], optional[] }` (SCRUM-144 adds `optional` and item ids) |
 | POST | /api/internal/events/:eventId/submit-safety-check | same | `APPROVED → SAFETY_REVIEW` when nothing is missing |
 | POST | /api/internal/events/:eventId/withdraw-safety-check | same | `SAFETY_REVIEW → APPROVED` |
+| POST | /api/internal/events/:eventId/confirm | requireAuth + internal.access + events.decide (assigned coordinator) | `PREPARATION → CONFIRMED` when nothing essential is outstanding (SCRUM-144) |
+| PATCH | /api/internal/events/:eventId/arrangements/:kind/:requestId | same | `kind` is `venue` or `equipment`; body `{ "is_essential": boolean }`; only while `APPROVED` or `PREPARATION` (SCRUM-144) |
 | GET | /api/internal/safety-reviews | requireAuth + internal.access + events.safety.read (any Safety Officer) | `{ events[] }` awaiting safety review, soonest start first |
 | GET | /api/internal/safety-reviews/:eventId | same | `{ event, venues[], equipment[] }`; 404 unless the event is `SAFETY_REVIEW` |
 | POST | /api/internal/events/:eventId/cancel | requireAuth + internal.access + events.cancel (assigned coordinator or coordinator lead) | any active status (including `POSTPONED`) `→ CANCELLED`; body `{ "reason": string }` (required) |
@@ -299,7 +301,8 @@ alter table public.events
 event's **assigned coordinator** may act: `events.safety.submit` is a `record: true` permission and
 reuses `review.routes.js#assignedToCaller`.
 
-- **Ready** means nothing is missing. Every arrangement is essential until SCRUM-144.
+- **Ready** means nothing essential is missing. Since SCRUM-144 a request its coordinator marked non-essential
+  (`is_essential = false`) is listed under `optional` instead and does not block; see SCRUM-144 below.
   - Venue: at least one booking request is booked, meaning every slot that isn't `cancelled` is
     `confirmed`. A request with a `pending` slot is missing ("Waiting for Venue Staff to decide.").
     Fully rejected or cancelled requests are ignored. With nothing booked and nothing pending, the
@@ -307,7 +310,7 @@ reuses `review.routes.js#assignedToCaller`.
   - Equipment: every request must be `APPROVED`. `PENDING` and `REJECTED` are missing; `RELEASED`
     is ignored. No equipment requests at all is ready.
 - `findArrangements` only reads `venue_booking_requests` (+ `venues`, `venue_bookings`) and
-  `equipment_requests` (+ `equipment`). It never writes to another lane's tables.
+  `equipment_requests` (+ `equipment`). The one write to those lanes' tables is SCRUM-144's `is_essential` flag.
 - Submit re-runs the rule on the server. Not ready: 409 with `missing`, nothing written. Ready:
   one conditional `transitionStatus` filtered on `APPROVED` and the caller, so a race is a 409.
 - AC4: `SAFETY_REVIEW` is not in `PLANNING_STATUSES`, so the venue and equipment lanes' existing
@@ -327,7 +330,7 @@ reuses `review.routes.js#assignedToCaller`.
 | 401 | No or invalid session | "Please sign in to continue." |
 | 403 | Not a coordinator, or not this event's coordinator | "You do not have permission to access this information." |
 | 404 | Event deleted after the access check | "That event no longer exists." |
-| 409 | Arrangements missing | "This event is not ready for the safety check. Finish the arrangements listed." plus `missing: [{ kind, label, reason }]` |
+| 409 | Arrangements missing | "This event is not ready for the safety check. Finish the arrangements listed." plus `missing: [{ kind, id, label, reason }]` (`id` absent on "No venue booking…") |
 | 409 | Wrong status, or reassigned meanwhile | "This event has changed since you opened it. Refresh to see its current status." |
 | 500 | Reading arrangements failed | "Something went wrong. Please try again." |
 | 503 | The access check could not reach storage | "Unable to check access. Please try again." |
@@ -439,6 +442,56 @@ grant select, insert on public.event_activity_log to service_role;
 
 `action` is free text and `details` free-form JSON, so later stories (US-75's history) can add their own actions
 and fields without another schema change.
+
+### Confirm an event (SCRUM-144)
+
+`safetyReadiness.js#checkArrangements` (the shared rule), `safetyCheck.service.js#confirm` / `#setEssential`,
+`safetyCheck.controller.js`, `routes/safetyCheck.routes.js`, `events.repository.js#setArrangementEssential`.
+Pages: `ConfirmEventControls.jsx` and the shared `ArrangementChecklist.jsx` on `/assigned-events/:eventId`.
+
+- **Who:** the event's assigned coordinator, through `events.decide` (the same guard as start review / approve /
+  reject), so `permissions.js` is unchanged. Everyone else gets 403.
+- **When (AC1):** only from `PREPARATION`, which an event reaches only through the Safety Officer's approval
+  (SCRUM-141). `APPROVED → CONFIRMED` was removed from `lifecycle.js`.
+- **What blocks (AC1–AC3):** the SCRUM-139 rule, re-run on the server at confirm time. Each essential venue booking
+  request still pending is listed on its own line (a booking request is one venue on one date, so a multi-venue
+  event has one line per venue still waiting); each essential equipment request not yet `APPROVED` too. At least
+  one booked venue is always required. Anything left: 409 with `missing`, nothing written. Otherwise one
+  conditional `transitionStatus` from `PREPARATION` filtered on the caller, so a race is a 409.
+- **Non-essential (AC4):** `is_essential` on `venue_booking_requests` and `equipment_requests`, default `true`. The
+  coordinator decides, with Technical Support where it's equipment (discussions #106, #80), and marks the request
+  with *Mark as non-essential* (or back with *Mark as essential*). It can change only while the event is
+  `APPROVED` or `PREPARATION`: not during safety review (arrangements are locked) and not once confirmed. A
+  non-essential outstanding request is returned under `optional`, does not block, and stays open for its lane to
+  finish. It also stops blocking the SCRUM-139 safety check, because both use one rule.
+- **Write scope:** `setArrangementEssential` updates only `is_essential`, filtered on both the request id and the
+  event id, so a request of another event matches nothing (404). The Venue and Equipment lanes' code and pages are
+  unchanged and do not show the flag.
+
+| Status | When | Message |
+| --- | --- | --- |
+| 200 | Confirmed / flag saved | `{ event }` / `{ arrangement: { id, is_essential } }` |
+| 400 | Flag not `true`/`false`, unknown `kind`, or malformed request id | "Choose whether this arrangement is essential." / "That arrangement reference is not valid." |
+| 401 | No or invalid session | "Please sign in to continue." |
+| 403 | Not this event's assigned coordinator | "You do not have permission to access this information." |
+| 404 | Request not part of this event | "That arrangement is not part of this event." |
+| 409 | Essential items outstanding | "This event cannot be confirmed yet. Finish the essential arrangements listed." plus `missing` |
+| 409 | Not `PREPARATION` (confirm), or reassigned meanwhile | "This event has changed since you opened it. Refresh to see its current status." |
+| 409 | Flag changed outside `APPROVED` / `PREPARATION` | "Arrangements can only be marked while the event is in planning or preparation." |
+| 500 | Storage failed | "Something went wrong. Please try again." |
+
+**Schema reference.** Added by hand in the Supabase SQL editor on 2026-10-19 (no migration file), after telling the
+Venue and Equipment lanes:
+
+```sql
+alter table public.venue_booking_requests
+  add column if not exists is_essential boolean not null default true;
+
+alter table public.equipment_requests
+  add column if not exists is_essential boolean not null default true;
+```
+
+Existing rows read as essential, so nothing changed for any event until a coordinator marks a request.
 
 ### Cancelling an event (SCRUM-148)
 
@@ -665,6 +718,8 @@ Feature folder at `frontend/src/features/events/`.
 | `components/EventDecisionSummary.jsx` | EventWorkspaceDetailPage (every scope) | Outcome, approver ("Not recorded" when unknown), time, and note or reason; hidden until `approved_rejected_at` is set |
 | `components/EventActivityHistory.jsx` | EventWorkspaceDetailPage (every scope) | SCRUM-141: recorded decisions newest first, with the note or rejection reason; empty and unavailable states |
 | `components/SafetyDecisionControls.jsx` | SafetyReviewDetailPage (`events.safety.decide`) | SCRUM-141: note + *Approve* / *Reject*; reject needs a reason |
+| `components/ArrangementChecklist.jsx` | SafetyCheckControls, ConfirmEventControls | SCRUM-144: missing and non-essential lists, with *Mark as non-essential* / *Mark as essential* per request |
+| `components/ConfirmEventControls.jsx` | EventWorkspaceDetailPage (assigned coordinator, `PREPARATION`) | SCRUM-144: readiness, the checklist and *Confirm event*; loading, error and busy states |
 
 ### Services
 
@@ -823,14 +878,17 @@ the Week 12 release and is not part of this sprint.
   Supabase dashboard and need to be reflected in this document in the same
   sitting.
 - Start review, approve, reject, cancel and postpone move an event past `SUBMITTED` (SCRUM-98/99/148/149).
-  Confirm and complete have no action yet; resuming a postponed event with a new date doesn't either; all three
-  arrive with their own stories.
+  Confirm arrives with SCRUM-144. Complete has no action yet, and resuming a postponed event with a new date
+  doesn't either; both arrive with their own stories.
 - The decision columns (`approved_rejected_by`, `approved_rejected_at`, `approval_rejection_remark`) must exist
   in the shared database (SQL under *Schema reference*) before review works; the cancellation columns
   (`cancelled_by`, `cancelled_at`, `cancellation_reason`) must exist before cancel works outside the tests; the
   postponement columns (`postponed_by`, `postponed_at`, `postponement_reason`) must exist before postpone works
   outside the tests; the `event_activity_log` table (SCRUM-141 *Schema reference*, created 2026-10-18) must exist before safety decisions
   work: without it every decision is undone with a 500, and event pages say the history is unavailable.
-- `PREPARATION` has no way forward but cancel until SCRUM-144 adds confirmation; it is not postponable until the
-  PO agrees it.
+- `PREPARATION` is not postponable until the PO agrees it.
+- `CONFIRMED` is still in `PLANNING_STATUSES` (SCRUM-99 AC1), so after confirmation the *Arrange* links return and
+  the Venue and Equipment lanes accept new requests without another check. Whether a confirmed event should stay
+  open to changes is a PO/team question; the change itself would be in this lane (`lifecycle.js` and
+  `EventWorkspaceDetailPage.jsx`).
 - US-13 has no Jira issue, so `US-13` remains the label in code and tests.

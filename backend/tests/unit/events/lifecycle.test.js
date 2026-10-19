@@ -28,13 +28,13 @@ const AGREED_TRANSITIONS = [
   ["UNDER_REVIEW", "CANCELLED"],
   ["UNDER_REVIEW", "POSTPONED"],
   ["APPROVED", "SAFETY_REVIEW"],
-  ["APPROVED", "CONFIRMED"],
   ["APPROVED", "CANCELLED"],
   ["APPROVED", "POSTPONED"],
   ["SAFETY_REVIEW", "APPROVED"],
   ["SAFETY_REVIEW", "PREPARATION"],
   ["SAFETY_REVIEW", "CANCELLED"],
   ["SAFETY_REVIEW", "POSTPONED"],
+  ["PREPARATION", "CONFIRMED"],
   ["PREPARATION", "CANCELLED"],
   ["CONFIRMED", "COMPLETED"],
   ["CONFIRMED", "CANCELLED"],
@@ -139,4 +139,9 @@ test("SCRUM-98/149/141: active events are those submitted, postponed, and not ye
 test("SCRUM-149: postponable events are the active statuses minus POSTPONED itself", () => {
   expect([...POSTPONABLE_STATUSES].sort()).toEqual(["APPROVED", "CONFIRMED", "SAFETY_REVIEW", "SUBMITTED", "UNDER_REVIEW"]);
   expect(Object.isFrozen(POSTPONABLE_STATUSES)).toBe(true);
+});
+
+test("SCRUM-144 AC1: only an event that passed the safety check (PREPARATION) can be confirmed", () => {
+  expect(STATUSES.filter((from) => canTransition(from, "CONFIRMED"))).toEqual(["PREPARATION"]);
+  expect(canTransition("APPROVED", "CONFIRMED")).toBe(false);
 });
