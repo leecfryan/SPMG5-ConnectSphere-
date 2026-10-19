@@ -307,6 +307,52 @@ async function decideBookingRequest(requestId, decision, note, decidedBy) {
   return data;
 }
 
+// SCRUM-154 AC2/AC4: changes one booking's date and non-slot details, and
+// re-flags it to pending, logging the change, in one transaction. Slots are
+// not a param here - out of scope by decision; a date change carries the
+// booking's existing slots over to the new date unchanged (the SQL function
+// reads them itself, the caller never supplies them). Unlike decideBookingRequest
+// this throws rather than returning null on a missing or non-live request,
+// because the controller has to tell those two cases apart (404 vs 409) and a
+// bare null cannot carry which one happened - see change_venue_booking_request's
+// REQUEST_NOT_FOUND (P0002) and NOT_LIVE (P0003) errcodes.
+async function changeBookingRequest(requestId, userId, value) {
+  const { data, error } = await getSupabase().rpc("change_venue_booking_request", {
+    p_request_id: requestId,
+    p_user_id: userId,
+    p_booking_date: value.booking_date,
+    p_expected_attendees: value.expected_attendees,
+    p_room_layout: value.room_layout,
+    p_required_facilities: value.required_facilities,
+    p_accessibility_requirements: value.accessibility_requirements,
+    p_additional_requirements: value.additional_requirements,
+  });
+
+  if (error) {
+    const mapped = new Error(`Failed to change booking request: ${error.message}`);
+    mapped.code = error.code;
+    throw mapped;
+  }
+  return data;
+}
+
+// SCRUM-154 AC1/AC3/AC4: cancels one booking's live slots and logs it, without
+// touching the event's other venue bookings. Same error-code shape as
+// changeBookingRequest above.
+async function cancelBookingRequest(requestId, userId) {
+  const { data, error } = await getSupabase().rpc("cancel_venue_booking_request", {
+    p_request_id: requestId,
+    p_user_id: userId,
+  });
+
+  if (error) {
+    const mapped = new Error(`Failed to cancel booking request: ${error.message}`);
+    mapped.code = error.code;
+    throw mapped;
+  }
+  return data;
+}
+
 // SCRUM-148 AC3: cross-lane addition, approved by the Venue owner and kept to
 // this one function. Releases every pending/confirmed venue_bookings row tied
 // to the cancelled event's booking request(s), across however many venues the
@@ -540,6 +586,8 @@ module.exports = {
   getBookingRequestById,
   listBookingRequests,
   decideBookingRequest,
+  changeBookingRequest,
+  cancelBookingRequest,
   releaseBookingsForCancelledEvent,
   createUnavailabilityPeriod,
   listUnavailabilityPeriods,
