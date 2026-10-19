@@ -56,6 +56,13 @@ const policies = Object.freeze({
   "bookings.decide": {
     roles: ["venue_staff"],
   },
+  // SCRUM-154: only the coordinator who made a booking request may change or
+  // cancel it. Venue Staff keep bookings.decide for their own review action;
+  // this is not an alternative route to approving or rejecting.
+  "bookings.manage": {
+    roles: ["event_coordinator"],
+    record: true,
+  },
   "equipment.request": { roles: ["event_coordinator"] },
   "equipment.review": { roles: ["technical_support_staff"] },
   "equipment.manage": { roles: ["technical_support_staff"] },

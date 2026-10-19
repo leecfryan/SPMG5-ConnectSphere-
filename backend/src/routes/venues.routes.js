@@ -34,6 +34,11 @@ module.exports = function createVenuesRoutes(service) {
   router.patch("/booking-requests/:requestId/decision", requirePermission("bookings.decide", bookingScope), available, controller.patchBookingRequestDecision);
   // SCRUM-135: Venue Staff view conflict flags raised after a setup/turnaround change.
   router.get("/:id/booking-conflicts", requirePermission("venues.conflicts"), available, controller.getConflictFlags);
+  // SCRUM-154: a coordinator changes or cancels one of their own requests.
+  // bookings.manage is coordinator-only, so bookingScope always resolves to
+  // their own coordinatorId here - the same scope rule as bookings.read/decide.
+  router.patch("/booking-requests/:requestId", requirePermission("bookings.manage", bookingScope), available, controller.patchBookingRequest);
+  router.patch("/booking-requests/:requestId/cancel", requirePermission("bookings.manage", bookingScope), available, controller.patchBookingRequestCancel);
   // SCRUM-133: Venue Staff manage unavailability periods for a venue.
   router.get("/:id/unavailability", requirePermission("venues.unavailability"), available, controller.getUnavailabilityPeriods);
   router.post("/:id/unavailability", requirePermission("venues.unavailability"), available, controller.postUnavailabilityPeriod);
