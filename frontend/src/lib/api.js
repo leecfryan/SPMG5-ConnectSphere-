@@ -127,6 +127,27 @@ export function fetchVenueBookingChecks(eventId, token) {
   return request(`/api/venues/events/${encodeURIComponent(eventId)}/booking-checks`, token);
 }
 
+// SCRUM-154: the assigned coordinator cancels one of their own venue bookings,
+// releasing its period, without touching the event's other venue bookings.
+export function cancelBookingRequest(requestId, token) {
+  return request(`/api/venues/booking-requests/${requestId}/cancel`, token, {
+    method: "PATCH",
+  });
+}
+
+// SCRUM-154: the assigned coordinator changes one of their own venue
+// bookings' date or non-slot details. The booking is sent back to pending for
+// Venue Staff to decide again.
+export function changeBookingRequest(requestId, payload, token) {
+  return request(`/api/venues/booking-requests/${requestId}`, token, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
 // Scrum-29 follow-up: with no window, the full catalogue (used for the
 // catalogue page and for labelling existing requests). With both start and
 // end, only equipment bookable for that period - used to filter the request
