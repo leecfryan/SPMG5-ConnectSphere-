@@ -3,6 +3,10 @@ const { setupWorkflow } = require('./support/event-workspace-fixtures.cjs');
 const { backendURL } = require('./support/settings.cjs');
 const venueId = '11111111-1111-4111-8111-111111111111';
 
+function futureDate(daysAhead) {
+  return new Date(Date.now() + daysAhead * 86400000).toISOString().slice(0, 10);
+}
+
 test('[VENUE-E2E-001] Staff navigate catalogue, edit, calendar and review pages with refresh and Back', async ({ page, accounts }) => {
   const staff = await accounts.create(['venue_staff']);
   await page.goto('/venues');
@@ -131,4 +135,79 @@ test('[VENUE-E2E-005] SCRUM-138: each booking of an event is checked on its own,
 
   await page.setViewportSize({ width: 375, height: 812 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test('[VENUE-E2E-006] SCRUM-136: affected bookings panel shown when a new period overlaps a confirmed booking', async ({ page, accounts, request }) => {
+  const organiser = await accounts.create(['event_organiser']);
+  const coordinator = await accounts.create(['event_coordinator']);
+  const staff = await accounts.create(['venue_staff']);
+  const orgSession = await accounts.session(organiser);
+  const coordSession = await accounts.session(coordinator);
+  const staffSession = await accounts.session(staff);
+
+  // Use a date range that no other browser spec touches.
+  const bookingDate = futureDate(95);
+
+  const eventResp = await request.post('/api/events', {
+    headers: { Authorization: 'Bearer ' + orgSession.access_token },
+    data: {
+      name: 'Conference 136',
+      purpose: 'Testing',
+      description: 'Browser spec for SCRUM-136',
+      start_time: bookingDate + 'T00:00:00Z',
+      end_time: bookingDate + 'T15:00:00Z',
+      expected_attendance: 50,
+    },
+  });
+  expect(eventResp.status()).toBe(201);
+  const { event } = await eventResp.json();
+
+  await accounts.assignEvent(event.id, coordinator.id);
+  await accounts.updateEvent(event.id, { status: 'APPROVED' });
+
+  const bookingResp = await request.post(`/api/venues/${venueId}/booking-requests`, {
+    headers: { Authorization: 'Bearer ' + coordSession.access_token },
+    data: {
+      event_id: event.id,
+      booking_date: bookingDate,
+      slots: ['am'],
+      expected_attendees: 50,
+      room_layout: 'Theatre',
+      required_facilities: [],
+    },
+  });
+  expect(bookingResp.status()).toBe(201);
+  const { data: bookingRequest } = await bookingResp.json();
+
+  expect((await request.patch(`/api/venues/booking-requests/${bookingRequest.id}/decision`, {
+    headers: { Authorization: 'Bearer ' + staffSession.access_token },
+    data: { decision: 'confirmed' },
+  })).status()).toBe(200);
+
+  // Navigate to the venue unavailability page and sign in as the same staff member.
+  await page.goto(`/venues/${venueId}/unavailability`);
+  await signIn(page, staff);
+  await expect(page.getByRole('heading', { name: 'Manage unavailability' })).toBeVisible();
+
+  // Open the create form and fill in a period that covers the booking date and slot.
+  await page.getByRole('button', { name: 'Add period' }).click();
+  await expect(page.getByRole('heading', { name: 'Add unavailability period' })).toBeVisible();
+  await page.getByLabel('Start date').fill(bookingDate);
+  await page.getByLabel('End date').fill(bookingDate);
+  await page.getByLabel('AM (08:00 – 12:00)').check();
+  await page.getByLabel('Reason').fill('Deep clean');
+  await page.getByRole('button', { name: 'Add period' }).click();
+
+  // AC2: the affected panel shows the reason for unavailability, the event name
+  // and the booking date. AC4: the advisory confirms no bookings were modified.
+  await expect(page.getByText(/Period added — Deep clean/)).toBeVisible();
+  await expect(page.getByText('Conference 136')).toBeVisible();
+  await expect(page.getByText(new RegExp(bookingDate))).toBeVisible();
+  await expect(page.getByText(/bookings below have not been changed/)).toBeVisible();
+
+  // Done returns to the period list, which shows the new period's reason.
+  await page.getByRole('button', { name: 'Done' }).click();
+  await expect(page.getByText('Conference 136')).not.toBeVisible();
+  // exact: true avoids matching "Deep cleaning" left by earlier tests in the shared fake storage.
+  await expect(page.getByText('Deep clean', { exact: true })).toBeVisible();
 });
