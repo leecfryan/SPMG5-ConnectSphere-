@@ -71,6 +71,7 @@ function createVenuesController(service) {
     deleteUnavailabilityPeriod: removePeriod,
     recheckConflictsAfterUpdate,
     listConflictingRequests,
+    listAffectedBookingRequests,
     listActiveHoldsInRange,
     listHolds,
     createHold,
@@ -709,7 +710,11 @@ function createVenuesController(service) {
       const venue = await getVenueById(id);
       if (!venue) return res.status(404).json({ error: "Venue not found" });
       const period = await createUnavailabilityPeriod(id, value, req.user.id);
-      res.status(201).json({ data: period });
+      // SCRUM-136: identify confirmed bookings that now overlap the unavailability
+      // period (including setup/turnaround buffer) so the caller can arrange alternatives.
+      // AC4: read-only — no booking is modified.
+      const affected = await listAffectedBookingRequests(id, period, venue);
+      res.status(201).json({ data: period, affected });
     } catch (err) {
       next(err);
     }
