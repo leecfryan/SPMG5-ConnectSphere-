@@ -33,7 +33,7 @@ test('[SAFETY-E2E-API-001] SCRUM-139 AC1-AC4: submit only when arranged; arrange
 
   // AC1/AC2: nothing arranged yet, so submission is refused with the reason.
   expect(await (await act('safety-readiness', headers.first)).json()).toEqual({
-    ready: false, missing: [{ kind: 'venue', label: 'Venue', reason: 'No venue booking has been approved yet.' }],
+    ready: false, missing: [{ kind: 'venue', label: 'Venue', reason: 'No venue booking has been approved yet.' }], optional: [],
   });
   const refused = await act('submit-safety-check', headers.first);
   expect(refused.status()).toBe(409);
@@ -45,13 +45,14 @@ test('[SAFETY-E2E-API-001] SCRUM-139 AC1-AC4: submit only when arranged; arrange
   const equipment = await requestEquipment(first.id);
   expect(equipment.status()).toBe(201);
   expect((await (await act('safety-readiness', headers.first)).json()).missing).toEqual([
-    { kind: 'venue', label: `Integration Hall · ${date}`, reason: 'Waiting for Venue Staff to decide.' },
-    { kind: 'equipment', label: `Projector ${first.id}`, reason: 'Waiting for Technical Support Staff to reserve it.' },
+    // SCRUM-144: each outstanding item carries its request id, for the essential flag.
+    { kind: 'venue', id: (await venue.json()).data.id, label: `Integration Hall · ${date}`, reason: 'Waiting for Venue Staff to decide.' },
+    { kind: 'equipment', id: (await equipment.json()).data.id, label: `Projector ${first.id}`, reason: 'Waiting for Technical Support Staff to reserve it.' },
   ]);
 
   expect((await request.patch(`/api/venues/booking-requests/${(await venue.json()).data.id}/decision`, { headers: headers.venue_staff, data: { decision: 'confirmed' } })).status()).toBe(200);
   expect((await request.patch(`/api/equipment-requests/${(await equipment.json()).data.id}/status`, { headers: headers.technical_support_staff, data: { status: 'APPROVED' } })).status()).toBe(200);
-  expect(await (await act('safety-readiness', headers.first)).json()).toEqual({ ready: true, missing: [] });
+  expect(await (await act('safety-readiness', headers.first)).json()).toEqual({ ready: true, missing: [], optional: [] });
 
   // AC3
   const submitted = await act('submit-safety-check', headers.first);

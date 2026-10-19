@@ -105,6 +105,15 @@ beforeEach(() => {
   handlers = {};
 });
 
+const CANCEL_URL = `/api/venues/booking-requests/${REQUEST.id}/cancel`;
+const CHANGE_URL = `/api/venues/booking-requests/${REQUEST.id}`;
+const VENUE_URL = `/api/venues/${VENUE_ID}`;
+
+const VENUE_DETAIL = {
+  id: VENUE_ID, name: "Marina Grand Ballroom", city: "Singapore", country: "Singapore", capacity: 120,
+  room_layouts: ["Theatre", "Banquet"], facilities: ["Stage", "Projector"], accessibility_features: ["Lift"],
+};
+
 function setup(roles = ["event_coordinator"]) {
   getAuthClient.mockResolvedValue({
     auth: {
@@ -116,7 +125,7 @@ function setup(roles = ["event_coordinator"]) {
     },
   });
 
-  const fetchMock = vi.fn(async (url) => {
+  const fetchMock = vi.fn(async (url, options = {}) => {
     if (url === "/api/auth/me") {
       return ok({
         user: {
@@ -133,8 +142,17 @@ function setup(roles = ["event_coordinator"]) {
     if (url === CHECKS_URL) {
       return (handlers.check ?? (() => ok({ data: REPORT })))();
     }
+    if (url === CANCEL_URL && options.method === "PATCH") {
+      return (handlers.cancel ?? (() => ok({ data: { ...REQUEST, status: "cancelled" } })))();
+    }
+    if (url === VENUE_URL) {
+      return (handlers.venue ?? (() => ok({ data: VENUE_DETAIL })))();
+    }
+    if (url === CHANGE_URL && options.method === "PATCH") {
+      return (handlers.change ?? (() => ok({ data: { ...REQUEST, status: "pending" } })))();
+    }
     if (String(url).startsWith("/api/venues/booking-requests")) {
-      return ok({ data: [REQUEST] });
+      return (handlers.list ?? (() => ok({ data: [REQUEST] })))();
     }
     throw new Error("Unexpected test request: " + url);
   });
@@ -250,4 +268,169 @@ test("[SCRUM-138-UI-005] a role without booking access cannot reach the page at 
     await screen.findByRole("heading", { name: "Access denied" }, { timeout: 5000 })
   ).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Check venue bookings" })).toBeNull();
+});
+
+// ---------------------------------------------------------------------------
+// SCRUM-154: the assigned coordinator cancels one venue booking from this
+// same page. Same real App / real permission policy / faked fetch pattern.
+// ---------------------------------------------------------------------------
+
+test("[TC-SCRUM-154-UI-01] the assigned coordinator sees a cancel action on a pending booking", async () => {
+  setup();
+  open();
+
+  expect(await screen.findByRole("button", { name: "Cancel this booking" }, { timeout: 5000 })).toBeTruthy();
+});
+
+test("[TC-SCRUM-154-UI-02] Venue Staff never see the cancel action, even on the same page", async () => {
+  setup(["venue_staff"]);
+  open();
+
+  await screen.findByRole("heading", { name: "Assigned conference" }, { timeout: 5000 });
+  expect(screen.queryByRole("button", { name: "Cancel this booking" })).toBeNull();
+});
+
+test("[TC-SCRUM-154-UI-03] cancelling asks for confirmation first, and backing out writes nothing", async () => {
+  const fetchMock = setup();
+  const user = userEvent.setup();
+  open();
+
+  await user.click(await screen.findByRole("button", { name: "Cancel this booking" }, { timeout: 5000 }));
+
+  expect(screen.getByText(/cannot be undone/i)).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Never mind" }));
+
+  expect(screen.getByRole("button", { name: "Cancel this booking" })).toBeTruthy();
+  expect(fetchMock.mock.calls.map(([url]) => url)).not.toContain(CANCEL_URL);
+});
+
+test("[TC-SCRUM-154-UI-04] confirming cancels the booking and the card reflects it", async () => {
+  const fetchMock = setup();
+  let served = false;
+  handlers.list = () => ok({ data: [served ? { ...REQUEST, status: "cancelled" } : REQUEST] });
+  handlers.cancel = () => { served = true; return ok({ data: { ...REQUEST, status: "cancelled" } }); };
+
+  const user = userEvent.setup();
+  open();
+
+  await user.click(await screen.findByRole("button", { name: "Cancel this booking" }, { timeout: 5000 }));
+  await user.click(screen.getByRole("button", { name: "Confirm cancellation" }));
+
+  // Scoped to the status badge itself: the "Show" filter's own <option>
+  // Cancelled</option> is always in the DOM too, and a bare findByText would
+  // match both.
+  expect(await screen.findByText("Cancelled", { selector: ".v-status" })).toBeTruthy();
+  expect(fetchMock.mock.calls.map(([url]) => url)).toContain(CANCEL_URL);
+  expect(screen.queryByRole("button", { name: "Cancel this booking" })).toBeNull();
+});
+
+test("[TC-SCRUM-154-UI-05] a booking that is no longer live shows the refusal, not a crash", async () => {
+  setup();
+  handlers.cancel = () => fail(409, "This booking is no longer live");
+
+  const user = userEvent.setup();
+  open();
+
+  await user.click(await screen.findByRole("button", { name: "Cancel this booking" }, { timeout: 5000 }));
+  await user.click(screen.getByRole("button", { name: "Confirm cancellation" }));
+
+  expect(await screen.findByText("This booking is no longer live")).toBeTruthy();
+  // The card is untouched - still pending, still cancellable again.
+  expect(screen.getByRole("button", { name: "Confirm cancellation" })).toBeTruthy();
+});
+
+test("[TC-SCRUM-154-UI-06] a rejected booking offers no cancel action - it is already terminal", async () => {
+  setup();
+  handlers.list = () => ok({ data: [{ ...REQUEST, status: "rejected", slots: [{ slot: "am", status: "rejected" }] }] });
+  open();
+
+  await screen.findByRole("heading", { name: "Assigned conference" }, { timeout: 5000 });
+  expect(screen.queryByRole("button", { name: "Cancel this booking" })).toBeNull();
+});
+
+// ---------------------------------------------------------------------------
+// SCRUM-154: the assigned coordinator changes a booking's date and non-slot
+// details from the same page. Slot selection is out of scope by decision, so
+// there is no slot picker to test - just the date and the create form's
+// other fields.
+// ---------------------------------------------------------------------------
+
+test("[TC-SCRUM-154-UI-07] the assigned coordinator sees an edit action, and opening it loads this venue's requirements", async () => {
+  setup();
+  const user = userEvent.setup();
+  open();
+
+  await user.click(await screen.findByRole("button", { name: "Edit this booking" }, { timeout: 5000 }));
+
+  expect(await screen.findByLabelText("Date")).toBeTruthy();
+  expect(screen.getByLabelText("Date").value).toBe(REQUEST.booking_date);
+  expect(screen.getByLabelText("Room layout").value).toBe(REQUEST.room_layout);
+});
+
+test("[TC-SCRUM-154-UI-08] Venue Staff never see the edit action, even on the same page", async () => {
+  setup(["venue_staff"]);
+  open();
+
+  await screen.findByRole("heading", { name: "Assigned conference" }, { timeout: 5000 });
+  expect(screen.queryByRole("button", { name: "Edit this booking" })).toBeNull();
+});
+
+test("[TC-SCRUM-154-UI-09] saving sends the edited fields and the new date, and the card reflects the result", async () => {
+  const fetchMock = setup();
+  const user = userEvent.setup();
+  open();
+
+  await user.click(await screen.findByRole("button", { name: "Edit this booking" }, { timeout: 5000 }));
+  await screen.findByLabelText("Date");
+
+  await user.clear(screen.getByLabelText("Expected attendees"));
+  await user.type(screen.getByLabelText("Expected attendees"), "80");
+  await user.clear(screen.getByLabelText("Date"));
+  await user.type(screen.getByLabelText("Date"), "2099-11-01");
+
+  await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+  expect(await screen.findByText("Pending review", { selector: ".v-status" })).toBeTruthy();
+  const [, body] = fetchMock.mock.calls.find(([url]) => url === CHANGE_URL);
+  expect(JSON.parse(body.body)).toEqual(expect.objectContaining({
+    booking_date: "2099-11-01", expected_attendees: 80, room_layout: REQUEST.room_layout,
+  }));
+  expect(screen.queryByLabelText("Date")).toBeNull();
+});
+
+test("[TC-SCRUM-154-UI-10] discarding changes closes the form without saving", async () => {
+  const fetchMock = setup();
+  const user = userEvent.setup();
+  open();
+
+  await user.click(await screen.findByRole("button", { name: "Edit this booking" }, { timeout: 5000 }));
+  await screen.findByLabelText("Date");
+  await user.click(screen.getByRole("button", { name: "Discard changes" }));
+
+  expect(screen.getByRole("button", { name: "Edit this booking" })).toBeTruthy();
+  expect(fetchMock.mock.calls.map(([url]) => url)).not.toContain(CHANGE_URL);
+});
+
+test("[TC-SCRUM-154-UI-11] a booking that is no longer live shows the refusal, not a crash", async () => {
+  setup();
+  handlers.change = () => fail(409, "This booking is no longer live");
+
+  const user = userEvent.setup();
+  open();
+
+  await user.click(await screen.findByRole("button", { name: "Edit this booking" }, { timeout: 5000 }));
+  await screen.findByLabelText("Date");
+  await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+  expect(await screen.findByText("This booking is no longer live")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeTruthy();
+});
+
+test("[TC-SCRUM-154-UI-12] a rejected booking offers no edit action - it is already terminal", async () => {
+  setup();
+  handlers.list = () => ok({ data: [{ ...REQUEST, status: "rejected", slots: [{ slot: "am", status: "rejected" }] }] });
+  open();
+
+  await screen.findByRole("heading", { name: "Assigned conference" }, { timeout: 5000 });
+  expect(screen.queryByRole("button", { name: "Edit this booking" })).toBeNull();
 });

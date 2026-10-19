@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { EVENT_LIMITS, submitEventRequest, updateEventRequest } from "../eventsService";
+import { EVENT_LIMITS, saveDraft, submitDraft, submitEventRequest, updateDraft, updateEventRequest } from "../eventsService";
 import {
   registrationEndsAfterEventStarts,
   registrationWindowValidationError,
@@ -114,7 +114,9 @@ function TextAreaField({
 function initialFields(event) {
   if (!event) return EMPTY;
   const fields = Object.fromEntries(Object.keys(EMPTY).map(field => [field, String(event[field] ?? "")]));
-  for (const field of ["start_time", "end_time"]) {
+  // A saved draft can hold registration times too, so all four are shown in
+  // the organiser's local time, the way the datetime-local inputs expect.
+  for (const field of ["start_time", "end_time", "registration_start", "registration_end"]) {
     if (!event[field]) continue;
     const date = new Date(event[field]);
     fields[field] = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
@@ -122,13 +124,17 @@ function initialFields(event) {
   return fields;
 }
 
-export default function EventRequestForm({ onSubmitted, event: existingEvent, onCancel }) {
+// SCRUM-147: a new request (no `event`) can be saved as a draft at any point;
+// `draft` is the saved draft being continued, and onDraftSaved receives each save.
+export default function EventRequestForm({ onSubmitted, event: existingEvent, onCancel, draft, onDraftSaved }) {
   const { token } = useAuth();
-  const initial = initialFields(existingEvent);
+  const initial = initialFields(existingEvent ?? draft);
   const [fields, setFields] = useState(() => initial);
   const [errors, setErrors] = useState([]);
   const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
+  // false, or which button is working: "draft" or "submit".
+  const [pending, setPending] = useState(false);
+  const busy = Boolean(pending);
   const submitting = useRef(false);
 
   function update(field) {
@@ -140,6 +146,31 @@ export default function EventRequestForm({ onSubmitted, event: existingEvent, on
 
   function errorFor(field) {
     return errors.find((problem) => problem.field === field)?.message ?? "";
+  }
+
+  async function send(action, write) {
+    submitting.current = true;
+    setPending(action);
+    setErrors([]);
+    setMessage("");
+    try {
+      const result = await write();
+      if (result.event) return result.event;
+      setErrors(result.errors);
+      setMessage(result.message);
+      return null;
+    } finally {
+      submitting.current = false;
+      setPending(false);
+    }
+  }
+
+  // AC2: only the name is checked when a draft is saved, so the
+  // registration-window check below waits for the submission too.
+  async function saveAsDraft() {
+    if (submitting.current) return;
+    const saved = await send("draft", () => draft ? updateDraft(draft.id, fields, token) : saveDraft(fields, token));
+    if (saved) onDraftSaved(saved);
   }
 
   async function submit(event) {
@@ -154,26 +185,13 @@ export default function EventRequestForm({ onSubmitted, event: existingEvent, on
       setMessage("");
       return;
     }
-    submitting.current = true;
-    setBusy(true);
-    setErrors([]);
-    setMessage("");
-    try {
-      const changes = Object.fromEntries(Object.entries(fields).filter(([field, value]) => value !== initial[field]));
-      const result = existingEvent
-        ? await updateEventRequest(existingEvent.id, changes, token)
-        : await submitEventRequest(fields, token);
-      if (result.event) {
-        if (!existingEvent) setFields(EMPTY);
-        onSubmitted(result.event);
-        return;
-      }
-      setErrors(result.errors);
-      setMessage(result.message);
-    } finally {
-      submitting.current = false;
-      setBusy(false);
-    }
+    const changes = Object.fromEntries(Object.entries(fields).filter(([field, value]) => value !== initial[field]));
+    const submitted = await send("submit", () => existingEvent
+      ? updateEventRequest(existingEvent.id, changes, token)
+      : draft ? submitDraft(draft.id, fields, token) : submitEventRequest(fields, token));
+    if (!submitted) return;
+    if (!existingEvent) setFields(EMPTY);
+    onSubmitted(submitted);
   }
 
   // Shared props for every control, so a field declaration stays one line of
@@ -312,12 +330,16 @@ export default function EventRequestForm({ onSubmitted, event: existingEvent, on
       )}
 
       <button className="primary" type="submit" disabled={busy || (existingEvent && Object.keys(fields).every(field => fields[field] === initial[field]))}>
-        {existingEvent ? (busy ? "Saving…" : "Save changes") : (busy ? "Submitting…" : "Submit request")}
+        {existingEvent ? (busy ? "Saving…" : "Save changes") : (pending === "submit" ? "Submitting…" : "Submit request")}
       </button>
       {existingEvent && <button className="secondary" type="button" disabled={busy} onClick={onCancel}>Cancel editing</button>}
+      {!existingEvent && <button className="secondary" type="button" disabled={busy} onClick={saveAsDraft}>
+        {pending === "draft" ? "Saving draft…" : "Save draft"}
+      </button>}
       <p className="card-note">
         {existingEvent ? "Saving updates your event details. Your event's status and assignment stay the same." :
-          "Submitting sends your request to ConnectSphere for coordinator assignment and review."}
+          "Submitting sends your request to ConnectSphere for coordinator assignment and review. " +
+          "A draft needs only the event name and is visible only to you until you submit it."}
       </p>
     </form>
   );

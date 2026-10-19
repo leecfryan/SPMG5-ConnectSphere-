@@ -19,7 +19,8 @@ test('[E2E-SAFETY-001] SCRUM-139: the coordinator sees what is missing, submits 
   await page.goto(`/assigned-events/${event.id}`);
   await signIn(page, first);
   await expect(status).toHaveText('Approved – planning');
-  await expect(page.getByRole('list', { name: 'Missing arrangements' })).toHaveText(`Integration Hall · ${date}: Waiting for Venue Staff to decide.`);
+  // SCRUM-144 adds the coordinator's essential toggle to each outstanding request.
+  await expect(page.getByRole('list', { name: 'Missing arrangements' })).toHaveText(`Integration Hall · ${date}: Waiting for Venue Staff to decide. Mark as non-essential`);
   await expect(submit).toBeDisabled();
 
   // Venue Staff confirm the booking through the venue lane's own endpoint.

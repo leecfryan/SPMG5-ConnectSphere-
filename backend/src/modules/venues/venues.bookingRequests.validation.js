@@ -169,6 +169,92 @@ function validateBookingRequestShape(payload) {
   };
 }
 
+// SCRUM-154: the fields a coordinator may change on an existing booking.
+// slots is not here - slot changes are out of scope by decision; moving to a
+// different date keeps whatever slots the booking already has. event_id is
+// not here either - the request's own id in the URL already says which one,
+// and it never moves to a different event. purpose is not here either, by
+// decision: it is part of the create flow but this story does not touch it.
+const ALLOWED_CHANGE_FIELDS = [
+  "booking_date",
+  "expected_attendees",
+  "room_layout",
+  "required_facilities",
+  "accessibility_requirements",
+  "additional_requirements",
+];
+
+// SCRUM-154 AC2: the coordinator always sends the full merged value - every
+// field, current plus their edit - never a partial patch, so there is no
+// "field omitted means unchanged" ambiguity for change_venue_booking_request
+// to resolve. Mirrors validateBookingRequestShape's field-by-field rules,
+// minus event_id, slots and purpose.
+function validateChangeRequestShape(payload) {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    return { errors: ["Request body must be an object"], value: null };
+  }
+
+  const errors = [];
+
+  const unknown = Object.keys(payload).filter(
+    (key) => !ALLOWED_CHANGE_FIELDS.includes(key)
+  );
+  if (unknown.length > 0) {
+    errors.push(`Unknown fields: ${unknown.join(", ")}`);
+  }
+
+  if (!isValidDateString(payload.booking_date)) {
+    errors.push("booking_date must be a date in YYYY-MM-DD format");
+  }
+
+  if (
+    !Number.isInteger(payload.expected_attendees) ||
+    payload.expected_attendees <= 0
+  ) {
+    errors.push("expected_attendees must be a whole number greater than zero");
+  }
+
+  if (typeof payload.room_layout !== "string" || payload.room_layout.trim() === "") {
+    errors.push("room_layout is required");
+  }
+
+  for (const field of ["required_facilities", "accessibility_requirements"]) {
+    if (payload[field] === undefined) continue;
+    if (!isStringArray(payload[field])) {
+      errors.push(`${field} must be a list of strings`);
+    } else if (hasDuplicates(payload[field])) {
+      errors.push(`${field} must not repeat`);
+    }
+  }
+
+  const additional = payload.additional_requirements;
+  if (additional !== undefined && additional !== null) {
+    if (typeof additional !== "string") {
+      errors.push("additional_requirements must be text or null");
+    } else if (additional.length > ADDITIONAL_REQUIREMENTS_MAX) {
+      errors.push(
+        `additional_requirements must be ${ADDITIONAL_REQUIREMENTS_MAX} characters or fewer`
+      );
+    }
+  }
+
+  if (errors.length > 0) return { errors, value: null };
+
+  const trimmedAdditional = typeof additional === "string" ? additional.trim() : "";
+
+  return {
+    errors: [],
+    value: {
+      booking_date: payload.booking_date,
+      expected_attendees: payload.expected_attendees,
+      room_layout: payload.room_layout.trim(),
+      required_facilities: payload.required_facilities || [],
+      accessibility_requirements: payload.accessibility_requirements || [],
+      additional_requirements: trimmedAdditional === "" ? null : trimmedAdditional,
+    },
+  };
+}
+
 // SCRUM-87: requirements are only "relevant" if this venue can meet them. The
 // options come from the catalogue data shown in SCRUM-15.
 function validateAgainstVenue(value, venue) {
@@ -525,6 +611,7 @@ module.exports = {
   DECISION_NOTE_MAX,
   localDateInTimeZone,
   validateBookingRequestShape,
+  validateChangeRequestShape,
   validateAgainstVenue,
   validateAgainstEvent,
   findSlotProblems,

@@ -2,7 +2,7 @@ import { test, expect } from "vitest";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { findMissingArrangements } = require("../../../src/modules/events/safetyReadiness");
+const { findMissingArrangements, checkArrangements } = require("../../../src/modules/events/safetyReadiness");
 
 const venueRequest = (name, date, ...statuses) => ({
   venue: { name },
@@ -110,4 +110,63 @@ test("SCRUM-139 AC2: a pending venue with nothing booked is listed once, not twi
     venueRequests: [venueRequest("Hall B", "2099-05-01", "pending")],
     equipmentRequests: [],
   })).toEqual([{ kind: "venue", label: "Hall B · 2099-05-01", reason: "Waiting for Venue Staff to decide." }]);
+});
+
+// SCRUM-144: the same rule, with each request's id and its essential flag.
+const flagged = (request, id, isEssential) => ({ ...request, id, is_essential: isEssential });
+
+test("SCRUM-144 AC2: on a multi-venue event every essential venue still pending is listed, each with its request id", () => {
+  expect(checkArrangements({
+    venueRequests: [
+      flagged(CONFIRMED_HALL_A, "vr-a", true),
+      flagged(venueRequest("Hall B", "2099-05-02", "pending"), "vr-b", true),
+      flagged(venueRequest("Hall C", "2099-05-03", "pending"), "vr-c", true),
+    ],
+    equipmentRequests: [],
+  })).toEqual({
+    missing: [
+      { kind: "venue", id: "vr-b", label: "Hall B · 2099-05-02", reason: "Waiting for Venue Staff to decide." },
+      { kind: "venue", id: "vr-c", label: "Hall C · 2099-05-03", reason: "Waiting for Venue Staff to decide." },
+    ],
+    optional: [],
+  });
+});
+
+test("SCRUM-144 AC4: outstanding requests marked non-essential do not block and are listed as optional", () => {
+  expect(checkArrangements({
+    venueRequests: [flagged(CONFIRMED_HALL_A, "vr-a", true), flagged(venueRequest("Hall B", "2099-05-02", "pending"), "vr-b", false)],
+    equipmentRequests: [flagged(equipmentRequest("Microphone", "PENDING"), "eq-1", false), flagged(equipmentRequest("Projector", "APPROVED"), "eq-2", false)],
+  })).toEqual({
+    missing: [],
+    optional: [
+      { kind: "venue", id: "vr-b", label: "Hall B · 2099-05-02", reason: "Waiting for Venue Staff to decide." },
+      { kind: "equipment", id: "eq-1", label: "Microphone", reason: "Waiting for Technical Support Staff to reserve it." },
+    ],
+  });
+});
+
+test("SCRUM-144 AC4: an essential item still blocks beside a non-essential one", () => {
+  const { missing, optional } = checkArrangements({
+    venueRequests: [flagged(CONFIRMED_HALL_A, "vr-a", true)],
+    equipmentRequests: [flagged(equipmentRequest("Microphone", "REJECTED"), "eq-1", true), flagged(equipmentRequest("Speaker", "REVIEW_REQUIRED"), "eq-2", false)],
+  });
+  expect(missing.map((item) => item.id)).toEqual(["eq-1"]);
+  expect(optional.map((item) => item.id)).toEqual(["eq-2"]);
+});
+
+test("SCRUM-144 boundary: with no booked venue, a venue is still required even if every pending venue is non-essential", () => {
+  expect(checkArrangements({
+    venueRequests: [flagged(venueRequest("Hall B", "2099-05-02", "pending"), "vr-b", false)],
+    equipmentRequests: [],
+  })).toEqual({
+    missing: [NO_VENUE],
+    optional: [{ kind: "venue", id: "vr-b", label: "Hall B · 2099-05-02", reason: "Waiting for Venue Staff to decide." }],
+  });
+});
+
+test("SCRUM-144: a request without the flag (column default) counts as essential", () => {
+  expect(checkArrangements({
+    venueRequests: [CONFIRMED_HALL_A],
+    equipmentRequests: [{ ...equipmentRequest("Microphone", "PENDING"), id: "eq-1" }],
+  }).missing.map((item) => item.id)).toEqual(["eq-1"]);
 });

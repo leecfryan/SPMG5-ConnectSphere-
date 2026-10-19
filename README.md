@@ -86,7 +86,10 @@ returned by GET /api/internal/access. SCRUM-142 also recognises Safety Officer
 (`safety_officer`) as internal staff; SCRUM-140 gives it a read-only safety review
 queue at `/safety-reviews`; SCRUM-141 lets it approve (to preparation) or reject
 (with a reason, back to planning) the safety arrangement, and each decision appears
-in the event's activity history. Other assigned
+in the event's activity history. SCRUM-144 lets the assigned Event Coordinator
+confirm an event once it has passed the safety check and nothing essential is
+outstanding; an outstanding venue booking or equipment request can be marked
+non-essential so it does not block. Other assigned
 roles continue to grant their own capabilities.
 
 Feature owners must attach requirePermission to their data endpoints. Sensitive
@@ -98,7 +101,10 @@ the agreed matrix, integration examples, tests and remaining work.
 
 Event Organisers can open `/events/new` through the workspace navigation. The
 frontend and backend both enforce `events.submit`; the API obtains ownership
-from the verified user. At `/my-event-requests`, organisers can edit responsible
+from the verified user. *Save draft* keeps an unfinished request that needs only
+a name; the organiser's drafts are listed under *Your drafts* on
+`/my-event-requests`, visible to no one else, and the full checks run when a
+draft is submitted (SCRUM-147). At `/my-event-requests`, organisers can edit responsible
 events and view colleagues’ events in their client organisation. Unrelated clients
 are hidden. Configure trusted organisation metadata using
 [the event access guide](docs/event-access.md#scrum-100-external-client-organiser-scope).

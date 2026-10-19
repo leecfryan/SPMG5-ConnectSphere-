@@ -4,6 +4,7 @@ import { useAuth } from "../../auth/useAuth";
 import { useApiResource } from "../../../hooks/useApiResource";
 import { workspaces } from "../workspaces";
 import StatusBadge from "../components/StatusBadge";
+import DraftList from "../components/DraftList";
 import "../workspace.css";
 
 function EventList({ events, workspace, userId }) {
@@ -36,6 +37,7 @@ export default function EventWorkspacePage({ scope }) {
     </>}
     {data?.events.length === 0 && <p>No events to show yet.</p>}
     {data?.events.length > 0 && events.length === 0 && <p>No events match your search.</p>}
+    {scope === "organiser" && <DraftList />}
     {scope === "organiser" && data && <>
       <section aria-labelledby="own-events-title">
         <h2 id="own-events-title">Events you are responsible for</h2>

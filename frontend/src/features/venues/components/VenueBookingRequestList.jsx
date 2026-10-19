@@ -1,7 +1,16 @@
 import { useAuth } from "../../auth/useAuth";
 import { useState, useEffect } from "react";
 import { Link, useSearchParams } from "react-router";
-import { decideBookingRequest, fetchBookingRequests, fetchVenueBookingChecks, markVenueBookingAffected } from "../../../lib/api";
+import {
+  cancelBookingRequest,
+  changeBookingRequest,
+  decideBookingRequest,
+  fetchBookingRequests,
+  fetchVenueBookingChecks,
+  fetchVenueById,
+  markVenueBookingAffected,
+} from "../../../lib/api";
+import ChipToggleGroup from "./ChipToggleGroup";
 import {
   IconAlert,
   IconArrowLeft,
@@ -206,8 +215,8 @@ function MarkAffectedPanel({ request, token, onMarked }) {
   const [error, setError] = useState(null);
   const hasReason = reason.trim() !== "";
 
-  async function handleSubmit(e) {
-    e.preventDefault();
+  async function handleSubmit(event) {
+    event.preventDefault();
     if (!hasReason) return;
     setBusy(true);
     setError(null);
@@ -222,37 +231,75 @@ function MarkAffectedPanel({ request, token, onMarked }) {
   }
 
   if (!open) {
-    return (
-      <div className="v-decision">
-        <div className="v-decision-actions">
-          <button type="button" className="v-btn v-btn-secondary" onClick={() => setOpen(true)}>
-            <IconAlert />
-            Mark as affected
-          </button>
-        </div>
-      </div>
-    );
+    return <div className="v-decision"><div className="v-decision-actions">
+      <button type="button" className="v-btn v-btn-secondary" onClick={() => setOpen(true)}>
+        <IconAlert />
+        Mark as affected
+      </button>
+    </div></div>;
   }
 
   return (
     <form className="v-decision" onSubmit={handleSubmit}>
       <label className="v-field">
         <span className="v-label">Reason this venue is no longer suitable</span>
-        <textarea
-          className="v-input"
-          rows="2"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          placeholder="e.g. Venue under maintenance on the booking date"
-          required
-          disabled={busy}
-        />
-        <span className="v-hint">
-          {hasReason
-            ? "Shared with the coordinator, who will arrange a replacement."
-            : "A reason is required. It is shared with the coordinator."}
-        </span>
+        <textarea className="v-input" rows="2" value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder="e.g. Venue under maintenance on the booking date" required disabled={busy} />
+        <span className="v-hint">{hasReason
+          ? "Shared with the coordinator, who will arrange a replacement."
+          : "A reason is required. It is shared with the coordinator."}</span>
       </label>
+      {error && <p className="v-alert v-alert-error" role="alert"><IconAlert /><span>{error}</span></p>}
+      <div className="v-decision-actions">
+        <button type="button" className="v-btn v-btn-secondary"
+          onClick={() => { setOpen(false); setReason(""); setError(null); }} disabled={busy}>Cancel</button>
+        <button type="submit" className="v-btn v-btn-danger" disabled={busy || !hasReason}
+          title={hasReason ? undefined : "Type a reason first"}>{busy ? "Marking…" : "Confirm — mark as affected"}</button>
+      </div>
+    </form>
+  );
+}
+
+// SCRUM-154. Shown only to the assigned coordinator who holds bookings.manage,
+// and only while the booking still has something live to release. Cancel is
+// final - there is no undo - so this asks for a second click before it writes
+// anything, same shape as DecisionPanel's rejection step.
+function CancelPanel({ request, onCancelled }) {
+  const { token } = useAuth();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  function cancel() {
+    setBusy(true);
+    setError(null);
+
+    cancelBookingRequest(request.id, token)
+      .then(onCancelled)
+      .catch((err) => setError(err.message))
+      .finally(() => setBusy(false));
+  }
+
+  if (!confirming) {
+    return (
+      <div className="v-decision-actions">
+        <button type="button" className="v-btn v-btn-danger" onClick={() => setConfirming(true)}>
+          Cancel this booking
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="v-decision">
+      <p className="v-alert v-alert-error" role="alert">
+        <IconAlert />
+        <span>
+          This releases the booking's period and cannot be undone. The event's other venue
+          bookings are not affected.
+        </span>
+      </p>
       {error && (
         <p className="v-alert v-alert-error" role="alert">
           <IconAlert />
@@ -263,25 +310,199 @@ function MarkAffectedPanel({ request, token, onMarked }) {
         <button
           type="button"
           className="v-btn v-btn-secondary"
-          onClick={() => { setOpen(false); setReason(""); setError(null); }}
+          onClick={() => { setConfirming(false); setError(null); }}
           disabled={busy}
         >
-          Cancel
+          Never mind
         </button>
-        <button
-          type="submit"
-          className="v-btn v-btn-danger"
-          disabled={busy || !hasReason}
-          title={hasReason ? undefined : "Type a reason first"}
-        >
-          {busy ? "Marking…" : "Confirm — mark as affected"}
+        <button type="button" className="v-btn v-btn-danger" onClick={cancel} disabled={busy}>
+          {busy ? "Cancelling..." : "Confirm cancellation"}
         </button>
       </div>
-    </form>
+    </div>
   );
 }
 
-function RequestCard({ request, canDecide, canManageReplacement, onDecided, token }) {
+function toggleItem(list, item) {
+  return list.includes(item) ? list.filter((existing) => existing !== item) : [...list, item];
+}
+
+// SCRUM-154 AC2. Shown only to the assigned coordinator, and only while the
+// booking still has something live to change. Slot selection is out of scope
+// by decision: moving the date carries the booking's existing slots over
+// unchanged, so there is nothing to pick here - only a date field, plus the
+// same non-slot fields the create form offers.
+function EditPanel({ request, onChanged }) {
+  const { token } = useAuth();
+  const [editing, setEditing] = useState(false);
+  const [venueDetail, setVenueDetail] = useState(null);
+  const [venueError, setVenueError] = useState(null);
+
+  const [bookingDate, setBookingDate] = useState(request.booking_date);
+  const [attendees, setAttendees] = useState(String(request.expected_attendees));
+  const [roomLayout, setRoomLayout] = useState(request.room_layout);
+  const [facilities, setFacilities] = useState(request.required_facilities || []);
+  const [accessibility, setAccessibility] = useState(request.accessibility_requirements || []);
+  const [additional, setAdditional] = useState(request.additional_requirements || "");
+
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!editing || venueDetail || venueError) return;
+    fetchVenueById(request.venue.id, token)
+      .then(setVenueDetail)
+      .catch((err) => setVenueError(err.message));
+  }, [editing, venueDetail, venueError, request.venue.id, token]);
+
+  function startEditing() {
+    setBookingDate(request.booking_date);
+    setAttendees(String(request.expected_attendees));
+    setRoomLayout(request.room_layout);
+    setFacilities(request.required_facilities || []);
+    setAccessibility(request.accessibility_requirements || []);
+    setAdditional(request.additional_requirements || "");
+    setError(null);
+    setEditing(true);
+  }
+
+  function save() {
+    setBusy(true);
+    setError(null);
+
+    changeBookingRequest(request.id, {
+      booking_date: bookingDate,
+      expected_attendees: Number(attendees),
+      room_layout: roomLayout,
+      required_facilities: facilities,
+      accessibility_requirements: accessibility,
+      additional_requirements: additional.trim() === "" ? null : additional.trim(),
+    }, token)
+      .then(() => { setEditing(false); onChanged(); })
+      .catch((err) => setError(err.message))
+      .finally(() => setBusy(false));
+  }
+
+  if (!editing) {
+    return (
+      <div className="v-decision-actions">
+        <button type="button" className="v-btn v-btn-secondary" onClick={startEditing}>
+          Edit this booking
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="v-decision">
+      <p className="v-hint">Saving sends this booking back to Venue Staff for review.</p>
+
+      {venueError && (
+        <p className="v-alert v-alert-error" role="alert">
+          <IconAlert />
+          <span>Could not load this venue's requirements: {venueError}</span>
+        </p>
+      )}
+      {error && (
+        <p className="v-alert v-alert-error" role="alert">
+          <IconAlert />
+          <span>{error}</span>
+        </p>
+      )}
+
+      {!venueDetail && !venueError && <p className="v-loading-line">Loading venue requirements...</p>}
+
+      {venueDetail && (
+        <div className="v-form-grid">
+          <label className="v-field">
+            <span className="v-label">Date</span>
+            <input
+              className="v-input"
+              type="date"
+              value={bookingDate}
+              onChange={(e) => setBookingDate(e.target.value)}
+            />
+          </label>
+
+          <label className="v-field">
+            <span className="v-label">Expected attendees</span>
+            <input
+              className="v-input"
+              type="number"
+              min="1"
+              max={venueDetail.capacity}
+              value={attendees}
+              onChange={(e) => setAttendees(e.target.value)}
+            />
+          </label>
+
+          <label className="v-field">
+            <span className="v-label">Room layout</span>
+            <select
+              className="v-input"
+              value={roomLayout}
+              onChange={(e) => setRoomLayout(e.target.value)}
+            >
+              {venueDetail.room_layouts.map((layout) => (
+                <option key={layout} value={layout}>{layout}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+
+      {venueDetail && (
+        <>
+          <ChipToggleGroup
+            legend="Facilities needed"
+            options={venueDetail.facilities}
+            selected={facilities}
+            onToggle={(item) => setFacilities((current) => toggleItem(current, item))}
+            emptyLabel="None recorded for this venue"
+          />
+          <ChipToggleGroup
+            legend="Accessibility needed"
+            options={venueDetail.accessibility_features}
+            selected={accessibility}
+            onToggle={(item) => setAccessibility((current) => toggleItem(current, item))}
+            emptyLabel="None recorded for this venue"
+          />
+
+          <label className="v-field">
+            <span className="v-label">Anything else Venue Staff should know</span>
+            <textarea
+              className="v-input"
+              rows="3"
+              value={additional}
+              onChange={(e) => setAdditional(e.target.value)}
+            />
+          </label>
+        </>
+      )}
+
+      <div className="v-decision-actions">
+        <button
+          type="button"
+          className="v-btn v-btn-secondary"
+          onClick={() => setEditing(false)}
+          disabled={busy}
+        >
+          Discard changes
+        </button>
+        <button
+          type="button"
+          className="v-btn v-btn-primary"
+          onClick={save}
+          disabled={busy || !venueDetail}
+        >
+          {busy ? "Saving..." : "Save changes"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RequestCard({ request, canDecide, canManage, canManageReplacement, onDecided, onCancelled, onChanged, token }) {
   const hasTiming = Boolean(request.event.start_time && request.event.end_time);
 
   return (
@@ -302,19 +523,13 @@ function RequestCard({ request, canDecide, canManageReplacement, onDecided, toke
         </span>
       </header>
       {request.replaces_booking_id && (
-        <p className="v-alert" role="status">
-          Replacement request for affected booking {request.replaces_booking_id}.
-        </p>
+        <p className="v-alert" role="status">Replacement request for affected booking {request.replaces_booking_id}.</p>
       )}
       {request.is_affected && (
         <div className="v-alert v-alert-error" role="status" style={{ borderLeft: "4px solid #ef4444", margin: "8px 0", padding: "8px" }}>
           <strong>Venue arrangement unresolved</strong>
           <p>{request.affected_reason ? `Reason: ${request.affected_reason}` : "The booked venue has become unavailable."}</p>
-          {canManageReplacement && (
-            <Link className="v-btn v-btn-secondary" to={`/venues/booking-requests/${request.id}/replacement`}>
-              Find replacement venue
-            </Link>
-          )}
+          {canManageReplacement && <Link className="v-btn v-btn-secondary" to={`/venues/booking-requests/${request.id}/replacement`}>Find replacement venue</Link>}
         </div>
       )}
 
@@ -389,13 +604,17 @@ function RequestCard({ request, canDecide, canManageReplacement, onDecided, toke
         </div>
       )}
 
-      {/* SCRUM-145: Venue Staff mark a live booking as affected when the venue
-          becomes unavailable. Only shown for pending/confirmed bookings that are
-          not already affected — once marked the coordinator takes over the flow. */}
-      {canDecide && !request.is_affected &&
-        ["pending", "confirmed"].includes(request.status) && (
+      {canDecide && !request.is_affected && ["pending", "confirmed"].includes(request.status) && (
         <div className="v-request-body">
           <MarkAffectedPanel request={request} token={token} onMarked={onDecided} />
+        </div>
+      )}
+
+      {/* SCRUM-154: only the assigned coordinator, and only while live */}
+      {canManage && ["pending", "confirmed"].includes(request.status) && (
+        <div className="v-request-body">
+          <EditPanel request={request} onChanged={onChanged} />
+          <CancelPanel request={request} onCancelled={onCancelled} />
         </div>
       )}
 
@@ -425,6 +644,7 @@ function VenueBookingRequestList({ onBack }) {
   const [searchParams] = useSearchParams();
   const eventId = searchParams.get("event") || searchParams.get("event_id");
   const canDecide = hasPermission("bookings.decide");
+  const canManage = hasPermission("bookings.manage");
   const canManageReplacement = hasPermission("bookings.request");
   const [status, setStatus] = useState(eventId ? "" : "pending");
   const [result, setResult] = useState(null);
@@ -440,33 +660,18 @@ function VenueBookingRequestList({ onBack }) {
   // coordinator asks for it.
   const [check, setCheck] = useState(null);
 
-  // SCRUM-145: after checks run, any booking that failed a suitability, availability
-  // or conflict check and is not already marked as affected is auto-marked. The reason
-  // is assembled from the failed checks so the coordinator sees a useful message.
   async function autoMarkFailed(report) {
-    const toMark = (report.results || []).filter(
-      (result) =>
-        result.overall === "failed" &&
-        result.booking_id &&
-        // Only mark bookings that exist in the current list and are not already affected.
-        requests.some((req) => req.id === result.booking_id && !req.is_affected)
-    );
+    const toMark = (report.results || []).filter((result) => result.overall === "failed" && result.booking_id
+      && requests.some((request) => request.id === result.booking_id && !request.is_affected));
     if (toMark.length === 0) return;
-    await Promise.allSettled(
-      toMark.map((result) => {
-        const reasons = [
-          ...((result.suitability?.reasons) || []),
-          ...((result.availability?.reasons) || []),
-          ...((result.conflicts?.reasons) || []),
-        ];
-        const reason =
-          reasons.length > 0
-            ? reasons.join("; ")
-            : "Venue booking check failed";
-        return markVenueBookingAffected(result.booking_id, reason, token);
-      })
-    );
-    // Refresh the request list so the affected flags appear immediately.
+    await Promise.allSettled(toMark.map((result) => {
+      const reasons = [
+        ...(result.suitability?.reasons || []),
+        ...(result.availability?.reasons || []),
+        ...(result.conflicts?.reasons || []),
+      ];
+      return markVenueBookingAffected(result.booking_id, reasons.join("; ") || "Venue booking check failed", token);
+    }));
     setRefreshKey((key) => key + 1);
   }
 
@@ -611,9 +816,12 @@ function VenueBookingRequestList({ onBack }) {
                 key={request.id}
                 request={request}
                 canDecide={canDecide}
+                canManage={canManage}
                 canManageReplacement={canManageReplacement}
                 token={token}
                 onDecided={() => setRefreshKey((key) => key + 1)}
+                onCancelled={() => setRefreshKey((key) => key + 1)}
+                onChanged={() => setRefreshKey((key) => key + 1)}
               />
             ))}
           </div>

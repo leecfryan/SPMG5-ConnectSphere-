@@ -37,9 +37,9 @@ function unwrap({ data, error }, action) {
   return data;
 }
 
-// Every request is inserted already SUBMITTED - phase one has no drafts (US-13
-// brings them). status and submitted_at are set here, never picked from the
-// caller's fields, so a client cannot choose them.
+// A request submitted straight from the form is inserted already SUBMITTED.
+// status and submitted_at are set here, never picked from the caller's fields,
+// so a client cannot choose them.
 async function createSubmitted(
   fields,
   organiserId,
@@ -82,12 +82,55 @@ async function update(id, patch) {
   );
 }
 
-async function markSubmitted(id, submittedAt = new Date().toISOString()) {
+// SCRUM-147: a draft keeps status DRAFT and no submitted_at until submitted.
+// Every draft read and write is scoped to its organiser, so another account's
+// draft matches nothing (AC4).
+async function createDraft(fields, organiserId) {
+  const row = { ...pickCol(fields), organiser_id: organiserId, status: "DRAFT" };
+  return unwrap(
+    await getSupabase().from(TABLE).insert(row).select().single(),
+    "createDraft",
+  );
+}
+
+function ownDrafts(organiserId) {
+  return getSupabase().from(TABLE).select("*").eq("organiser_id", organiserId).eq("status", "DRAFT");
+}
+
+async function findOwnDrafts(organiserId) {
+  return unwrap(
+    await ownDrafts(organiserId).order("created_at", { ascending: false }),
+    "findOwnDrafts",
+  );
+}
+
+async function findOwnDraft(id, organiserId) {
+  return unwrap(await ownDrafts(organiserId).eq("id", id).maybeSingle(), "findOwnDraft");
+}
+
+async function updateDraft(id, organiserId, fields) {
   return unwrap(
     await getSupabase()
       .from(TABLE)
-      .update({ status: "SUBMITTED", submitted_at: submittedAt })
+      .update(pickCol(fields))
       .eq("id", id)
+      .eq("organiser_id", organiserId)
+      .eq("status", "DRAFT")
+      .select()
+      .maybeSingle(),
+    "updateDraft",
+  );
+}
+
+// The draft's last edits are written with the status change, so what was
+// validated is exactly what is submitted.
+async function markSubmitted(id, organiserId, fields, submittedAt = new Date().toISOString()) {
+  return unwrap(
+    await getSupabase()
+      .from(TABLE)
+      .update({ ...pickCol(fields), status: "SUBMITTED", submitted_at: submittedAt })
+      .eq("id", id)
+      .eq("organiser_id", organiserId)
       .eq("status", "DRAFT")
       .select()
       .maybeSingle(),
@@ -210,7 +253,7 @@ async function findArrangements(eventId) {
     supabase
       .from("venue_booking_requests")
       .select(
-        "id, booking_date, expected_attendees, room_layout, accessibility_requirements, " +
+        "id, booking_date, expected_attendees, room_layout, accessibility_requirements, is_essential, " +
         "venue:venues!venue_id(name, capacity, accessibility_features, notes), " +
         "slots:venue_bookings!request_id(slot, status)",
       )
@@ -218,7 +261,7 @@ async function findArrangements(eventId) {
       .order("booking_date", { ascending: true }),
     supabase
       .from("equipment_requests")
-      .select("id, status, quantity_requested, technical_requirement, equipment:equipment!equipment_id(type)")
+      .select("id, status, quantity_requested, technical_requirement, is_essential, equipment:equipment!equipment_id(type)")
       .eq("event_id", eventId)
       .order("created_at", { ascending: true }),
   ]);
@@ -226,6 +269,23 @@ async function findArrangements(eventId) {
     venueRequests: unwrap(venueRequests, "findArrangements venue"),
     equipmentRequests: unwrap(equipmentRequests, "findArrangements equipment"),
   };
+}
+
+// SCRUM-144 AC4: the one write this lane makes to the Venue and Equipment
+// lanes' tables - the coordinator's essential flag, nothing else. Filtered on
+// event_id too, so a request id from another event matches nothing (404).
+const ARRANGEMENT_TABLES = Object.freeze({ venue: "venue_booking_requests", equipment: "equipment_requests" });
+async function setArrangementEssential(kind, requestId, eventId, isEssential) {
+  return unwrap(
+    await getSupabase()
+      .from(ARRANGEMENT_TABLES[kind])
+      .update({ is_essential: isEssential })
+      .eq("id", requestId)
+      .eq("event_id", eventId)
+      .select("id, is_essential")
+      .maybeSingle(),
+    "setArrangementEssential",
+  );
 }
 
 // SCRUM-141: undoes a transition whose activity row could not be written, so
@@ -258,6 +318,10 @@ module.exports = {
   findById,
   findByIds,
   update,
+  createDraft,
+  findOwnDrafts,
+  findOwnDraft,
+  updateDraft,
   markSubmitted,
   transitionStatus,
   cancel,
@@ -270,4 +334,5 @@ module.exports = {
   findAwaitingSafetyReviewById,
   undoTransition,
   recordActivity,
+  setArrangementEssential,
 };

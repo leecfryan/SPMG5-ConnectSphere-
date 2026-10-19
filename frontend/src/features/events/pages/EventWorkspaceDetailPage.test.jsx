@@ -51,6 +51,7 @@ function setup(scope, initial, { userId = "coord-1", events } = {}) {
     if (options.method === "POST" && url.endsWith("/submit-safety-check")) event = { ...event, status: "SAFETY_REVIEW" };
     else if (options.method === "POST" && url.endsWith("/withdraw-safety-check")) event = { ...event, status: "APPROVED" };
     else if (options.method === "POST" && url.endsWith("/start-review")) event = { ...event, status: "UNDER_REVIEW" };
+    else if (options.method === "POST" && url.endsWith("/confirm")) event = { ...event, status: "CONFIRMED" };
     else if (options.method === "POST" && url.endsWith("/approve")) event = { ...event, status: "APPROVED", ...DECISION };
     else if (options.method === "POST" && url.endsWith("/reject")) event = { ...event, status: "REJECTED", ...DECISION, approval_rejection_remark: JSON.parse(options.body).note };
     else throw new Error("Unexpected test request: " + url);
@@ -320,14 +321,16 @@ test("[SCRUM-141-UI-007] AC4: an event with no decisions says so, and an unreada
   expect(await screen.findByText("Activity history is unavailable right now. Refresh the event to try again.")).toBeInTheDocument();
 });
 
+// SCRUM-144 adds the Confirm event section here; it only reads readiness until the coordinator acts.
 test("[SCRUM-141-UI-008] AC3: a coordinator's event in preparation shows Preparation, with arrangements and the safety check closed", async () => {
   const { fetchMock } = setup("coordinator", { status: "PREPARATION", activity: [APPROVAL] });
 
   expect(await screen.findByText("Preparation", { selector: ".status-badge" })).toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: "Event arrangements" })).not.toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Operational Safety Check" })).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Confirm event" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Cancel event" })).toBeInTheDocument();
-  expect(fetchMock.mock.calls.some(([url]) => url.includes("safety"))).toBe(false);
+  expect(posts(fetchMock)).toEqual([]);
 });
 
 test("[SCRUM-141-UI-009] AC4: an approval note is labelled Note, and an action the page does not know is shown as recorded", async () => {
@@ -339,4 +342,31 @@ test("[SCRUM-141-UI-009] AC4: an approval note is labelled Note, and an action t
   const entries = within(await screen.findByRole("region", { name: "Activity history" })).getAllByRole("listitem").map((item) => item.textContent);
   expect(entries[0]).toContain("Note: Second exit opened");
   expect(entries[1]).toMatch(/^SOMETHING_NEW · /);
+});
+
+// SCRUM-144: confirming from the coordinator's event page.
+test("[SCRUM-144-UI-011] AC1: the assigned coordinator confirms an event in preparation and the page shows Confirmed", async () => {
+  const { fetchMock, user } = setup("coordinator", { status: "PREPARATION", activity: [APPROVAL] });
+
+  await user.click(await screen.findByRole("button", { name: "Confirm event", disabled: false }));
+
+  expect(await screen.findByText("Confirmed", { selector: ".status-badge" })).toBeInTheDocument();
+  expect(posts(fetchMock)).toEqual([`/api/internal/events/${EVENT_ID}/confirm`]);
+  expect(screen.queryByRole("heading", { name: "Confirm event" })).not.toBeInTheDocument();
+});
+
+test.each([["organiser", "org-1"], ["manager", "manager-1"], ["coordinator", "coord-2"]])(
+  "[SCRUM-144-UI-012] AC1: the %s who is not the assigned coordinator sees no Confirm event section", async (scope, userId) => {
+    const { fetchMock } = setup(scope, { status: "PREPARATION", activity: [] }, { userId });
+
+    expect(await screen.findByRole("heading", { name: "Digital Literacy for Seniors" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Confirm event" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => url.includes("safety-readiness"))).toBe(false);
+  });
+
+test.each(["APPROVED", "SAFETY_REVIEW", "CONFIRMED"])("[SCRUM-144-UI-013] AC1: an event in %s offers no Confirm event section", async (status) => {
+  setup("coordinator", { status, activity: [] });
+
+  expect(await screen.findByRole("heading", { name: "Digital Literacy for Seniors" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Confirm event" })).not.toBeInTheDocument();
 });

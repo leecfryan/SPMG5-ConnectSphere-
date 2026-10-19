@@ -80,7 +80,7 @@ them in tests needs no credentials.
 
 ### Mount order matters
 
-`/api/events` is mounted twice: the Event Lifecycle router first (`POST /`), then Registration's `eventHandlers`
+`/api/events` is mounted twice: the Event Lifecycle router first (`POST /` and SCRUM-147's `/drafts[/:id[/submit]]`), then Registration's `eventHandlers`
 (`GET /registration-windows[/:eventId]`, `GET /`, `GET /:eventId`). A new static `GET /api/events/<name>` path must
 be declared before `/:eventId` swallows it. That is why staff event actions live under `/api/internal/events/…`
 and managed events under `/api/managed-events`. Inside any router, declare static paths before parameter paths.
@@ -140,9 +140,10 @@ and managed events under `/api/managed-events`. Inside any router, declare stati
 | Identity | `GET /api/auth/me` | authenticated |
 | Notification inbox identity | `GET /api/notifications/inbox-config` | authenticated; caller ID only, no role requirement |
 | Staff | `GET /api/internal/access` | `internal.access` |
-| Event requests | `POST /api/events` | `events.submit` |
+| Event requests | `POST /api/events`; `POST|GET /api/events/drafts`, `GET|PATCH /api/events/drafts/:id`, `POST /api/events/drafts/:id/submit` | `events.submit`; drafts scoped to `organiser_id = req.user.id` (others' drafts 404) |
 | Assignment | `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` | `internal.access` + `events.assign_coordinator` |
 | Review | `POST /api/internal/events/:eventId/{start-review,approve,reject}` | `internal.access` + `events.decide`; assigned coordinator only |
+| Confirmation | `POST /api/internal/events/:eventId/confirm`, `PATCH /api/internal/events/:eventId/arrangements/:kind/:requestId` | `internal.access` + `events.decide`; assigned coordinator only; confirm only from `PREPARATION` (SCRUM-144) |
 | Cancellation, postponement | `POST /api/internal/events/:eventId/cancel`, `POST /api/internal/events/:eventId/postpone` | `internal.access` + `events.cancel` / `events.postpone`; assigned coordinator or Event Coordinator Lead |
 | Safety check | `GET /api/internal/events/:eventId/safety-readiness`, `POST /api/internal/events/:eventId/{submit-safety-check,withdraw-safety-check}` | `internal.access` + `events.safety.submit`, assigned coordinator only |
 | Safety review | `GET /api/internal/safety-reviews`, `GET /api/internal/safety-reviews/:eventId` | `internal.access` + `events.safety.read` (Safety Officer); `SAFETY_REVIEW` events only |
@@ -220,6 +221,10 @@ shares the database.
   `markSubmitted`, `transitionStatus`, `cancel`, `postpone`, and `undoTransition`, which only reverts a safety
   decision whose history row failed), each guarded by the expected current status, and by `seedData.js`; never
   through `WRITABLE_COLS`.
+- `venue_booking_requests.is_essential` and `equipment_requests.is_essential` (SCRUM-144, boolean, default true):
+  written only by the Event Lifecycle lane's `setArrangementEssential`; a non-essential outstanding request does
+  not block the safety check or confirmation. SQL under SCRUM-144's *Schema reference* in
+  [../../docs/event-requests.md](../../docs/event-requests.md). `CONFIRMED` is reached only from `PREPARATION`.
 - `event_activity_log` (SCRUM-141): append-only event history (`user_id`, `action`, `details` jsonb); RLS on, no
   policies, and only `service_role` may select or insert. SQL in
   [../../docs/event-requests.md](../../docs/event-requests.md) under SCRUM-141's *Schema reference*.

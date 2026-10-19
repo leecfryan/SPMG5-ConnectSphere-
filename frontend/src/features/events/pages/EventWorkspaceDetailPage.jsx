@@ -13,6 +13,7 @@ import EventPostponeControl from "../components/EventPostponeControl";
 import EventPostponeSummary from "../components/EventPostponeSummary";
 import EventRequestForm from "../components/EventRequestForm";
 import SafetyCheckControls from "../components/SafetyCheckControls";
+import ConfirmEventControls from "../components/ConfirmEventControls";
 import StatusBadge from "../components/StatusBadge";
 import "../workspace.css";
 
@@ -54,6 +55,7 @@ function Detail({ scope, eventId }) {
       <EventActivityHistory activity={event.activity} />
       {scope === "coordinator" && event.coordinator_id === user.id && <EventDecisionControls event={event} onDecided={reload} />}
       {scope === "coordinator" && event.coordinator_id === user.id && <SafetyCheckControls key={event.status} event={event} onChanged={reload} />}
+      {scope === "coordinator" && event.coordinator_id === user.id && event.status === "PREPARATION" && <ConfirmEventControls event={event} onChanged={reload} />}
       {scope === "manager" && <EventReviewControls key={`${event.id}:${event.status}:${event.coordinator_id}`} event={event} onUpdated={reload} />}
       {scope === "coordinator" && event.coordinator_id === user.id && ["APPROVED", "CONFIRMED"].includes(event.status) && <nav className="event-actions" aria-label="Event arrangements">
         <Link to="/venues">Arrange venue bookings</Link>
