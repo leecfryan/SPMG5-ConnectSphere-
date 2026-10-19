@@ -35,6 +35,10 @@ enforces the same capability independently. `/api/events` browsing and
 their own role and record checks. Venue availability remains visible for planning
 but hides unrelated event names from coordinators.
 
+Drafts (SCRUM-147) are private to the organiser who saved them: the organiser workspace list excludes `DRAFT`
+for every organiser, the owner included, and drafts are reached only through `/api/events/drafts`, which answers
+404 for anyone else's. See [Event requests](event-requests.md#draft-event-requests-scrum-147).
+
 Tests must cover two coordinators, direct URL/API access to another assignment,
 multi-role accounts, manager-only assignment, revoked roles, and organisers'
 ownership. Test fixtures must not substitute for a production assignment API.

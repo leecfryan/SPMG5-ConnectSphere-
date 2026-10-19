@@ -112,6 +112,10 @@ test("[SCRUM-147-UI-007] AC3: submitting an opened draft submits that draft, not
   expect(await screen.findByRole("heading", { name: "Request submitted" })).toBeTruthy();
   expect(sent(fetchMock, "POST /api/events/drafts/draft-1/submit")).toMatchObject({ name: "Half-planned gala" });
   expect(fetchMock.mock.calls.some(([url]) => url === "/api/events")).toBe(false);
+
+  await user.click(screen.getByRole("button", { name: "Submit another request" }));
+  expect(await screen.findByText("NEW EVENT REQUEST")).toBeTruthy();
+  expect(screen.getByLabelText(/Event name/).value).toBe("");
 });
 
 test("[SCRUM-147-UI-008] AC2: an incomplete draft is not submitted; each missing field is shown and the draft stays open", async () => {

@@ -98,7 +98,10 @@ the agreed matrix, integration examples, tests and remaining work.
 
 Event Organisers can open `/events/new` through the workspace navigation. The
 frontend and backend both enforce `events.submit`; the API obtains ownership
-from the verified user. At `/my-event-requests`, organisers can edit responsible
+from the verified user. *Save draft* keeps an unfinished request that needs only
+a name; the organiser's drafts are listed under *Your drafts* on
+`/my-event-requests`, visible to no one else, and the full checks run when a
+draft is submitted (SCRUM-147). At `/my-event-requests`, organisers can edit responsible
 events and view colleagues’ events in their client organisation. Unrelated clients
 are hidden. Configure trusted organisation metadata using
 [the event access guide](docs/event-access.md#scrum-100-external-client-organiser-scope).
