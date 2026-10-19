@@ -82,7 +82,7 @@ test("[SCRUM-142-INT-003] legacy, canonical and duplicate roles combine without 
   expect(identity.user.accountTypes).toEqual(["internal", "external"]);
   expect(identity.permissions.sort()).toEqual([
     ...LEAD_PERMISSIONS, "bookings.decide", "bookings.read", "events.browse",
-    "registrations.manage", "venues.holds", "venues.read", "venues.unavailability", "venues.update",
+    "registrations.manage", "venues.conflicts", "venues.holds", "venues.read", "venues.unavailability", "venues.update",
   ].sort());
 });
 
@@ -207,7 +207,7 @@ test("[SCRUM-142-SAFETY-INT-003] Safety Officer combines with Venue Staff withou
   const identity = await (await send("/api/auth/me")).json();
   expect(identity.user.roles).toEqual(roles);
   expect(identity.permissions.sort()).toEqual([
-    "bookings.decide", "bookings.read", "events.safety.decide", "events.safety.read", "internal.access", "venues.holds", "venues.read", "venues.unavailability", "venues.update",
+    "bookings.decide", "bookings.read", "events.safety.decide", "events.safety.read", "internal.access", "venues.conflicts", "venues.holds", "venues.read", "venues.unavailability", "venues.update",
   ]);
 });
 

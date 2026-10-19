@@ -40,6 +40,10 @@ const policies = Object.freeze({
   "venues.unavailability": {
     roles: ["venue_staff"],
   },
+  // SCRUM-135: viewing conflict flags after a setup/turnaround change is Venue Staff work only.
+  "venues.conflicts": {
+    roles: ["venue_staff"],
+  },
   // SCRUM-146: placing and viewing tentative holds is Venue Staff work only.
   "venues.holds": {
     roles: ["venue_staff"],

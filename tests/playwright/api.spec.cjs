@@ -92,7 +92,7 @@ test('[API-RBAC-049] Combined roles return unique capabilities and removal immed
   const account = await accounts.create(['venue_staff', 'technical_support_staff', 'attendee', 'venue_staff']);
   const headers = bearer(await accounts.session(account));
   const identity = await request.get('/api/auth/me', { headers });
-  expect((await identity.json()).permissions).toEqual(['events.browse', 'registrations.manage', 'venues.update', 'venues.unavailability', 'venues.holds', 'bookings.decide', 'equipment.review', 'equipment.manage', 'equipment.messages', 'internal.access', 'venues.read', 'bookings.read', 'equipment.read', 'technical_requests.read']);
+  expect((await identity.json()).permissions).toEqual(['events.browse', 'registrations.manage', 'venues.update', 'venues.unavailability', 'venues.conflicts', 'venues.holds', 'bookings.decide', 'equipment.review', 'equipment.manage', 'equipment.messages', 'internal.access', 'venues.read', 'bookings.read', 'equipment.read', 'technical_requests.read']);
   const access = await request.get('/api/internal/access', { headers });
   expect(access.status()).toBe(200);
   expect((await access.json()).responsibilities.map((item) => item.permission)).toEqual(permissions.slice(0, 4));
@@ -228,7 +228,7 @@ test('[SCRUM-142-SAFETY-API-010] officer can accompany attendee and Venue Staff 
   const body = await (await request.get('/api/auth/me', { headers })).json();
   expect(body.user.roles).toEqual(['safety_officer', 'attendee', 'venue_staff']);
   expect(body.user.accountTypes).toEqual(['internal', 'external']);
-  expect(body.permissions.sort()).toEqual(['bookings.decide', 'bookings.read', 'events.browse', 'events.safety.decide', 'events.safety.read', 'internal.access', 'registrations.manage', 'venues.holds', 'venues.read', 'venues.unavailability', 'venues.update']);
+  expect(body.permissions.sort()).toEqual(['bookings.decide', 'bookings.read', 'events.browse', 'events.safety.decide', 'events.safety.read', 'internal.access', 'registrations.manage', 'venues.conflicts', 'venues.holds', 'venues.read', 'venues.unavailability', 'venues.update']);
   expect((await request.get('/api/venues', { headers })).status()).toBe(200);
   expect((await request.get('/api/event-workspace/manager', { headers })).status()).toBe(403);
   await accounts.update(account, { roles: ['safety_officer', 'attendee'] });

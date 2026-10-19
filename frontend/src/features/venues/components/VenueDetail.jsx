@@ -88,7 +88,7 @@ function Stat({ icon, label, value, unit }) {
   );
 }
 
-function VenueDetail({ venue, onBack, onEdit, onViewAvailability, onManageUnavailability, onManageHolds, canAssess }) {
+function VenueDetail({ venue, onBack, onEdit, onViewAvailability, onManageUnavailability, onManageHolds, onViewConflicts, canAssess }) {
   return (
     <div className="venue-detail">
       <button type="button" className="v-back" onClick={onBack}>
@@ -124,6 +124,13 @@ function VenueDetail({ venue, onBack, onEdit, onViewAvailability, onManageUnavai
           {onManageHolds && (
             <button type="button" className="v-btn v-btn-secondary" onClick={onManageHolds}>
               Manage holds
+            </button>
+          )}
+
+          {/* SCRUM-135: Venue Staff view conflict flags after a setup/turnaround change */}
+          {onViewConflicts && (
+            <button type="button" className="v-btn v-btn-secondary" onClick={onViewConflicts}>
+              View conflict flags
             </button>
           )}
 
