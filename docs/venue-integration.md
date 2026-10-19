@@ -120,7 +120,7 @@ is made by the Event Coordinator, so no counter-offer is applied automatically.
 
 Venue Staff can block a venue from accepting new bookings for a defined date range and a subset of slots (am, pm, night). New booking requests that overlap an unavailable slot are rejected with 409; existing confirmed bookings are unaffected.
 
-`POST /api/venues/:id/unavailability` — body: `{ start_date, end_date, slots[], reason }`. `start_date` and `end_date` are `YYYY-MM-DD`; `end_date` must not be before `start_date`. `slots` must be a non-empty subset of `["am", "pm", "night"]`. Returns 201 with the created period record.
+`POST /api/venues/:id/unavailability` — body: `{ start_date, end_date, slots[], reason }`. `start_date` and `end_date` are `YYYY-MM-DD`; `end_date` must not be before `start_date`. `slots` must be a non-empty subset of `["am", "pm", "night"]`. Returns 201 with `{ data: period, affected: [] }`. `affected` is the array of confirmed booking requests whose committed slots (including setup/turnaround buffer) overlap the new period — these are not modified (see SCRUM-136).
 
 `GET /api/venues/:id/unavailability` — returns 200 with the array of all period records for the venue, ordered by start date.
 
@@ -131,6 +131,8 @@ Venue Staff can block a venue from accepting new bookings for a defined date ran
 All four endpoints require `venues.unavailability`, held by Venue Staff only. The `created_by` field is set server-side from the verified session; it cannot be supplied in the request body.
 
 **How blocking works.** `listUnavailabilityInRange` reads from both `venue_unavailability` (legacy per-slot seed rows) and `venue_unavailability_periods` (new period records). Period records are expanded into per-slot rows matching the shape the availability calendar already reads. The calendar marks those slots `unavailable`, and `findSlotProblems` rejects any booking request that targets a non-`available`/`pending` slot.
+
+**Affected bookings (SCRUM-136).** After the period is created, `listAffectedBookingRequests(venueId, period, venue)` returns every confirmed booking request whose `booking_date` falls in the period's date range AND whose committed slots (expanded from confirmed slot rows via `committedSlots` with the venue's `setup_minutes`/`turnaround_minutes`) intersect the period's `slots`. The result is returned in `affected` alongside the created period; no booking is changed. Each entry in `affected` includes `event.coordinator_id` so the caller knows who to contact.
 
 ## Tentative venue holds (SCRUM-146)
 
