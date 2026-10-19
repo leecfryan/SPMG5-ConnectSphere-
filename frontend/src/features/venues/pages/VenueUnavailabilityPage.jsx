@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../../auth/useAuth";
 import {
   fetchUnavailabilityPeriods,
+  fetchAffectedBookings,
   createUnavailabilityPeriod,
   updateUnavailabilityPeriod,
   deleteUnavailabilityPeriod,
@@ -12,10 +13,21 @@ import { IconAlert, IconArrowLeft } from "../components/VenueIcons";
 const SLOT_LABELS = { am: "AM", pm: "PM", night: "Night" };
 const SLOT_ORDER = ["am", "pm", "night"];
 
-function PeriodRow({ period, onEdit, onDelete }) {
+function PeriodRow({ venueId, token, period, onEdit, onDelete }) {
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+  // SCRUM-136: keep the affected list accessible after the creation panel is
+  // dismissed or the page reloads — re-fetch on demand per period.
+  const [affected, setAffected] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    fetchAffectedBookings(venueId, period.id, token)
+      .then((res) => { if (active) setAffected(res.data); })
+      .catch(() => { if (active) setAffected([]); });
+    return () => { active = false; };
+  }, [venueId, period.id, token]);
 
   async function handleDelete() {
     setDeleting(true);
@@ -30,59 +42,79 @@ function PeriodRow({ period, onEdit, onDelete }) {
   }
 
   return (
-    <div className="v-card" style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ fontWeight: 600, marginBottom: 4 }}>{period.reason}</p>
-        <p style={{ color: "var(--v-text-muted)", fontSize: 14, marginBottom: 4 }}>
-          {period.start_date === period.end_date
-            ? period.start_date
-            : `${period.start_date} to ${period.end_date}`}
-          {" · "}
-          {period.slots.map((s) => SLOT_LABELS[s]).join(", ")}
-        </p>
-        {deleteError && (
-          <p className="v-alert v-alert-error" role="alert" style={{ marginTop: 8 }}>
-            <IconAlert />
-            <span>{deleteError}</span>
+    <div className="v-card">
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 16 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontWeight: 600, marginBottom: 4 }}>{period.reason}</p>
+          <p style={{ color: "var(--v-text-muted)", fontSize: 14, marginBottom: 4 }}>
+            {period.start_date === period.end_date
+              ? period.start_date
+              : `${period.start_date} to ${period.end_date}`}
+            {" · "}
+            {period.slots.map((s) => SLOT_LABELS[s]).join(", ")}
           </p>
-        )}
+          {deleteError && (
+            <p className="v-alert v-alert-error" role="alert" style={{ marginTop: 8 }}>
+              <IconAlert />
+              <span>{deleteError}</span>
+            </p>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+          {confirming ? (
+            <>
+              <button
+                type="button"
+                className="v-btn v-btn-secondary"
+                onClick={() => setConfirming(false)}
+                disabled={deleting}
+              >
+                Keep
+              </button>
+              <button
+                type="button"
+                className="v-btn v-btn-primary"
+                style={{ background: "var(--v-danger)", borderColor: "var(--v-danger)" }}
+                onClick={handleDelete}
+                disabled={deleting}
+              >
+                {deleting ? "Deleting…" : "Confirm delete"}
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="v-btn v-btn-secondary" onClick={() => onEdit(period)}>
+                Edit
+              </button>
+              <button
+                type="button"
+                className="v-btn v-btn-secondary"
+                onClick={() => setConfirming(true)}
+              >
+                Delete
+              </button>
+            </>
+          )}
+        </div>
       </div>
-      <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-        {confirming ? (
-          <>
-            <button
-              type="button"
-              className="v-btn v-btn-secondary"
-              onClick={() => setConfirming(false)}
-              disabled={deleting}
-            >
-              Keep
-            </button>
-            <button
-              type="button"
-              className="v-btn v-btn-primary"
-              style={{ background: "var(--v-danger)", borderColor: "var(--v-danger)" }}
-              onClick={handleDelete}
-              disabled={deleting}
-            >
-              {deleting ? "Deleting…" : "Confirm delete"}
-            </button>
-          </>
-        ) : (
-          <>
-            <button type="button" className="v-btn v-btn-secondary" onClick={() => onEdit(period)}>
-              Edit
-            </button>
-            <button
-              type="button"
-              className="v-btn v-btn-secondary"
-              onClick={() => setConfirming(true)}
-            >
-              Delete
-            </button>
-          </>
-        )}
-      </div>
+      {affected && affected.length > 0 && (
+        <div style={{ marginTop: 12, borderTop: "1px solid var(--v-border)", paddingTop: 12 }}>
+          <p style={{ fontSize: 13, color: "var(--v-text-muted)", marginBottom: 8 }}>
+            {affected.length} confirmed booking{affected.length !== 1 ? "s" : ""} overlap this period — contact the assigned coordinator to arrange alternatives.
+          </p>
+          {affected.map((r) => {
+            const slotLabel = SLOT_ORDER
+              .filter((s) => r.slots.some((sl) => sl.slot === s && sl.status === "confirmed"))
+              .map((s) => SLOT_LABELS[s]).join(", ");
+            return (
+              <div key={r.id} style={{ paddingTop: 8, borderTop: "1px solid var(--v-border)" }}>
+                <p style={{ fontWeight: 600, marginBottom: 4 }}>{r.event.name}</p>
+                <p style={{ color: "var(--v-text-muted)", fontSize: 14 }}>{r.booking_date} · {slotLabel}</p>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -269,6 +301,8 @@ function VenueUnavailabilityPage({ venue, onBack }) {
               {periods.map((p) => (
                 <PeriodRow
                   key={p.id}
+                  venueId={venue.id}
+                  token={token}
                   period={p}
                   onEdit={(period) => { setSaveError(null); setMode({ edit: period }); }}
                   onDelete={handleDelete}

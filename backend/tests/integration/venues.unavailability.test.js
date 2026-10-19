@@ -392,6 +392,43 @@ test("[TC-SCRUM-136-06] Event Coordinator cannot create a period (403 — affect
   expect(service.listAffectedBookingRequests).not.toHaveBeenCalled();
 });
 
+// ---------------------------------------------------------------------------
+// SCRUM-136: GET /unavailability/:periodId/affected
+// ---------------------------------------------------------------------------
+
+test("[TC-SCRUM-136-12] GET affected returns 200 with empty array when no bookings overlap", async () => {
+  service.listAffectedBookingRequests.mockResolvedValue([]);
+  const res = await send(`/${venueId}/unavailability/${periodId}/affected`, "venue_staff");
+  expect(res.status).toBe(200);
+  const json = await res.json();
+  expect(Array.isArray(json.data)).toBe(true);
+  expect(json.data).toHaveLength(0);
+  expect(service.listAffectedBookingRequests).toHaveBeenCalledWith(venueId, period, venue);
+});
+
+test("[TC-SCRUM-136-13] GET affected returns confirmed booking requests that overlap the period", async () => {
+  service.listAffectedBookingRequests.mockResolvedValue([affectedRequest]);
+  const res = await send(`/${venueId}/unavailability/${periodId}/affected`, "venue_staff");
+  expect(res.status).toBe(200);
+  const json = await res.json();
+  expect(json.data).toHaveLength(1);
+  expect(json.data[0].id).toBe(affectedRequest.id);
+  expect(json.data[0].event.coordinator_id).toBe(coordinatorId);
+});
+
+test("[TC-SCRUM-136-14] GET affected returns 404 when the period does not exist", async () => {
+  service.getUnavailabilityPeriodById.mockResolvedValue(null);
+  const res = await send(`/${venueId}/unavailability/${periodId}/affected`, "venue_staff");
+  expect(res.status).toBe(404);
+  expect(service.listAffectedBookingRequests).not.toHaveBeenCalled();
+});
+
+test("[TC-SCRUM-136-15] Event Coordinator cannot fetch affected bookings (403)", async () => {
+  const res = await send(`/${venueId}/unavailability/${periodId}/affected`, "event_coordinator");
+  expect(res.status).toBe(403);
+  expect(service.listAffectedBookingRequests).not.toHaveBeenCalled();
+});
+
 test("[TC-SCRUM-133-21] Create period blocks booking, delete period restores availability", async () => {
   // Step 1: slot is unavailable — booking request is refused
   service.listUnavailabilityInRange.mockResolvedValue([

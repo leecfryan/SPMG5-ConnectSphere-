@@ -117,5 +117,8 @@ module.exports = function venueStorage(accounts) {
       holds.push(...rows);
       return rows;
     },
+    // SCRUM-135: no-op in fake storage — conflict flag updates rely on Supabase
+    // queries (getSupabase()) that have no in-memory equivalent here.
+    async recheckConflictsAfterUpdate() {},
   };
 };

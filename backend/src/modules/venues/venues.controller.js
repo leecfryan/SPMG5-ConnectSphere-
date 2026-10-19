@@ -760,6 +760,24 @@ function createVenuesController(service) {
     }
   }
 
+  // SCRUM-136: re-fetch affected bookings for an existing period so the list
+  // remains accessible after the creation panel is dismissed or the page reloads.
+  async function getUnavailabilityPeriodAffected(req, res, next) {
+    try {
+      const { id, periodId } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+      if (!UUID_PATTERN.test(periodId)) return res.status(400).json({ error: "Invalid period id" });
+      const venue = await getVenueById(id);
+      if (!venue) return res.status(404).json({ error: "Venue not found" });
+      const period = await getUnavailabilityPeriodById(periodId, id);
+      if (!period) return res.status(404).json({ error: "Unavailability period not found" });
+      const affected = await listAffectedBookingRequests(id, period, venue);
+      res.status(200).json({ data: affected });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // SCRUM-146: venue holds
   // ---------------------------------------------------------------------------
@@ -841,6 +859,7 @@ function createVenuesController(service) {
     postUnavailabilityPeriod,
     patchUnavailabilityPeriod,
     deleteUnavailabilityPeriod,
+    getUnavailabilityPeriodAffected,
     postHold,
     getHolds,
   };

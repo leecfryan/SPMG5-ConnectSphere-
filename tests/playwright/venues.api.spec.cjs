@@ -169,3 +169,46 @@ test('[TC-SCRUM-136-11] Creating a period does not cancel or modify affected boo
   const { data: readBack } = await getResp.json();
   expect(readBack.slots.every(s => s.status === 'confirmed')).toBe(true);
 });
+
+test('[TC-SCRUM-136-16] GET affected returns the same confirmed booking that POST returned at creation', async ({ accounts, request }) => {
+  const date = futureDate(92);
+  const { staffSession } = await setupConfirmedBooking(accounts, request, { bookingDate: date, slot: 'am' });
+
+  const postRes = await request.post(`/api/venues/${venueId}/unavailability`, {
+    headers: { Authorization: 'Bearer ' + staffSession.access_token },
+    data: { start_date: date, end_date: date, slots: ['am'], reason: 'Test' },
+  });
+  expect(postRes.status()).toBe(201);
+  const { data: period, affected: postAffected } = await postRes.json();
+
+  const getRes = await request.get(`/api/venues/${venueId}/unavailability/${period.id}/affected`, {
+    headers: { Authorization: 'Bearer ' + staffSession.access_token },
+  });
+  expect(getRes.status()).toBe(200);
+  const { data: getAffected } = await getRes.json();
+
+  // The GET returns at least the same booking that POST flagged.
+  expect(getAffected.length).toBeGreaterThanOrEqual(postAffected.length);
+  const postIds = postAffected.map(r => r.id);
+  for (const id of postIds) {
+    expect(getAffected.some(r => r.id === id)).toBe(true);
+  }
+});
+
+test('[TC-SCRUM-136-17] GET affected returns empty when no confirmed bookings overlap', async ({ accounts, request }) => {
+  const staff = await accounts.create(['venue_staff']);
+  const staffSession = await accounts.session(staff);
+
+  const postRes = await request.post(`/api/venues/${venueId}/unavailability`, {
+    headers: { Authorization: 'Bearer ' + staffSession.access_token },
+    data: { start_date: futureDate(96), end_date: futureDate(96), slots: ['night'], reason: 'Test' },
+  });
+  expect(postRes.status()).toBe(201);
+  const { data: period } = await postRes.json();
+
+  const getRes = await request.get(`/api/venues/${venueId}/unavailability/${period.id}/affected`, {
+    headers: { Authorization: 'Bearer ' + staffSession.access_token },
+  });
+  expect(getRes.status()).toBe(200);
+  expect((await getRes.json()).data).toHaveLength(0);
+});

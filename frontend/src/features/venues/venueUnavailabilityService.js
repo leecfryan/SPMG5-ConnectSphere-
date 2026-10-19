@@ -9,6 +9,12 @@ export function createUnavailabilityPeriod(venueId, data, token) {
   return apiFetch(`/api/venues/${venueId}/unavailability`, token, { method: "POST", body: data });
 }
 
+// SCRUM-136: re-fetch affected bookings for an existing period (same overlap
+// logic as POST, so the list stays current after the creation panel is dismissed).
+export function fetchAffectedBookings(venueId, periodId, token) {
+  return apiFetch(`/api/venues/${venueId}/unavailability/${periodId}/affected`, token);
+}
+
 export function updateUnavailabilityPeriod(venueId, periodId, changes, token) {
   return apiFetch(`/api/venues/${venueId}/unavailability/${periodId}`, token, { method: "PATCH", body: changes });
 }

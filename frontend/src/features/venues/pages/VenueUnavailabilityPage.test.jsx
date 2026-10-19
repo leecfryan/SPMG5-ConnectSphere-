@@ -12,6 +12,7 @@ vi.mock("../venueUnavailabilityService");
 
 import {
   fetchUnavailabilityPeriods,
+  fetchAffectedBookings,
   createUnavailabilityPeriod,
 } from "../venueUnavailabilityService";
 
@@ -74,6 +75,7 @@ test("[TC-SCRUM-136-UI-01] affected bookings are shown after period creation wit
 test("[TC-SCRUM-136-UI-02] no affected bookings: returns to list without showing affected panel", async () => {
   fetchUnavailabilityPeriods.mockResolvedValue({ data: [] });
   createUnavailabilityPeriod.mockResolvedValue({ data: PERIOD, affected: [] });
+  fetchAffectedBookings.mockResolvedValue({ data: [] });
 
   render(<VenueUnavailabilityPage venue={VENUE} onBack={() => {}} />);
   await openFormAndSubmit();
@@ -87,6 +89,9 @@ test("[TC-SCRUM-136-UI-02] no affected bookings: returns to list without showing
 test("[TC-SCRUM-136-UI-03] Done button returns to the period list after viewing affected bookings", async () => {
   fetchUnavailabilityPeriods.mockResolvedValue({ data: [] });
   createUnavailabilityPeriod.mockResolvedValue({ data: PERIOD, affected: [AFFECTED_REQUEST] });
+  // Return empty from the GET so the creation panel header is the only place
+  // "Annual Conference" appears — its absence after Done confirms the panel closed.
+  fetchAffectedBookings.mockResolvedValue({ data: [] });
 
   render(<VenueUnavailabilityPage venue={VENUE} onBack={() => {}} />);
   await openFormAndSubmit();
@@ -117,4 +122,16 @@ test("[TC-SCRUM-136-UI-04] plural wording used for multiple affected bookings", 
   expect(screen.getByText(/2 confirmed bookings overlap this period/)).toBeTruthy();
   expect(screen.getByText("Annual Conference")).toBeTruthy();
   expect(screen.getByText("Workshop")).toBeTruthy();
+});
+
+test("[TC-SCRUM-136-UI-05] period list shows affected bookings fetched from the API after Done or reload", async () => {
+  fetchUnavailabilityPeriods.mockResolvedValue({ data: [PERIOD] });
+  fetchAffectedBookings.mockResolvedValue({ data: [AFFECTED_REQUEST] });
+
+  render(<VenueUnavailabilityPage venue={VENUE} onBack={() => {}} />);
+
+  // The period appears in the list and the affected booking is shown beneath it.
+  expect(await screen.findByText("Maintenance")).toBeTruthy();
+  expect(await screen.findByText("Annual Conference")).toBeTruthy();
+  expect(await screen.findByText(/1 confirmed booking overlap this period/)).toBeTruthy();
 });
