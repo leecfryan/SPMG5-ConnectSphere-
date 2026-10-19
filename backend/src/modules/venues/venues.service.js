@@ -1,6 +1,6 @@
 // Lazy construction keeps sign-in available when venue storage is not configured.
 const getSupabase = () => require("../../supabase");
-const { eachDateInRange } = require("./venues.availability");
+const { eachDateInRange, committedSlots } = require("./venues.availability");
 const { PLANNING_STATUSES } = require("../events/lifecycle");
 const { findBufferConflicts } = require("./venues.conflicts");
 
@@ -163,7 +163,7 @@ const BOOKING_REQUEST_FIELDS = [
   "decided_at",
   "decision_note",
   "venue:venues!venue_id(id, name, city, country, capacity)",
-  "event:events!event_id!inner(id, name, status, start_time, end_time)",
+  "event:events!event_id!inner(id, name, status, start_time, end_time, coordinator_id)",
   "slots:venue_bookings!request_id(slot, status)",
 ].join(", ");
 
@@ -303,6 +303,52 @@ async function decideBookingRequest(requestId, decision, note, decidedBy) {
     const conflict = new Error(`Failed to decide booking request: ${error.message}`);
     conflict.code = error.code;
     throw conflict;
+  }
+  return data;
+}
+
+// SCRUM-154 AC2/AC4: changes one booking's date and non-slot details, and
+// re-flags it to pending, logging the change, in one transaction. Slots are
+// not a param here - out of scope by decision; a date change carries the
+// booking's existing slots over to the new date unchanged (the SQL function
+// reads them itself, the caller never supplies them). Unlike decideBookingRequest
+// this throws rather than returning null on a missing or non-live request,
+// because the controller has to tell those two cases apart (404 vs 409) and a
+// bare null cannot carry which one happened - see change_venue_booking_request's
+// REQUEST_NOT_FOUND (P0002) and NOT_LIVE (P0003) errcodes.
+async function changeBookingRequest(requestId, userId, value) {
+  const { data, error } = await getSupabase().rpc("change_venue_booking_request", {
+    p_request_id: requestId,
+    p_user_id: userId,
+    p_booking_date: value.booking_date,
+    p_expected_attendees: value.expected_attendees,
+    p_room_layout: value.room_layout,
+    p_required_facilities: value.required_facilities,
+    p_accessibility_requirements: value.accessibility_requirements,
+    p_additional_requirements: value.additional_requirements,
+  });
+
+  if (error) {
+    const mapped = new Error(`Failed to change booking request: ${error.message}`);
+    mapped.code = error.code;
+    throw mapped;
+  }
+  return data;
+}
+
+// SCRUM-154 AC1/AC3/AC4: cancels one booking's live slots and logs it, without
+// touching the event's other venue bookings. Same error-code shape as
+// changeBookingRequest above.
+async function cancelBookingRequest(requestId, userId) {
+  const { data, error } = await getSupabase().rpc("cancel_venue_booking_request", {
+    p_request_id: requestId,
+    p_user_id: userId,
+  });
+
+  if (error) {
+    const mapped = new Error(`Failed to cancel booking request: ${error.message}`);
+    mapped.code = error.code;
+    throw mapped;
   }
   return data;
 }
@@ -524,6 +570,31 @@ async function listConflictingRequests(venueId) {
   return data;
 }
 
+// SCRUM-136: confirmed booking requests whose committed slots (including setup /
+// turnaround buffer) overlap the slots of a newly created unavailability period.
+// Only confirmed slot rows are checked — pending requests are not yet scheduled.
+// AC4: no data is modified; this is a read-only query.
+async function listAffectedBookingRequests(venueId, period, venue) {
+  const { data, error } = await getSupabase()
+    .from("venue_booking_requests")
+    .select(BOOKING_REQUEST_FIELDS)
+    .eq("venue_id", venueId)
+    .gte("booking_date", period.start_date)
+    .lte("booking_date", period.end_date);
+  if (error) throw new Error(`Failed to list booking requests in range: ${error.message}`);
+
+  const periodSlotSet = new Set(period.slots);
+
+  return data.filter((request) => {
+    const confirmedSlots = request.slots
+      .filter((s) => s.status === "confirmed")
+      .map((s) => s.slot);
+    if (confirmedSlots.length === 0) return false;
+    const expanded = committedSlots(confirmedSlots, venue.setup_minutes, venue.turnaround_minutes);
+    return expanded.some((slot) => periodSlotSet.has(slot));
+  });
+}
+
 module.exports = {
   listVenues,
   listBookingsForVenuesOnDate,
@@ -540,6 +611,8 @@ module.exports = {
   getBookingRequestById,
   listBookingRequests,
   decideBookingRequest,
+  changeBookingRequest,
+  cancelBookingRequest,
   releaseBookingsForCancelledEvent,
   createUnavailabilityPeriod,
   listUnavailabilityPeriods,
@@ -549,6 +622,7 @@ module.exports = {
   listFutureVenueBookings,
   recheckConflictsAfterUpdate,
   listConflictingRequests,
+  listAffectedBookingRequests,
   listActiveHoldsInRange,
   listHolds,
   createHold,

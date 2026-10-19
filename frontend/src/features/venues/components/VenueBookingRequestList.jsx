@@ -1,7 +1,15 @@
 import { useAuth } from "../../auth/useAuth";
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router";
-import { decideBookingRequest, fetchBookingRequests, fetchVenueBookingChecks } from "../../../lib/api";
+import {
+  cancelBookingRequest,
+  changeBookingRequest,
+  decideBookingRequest,
+  fetchBookingRequests,
+  fetchVenueBookingChecks,
+  fetchVenueById,
+} from "../../../lib/api";
+import ChipToggleGroup from "./ChipToggleGroup";
 import {
   IconAlert,
   IconArrowLeft,
@@ -197,7 +205,248 @@ function DecisionPanel({ request, onDecided }) {
   );
 }
 
-function RequestCard({ request, canDecide, onDecided }) {
+// SCRUM-154. Shown only to the assigned coordinator who holds bookings.manage,
+// and only while the booking still has something live to release. Cancel is
+// final - there is no undo - so this asks for a second click before it writes
+// anything, same shape as DecisionPanel's rejection step.
+function CancelPanel({ request, onCancelled }) {
+  const { token } = useAuth();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  function cancel() {
+    setBusy(true);
+    setError(null);
+
+    cancelBookingRequest(request.id, token)
+      .then(onCancelled)
+      .catch((err) => setError(err.message))
+      .finally(() => setBusy(false));
+  }
+
+  if (!confirming) {
+    return (
+      <div className="v-decision-actions">
+        <button type="button" className="v-btn v-btn-danger" onClick={() => setConfirming(true)}>
+          Cancel this booking
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="v-decision">
+      <p className="v-alert v-alert-error" role="alert">
+        <IconAlert />
+        <span>
+          This releases the booking's period and cannot be undone. The event's other venue
+          bookings are not affected.
+        </span>
+      </p>
+      {error && (
+        <p className="v-alert v-alert-error" role="alert">
+          <IconAlert />
+          <span>{error}</span>
+        </p>
+      )}
+      <div className="v-decision-actions">
+        <button
+          type="button"
+          className="v-btn v-btn-secondary"
+          onClick={() => { setConfirming(false); setError(null); }}
+          disabled={busy}
+        >
+          Never mind
+        </button>
+        <button type="button" className="v-btn v-btn-danger" onClick={cancel} disabled={busy}>
+          {busy ? "Cancelling..." : "Confirm cancellation"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function toggleItem(list, item) {
+  return list.includes(item) ? list.filter((existing) => existing !== item) : [...list, item];
+}
+
+// SCRUM-154 AC2. Shown only to the assigned coordinator, and only while the
+// booking still has something live to change. Slot selection is out of scope
+// by decision: moving the date carries the booking's existing slots over
+// unchanged, so there is nothing to pick here - only a date field, plus the
+// same non-slot fields the create form offers.
+function EditPanel({ request, onChanged }) {
+  const { token } = useAuth();
+  const [editing, setEditing] = useState(false);
+  const [venueDetail, setVenueDetail] = useState(null);
+  const [venueError, setVenueError] = useState(null);
+
+  const [bookingDate, setBookingDate] = useState(request.booking_date);
+  const [attendees, setAttendees] = useState(String(request.expected_attendees));
+  const [roomLayout, setRoomLayout] = useState(request.room_layout);
+  const [facilities, setFacilities] = useState(request.required_facilities || []);
+  const [accessibility, setAccessibility] = useState(request.accessibility_requirements || []);
+  const [additional, setAdditional] = useState(request.additional_requirements || "");
+
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!editing || venueDetail || venueError) return;
+    fetchVenueById(request.venue.id, token)
+      .then(setVenueDetail)
+      .catch((err) => setVenueError(err.message));
+  }, [editing, venueDetail, venueError, request.venue.id, token]);
+
+  function startEditing() {
+    setBookingDate(request.booking_date);
+    setAttendees(String(request.expected_attendees));
+    setRoomLayout(request.room_layout);
+    setFacilities(request.required_facilities || []);
+    setAccessibility(request.accessibility_requirements || []);
+    setAdditional(request.additional_requirements || "");
+    setError(null);
+    setEditing(true);
+  }
+
+  function save() {
+    setBusy(true);
+    setError(null);
+
+    changeBookingRequest(request.id, {
+      booking_date: bookingDate,
+      expected_attendees: Number(attendees),
+      room_layout: roomLayout,
+      required_facilities: facilities,
+      accessibility_requirements: accessibility,
+      additional_requirements: additional.trim() === "" ? null : additional.trim(),
+    }, token)
+      .then(() => { setEditing(false); onChanged(); })
+      .catch((err) => setError(err.message))
+      .finally(() => setBusy(false));
+  }
+
+  if (!editing) {
+    return (
+      <div className="v-decision-actions">
+        <button type="button" className="v-btn v-btn-secondary" onClick={startEditing}>
+          Edit this booking
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="v-decision">
+      <p className="v-hint">Saving sends this booking back to Venue Staff for review.</p>
+
+      {venueError && (
+        <p className="v-alert v-alert-error" role="alert">
+          <IconAlert />
+          <span>Could not load this venue's requirements: {venueError}</span>
+        </p>
+      )}
+      {error && (
+        <p className="v-alert v-alert-error" role="alert">
+          <IconAlert />
+          <span>{error}</span>
+        </p>
+      )}
+
+      {!venueDetail && !venueError && <p className="v-loading-line">Loading venue requirements...</p>}
+
+      {venueDetail && (
+        <div className="v-form-grid">
+          <label className="v-field">
+            <span className="v-label">Date</span>
+            <input
+              className="v-input"
+              type="date"
+              value={bookingDate}
+              onChange={(e) => setBookingDate(e.target.value)}
+            />
+          </label>
+
+          <label className="v-field">
+            <span className="v-label">Expected attendees</span>
+            <input
+              className="v-input"
+              type="number"
+              min="1"
+              max={venueDetail.capacity}
+              value={attendees}
+              onChange={(e) => setAttendees(e.target.value)}
+            />
+          </label>
+
+          <label className="v-field">
+            <span className="v-label">Room layout</span>
+            <select
+              className="v-input"
+              value={roomLayout}
+              onChange={(e) => setRoomLayout(e.target.value)}
+            >
+              {venueDetail.room_layouts.map((layout) => (
+                <option key={layout} value={layout}>{layout}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+
+      {venueDetail && (
+        <>
+          <ChipToggleGroup
+            legend="Facilities needed"
+            options={venueDetail.facilities}
+            selected={facilities}
+            onToggle={(item) => setFacilities((current) => toggleItem(current, item))}
+            emptyLabel="None recorded for this venue"
+          />
+          <ChipToggleGroup
+            legend="Accessibility needed"
+            options={venueDetail.accessibility_features}
+            selected={accessibility}
+            onToggle={(item) => setAccessibility((current) => toggleItem(current, item))}
+            emptyLabel="None recorded for this venue"
+          />
+
+          <label className="v-field">
+            <span className="v-label">Anything else Venue Staff should know</span>
+            <textarea
+              className="v-input"
+              rows="3"
+              value={additional}
+              onChange={(e) => setAdditional(e.target.value)}
+            />
+          </label>
+        </>
+      )}
+
+      <div className="v-decision-actions">
+        <button
+          type="button"
+          className="v-btn v-btn-secondary"
+          onClick={() => setEditing(false)}
+          disabled={busy}
+        >
+          Discard changes
+        </button>
+        <button
+          type="button"
+          className="v-btn v-btn-primary"
+          onClick={save}
+          disabled={busy || !venueDetail}
+        >
+          {busy ? "Saving..." : "Save changes"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RequestCard({ request, canDecide, canManage, onDecided, onCancelled, onChanged }) {
   const hasTiming = Boolean(request.event.start_time && request.event.end_time);
 
   return (
@@ -289,6 +538,14 @@ function RequestCard({ request, canDecide, onDecided }) {
         </div>
       )}
 
+      {/* SCRUM-154: only the assigned coordinator, and only while live */}
+      {canManage && ["pending", "confirmed"].includes(request.status) && (
+        <div className="v-request-body">
+          <EditPanel request={request} onChanged={onChanged} />
+          <CancelPanel request={request} onCancelled={onCancelled} />
+        </div>
+      )}
+
       {request.decided_at && (
         <div className="v-request-body">
           <p className="v-subheading">Decision</p>
@@ -315,6 +572,7 @@ function VenueBookingRequestList({ onBack }) {
   const [searchParams] = useSearchParams();
   const eventId = searchParams.get("event") || searchParams.get("event_id");
   const canDecide = hasPermission("bookings.decide");
+  const canManage = hasPermission("bookings.manage");
   const [status, setStatus] = useState(eventId ? "" : "pending");
   const [result, setResult] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -467,7 +725,10 @@ function VenueBookingRequestList({ onBack }) {
                 key={request.id}
                 request={request}
                 canDecide={canDecide}
+                canManage={canManage}
                 onDecided={() => setRefreshKey((key) => key + 1)}
+                onCancelled={() => setRefreshKey((key) => key + 1)}
+                onChanged={() => setRefreshKey((key) => key + 1)}
               />
             ))}
           </div>

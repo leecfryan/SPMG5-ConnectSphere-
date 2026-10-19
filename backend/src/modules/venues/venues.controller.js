@@ -4,6 +4,7 @@ const {
   VENUE_TIME_ZONE,
   localDateInTimeZone,
   validateBookingRequestShape,
+  validateChangeRequestShape,
   validateAgainstVenue,
   validateAgainstEvent,
   findSlotProblems,
@@ -13,6 +14,7 @@ const {
   REQUESTABLE_STATUSES,
   assessVenueSuitability,
 } = require("./venues.bookingRequests.validation");
+const { PLANNING_STATUSES } = require("../events/lifecycle");
 const {
   SLOTS,
   MAX_RANGE_DAYS,
@@ -64,6 +66,8 @@ function createVenuesController(service) {
     getBookingRequestById,
     listBookingRequests,
     decideBookingRequest,
+    changeBookingRequest,
+    cancelBookingRequest,
     createUnavailabilityPeriod,
     listUnavailabilityPeriods,
     getUnavailabilityPeriodById,
@@ -71,6 +75,7 @@ function createVenuesController(service) {
     deleteUnavailabilityPeriod: removePeriod,
     recheckConflictsAfterUpdate,
     listConflictingRequests,
+    listAffectedBookingRequests,
     listActiveHoldsInRange,
     listHolds,
     createHold,
@@ -684,6 +689,147 @@ function createVenuesController(service) {
   }
 
   // ---------------------------------------------------------------------------
+  // SCRUM-154: a coordinator changes or cancels one of their own booking
+  // requests, without touching the event's other venue bookings.
+  //
+  // Both handlers load the request under the same coordinator-scoped query
+  // getBookingRequest/getBookingRequests already use (req.bookingScope), so a
+  // wrong or missing id answers 404 either way - the query itself decides
+  // what is "theirs," the same masking this lane already relies on elsewhere.
+  // ---------------------------------------------------------------------------
+
+  const EVENT_NOT_READY = {
+    error: "This event is not accepting venue booking changes right now",
+  };
+
+  function notLive(res) {
+    return res.status(409).json({ error: "This booking is no longer live" });
+  }
+
+  // SCRUM-154 AC2: change one booking's date and non-slot details (attendees,
+  // room layout, facilities, accessibility, additional requirements). Slot
+  // selection is out of scope by decision - a date change carries the
+  // booking's existing slots over to the new date unchanged, so there is
+  // nothing for the coordinator to pick; only a date move needs an
+  // availability check at all, since an unchanged date already holds (or
+  // contests) exactly what it did before.
+  async function patchBookingRequest(req, res, next) {
+    try {
+      const { requestId } = req.params;
+      if (!UUID_PATTERN.test(requestId)) {
+        return res.status(400).json({ error: "Invalid booking request id" });
+      }
+
+      const { errors, value } = validateChangeRequestShape(req.body);
+      if (errors.length > 0) {
+        return res.status(400).json({ error: "Validation failed", details: errors });
+      }
+
+      const existing = await getBookingRequestById(requestId, req.bookingScope);
+      if (!existing) {
+        return res.status(404).json({ error: "Booking request not found" });
+      }
+
+      if (!PLANNING_STATUSES.includes(existing.event.status)) {
+        return res.status(409).json(EVENT_NOT_READY);
+      }
+
+      const venue = await getVenueById(existing.venue.id);
+      if (!venue) {
+        return res.status(404).json({ error: "Venue not found" });
+      }
+
+      const today = localDateInTimeZone(new Date(), VENUE_TIME_ZONE);
+      const contextErrors = [
+        ...validateAgainstVenue(value, venue),
+        ...validateAgainstEvent(value, existing.event, today),
+      ];
+      if (contextErrors.length > 0) {
+        return res.status(400).json({ error: "Validation failed", details: contextErrors });
+      }
+
+      if (value.booking_date !== existing.booking_date) {
+        const liveSlots = (existing.slots || [])
+          .filter((row) => ["pending", "confirmed"].includes(row.status))
+          .map((row) => row.slot);
+        const [slotRows, unavailability, holds] = await Promise.all([
+          listSlotRowsForDate(venue.id, value.booking_date),
+          listUnavailabilityInRange(venue.id, value.booking_date, value.booking_date),
+          listActiveHoldsInRange(venue.id, value.booking_date, value.booking_date),
+        ]);
+        const [calendarDay] = buildAvailabilityCalendar({
+          operatingHours: venue.operating_hours,
+          bookings: slotRows.map((row) => ({ ...row, event_name: "Reserved event" })),
+          unavailability,
+          holds,
+          from: value.booking_date,
+          to: value.booking_date,
+        });
+        const { conflicts, duplicates } = findSlotProblems(
+          { slots: liveSlots },
+          calendarDay,
+          slotRows,
+          existing.event.id,
+          venue
+        );
+        if (conflicts.length > 0 || duplicates.length > 0) {
+          return res.status(409).json({
+            error: "The new date is not available for this booking's slots",
+            details: [...conflicts, ...duplicates],
+          });
+        }
+      }
+
+      let changedId;
+      try {
+        changedId = await changeBookingRequest(requestId, req.user.id, value);
+      } catch (err) {
+        if (err.code === "P0002") return res.status(404).json({ error: "Booking request not found" });
+        if (err.code === "P0003") return notLive(res);
+        throw err;
+      }
+
+      const updated = await getBookingRequestById(changedId, req.bookingScope);
+      res.status(200).json({ data: withStatus(updated) });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // SCRUM-154 AC1/AC3: cancel one booking, releasing its live slots, without
+  // touching the event's other venue bookings.
+  async function patchBookingRequestCancel(req, res, next) {
+    try {
+      const { requestId } = req.params;
+      if (!UUID_PATTERN.test(requestId)) {
+        return res.status(400).json({ error: "Invalid booking request id" });
+      }
+
+      const existing = await getBookingRequestById(requestId, req.bookingScope);
+      if (!existing) {
+        return res.status(404).json({ error: "Booking request not found" });
+      }
+
+      if (!PLANNING_STATUSES.includes(existing.event.status)) {
+        return res.status(409).json(EVENT_NOT_READY);
+      }
+
+      try {
+        await cancelBookingRequest(requestId, req.user.id);
+      } catch (err) {
+        if (err.code === "P0002") return res.status(404).json({ error: "Booking request not found" });
+        if (err.code === "P0003") return notLive(res);
+        throw err;
+      }
+
+      const cancelled = await getBookingRequestById(requestId, req.bookingScope);
+      res.status(200).json({ data: withStatus(cancelled) });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // SCRUM-133: venue unavailability periods
   // ---------------------------------------------------------------------------
 
@@ -709,7 +855,11 @@ function createVenuesController(service) {
       const venue = await getVenueById(id);
       if (!venue) return res.status(404).json({ error: "Venue not found" });
       const period = await createUnavailabilityPeriod(id, value, req.user.id);
-      res.status(201).json({ data: period });
+      // SCRUM-136: identify confirmed bookings that now overlap the unavailability
+      // period (including setup/turnaround buffer) so the caller can arrange alternatives.
+      // AC4: read-only — no booking is modified.
+      const affected = await listAffectedBookingRequests(id, period, venue);
+      res.status(201).json({ data: period, affected });
     } catch (err) {
       next(err);
     }
@@ -750,6 +900,24 @@ function createVenuesController(service) {
       const deleted = await removePeriod(periodId, id);
       if (!deleted) return res.status(404).json({ error: "Unavailability period not found" });
       res.status(204).end();
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // SCRUM-136: re-fetch affected bookings for an existing period so the list
+  // remains accessible after the creation panel is dismissed or the page reloads.
+  async function getUnavailabilityPeriodAffected(req, res, next) {
+    try {
+      const { id, periodId } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+      if (!UUID_PATTERN.test(periodId)) return res.status(400).json({ error: "Invalid period id" });
+      const venue = await getVenueById(id);
+      if (!venue) return res.status(404).json({ error: "Venue not found" });
+      const period = await getUnavailabilityPeriodById(periodId, id);
+      if (!period) return res.status(404).json({ error: "Unavailability period not found" });
+      const affected = await listAffectedBookingRequests(id, period, venue);
+      res.status(200).json({ data: affected });
     } catch (err) {
       next(err);
     }
@@ -832,10 +1000,13 @@ function createVenuesController(service) {
     getEventBookingChecks,
     patchBookingRequestDecision,
     getConflictFlags,
+    patchBookingRequest,
+    patchBookingRequestCancel,
     getUnavailabilityPeriods,
     postUnavailabilityPeriod,
     patchUnavailabilityPeriod,
     deleteUnavailabilityPeriod,
+    getUnavailabilityPeriodAffected,
     postHold,
     getHolds,
   };
