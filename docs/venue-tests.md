@@ -659,6 +659,39 @@ applied and confirmed working through the live suite.
 ---
 
 ## 9. Coverage note
+## 9. SCRUM-136 — Affected bookings when venue marked unavailable
+
+Story: as Venue Staff, I want to see which bookings are affected when I mark a venue unavailable so that alternative arrangements can be made for them.
+
+### Test case specifications
+
+| ID | AC | Type | Scenario | Expected |
+| --- | --- | --- | --- | --- |
+| TC-SCRUM-136-01 | 1 | Happy | POST period: 201 response always includes an `affected` array | `json.affected` is an array | `[TC-SCRUM-136-01]` | 2026-10-16 ✅ |
+| TC-SCRUM-136-02 | 1, 2 | Happy | Confirmed booking overlapping the period appears in affected | `affected` length 1; entry id matches; `event.coordinator_id` present | `[TC-SCRUM-136-02]` | 2026-10-16 ✅ |
+| TC-SCRUM-136-03 | 1 | Boundary | No confirmed bookings in the period: affected is empty | `affected` length 0 | `[TC-SCRUM-136-03]` | 2026-10-16 ✅ |
+| TC-SCRUM-136-04 | 4 | Negative | Creating a period does not cancel or modify any booking | `decideBookingRequest` not called | `[TC-SCRUM-136-04]` | 2026-10-16 ✅ |
+| TC-SCRUM-136-05 | 1 | Happy | `listAffectedBookingRequests` called with the correct period and venue objects | Called with `(venueId, customPeriod, venue)` | `[TC-SCRUM-136-05]` | 2026-10-16 ✅ |
+| TC-SCRUM-136-06 | — | Negative | Event Coordinator cannot create a period (403) — affected not exposed | 403; `listAffectedBookingRequests` not called | `[TC-SCRUM-136-06]` | 2026-10-16 ✅ |
+| TC-SCRUM-136-07 | 1 | Boundary | No confirmed bookings in range: affected is empty (Playwright API) | `affected` length 0 | `[TC-SCRUM-136-07]` | — |
+| TC-SCRUM-136-08 | 1, 2 | Happy | Confirmed booking in range with coordinator_id (Playwright API) | Entry with `booking_date`, confirmed slot, `event.coordinator_id` set | `[TC-SCRUM-136-08]` | — |
+| TC-SCRUM-136-09 | 1 | Boundary | Pending-only booking not in affected (Playwright API) | No entry with only pending slots | `[TC-SCRUM-136-09]` | — |
+| TC-SCRUM-136-10 | 1 | Boundary | Booking outside period date range not in affected (Playwright API) | No entry with the out-of-range `booking_date` | `[TC-SCRUM-136-10]` | — |
+| TC-SCRUM-136-11 | 4 | Negative | Creating period does not modify affected bookings (Playwright API) | Slot still `confirmed` after period created | `[TC-SCRUM-136-11]` | — |
+
+### Decisions
+
+- Only confirmed slot rows are checked for overlap; pending requests are not yet scheduled so they do not require alternative arrangements.
+- `listAffectedBookingRequests` is a read-only pass over `venue_booking_requests` filtered by `booking_date` in the period range. The overlap check (`committedSlots` + slot-set intersection) is done in JavaScript after the query to reuse existing pure logic without adding a database dependency.
+- `coordinator_id` was added to the `event` join in `BOOKING_REQUEST_FIELDS` so it appears on all booking request reads (harmless addition — it is already in the events table).
+
+### Deliberately absent
+
+UI to display the affected list (the 201 JSON is the delivery channel for this story); coordinator notification; cancellation or rescheduling of affected bookings.
+
+---
+
+## 8. Coverage note
 
 `npm --prefix backend run test:cov` reports the whole backend. Most venue modules are exercised through the
 integration suites above rather than by unit tests of their own, so coverage of
