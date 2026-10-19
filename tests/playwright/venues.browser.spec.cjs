@@ -205,9 +205,11 @@ test('[VENUE-E2E-006] SCRUM-136: affected bookings panel shown when a new period
   await expect(page.getByText(new RegExp(bookingDate))).toBeVisible();
   await expect(page.getByText(/bookings below have not been changed/)).toBeVisible();
 
-  // Done returns to the period list, which shows the new period's reason.
+  // Done dismisses the creation panel and returns to the period list.
   await page.getByRole('button', { name: 'Done' }).click();
-  await expect(page.getByText('Conference 136')).not.toBeVisible();
-  // exact: true avoids matching "Deep cleaning" left by earlier tests in the shared fake storage.
+  await expect(page.getByText(/bookings below have not been changed/)).not.toBeVisible();
+  // Period reason visible in the list. exact: true avoids matching "Deep cleaning" left by earlier tests.
   await expect(page.getByText('Deep clean', { exact: true })).toBeVisible();
+  // AC3: the affected booking is still visible under the period row after Done.
+  await expect(page.getByText('Conference 136')).toBeVisible();
 });
