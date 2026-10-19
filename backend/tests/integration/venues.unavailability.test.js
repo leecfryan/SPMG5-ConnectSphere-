@@ -61,6 +61,7 @@ const service = Object.fromEntries(
     "createUnavailabilityPeriod", "listUnavailabilityPeriods",
     "getUnavailabilityPeriodById", "updateUnavailabilityPeriod",
     "deleteUnavailabilityPeriod",
+    "listAffectedBookingRequests",
     "listActiveHoldsInRange", "listHolds", "createHold",
   ].map((name) => [name, vi.fn()])
 );
@@ -101,6 +102,7 @@ beforeEach(() => {
   service.listSlotRowsForDate.mockResolvedValue([]);
   service.getEventById.mockResolvedValue(event);
   service.listBookableEvents.mockResolvedValue([event]);
+  service.listAffectedBookingRequests.mockResolvedValue([]);
   service.listActiveHoldsInRange.mockResolvedValue([]);
 });
 
@@ -120,6 +122,7 @@ test("[TC-SCRUM-133-01] Venue Staff creates a single-day, single-slot unavailabi
   expect(res.status).toBe(201);
   const json = await res.json();
   expect(json.data).toMatchObject({ start_date: "2099-11-01", slots: ["am"], reason: "Maintenance" });
+  expect(Array.isArray(json.affected)).toBe(true);
   expect(service.createUnavailabilityPeriod).toHaveBeenCalledWith(
     venueId,
     expect.objectContaining({ start_date: "2099-11-01", slots: ["am"], reason: "Maintenance" }),
@@ -316,6 +319,114 @@ test("[TC-SCRUM-133-20] Create period blocks booking, shorten period restores av
   });
   const allowed = await send(`/${venueId}/booking-requests`, "event_coordinator", "POST", bookingBody);
   expect(allowed.status).toBe(201);
+});
+
+// ---------------------------------------------------------------------------
+// SCRUM-136: affected bookings in the POST /unavailability response
+// ---------------------------------------------------------------------------
+
+const coordinatorId = "33333333-3333-4333-8333-333333333333";
+
+const affectedRequest = {
+  id: "55555555-5555-4555-8555-555555555555",
+  booking_date: "2099-11-01",
+  venue: { id: venueId, name: "Integration Hall", city: "Singapore", country: "Singapore", capacity: 200 },
+  event: { id: eventId, name: "Assigned conference", status: "APPROVED",
+    start_time: "2099-10-10T00:00:00Z", end_time: "2099-10-10T15:00:00Z", coordinator_id: coordinatorId },
+  slots: [{ slot: "am", status: "confirmed" }],
+  submitted_at: "2026-10-07T00:00:00Z",
+  decided_at: "2026-10-08T00:00:00Z",
+  decision_note: null,
+  expected_attendees: 100,
+  room_layout: "Theatre",
+  required_facilities: [],
+  accessibility_requirements: [],
+  purpose: null,
+};
+
+test("[TC-SCRUM-136-01] 201 response always includes an affected array", async () => {
+  const res = await send(`/${venueId}/unavailability`, "venue_staff", "POST", createBody);
+  expect(res.status).toBe(201);
+  const json = await res.json();
+  expect(Array.isArray(json.affected)).toBe(true);
+  expect(service.listAffectedBookingRequests).toHaveBeenCalledWith(venueId, period, venue);
+});
+
+test("[TC-SCRUM-136-02] Confirmed booking overlapping the period appears in affected", async () => {
+  service.listAffectedBookingRequests.mockResolvedValue([affectedRequest]);
+  const res = await send(`/${venueId}/unavailability`, "venue_staff", "POST", createBody);
+  expect(res.status).toBe(201);
+  const json = await res.json();
+  expect(json.affected).toHaveLength(1);
+  expect(json.affected[0].id).toBe(affectedRequest.id);
+  expect(json.affected[0].event.coordinator_id).toBe(coordinatorId);
+});
+
+test("[TC-SCRUM-136-03] No confirmed bookings in the period: affected is empty", async () => {
+  service.listAffectedBookingRequests.mockResolvedValue([]);
+  const res = await send(`/${venueId}/unavailability`, "venue_staff", "POST", createBody);
+  expect(res.status).toBe(201);
+  const json = await res.json();
+  expect(json.affected).toHaveLength(0);
+});
+
+test("[TC-SCRUM-136-04] Creating a period does not cancel or modify any booking (AC4)", async () => {
+  service.listAffectedBookingRequests.mockResolvedValue([affectedRequest]);
+  const res = await send(`/${venueId}/unavailability`, "venue_staff", "POST", createBody);
+  expect(res.status).toBe(201);
+  expect(service.decideBookingRequest).not.toHaveBeenCalled();
+});
+
+test("[TC-SCRUM-136-05] listAffectedBookingRequests is called with the created period and venue", async () => {
+  const customPeriod = { ...period, start_date: "2099-12-01", end_date: "2099-12-03", slots: ["pm"] };
+  service.createUnavailabilityPeriod.mockResolvedValue(customPeriod);
+  const res = await send(`/${venueId}/unavailability`, "venue_staff", "POST",
+    { start_date: "2099-12-01", end_date: "2099-12-03", slots: ["pm"], reason: "Inspection" });
+  expect(res.status).toBe(201);
+  expect(service.listAffectedBookingRequests).toHaveBeenCalledWith(venueId, customPeriod, venue);
+});
+
+test("[TC-SCRUM-136-06] Event Coordinator cannot create a period (403 — affected not exposed)", async () => {
+  const res = await send(`/${venueId}/unavailability`, "event_coordinator", "POST", createBody);
+  expect(res.status).toBe(403);
+  expect(service.listAffectedBookingRequests).not.toHaveBeenCalled();
+});
+
+// ---------------------------------------------------------------------------
+// SCRUM-136: GET /unavailability/:periodId/affected
+// ---------------------------------------------------------------------------
+
+test("[TC-SCRUM-136-12] GET affected returns 200 with empty array when no bookings overlap", async () => {
+  service.listAffectedBookingRequests.mockResolvedValue([]);
+  const res = await send(`/${venueId}/unavailability/${periodId}/affected`, "venue_staff");
+  expect(res.status).toBe(200);
+  const json = await res.json();
+  expect(Array.isArray(json.data)).toBe(true);
+  expect(json.data).toHaveLength(0);
+  expect(service.listAffectedBookingRequests).toHaveBeenCalledWith(venueId, period, venue);
+});
+
+test("[TC-SCRUM-136-13] GET affected returns confirmed booking requests that overlap the period", async () => {
+  service.listAffectedBookingRequests.mockResolvedValue([affectedRequest]);
+  const res = await send(`/${venueId}/unavailability/${periodId}/affected`, "venue_staff");
+  expect(res.status).toBe(200);
+  const json = await res.json();
+  expect(json.data).toHaveLength(1);
+  expect(json.data[0].id).toBe(affectedRequest.id);
+  expect(json.data[0].event.coordinator_id).toBe(coordinatorId);
+});
+
+test("[TC-SCRUM-136-14] GET affected returns 404 when the period does not exist", async () => {
+  service.getUnavailabilityPeriodById.mockResolvedValue(null);
+  const res = await send(`/${venueId}/unavailability/${periodId}/affected`, "venue_staff");
+  expect(res.status).toBe(404);
+  expect(service.listAffectedBookingRequests).not.toHaveBeenCalled();
+});
+
+test("[TC-SCRUM-136-15] Event Coordinator cannot fetch affected bookings (403)", async () => {
+  const res = await send(`/${venueId}/unavailability/${periodId}/affected`, "event_coordinator");
+  expect(res.status).toBe(403);
+  expect(service.listAffectedBookingRequests).not.toHaveBeenCalled();
 });
 
 test("[TC-SCRUM-133-21] Create period blocks booking, delete period restores availability", async () => {

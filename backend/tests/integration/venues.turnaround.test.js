@@ -120,6 +120,7 @@ const service = Object.fromEntries(
     "createUnavailabilityPeriod", "listUnavailabilityPeriods",
     "getUnavailabilityPeriodById", "updateUnavailabilityPeriod",
     "deleteUnavailabilityPeriod",
+    "listAffectedBookingRequests",
     "listActiveHoldsInRange", "listHolds", "createHold",
   ].map((name) => [name, vi.fn()])
 );
