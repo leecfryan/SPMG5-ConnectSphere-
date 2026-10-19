@@ -182,10 +182,9 @@ test("[SCRUM-147-API-012] failure: 500 - a database failure returns a safe messa
   spies.createDraft.mockRejectedValueOnce(new Error("events.repository: createDraft failed - secret detail"));
   spies.findOwnDrafts.mockRejectedValueOnce(new Error("events.repository: findOwnDrafts failed - secret detail"));
 
-  for (const [method, body] of [["POST", { name: "Gala" }], ["GET"]]) {
-    const response = await call(method, "", { body });
-    expect(response).toEqual({ status: 500, body: { message: "Could not save the draft. Please try again." } });
-  }
+  expect(await call("POST", "", { body: { name: "Gala" } }))
+    .toEqual({ status: 500, body: { message: "Could not save the draft. Please try again." } });
+  expect(await call("GET", "")).toEqual({ status: 500, body: { message: "Could not load your drafts. Please try again." } });
 });
 
 test("[SCRUM-147-API-013] failure: 503 - drafts fail closed when event storage is not configured", async () => {

@@ -10,9 +10,11 @@ const FAILURES = Object.freeze({
   conflict: [409, "This draft has changed or was already submitted. Refresh and try again."],
 });
 
+const LOAD_FAILED = "Could not load your drafts. Please try again.";
+
 function createDraftsController(repository) {
   // Identity comes from the verified token only, never from the body.
-  function handle(action, run, created = 200) {
+  function handle(action, run, { created = 200, failure = "Could not save the draft. Please try again." } = {}) {
     return async (req, res) => {
       if (!repository) {
         return res.status(503).json({ message: "Event drafts are not configured. Please try again later." });
@@ -29,20 +31,20 @@ function createDraftsController(repository) {
         // The repository puts the Supabase message in here; it is for the log,
         // not for the organiser's screen.
         console.error(`${action} failed:`, error.message);
-        return res.status(500).json({ message: "Could not save the draft. Please try again." });
+        return res.status(500).json({ message: failure });
       }
     };
   }
 
   return {
     create: handle("POST /api/events/drafts",
-      (req) => service.saveDraft(req.body, req.user.id, repository), 201),
+      (req) => service.saveDraft(req.body, req.user.id, repository), { created: 201 }),
     list: handle("GET /api/events/drafts",
-      async (req) => ({ ok: true, body: { drafts: await repository.findOwnDrafts(req.user.id) } })),
+      async (req) => ({ ok: true, body: { drafts: await repository.findOwnDrafts(req.user.id) } }), { failure: LOAD_FAILED }),
     find: handle("GET /api/events/drafts/:id", async (req) => {
       const event = await repository.findOwnDraft(req.params.id, req.user.id);
       return event ? { ok: true, event } : { ok: false, reason: "not_found" };
-    }),
+    }, { failure: LOAD_FAILED }),
     update: handle("PATCH /api/events/drafts/:id",
       (req) => service.updateDraft(req.params.id, req.body, req.user.id, repository)),
     submit: handle("POST /api/events/drafts/:id/submit",
