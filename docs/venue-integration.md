@@ -867,6 +867,17 @@ grant execute on function public.submit_venue_booking_request(
 alter table public.venue_booking_requests enable row level security;
 ```
 
+### `is_essential` on booking requests (SCRUM-144, written by the Event Lifecycle lane)
+
+Added by hand on 2026-10-19. Venue code does not read or write it; the assigned coordinator sets it from the event
+page when a pending booking request is not essential to the event, so it stops blocking the safety check and
+confirmation (details in [event-requests.md](event-requests.md#confirm-an-event-scrum-144)).
+
+```sql
+alter table public.venue_booking_requests
+  add column if not exists is_essential boolean not null default true;
+```
+
 ### Authenticated submit wrapper, which records the verified requester
 
 ```sql

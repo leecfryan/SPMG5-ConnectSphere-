@@ -112,6 +112,8 @@ auth.post('/auth/v1/logout', (req, res) => {
 });
 
 const client = createClient(authURL, publicKey, { auth: { persistSession: false, autoRefreshToken: false } });
+// SCRUM-144: the coordinator's is_essential flags, keyed "<kind>:<request id>"; unset reads as essential (the column default).
+const essentialFlags = new Map();
 const findEvent = (id) => [...accounts.values()].flatMap(account => account.events).find(event => event.id === id) || null;
 // Only storage is substituted; event routing, validation, normalization and
 // verified ownership are the production implementations.
@@ -131,10 +133,12 @@ const eventsRepository = {
     const { equipmentService } = equipmentDependencies;
     const venueRequests = (await venuesService.listBookingRequests({ allVenues: true })).filter(r => r.event_id === id)
       .map(r => ({ id: r.id, booking_date: r.booking_date, expected_attendees: r.expected_attendees, room_layout: r.room_layout,
+        is_essential: essentialFlags.get('venue:' + r.id) ?? true,
         accessibility_requirements: r.accessibility_requirements ?? [], slots: r.slots,
         venue: { name: r.venue.name, capacity: r.venue.capacity, accessibility_features: r.venue.accessibility_features, notes: r.venue.notes } }));
     const equipmentRequests = await Promise.all((await equipmentService.listRequestsByEvent(id))
       .map(async r => ({ id: r.id, status: r.status, quantity_requested: r.quantity_requested, technical_requirement: r.technical_requirement,
+        is_essential: essentialFlags.get('equipment:' + r.id) ?? true,
         equipment: { type: (await equipmentService.findEquipmentById(r.equipment_id)).type } })));
     return { venueRequests, equipmentRequests };
   },
@@ -149,6 +153,14 @@ const eventsRepository = {
     if (event?.status !== 'SAFETY_REVIEW') return null;
     const { name, description, start_time, end_time, expected_attendance, accessibility_needs, other_comments } = event;
     return { id, name, description, start_time, end_time, expected_attendance, accessibility_needs, other_comments };
+  },
+  // SCRUM-144: same filter as the real write - the request must belong to the event.
+  async setArrangementEssential(kind, requestId, eventId, isEssential) {
+    const { venueRequests, equipmentRequests } = await eventsRepository.findArrangements(eventId);
+    const requests = kind === 'venue' ? venueRequests : equipmentRequests;
+    if (!requests.some(request => request.id === requestId)) return null;
+    essentialFlags.set(kind + ':' + requestId, isEssential);
+    return { id: requestId, is_essential: isEssential };
   },
   // SCRUM-141: same guards as the real writes. Rows land in the data client's
   // event_activity_log list, in the live table's shape, which the event workspace reads back.

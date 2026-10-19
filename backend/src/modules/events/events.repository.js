@@ -253,7 +253,7 @@ async function findArrangements(eventId) {
     supabase
       .from("venue_booking_requests")
       .select(
-        "id, booking_date, expected_attendees, room_layout, accessibility_requirements, " +
+        "id, booking_date, expected_attendees, room_layout, accessibility_requirements, is_essential, " +
         "venue:venues!venue_id(name, capacity, accessibility_features, notes), " +
         "slots:venue_bookings!request_id(slot, status)",
       )
@@ -261,7 +261,7 @@ async function findArrangements(eventId) {
       .order("booking_date", { ascending: true }),
     supabase
       .from("equipment_requests")
-      .select("id, status, quantity_requested, technical_requirement, equipment:equipment!equipment_id(type)")
+      .select("id, status, quantity_requested, technical_requirement, is_essential, equipment:equipment!equipment_id(type)")
       .eq("event_id", eventId)
       .order("created_at", { ascending: true }),
   ]);
@@ -269,6 +269,23 @@ async function findArrangements(eventId) {
     venueRequests: unwrap(venueRequests, "findArrangements venue"),
     equipmentRequests: unwrap(equipmentRequests, "findArrangements equipment"),
   };
+}
+
+// SCRUM-144 AC4: the one write this lane makes to the Venue and Equipment
+// lanes' tables - the coordinator's essential flag, nothing else. Filtered on
+// event_id too, so a request id from another event matches nothing (404).
+const ARRANGEMENT_TABLES = Object.freeze({ venue: "venue_booking_requests", equipment: "equipment_requests" });
+async function setArrangementEssential(kind, requestId, eventId, isEssential) {
+  return unwrap(
+    await getSupabase()
+      .from(ARRANGEMENT_TABLES[kind])
+      .update({ is_essential: isEssential })
+      .eq("id", requestId)
+      .eq("event_id", eventId)
+      .select("id, is_essential")
+      .maybeSingle(),
+    "setArrangementEssential",
+  );
 }
 
 // SCRUM-141: undoes a transition whose activity row could not be written, so
@@ -317,4 +334,5 @@ module.exports = {
   findAwaitingSafetyReviewById,
   undoTransition,
   recordActivity,
+  setArrangementEssential,
 };

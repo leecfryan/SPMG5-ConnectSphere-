@@ -238,6 +238,10 @@ The existing application contracts require:
   `quantity_requested`, `technical_requirement`, `borrow_start`, `borrow_end`,
   `status` (`PENDING`, `APPROVED`, `REJECTED`, `RELEASED` - SCRUM-104, and `REVIEW_REQUIRED` - SCRUM-150, all
   added to the check constraint by hand), `created_at`; generated IDs/timestamps and appropriate foreign keys.
+  SCRUM-144 (Event Lifecycle lane) added `is_essential boolean not null default true` by hand on 2026-10-19:
+  the assigned coordinator marks a request non-essential so it no longer blocks the safety check or
+  confirmation. Equipment code does not read or write it, but `select("*")` responses now include it. SQL and
+  rules in [event-requests.md](event-requests.md#confirm-an-event-scrum-144).
 - `messages`: `id`, `equipment_request_id`, `author_id`, `author_role`, `body`,
   `created_at`, `updated_at`, `deleted_at`; the existing timestamp trigger is used
   for edits. The author-role constraint must accept `tech_support` and

@@ -16,14 +16,15 @@ const TRANSITIONS = Object.freeze({
   DRAFT: Object.freeze(["SUBMITTED"]),
   SUBMITTED: Object.freeze(["UNDER_REVIEW", "CANCELLED", "POSTPONED"]),
   UNDER_REVIEW: Object.freeze(["APPROVED", "REJECTED", "CANCELLED", "POSTPONED"]),
-  APPROVED: Object.freeze(["SAFETY_REVIEW", "CONFIRMED", "CANCELLED", "POSTPONED"]),
+  // SCRUM-144 AC1: no APPROVED -> CONFIRMED; confirming needs the safety pass.
+  APPROVED: Object.freeze(["SAFETY_REVIEW", "CANCELLED", "POSTPONED"]),
   // SCRUM-139 AC4: back to APPROVED is the coordinator withdrawing the submission.
   // SCRUM-141 AC3: a Safety Officer's rejection takes the same edge back to
   // planning; only their approval reaches PREPARATION.
   SAFETY_REVIEW: Object.freeze(["APPROVED", "PREPARATION", "CANCELLED", "POSTPONED"]),
-  // SCRUM-141: confirming from here arrives with SCRUM-144. Postponing is left
-  // out until the PO agrees it (docs/event-requests.md merge checklist).
-  PREPARATION: Object.freeze(["CANCELLED"]),
+  // SCRUM-144 AC1: the only way to CONFIRMED. Postponing is left out until the
+  // PO agrees it (docs/event-requests.md merge checklist).
+  PREPARATION: Object.freeze(["CONFIRMED", "CANCELLED"]),
   CONFIRMED: Object.freeze(["COMPLETED", "CANCELLED", "POSTPONED"]),
   COMPLETED: Object.freeze([]),
   CANCELLED: Object.freeze([]),

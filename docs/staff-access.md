@@ -45,7 +45,7 @@ read matrix below, which lists read permissions only. The Safety Officer's
 | `events.assign_coordinator` | Event Coordinator Leads | The assignment queue: `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` |
 | `events.postpone` | Event Coordinators assigned to the event, Event Coordinator Leads | `POST /api/internal/events/:eventId/postpone`; coordinators retain the assignment check (SCRUM-149/142) |
 | `events.waitlist.manage` | Event Coordinators assigned to the event | Coordinator waitlist listing, offer settings and manual promotion; leads do not gain this capability (SCRUM-142 staging integration) |
-| `events.decide` | Event Coordinators, **assigned event only** (record check on `coordinator_id`) | `POST /api/internal/events/:eventId/{start-review,approve,reject}` |
+| `events.decide` | Event Coordinators, **assigned event only** (record check on `coordinator_id`) | `POST /api/internal/events/:eventId/{start-review,approve,reject,confirm}`, `PATCH /api/internal/events/:eventId/arrangements/:kind/:requestId` (SCRUM-144) |
 | `events.safety.submit` | Event Coordinators, **assigned event only** (same record check) | `GET /api/internal/events/:eventId/safety-readiness`, `POST /api/internal/events/:eventId/{submit-safety-check,withdraw-safety-check}` |
 | `events.safety.decide` | Safety Officers (a pool; no record check) | `POST /api/internal/safety-reviews/:eventId/{approve,reject}` (SCRUM-141) |
 

@@ -1,5 +1,10 @@
 // SCRUM-139 AC1/AC2: what still stops an event going to the Operational Safety
-// Check. Every arrangement counts as essential until SCRUM-144 adds the flag.
+// Check, and SCRUM-144 AC1-AC3: what still stops it being confirmed. One rule
+// for both, so the two gates never disagree.
+//
+// SCRUM-144 AC4: an outstanding request its coordinator marked non-essential
+// (is_essential false; #106, #80) does not block; it is listed as optional.
+// A booked venue is still required whatever the flags say.
 //
 // Venue: Venue Staff decide a whole request at once, but slots the coordinator
 // cancelled stay cancelled, so a request is booked when every slot that is not
@@ -30,29 +35,30 @@ function venueState(request) {
   return "ignored";
 }
 
-function findMissingArrangements({ venueRequests, equipmentRequests }) {
+function checkArrangements({ venueRequests, equipmentRequests }) {
   const missing = [];
+  const optional = [];
+  // id lets the coordinator mark the request essential or not (SCRUM-144 AC4).
+  const outstanding = (request, item) => (request.is_essential === false ? optional : missing).push({ ...item, id: request.id });
   let booked = false;
 
   for (const request of venueRequests) {
     const state = venueState(request);
     if (state === "booked") booked = true;
     if (state === "pending") {
-      missing.push({
-        kind: "venue",
-        label: `${request.venue.name} · ${request.booking_date}`,
-        reason: VENUE_PENDING,
-      });
+      outstanding(request, { kind: "venue", label: `${request.venue.name} · ${request.booking_date}`, reason: VENUE_PENDING });
     }
   }
-  // A pending request already says why the venue is missing.
+  // A pending essential request already says why the venue is missing.
   if (!booked && missing.length === 0) missing.push({ kind: "venue", label: "Venue", reason: NO_VENUE });
 
   for (const request of equipmentRequests) {
     const reason = EQUIPMENT_REASONS[request.status];
-    if (reason) missing.push({ kind: "equipment", label: request.equipment.type, reason });
+    if (reason) outstanding(request, { kind: "equipment", label: request.equipment.type, reason });
   }
-  return missing;
+  return { missing, optional };
 }
 
-module.exports = { findMissingArrangements, venueState };
+const findMissingArrangements = (arrangements) => checkArrangements(arrangements).missing;
+
+module.exports = { checkArrangements, findMissingArrangements, venueState };
