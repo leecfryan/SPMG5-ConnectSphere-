@@ -11,6 +11,7 @@ import VenueBookingRequestForm from "./components/VenueBookingRequestForm";
 import VenueBookingRequestList from "./components/VenueBookingRequestList";
 import VenueUnavailabilityPage from "./pages/VenueUnavailabilityPage";
 import VenueHoldsPage from "./pages/VenueHoldsPage";
+import VenueConflictsPage from "./pages/VenueConflictsPage";
 import "./venues.css";
 
 function VenueRecordPage({ mode = "detail" }) {
@@ -66,11 +67,15 @@ function VenueRecordPage({ mode = "detail" }) {
   // SCRUM-146: Venue Staff place and view tentative holds
   if (mode === "holds") return <VenueHoldsPage venue={venue}
     onBack={() => navigate(detailPath)} />;
+  // SCRUM-135: Venue Staff view conflict flags after a setup/turnaround change
+  if (mode === "conflicts") return <VenueConflictsPage venue={venue}
+    onBack={() => navigate(detailPath)} />;
   return <VenueDetail venue={venue} onBack={() => navigate("/venues")}
     onEdit={hasPermission("venues.update") ? () => navigate(`${detailPath}/edit`) : undefined}
     onViewAvailability={() => navigate(availabilityPath)}
     onManageUnavailability={hasPermission("venues.unavailability") ? () => navigate(`${detailPath}/unavailability`) : undefined}
     onManageHolds={hasPermission("venues.holds") ? () => navigate(`${detailPath}/holds`) : undefined}
+    onViewConflicts={hasPermission("venues.conflicts") ? () => navigate(`${detailPath}/booking-conflicts`) : undefined}
     canAssess={hasPermission("bookings.request")} />;
 }
 
@@ -95,6 +100,9 @@ export default function VenueRoutes() {
       </Route>
       <Route element={<RequirePermission permission="venues.holds" />}>
         <Route path=":id/holds" element={<VenueRecordPage key="holds" mode="holds" />} />
+      </Route>
+      <Route element={<RequirePermission permission="venues.conflicts" />}>
+        <Route path=":id/booking-conflicts" element={<VenueRecordPage key="conflicts" mode="conflicts" />} />
       </Route>
       <Route path="*" element={<><h1>Page not found</h1><Link to="/venues">Back to venues</Link></>} />
     </Routes>
