@@ -40,7 +40,7 @@ read matrix below, which lists read permissions only. The Safety Officer's
 | `venues.unavailability` | Venue Staff | Mark and manage venue unavailability periods (SCRUM-133) |
 | `venues.holds` | Venue Staff | Place and view tentative holds (SCRUM-146) |
 | `bookings.request` | Event Coordinators | Booking requests |
-| `events.submit` | Event Organisers | `POST /api/events`, `/events/new` |
+| `events.submit` | Event Organisers | `POST /api/events`, `/events/new`; the draft routes `/api/events/drafts[/:id[/submit]]`, scoped to the caller's own drafts (SCRUM-147) |
 | `events.own.update` | Event Organisers | `PATCH /api/event-workspace/organiser/:id`; owner check in lookup and write; colleague events remain view only |
 | `events.assign_coordinator` | Event Coordinator Leads | The assignment queue: `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` |
 | `events.postpone` | Event Coordinators assigned to the event, Event Coordinator Leads | `POST /api/internal/events/:eventId/postpone`; coordinators retain the assignment check (SCRUM-149/142) |

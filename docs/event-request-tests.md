@@ -45,9 +45,8 @@ column is a copy of a line you can read in the terminal.
 > subtask claims it. `SCRUM-46/47` tags the two tests that walk all four optional
 > text fields in one loop, which spans both subtasks.
 >
-> **`US-13` is the one label here that is not a Jira key.** The draft story has
-> not been raised on the board, so the eight `validateDraft` tests keep the
-> phase-one list's number until it is. Relabel them when the issue exists — see §7.
+> **The draft tests carry `SCRUM-147`.** They were labelled `US-13 (deferred)` until the draft story was raised
+> on the board; SCRUM-147 relabelled them and built drafts. §10 is its record.
 
 ---
 
@@ -81,7 +80,7 @@ happy path → cross-cutting → negative → boundary. IDs below are prefixed a
 | Negative | 20 | ER-N01–N20, plus the 2 supporting cases named at the end of §4.3 |
 | Boundary | 23 | ER-B01–B23 — heaviest by design; every rule in the validation contract has a threshold |
 | Cross-cutting | **0 in the original catalog** | Auth/permissions are covered by the merged HTTP integration tests in `tests/integration/events.submit.test.js` |
-| Deferred (US-13, not yet in Jira) | 8 | ER-D01–D08 — `validateDraft` is tested but **called by nothing**, see §7 |
+| SCRUM-147 (drafts) | 8 | ER-D01–D08 — `validateDraft`, now called when a draft is saved; see §7 and §10 |
 | **Total** | **64** | 62 with an ER id + the 2 supporting cases. This is the backend suite only; the 16 frontend cases are counted separately in §6 |
 
 **A test case may cover several data points.** Fourteen of the tests below are
@@ -326,28 +325,20 @@ branch had no endpoint in front of it. **That endpoint has since arrived with
 SCRUM-26 (Assign Event Coordinator)**, and its 77 cases are catalogued in
 [coordinator assignment tests](event-assignment-tests.md).
 
-**Eight tests cover deferred work, under the one label that is not a Jira key.**
-`validateDraft` is implemented and tested but **called by nothing** — the submit
-path runs `validateForSubmission`. Those tests are named `US-13 (deferred):`
-precisely so nobody reads their presence as evidence that drafts work.
-
-US-13 (save & continue a draft) is out of phase one and **has not been raised in
-Jira**: the board holds SCRUM-23, SCRUM-25 and SCRUM-26 under epic SCRUM-7, and
-nothing for drafts. The phase-one list's number is therefore the only identifier
-these tests can carry today. **When the story is created, relabel these eight tests
-and this table to its key** — it is the one piece of traceability in this document
-that does not yet point at the board.
+**The eight `validateDraft` tests are SCRUM-147's now.** They were written in phase one, named `US-13 (deferred)`
+and called by nothing. SCRUM-147 relabelled them and calls `validateDraft` whenever a draft is saved; the draft
+story's own cases are in §10.
 
 | ID | Rule proven about `validateDraft` | Automated test |
 | --- | --- | --- |
-| ER-D01 | A name alone is a valid draft | `US-13 (deferred): a name alone is enough for a draft` |
-| ER-D02 | A draft still requires a name | `US-13 (deferred): a draft still requires a name` |
-| ER-D03 | The 200-char name cap applies to drafts too | `US-13 (deferred): an over-long draft name is rejected` |
-| ER-D04 | Purpose and description are not required | `US-13 (deferred): purpose and description are not required for a draft` |
-| ER-D05 | Neither timestamp is required | `US-13 (deferred): a draft needs neither start_time nor end_time` |
-| ER-D06 | A non-string optional field is rejected | `US-13 (deferred): a non-string optional field is rejected` |
-| ER-D07 | Null / undefined optional fields are ignored | `US-13 (deferred): null / undefined optional fields are ignored` |
-| ER-D08 | Optional text cap holds at 2000 / 2001 | `US-13 (deferred) boundary: draft optional text at 2000 / 2001 characters` |
+| ER-D01 | A name alone is a valid draft | `SCRUM-147: a name alone is enough for a draft` |
+| ER-D02 | A draft still requires a name | `SCRUM-147: a draft still requires a name` |
+| ER-D03 | The 200-char name cap applies to drafts too | `SCRUM-147: an over-long draft name is rejected` |
+| ER-D04 | Purpose and description are not required | `SCRUM-147: purpose and description are not required for a draft` |
+| ER-D05 | Neither timestamp is required | `SCRUM-147: a draft needs neither start_time nor end_time` |
+| ER-D06 | A non-string optional field is rejected | `SCRUM-147: a non-string optional field is rejected` |
+| ER-D07 | Null / undefined optional fields are ignored | `SCRUM-147: null / undefined optional fields are ignored` |
+| ER-D08 | Optional text cap holds at 2000 / 2001 | `SCRUM-147 boundary: draft optional text at 2000 / 2001 characters` |
 
 The draft cap matches submission deliberately: a request captured early must not
 become unsavable later because a free-text field was allowed to grow past the limit
@@ -430,7 +421,64 @@ real Supabase instance to close that gap.
 - **SCRUM-49/50/51 are still `To Do` while the code that satisfies them is written
   and green.** SCRUM-25 shows 0% of subtasks done. Move them when the branch merges,
   or the board understates the lane.
-- **US-13 has no Jira issue** — see §7.
 - The exact `CHECK` constraint on `events.status`, which was widened or dropped by
   another lane without a migration — `APPROVED` is now in use and the constraint's
   current definition is unverified.
+
+---
+
+## 10. SCRUM-147 — Save and continue a draft event request
+
+> As an Event Organiser, I want to save an incomplete event request as a draft so that I can return later and
+> continue editing it before submission.
+>
+> 1. An organiser can save an incomplete event request as a draft.
+> 2. Required fields are only enforced on submission.
+> 3. The organiser can view their drafts, continue editing and submit them.
+> 4. Drafts are only visible to the organiser who created them.
+
+Source: *Week 4 Project Instructions*, *Draft Event Requests*. Clarification #116: no retention period. Expected
+values come from the AC: "incomplete" means only the name (the one `NOT NULL` form column), and "only visible to
+the organiser" includes colleagues in the same client organisation, who otherwise share request visibility
+(SCRUM-100).
+
+**Latest execution:** TC-01 to 14: 2026-10-19 · pass · local, Javen (agent run). TC-15: 2026-10-19 · pass ·
+local, shared dev database (run by Javen; `npm --prefix tests/e2e test -- draft-request`). Backend 1086 passed; frontend 496
+passed; Playwright 197 passed, 1 failed (`VENUE-E2E-001`, Venue lane, unrelated and already failing on `staging`).
+
+### 10.1 Test case specifications
+
+| ID | AC | Type | Pre-condition → action | Expected | Automated tests |
+| --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-147-01 | 1 | Happy | Organiser sends only a name (plus a forged `status`/`organiser_id`) | 201; `DRAFT`, owned by the verified caller, no `submitted_at` | `SCRUM-147-UNIT-001`, `-REPO-001`, `-API-002`; `DRAFT-API-001`; `SCRUM-147-UI-004`; `E2E-DRAFT-001` |
+| TC-SCRUM-147-02 | 1 | Negative | Save with no name, a blank name, or only other fields | 400 naming `name`; nothing saved; error shown against the name | `SCRUM-147-UNIT-002`, `-API-003`, `-UI-005`; ER-D02 |
+| TC-SCRUM-147-03 | 2 | Happy | Save with a past start, end before start, blank required fields, reversed registration window | Saved; no submission rule applied | `SCRUM-147-UNIT-003`, `-UI-011`; ER-D04, ER-D05 |
+| TC-SCRUM-147-04 | 2 | Boundary | Save with an unreadable date and attendance `0` | 400 for those two fields only | `SCRUM-147-UNIT-004` |
+| TC-SCRUM-147-05 | 2 | Negative | Submit a draft missing required fields, or whose edit blanks one | 400 listing every missing field; draft stays `DRAFT`; each field highlighted; form stays open | `SCRUM-147-UNIT-008`, `-UNIT-011`, `-API-009`, `-UI-008`; `DRAFT-API-001`; `E2E-DRAFT-001` |
+| TC-SCRUM-147-06 | 3 | Happy | Organiser opens *My event requests* | *Your drafts* lists own drafts newest first, apart from submitted requests; empty state when none | `SCRUM-147-REPO-002`, `-API-004`, `-UI-001`, `-UI-002`; `E2E-DRAFT-001` |
+| TC-SCRUM-147-07 | 3 | Happy | Open a draft (`/events/new?draft=<id>`), including after a refresh | Form pre-filled; event and registration times in local time | `SCRUM-147-API-005`, `-UI-006`; `E2E-DRAFT-001` |
+| TC-SCRUM-147-08 | 3 | Happy / negative | Edit and *Save draft*; then clear the name | Same draft updated (no new row), cleared fields cleared; clearing the name → 400, nothing written | `SCRUM-147-UNIT-005`, `-UNIT-006`, `-REPO-004`, `-API-008`, `-UI-006` |
+| TC-SCRUM-147-09 | 3 | Happy | Complete the draft and submit | `SUBMITTED` with `submitted_at`, edits included, same id; leaves *Your drafts*; appears with submitted requests; "Submit another request" starts a blank form | `SCRUM-147-UNIT-009`, `-UNIT-010`, `-REPO-005`, `-API-010`, `-UI-007`; `DRAFT-API-001`; `E2E-DRAFT-001` |
+| TC-SCRUM-147-10 | 4 | Security | A colleague in the same company lists, opens, edits and submits the owner's draft, by API and by URL | Empty list; 404 "Draft not found." each time; no form; draft unchanged | `SCRUM-147-UNIT-007`, `-API-004`, `-API-006`, `-UI-009`; `DRAFT-API-002`; `E2E-DRAFT-001` |
+| TC-SCRUM-147-11 | 4 | Security | Colleague and owner read the organisation workspace list and detail | No `DRAFT` row for either; detail 404 | `SCRUM-147-UNIT-013`; `DRAFT-API-002`; `E2E-DRAFT-001` |
+| TC-SCRUM-147-12 | 4 | Security | Attendee, venue staff, technical support, coordinator, coordinator lead, safety officer; no token; forged token | 403 / 401 on all five routes; nothing read or written | `SCRUM-147-API-001`; `DRAFT-API-003`…`-007` |
+| TC-SCRUM-147-13 | 3 | Conflict | The draft is submitted or changed between the read and the write; then edited again | 409; afterwards 404 (no longer a draft) | `SCRUM-147-UNIT-012`, `-API-011`; `DRAFT-API-001` |
+| TC-SCRUM-147-14 | — | Failure | Malformed id; storage error; storage not configured; slow and failed loads in the UI; no session | 400 "Invalid draft id."; 500 safe message (no database detail); 503; loading and error states, buttons locked while saving; nothing sent without a session | `SCRUM-147-API-007`, `-API-012`, `-API-013`, `-REPO-006`, `-UI-003`, `-UI-010`, `-SERVICE-001`…`-003` |
+| TC-SCRUM-147-15 | 1, 4 | Live DB | Real Supabase: throwaway organiser saves a name-only draft, reads the workspace, edits, submits | Row stored `DRAFT` with every other form column and `submitted_at` null; absent from the workspace list; then `SUBMITTED` with `submitted_at` set; rows and account deleted afterwards | `LIVE-DRAFT-001` (`tests/e2e/draft-request.spec.js`) |
+
+### 10.2 Coverage
+
+`drafts.controller.js` and the draft functions in `events.service.js` / `events.repository.js`: 100% lines and
+branches. `DraftList.jsx`, `EventRequestPage.jsx` and the SCRUM-147 parts of `EventRequestForm.jsx`: 100% lines
+and functions; the remaining branch entries are V8's JSX conditional counting.
+
+**Test review.** Removing the workspace `DRAFT` filter fails `DRAFT-API-002` and `E2E-DRAFT-001`; applying the
+registration-window check to draft saves fails `SCRUM-147-UI-011`.
+
+### 10.3 Not built
+
+Deleting a draft, auto-save, and draft expiry (#116) are outside the AC.
+
+**Why one live test.** It is the only check that the real `events` table accepts a draft with only a name and that
+PostgREST's `neq` filter really hides `DRAFT` rows from the workspace — both depend on the real schema, which the
+fakes cannot prove.

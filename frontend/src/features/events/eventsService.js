@@ -66,13 +66,13 @@ export async function submitEventRequest(fields, token) {
   }
 }
 
-export async function updateEventRequest(eventId, fields, token) {
-  if (!token) return { event: null, errors: [], message: "Please sign in to update an event." };
+// Same { event, errors, message } shape as submitEventRequest, for the
+// apiFetch-based writes.
+async function sendEventFields(path, method, fields, token, { signedOut, malformed }) {
+  if (!token) return { event: null, errors: [], message: signedOut };
   try {
-    const payload = await apiFetch(`/api/event-workspace/organiser/${encodeURIComponent(eventId)}`, token, {
-      method: "PATCH", body: withZonedTimes(fields),
-    });
-    if (!payload.event) return { event: null, errors: [], message: "Unable to update the event. Please refresh and try again." };
+    const payload = await apiFetch(path, token, { method, body: withZonedTimes(fields) });
+    if (!payload.event) return { event: null, errors: [], message: malformed };
     return { event: payload.event, errors: [], message: "" };
   } catch (error) {
     return {
@@ -80,4 +80,34 @@ export async function updateEventRequest(eventId, fields, token) {
       message: error.errors?.length ? "" : error.status ? error.message : "Unable to connect. Check your connection and try again.",
     };
   }
+}
+
+export function updateEventRequest(eventId, fields, token) {
+  return sendEventFields(`/api/event-workspace/organiser/${encodeURIComponent(eventId)}`, "PATCH", fields, token, {
+    signedOut: "Please sign in to update an event.",
+    malformed: "Unable to update the event. Please refresh and try again.",
+  });
+}
+
+// SCRUM-147: drafts. The whole form is sent each time, so a field the
+// organiser cleared is cleared on the draft too.
+const DRAFT_MESSAGES = Object.freeze({
+  signedOut: "Please sign in to save a draft.",
+  malformed: "Unable to save the draft. Please refresh and try again.",
+});
+const draftPath = (draftId = "") => `/api/events/drafts${draftId && "/" + encodeURIComponent(draftId)}`;
+
+export function saveDraft(fields, token) {
+  return sendEventFields(draftPath(), "POST", fields, token, DRAFT_MESSAGES);
+}
+
+export function updateDraft(draftId, fields, token) {
+  return sendEventFields(draftPath(draftId), "PATCH", fields, token, DRAFT_MESSAGES);
+}
+
+export function submitDraft(draftId, fields, token) {
+  return sendEventFields(`${draftPath(draftId)}/submit`, "POST", fields, token, {
+    signedOut: "Please sign in to submit an event request.",
+    malformed: "Could not submit the event request. Please try again.",
+  });
 }

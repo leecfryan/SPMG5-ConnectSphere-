@@ -13,7 +13,7 @@ same frontend port (Docker: 5173); routing does not start another Vite process.
 | `/my-event-requests` and `/:eventId` | Own and same-client requests; requires `events.own.read`. Own detail editing also requires `events.own.update`; colleagues are view only. |
 | `/assigned-events` and `/:eventId` | Coordinator-assigned planning records; requires `events.assigned.read`. |
 | `/event-management` and `/:eventId` | Manager review, assignment and opening registration; requires `events.review`. |
-| `/events/new` | Requires `events.submit`; organiser event form. |
+| `/events/new` | Requires `events.submit`; organiser event form. `?draft=<id>` continues one of the organiser's own drafts (SCRUM-147); anyone else's id shows "Draft not found." |
 | `/venues/*` | Internal venue pages; see [Venue integration](venue-integration.md) for child routes. |
 | `/equipment/requests?event=<uuid>` | Assigned coordinator Equipment request page; requires `equipment.request`. |
 | `/technical-support` | Technical dashboard; requires `equipment.review`. |

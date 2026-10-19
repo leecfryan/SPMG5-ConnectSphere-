@@ -17,7 +17,7 @@ const events = [
   { id: "peer", name: "Colleague conference", organiser_id: "organiser-b", status: "APPROVED", coordinator_id: "coordinator-a" },
 ];
 
-function setup(load) {
+function setup(load, loadDrafts = () => response(200, { drafts: [] })) {
   getAuthClient.mockResolvedValue({ auth: {
     onAuthStateChange: callback => {
       queueMicrotask(() => callback("INITIAL_SESSION", { access_token: "organiser-token", user: { id: "sdk-id" } }));
@@ -31,6 +31,7 @@ function setup(load) {
       permissions: getPermissions(["event_organiser"]),
     });
     if (url === "/api/event-workspace/organiser") return load();
+    if (url === "/api/events/drafts") return loadDrafts();
     throw new Error("Unexpected request: " + url);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -85,4 +86,33 @@ test("[SCRUM-100-UI-010] A failed scoped lookup offers retry without showing any
   await userEvent.setup().click(screen.getByRole("button", { name: "Refresh events" }));
   await screen.findByRole("link", { name: "Own workshop" });
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+const drafts = [{ id: "draft-1", name: "Half-planned gala", organiser_id: "organiser-a", status: "DRAFT", created_at: "2026-10-19T02:00:00.000Z" }];
+
+test("[SCRUM-147-UI-001] AC3: the organiser's drafts are listed apart from submitted events and open in the request form", async () => {
+  setup(() => response(200, { events }), () => response(200, { drafts }));
+  const draftGroup = await screen.findByRole("region", { name: "Your drafts" });
+  expect(within(draftGroup).getByText("Only you can see your drafts. Open one to continue editing and submit it.")).toBeTruthy();
+  expect((await within(draftGroup).findByRole("link", { name: "Half-planned gala" })).getAttribute("href")).toBe("/events/new?draft=draft-1");
+  expect(within(draftGroup).getByText(/Draft · started/)).toBeTruthy();
+  const ownGroup = await screen.findByRole("region", { name: "Events you are responsible for" });
+  expect(within(ownGroup).queryByRole("link", { name: "Half-planned gala" })).toBeNull();
+});
+
+test("[SCRUM-147-UI-002] AC3: an organiser without drafts sees an empty state", async () => {
+  setup(() => response(200, { events }));
+  const draftGroup = await screen.findByRole("region", { name: "Your drafts" });
+  await within(draftGroup).findByText("You have no drafts.");
+});
+
+test("[SCRUM-147-UI-003] AC3: the drafts list shows loading, then a safe error that leaves the events list working", async () => {
+  let finish;
+  setup(() => response(200, { events }), () => new Promise(resolve => { finish = resolve; }));
+  const draftGroup = await screen.findByRole("region", { name: "Your drafts" });
+  expect(within(draftGroup).getByText("Loading drafts…")).toBeTruthy();
+  await waitFor(() => expect(finish).toBeTypeOf("function"));
+  await act(async () => finish(response(500, { message: "Could not load your drafts. Please try again." })));
+  expect(within(draftGroup).getByRole("alert").textContent).toBe("Could not load your drafts. Please try again.");
+  expect(await screen.findByRole("link", { name: "Own workshop" })).toBeTruthy();
 });

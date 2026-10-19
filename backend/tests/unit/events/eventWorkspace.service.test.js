@@ -219,3 +219,16 @@ test("[SCRUM-141 AC4] A failed history read still loads the event, with the hist
 
   expect(event).toMatchObject({ id: "event-alice", activity: null });
 });
+
+test("[SCRUM-147-UNIT-013] AC4: drafts stay out of the organisation view, a colleague's and the owner's alike", async () => {
+  const { service, records } = setup();
+  records.push(
+    { ...records[0], id: "draft-alice", name: "Alice draft", status: "DRAFT" },
+    { ...records[1], id: "draft-bob", name: "Bob draft", status: "DRAFT" },
+  );
+
+  expect((await service.list("organiser", "alice")).map(event => event.id).sort()).toEqual(["event-alice", "event-bob"]);
+  expect(await service.find("organiser", "alice", "draft-bob")).toBeNull();
+  expect(await service.find("organiser", "alice", "draft-alice")).toBeNull();
+  expect(await service.updateOrganiserEvent("alice", "draft-alice", { name: "Renamed" })).toEqual({ ok: false, reason: "not_found" });
+});

@@ -96,6 +96,7 @@ module.exports = function registrationStorage(accounts) {
         in(key, values) { filters.push(row => values.includes(row[key])); return query; },
         not(key, operator, value) { if (operator !== 'is' || value !== null) throw new Error('Unsupported filter'); filters.push(row => row[key] != null); return query; },
         eq(key, value) { filters.push(row => row[key] === value); return query; },
+        neq(key, value) { filters.push(row => row[key] !== value); return query; },
         order(key, { ascending = true } = {}) { ordering = { key, ascending }; return query; },
         insert(value) { insertion = value; return query; },
         update(value) { update = value; return query; },

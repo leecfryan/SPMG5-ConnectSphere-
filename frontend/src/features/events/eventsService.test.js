@@ -6,7 +6,7 @@
 // reporter's output doubles as the traceability report.
 
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
-import { EVENT_LIMITS, submitEventRequest, updateEventRequest } from "./eventsService";
+import { EVENT_LIMITS, saveDraft, submitDraft, submitEventRequest, updateDraft, updateEventRequest } from "./eventsService";
 
 // A response only has to answer .status and .json() for the service.
 const jsonResponse = (status, payload) => ({ status, json: async () => payload });
@@ -270,4 +270,35 @@ test("[SCRUM-100-SERVICE-005] Network failure cannot look like a saved edit", as
 test("[SCRUM-100-SERVICE-006] A malformed successful response cannot claim an event was saved", async () => {
   fetch.mockResolvedValue({ ...jsonResponse(200, {}), ok: true });
   expect(await updateEventRequest("event", { name: "Updated" }, "verified-token")).toEqual({ event: null, errors: [], message: "Unable to update the event. Please refresh and try again." });
+});
+
+test.each([
+  ["new draft", () => saveDraft({ name: "Gala", start_time: "2099-01-01T09:00" }, "verified-token"), "/api/events/drafts", "POST"],
+  ["draft edit", () => updateDraft("draft 1", { name: "Gala", start_time: "2099-01-01T09:00" }, "verified-token"), "/api/events/drafts/draft%201", "PATCH"],
+  ["draft submit", () => submitDraft("draft 1", { name: "Gala", start_time: "2099-01-01T09:00" }, "verified-token"), "/api/events/drafts/draft%201/submit", "POST"],
+])("[SCRUM-147-SERVICE-001] A %s goes to its draft endpoint with local times converted", async (_name, send, path, method) => {
+  const event = { id: "draft 1", name: "Gala", status: "DRAFT" };
+  fetch.mockResolvedValue({ ...jsonResponse(200, { event }), ok: true });
+  expect(await send()).toEqual({ event, errors: [], message: "" });
+  expect(fetch.mock.calls[0][0]).toBe(path);
+  expect(fetch.mock.calls[0][1].method).toBe(method);
+  expect(fetch.mock.calls[0][1].headers.Authorization).toBe("Bearer verified-token");
+  expect(sentBody()).toEqual({ name: "Gala", start_time: "2099-01-01T01:00:00.000Z" });
+});
+
+test("[SCRUM-147-SERVICE-002] Without a session no draft request is sent", async () => {
+  expect((await saveDraft({ name: "Gala" })).message).toBe("Please sign in to save a draft.");
+  expect((await updateDraft("draft-1", { name: "Gala" })).message).toBe("Please sign in to save a draft.");
+  expect((await submitDraft("draft-1", { name: "Gala" })).message).toBe("Please sign in to submit an event request.");
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test("[SCRUM-147-SERVICE-003] Field errors and the not-found message reach the form; a malformed reply is not a save", async () => {
+  const errors = [{ field: "purpose", message: "required" }];
+  fetch.mockResolvedValueOnce({ ...jsonResponse(400, { errors, message: "Check the event details and try again." }), ok: false });
+  expect(await submitDraft("draft-1", {}, "verified-token")).toEqual({ event: null, errors, message: "" });
+  fetch.mockResolvedValueOnce({ ...jsonResponse(404, { message: "Draft not found." }), ok: false });
+  expect(await updateDraft("draft-1", { name: "Gala" }, "verified-token")).toEqual({ event: null, errors: [], message: "Draft not found." });
+  fetch.mockResolvedValueOnce({ ...jsonResponse(201, {}), ok: true });
+  expect(await saveDraft({ name: "Gala" }, "verified-token")).toEqual({ event: null, errors: [], message: "Unable to save the draft. Please refresh and try again." });
 });
