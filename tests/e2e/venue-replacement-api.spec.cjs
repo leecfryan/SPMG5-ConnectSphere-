@@ -1,166 +1,78 @@
-/**
- * Live-DB E2E tests for SCRUM-145: Venue Replacement
- * Tests against the real Supabase database with manual schema applied.
- * 
- * @see tests/e2e/support/venue-replacement-fixtures.js
- */
-const { test, expect } = require('@playwright/test');
-const { setupVenueReplacement, markBookingAffected, releaseBookingAffected } = require('../support/venue-replacement-fixtures');
-const { getAccessToken } = require('../support/venue-replacement-fixtures');
+const { test, expect } = require("@playwright/test");
+const { getAccessToken, setupVenueReplacement } = require("./support/venue-replacement-fixtures");
+const supabase = require("../../backend/src/supabase");
 
-test.describe('SCRUM-145: Venue Replacement - Live DB', () => {
-  test.beforeEach(async ({ }, testInfo) => {
-    // Each test gets its own fresh venue replacement setup
-    const { organiser, coordinator, venueStaff, outsider, venue, event, booking, teardown } = await setupVenueReplacement();
-    testInfo.setTimeout(120000); // Live DB tests take longer
-    // Store teardown in test context for afterEach
-    testInfo.parameters.teardown = teardown;
+test.describe("SCRUM-145 venue replacement live database", () => {
+  test.setTimeout(120_000);
+  let scenario;
+
+  test.beforeEach(async () => {
+    scenario = await setupVenueReplacement();
   });
 
-  test.afterEach(async ({ }, testInfo) => {
-    const teardown = testInfo.parameters.teardown;
-    if (teardown) {
-      await teardown();
-    }
+  test.afterEach(async () => {
+    await scenario?.teardown();
   });
 
-  test('TC-SCRUM-145-01: Coordinator can search for replacement venues against real booking', async ({ }, testInfo) => {
-    const { coordinator, venue, event, booking } = testInfo.parameters;
-    const token = await getAccessToken(coordinator);
-    const response = await fetch(
-      `${process.env.SUPABASE_URL}/rest/v1/booking-requests/${booking.id}/replacement-search?minCapacity=100`,
-      {
-        method: 'GET',
-        headers: {
-          'Authorization': 'Bearer ' + token,
-          'apikey': process.env.SUPABASE_URL,
-        },
-      }
-    );
-    expect(response.status).toBe(200);
-    const data = await response.json();
-    expect(data.data).toBeDefined();
-    expect(data.data.originalBooking.bookingId).toBe(booking.id);
-    expect(data.data.originalBooking.venueName).toBe(venue.name);
+  async function apiHeaders(account) {
+    return { Authorization: `Bearer ${await getAccessToken(account)}` };
+  }
+
+  test("TC-SCRUM-145-01: an affected booking returns matching real venue candidates", async ({ request }) => {
+    const headers = await apiHeaders(scenario.coordinator);
+    const mark = await request.post(`http://localhost:3000/api/venues/booking-requests/${scenario.booking.id}/mark-affected`, {
+      headers,
+      data: { reason: "Live test maintenance closure" },
+    });
+    expect(mark.status(), await mark.text()).toBe(200);
+
+    const search = await request.get(`http://localhost:3000/api/venues/booking-requests/${scenario.booking.id}/replacement-search`, { headers });
+    expect(search.status(), await search.text()).toBe(200);
+    const body = await search.json();
+    expect(body.data.originalBooking.bookingId).toBe(scenario.booking.id);
+    expect(body.data.candidateVenues.map((venue) => venue.venueId)).toContain(scenario.replacementVenue.id);
+    expect(body.data.candidateVenues.map((venue) => venue.venueId)).not.toContain(scenario.venue.id);
   });
 
-  test('TC-SCRUM-145-02: Marking a booking as affected transitions event status', async ({ }, testInfo) => {
-    const { coordinator, venue, event, booking } = testInfo.parameters;
-    const token = await getAccessToken(coordinator);
-    
-    // First mark as affected
-    const affectedResponse = await fetch(
-      `${process.env.SUPABASE_URL}/rest/v1/booking-requests/${booking.id}/mark-affected`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Bearer ' + token,
-          'apikey': process.env.SUPABASE_URL,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ reason: 'E2E test: venue maintenance' }),
-      }
-    );
-    expect(affectedResponse.status).toBe(200);
-    
-    // Verify the booking is now affected
-    const getResponse = await fetch(
-      `${process.env.SUPABASE_URL}/rest/v1/venue_booking_requests?id=eq.${booking.id}`,
-      {
-        method: 'GET',
-        headers: {
-          'Authorization': 'Bearer ' + token,
-          'apikey': process.env.SUPABASE_URL,
-        },
-      }
-    );
-    const bookings = await getResponse.json();
-    expect(bookings.data[0].is_affected).toBe(true);
-    expect(bookings.data[0].affected_reason).toContain('maintenance');
+  test("TC-SCRUM-145-04: another coordinator cannot inspect an affected booking", async ({ request }) => {
+    const coordinatorHeaders = await apiHeaders(scenario.coordinator);
+    const mark = await request.post(`http://localhost:3000/api/venues/booking-requests/${scenario.booking.id}/mark-affected`, {
+      headers: coordinatorHeaders,
+      data: { reason: "Live test maintenance closure" },
+    });
+    expect(mark.status(), await mark.text()).toBe(200);
+
+    const denied = await request.get(`http://localhost:3000/api/venues/booking-requests/${scenario.booking.id}/replacement-search`, {
+      headers: await apiHeaders(scenario.outsider),
+    });
+    expect(denied.status()).toBe(403);
   });
 
-  test('TC-SCRUM-145-03: Releasing an affected booking clears the affected flag', async ({ }, testInfo) => {
-    const { coordinator, venue, event, booking } = testInfo.parameters;
-    const token = await getAccessToken(coordinator);
-    
-    // First mark as affected
-    await fetch(
-      `${process.env.SUPABASE_URL}/rest/v1/booking-requests/${booking.id}/mark-affected`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Bearer ' + token,
-          'apikey': process.env.SUPABASE_URL,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ reason: 'E2E test' }),
-      }
-    );
-    
-    // Then release it
-    const releaseResponse = await fetch(
-      `${process.env.SUPABASE_URL}/rest/v1/booking-requests/${booking.id}/release`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Bearer ' + token,
-          'apikey': process.env.SUPABASE_URL,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-    expect(releaseResponse.status).toBe(200);
-    
-    // Verify the booking is no longer affected
-    const getResponse = await fetch(
-      `${process.env.SUPABASE_URL}/rest/v1/venue_booking_requests?id=eq.${booking.id}`,
-      {
-        method: 'GET',
-        headers: {
-          'Authorization': 'Bearer ' + token,
-          'apikey': process.env.SUPABASE_URL,
-        },
-      }
-    );
-    const bookings = await getResponse.json();
-    expect(bookings.data[0].is_affected).toBe(false);
-  });
+  test("TC-SCRUM-145-07: release clears the affected flag and cancels the original slots", async ({ request }) => {
+    const headers = await apiHeaders(scenario.coordinator);
+    const mark = await request.post(`http://localhost:3000/api/venues/booking-requests/${scenario.booking.id}/mark-affected`, {
+      headers,
+      data: { reason: "Live test maintenance closure" },
+    });
+    expect(mark.status(), await mark.text()).toBe(200);
 
-  test('TC-SCRUM-145-04: Different coordinator cannot search another's replacement', async ({ }, testInfo) => {
-    const { coordinator, outsider, venue, event, booking } = testInfo.parameters;
-    const outsiderToken = await getAccessToken(outsider);
-    
-    // Outsider tries to search the booking
-    const response = await fetch(
-      `${process.env.SUPABASE_URL}/rest/v1/booking-requests/${booking.id}/replacement-search`,
-      {
-        method: 'GET',
-        headers: {
-          'Authorization': 'Bearer ' + outsiderToken,
-          'apikey': process.env.SUPABASE_URL,
-        },
-      }
-    );
-    expect(response.status).toBe(403); // Forbidden - not their event
-  });
+    const release = await request.post(`http://localhost:3000/api/venues/booking-requests/${scenario.booking.id}/release`, { headers });
+    expect(release.status(), await release.text()).toBe(200);
 
-  test('TC-SCRUM-145-05: Venue staff can mark any affected booking', async ({ }, testInfo) => {
-    const { venueStaff, venue, event, booking } = testInfo.parameters;
-    const token = await getAccessToken(venueStaff);
-    
-    // Venue staff marks the booking as affected
-    const response = await fetch(
-      `${process.env.SUPABASE_URL}/rest/v1/booking-requests/${booking.id}/mark-affected`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Bearer ' + token,
-          'apikey': process.env.SUPABASE_URL,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ reason: 'E2E: venue staff marked affected' }),
-      }
-    );
-    expect(response.status).toBe(200);
+    const { data: booking, error: bookingError } = await supabase
+      .from("venue_booking_requests")
+      .select("is_affected")
+      .eq("id", scenario.booking.id)
+      .single();
+    expect(bookingError).toBeNull();
+    expect(booking.is_affected).toBe(false);
+
+    const { data: slots, error: slotsError } = await supabase
+      .from("venue_bookings")
+      .select("status")
+      .eq("request_id", scenario.booking.id)
+      .order("slot");
+    expect(slotsError).toBeNull();
+    expect(slots.map((slot) => slot.status)).toEqual(["cancelled", "cancelled"]);
   });
 });

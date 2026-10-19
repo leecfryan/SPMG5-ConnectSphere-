@@ -113,6 +113,7 @@ export default function ManagedEventDetailPage() {
           bookings={summary.venueBookings}
           eventId={summary.id}
           canCheck={typeof hasPermission === "function" && hasPermission("bookings.read")}
+          canManageReplacement={typeof hasPermission === "function" && hasPermission("bookings.request")}
         />
       </section>
       <dl className="account-details managed-event-summary">

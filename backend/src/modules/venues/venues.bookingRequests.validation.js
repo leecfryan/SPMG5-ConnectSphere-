@@ -216,7 +216,11 @@ function validateAgainstVenue(value, venue) {
 function validateAgainstEvent(value, event, today) {
   const errors = [];
 
-  if (!PLANNING_STATUSES.includes(event.status)) {
+  // SCRUM-145: a replacement is the one arrangement change permitted after
+  // safety approval. Its linked affected booking sends the event back through
+  // safety review when Venue Staff approve it.
+  const isSafetyReplacement = value.replaces_booking_id && event.status === "PREPARATION";
+  if (!PLANNING_STATUSES.includes(event.status) && !isSafetyReplacement) {
     errors.push("The event must be approved before requesting a venue");
     return errors;
   }

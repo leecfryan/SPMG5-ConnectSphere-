@@ -39,7 +39,7 @@ async function deleteAccount(id) {
 async function createVenue({ name = "E2E Test Venue", capacity = 200, is_active = true }) {
   const id = randomUUID();
   const { error } = await supabase.from("venues").insert({
-    id, name, capacity, is_active,
+    id, name, address: "1 Test Street", city: "Singapore", country: "Singapore", capacity, is_active,
     facilities: ["Projector"],
     accessibility_features: ["Lift"],
     room_layouts: ["Theatre"],
@@ -76,15 +76,47 @@ async function createBookingRequest({ venueId, eventId, coordinatorId, bookingDa
   const { error } = await supabase.from("venue_booking_requests").insert({
     id, venue_id: venueId, event_id: eventId, booking_date: bookingDate,
     expected_attendees: expectedAttendees, room_layout: roomLayout,
-    required_facilities: requiredFacilities, slots,
-    status: "pending", requested_by: coordinatorId,
+    required_facilities: requiredFacilities, requested_by: coordinatorId,
   });
   if (error) throw new Error("createBookingRequest failed: " + error.message);
+  const { error: slotError } = await supabase.from("venue_bookings").insert(
+    slots.map((slot) => ({
+      venue_id: venueId,
+      booking_date: bookingDate,
+      slot,
+      status: "confirmed",
+      event_name: "E2E Venue Replacement Test",
+      requested_by: coordinatorId,
+      request_id: id,
+    })),
+  );
+  if (slotError) throw new Error("createBookingRequest slots failed: " + slotError.message);
   return { id };
 }
 
 async function deleteBookingRequest(id) {
+  await supabase.from("venue_bookings").delete().eq("request_id", id);
   await supabase.from("venue_booking_requests").delete().eq("id", id);
+}
+
+async function getAccessToken(account) {
+  const response = await fetch(`${process.env.SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: process.env.SUPABASE_PUBLISHABLE_KEY,
+    },
+    body: JSON.stringify({
+      email: account.email,
+      password: account.password,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error("getAccessToken failed: " + await response.text());
+  }
+  const { access_token } = await response.json();
+  if (!access_token) throw new Error("getAccessToken failed: No access token returned");
+  return access_token;
 }
 
 async function markBookingAffected({ bookingId, reason = "E2E test venue maintenance" }) {
@@ -115,33 +147,46 @@ function freshBookingId() {
 // the common shape every venue replacement e2e test needs.
 // Call teardown() in the test's cleanup.
 async function setupVenueReplacement() {
-  const [organiser, coordinator, venueStaff, outsider] = await Promise.all([
-    await createAccount(["event_organiser"]),
-    await createAccount(["event_coordinator"]),
-    await createAccount(["venue_staff"]),
-    await createAccount(["event_coordinator"]), // different coordinator
-  ]);
+  const accounts = [];
+  const venues = [];
+  let event;
+  let booking;
 
-  const venue = await createVenue({ name: "E2E Marina Venue", capacity: 200 });
-  const event = await createEvent({ organiserId: organiser.id, coordinatorId: coordinator.id });
+  try {
+    const organiser = await createAccount(["event_organiser"]);
+    const coordinator = await createAccount(["event_coordinator"]);
+    const venueStaff = await createAccount(["venue_staff"]);
+    const outsider = await createAccount(["event_coordinator"]);
+    accounts.push(organiser, coordinator, venueStaff, outsider);
 
-  // Create a booking request for the event on the venue
-  const booking = await createBookingRequest({
-    venueId: venue.id, eventId: event.id, coordinatorId: coordinator.id,
-  });
+    const venue = await createVenue({ name: "E2E Marina Venue", capacity: 200 });
+    const replacementVenue = await createVenue({ name: "E2E Replacement Venue", capacity: 200 });
+    venues.push(venue, replacementVenue);
+    event = await createEvent({ organiserId: organiser.id, coordinatorId: coordinator.id });
+    booking = await createBookingRequest({
+      venueId: venue.id, eventId: event, coordinatorId: coordinator.id,
+      expectedAttendees: 100, requiredFacilities: ["Projector"],
+    });
 
-  async function teardown() {
-    await deleteBookingRequest(booking.id);
-    await deleteEvent(event.id);
-    await deleteVenue(venue.id);
-    await Promise.all([organiser, coordinator, venueStaff, outsider].map((a) => deleteAccount(a.id)));
+    async function teardown() {
+      await deleteBookingRequest(booking.id);
+      await deleteEvent(event);
+      await Promise.all(venues.reverse().map((item) => deleteVenue(item.id)));
+      await Promise.all(accounts.map((account) => deleteAccount(account.id)));
+    }
+
+    return { organiser, coordinator, venueStaff, outsider, venue, replacementVenue, event, booking, teardown };
+  } catch (error) {
+    if (booking) await deleteBookingRequest(booking.id);
+    if (event) await deleteEvent(event);
+    await Promise.all(venues.reverse().map((item) => deleteVenue(item.id)));
+    await Promise.all(accounts.map((account) => deleteAccount(account.id)));
+    throw error;
   }
-
-  return { organiser, coordinator, venueStaff, outsider, venue, event, booking, teardown };
 }
 
 module.exports = {
   createAccount, deleteAccount, createVenue, deleteVenue, createEvent, deleteEvent,
   createBookingRequest, deleteBookingRequest, markBookingAffected, releaseBookingAffected,
-  freshBookingId, setupVenueReplacement,
+  freshBookingId, getAccessToken, setupVenueReplacement,
 };

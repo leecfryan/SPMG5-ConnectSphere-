@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import { useContext, useState } from "react";
 import { AuthContext } from "../../auth/useAuth";
 import { releaseAffectedVenueBooking } from "../../../lib/api";
+import "./EventVenueBookings.css";
 
 const SLOT_LABELS = { am: "AM", pm: "PM", night: "Night" };
 const SLOT_ORDER = ["am", "pm", "night"];
@@ -52,16 +53,16 @@ function ReleaseAffectedBookingButton({ booking }) {
   );
 }
 
-export default function EventVenueBookings({ bookings = [], eventId, canCheck = false }) {
+export default function EventVenueBookings({ bookings = [], eventId, canCheck = false, canManageReplacement = false }) {
   if (bookings.length === 0) {
-    return <p className="event-venues__empty">No venue bookings recorded.</p>;
+    return <div className="event-venue-bookings"><p className="event-venues__empty">No venue bookings recorded.</p></div>;
   }
 
   return (
-    <>
+    <div className="event-venue-bookings">
       <ul className="event-venues" aria-label="Event venues">
         {bookings.map((booking) => (
-          <li key={booking.id} className="event-venues__item">
+          <li key={booking.id} className={`event-venues__item${booking.is_affected ? " event-venues__item--affected" : ""}`}>
             <div className="event-venues__heading">
               <strong>{booking.venue?.name || "Venue not recorded"}</strong>
               <span className="event-venues__status">
@@ -69,7 +70,7 @@ export default function EventVenueBookings({ bookings = [], eventId, canCheck = 
               </span>
             </div>
             {booking.is_affected && (
-              <p role="alert">
+              <p className="event-venues__affected-message" role="alert">
                 Venue arrangement unresolved{booking.affected_reason ? `: ${booking.affected_reason}` : "."}
               </p>
             )}
@@ -88,13 +89,13 @@ export default function EventVenueBookings({ bookings = [], eventId, canCheck = 
                 <dd>{booking.booking_date || "Date not recorded"} · {period(booking)}</dd>
               </div>
             </dl>
-            {booking.is_affected ? (
-              <>
+            {booking.is_affected && canManageReplacement ? (
+              <div className="event-venues__actions">
                 <Link className="btn btn-secondary" to={`/venues/booking-requests/${booking.id}/replacement`}>
                   Find replacement venue
                 </Link>
                 <ReleaseAffectedBookingButton booking={booking} />
-              </>
+              </div>
             ) : null}
           </li>
         ))}
@@ -107,6 +108,6 @@ export default function EventVenueBookings({ bookings = [], eventId, canCheck = 
           Check each venue booking
         </Link>
       )}
-    </>
+    </div>
   );
 }

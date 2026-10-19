@@ -23,11 +23,11 @@ const BOOKINGS = [
   },
 ];
 
-function renderBookings({ bookings = BOOKINGS, eventId = EVENT_ID, canCheck = true } = {}) {
+function renderBookings({ bookings = BOOKINGS, eventId = EVENT_ID, canCheck = true, canManageReplacement = false } = {}) {
   return render(
     <MemoryRouter>
       <AuthContext.Provider value={{ token: TOKEN }}>
-        <EventVenueBookings bookings={bookings} eventId={eventId} canCheck={canCheck} />
+        <EventVenueBookings bookings={bookings} eventId={eventId} canCheck={canCheck} canManageReplacement={canManageReplacement} />
       </AuthContext.Provider>
     </MemoryRouter>,
   );
@@ -84,9 +84,18 @@ test("[SCRUM-145-UI-002] an affected booking shows replacement and release actio
       slots: [{ slot: "am", status: "confirmed" }],
     },
   ];
-  renderBookings({ bookings: affected });
+  renderBookings({ bookings: affected, canManageReplacement: true });
 
   expect(screen.getByText("Affected - needs alternative")).toBeTruthy();
   expect(screen.getByRole("link", { name: "Find replacement venue" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Release this booking" })).toBeTruthy();
+});
+
+test("[SCRUM-145-UI-004] affected bookings are red but Venue Staff do not receive coordinator actions", () => {
+  renderBookings({ bookings: [{ ...BOOKINGS[0], is_affected: true, affected_reason: "Venue is unsuitable" }] });
+
+  expect(screen.getByText("Affected - needs alternative").closest("li").className).toContain("event-venues__item--affected");
+  expect(screen.getByRole("alert").textContent).toContain("Venue arrangement unresolved: Venue is unsuitable");
+  expect(screen.queryByRole("link", { name: "Find replacement venue" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Release this booking" })).toBeNull();
 });

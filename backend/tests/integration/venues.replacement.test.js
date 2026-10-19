@@ -1,105 +1,71 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { createRequire } from "node:module";
+import { once } from "node:events";
+
 const require = createRequire(import.meta.url);
 const createApp = require("../../src/app");
-const { once } = require("node:events");
 
-// Test fixtures
 const venueId = "11111111-1111-4111-8111-111111111111";
-const affectedBookingId = "33333333-3333-4333-8333-333333333333";
-const eventId = "44444444-4444-4444-8444-444444444444";
-const coordinatorId = "verified-user";
+const originalBookingId = "22222222-2222-4222-8222-222222222222";
+const eventId = "33333333-3333-4333-8333-333333333333";
+const coordinatorId = "44444444-4444-4444-8444-444444444444";
 
 const venue = {
   id: venueId,
-  name: "Marina Grand Ballroom",
+  name: "Replacement Hall",
   is_active: true,
-  capacity: 200,
-  facilities: ["Stage", "AV system"],
-  accessibility_features: ["Step-free access"],
+  capacity: 120,
+  facilities: ["Projector"],
+  accessibility_features: ["Lift"],
   room_layouts: ["Theatre"],
   operating_hours: Object.fromEntries(
-    ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((day) => [day, { open: "08:00", close: "23:00" }])
+    ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((day) => [day, { open: "08:00", close: "23:00" }]),
   ),
 };
 
-const event = {
-  id: eventId,
-  name: "Annual Conference",
-  status: "APPROVED",
-  coordinator_id: coordinatorId,
-  start_time: "2099-10-10T00:00:00Z",
-  end_time: "2099-10-10T15:00:00Z",
+const replacementBody = {
+  event_id: eventId,
+  booking_date: "2099-10-10",
+  slots: ["am"],
+  expected_attendees: 100,
+  room_layout: "Theatre",
+  required_facilities: ["Projector"],
+  accessibility_requirements: ["Lift"],
+  purpose: "Annual conference",
+  replaces_booking_id: originalBookingId,
 };
 
+const service = {
+  getVenueById: vi.fn(),
+  getEventById: vi.fn(),
+  listSlotRowsForDate: vi.fn(),
+  listUnavailabilityInRange: vi.fn(),
+  listActiveHoldsInRange: vi.fn(),
+  submitBookingRequest: vi.fn(),
+  getBookingRequestById: vi.fn(),
+  searchReplacementVenues: vi.fn(),
+  markVenueBookingAffected: vi.fn(),
+  releaseAffectedVenueBooking: vi.fn(),
+};
 
-
-let server, base;
+let server;
+let base;
 
 beforeAll(async () => {
   server = createApp({
     authClient: {
       auth: {
         getUser: async (token) => {
-          const roleMap = {
-            "event_coordinator": {
-              data: {
-                user: { id: coordinatorId, email: "coord@test.com" },
-                app_metadata: { roles: ["event_coordinator"] },
-              },
-              error: null,
-            },
-            "venue_staff": {
-              data: {
-                user: { id: coordinatorId, email: "staff@test.com" },
-                app_metadata: { roles: ["venue_staff"] },
-              },
-              error: null,
-            },
-            "attendee": {
-              data: {
-                user: { id: coordinatorId, email: "attendee@test.com" },
-                app_metadata: { roles: ["attendee"] },
-              },
-              error: null,
-            },
-            "event_organiser": {
-              data: {
-                user: { id: coordinatorId, email: "organiser@test.com" },
-                app_metadata: { roles: ["event_organiser"] },
-              },
-              error: null,
-            },
-            "invalid": {
-              data: null,
-              error: new Error("Invalid token"),
-            },
-          };
-          return roleMap[token] || roleMap["invalid"];
+          const roles = token === "coordinator" ? ["event_coordinator"]
+            : token === "staff" ? ["venue_staff"]
+              : token === "attendee" ? ["attendee"] : [];
+          return roles.length > 0
+            ? { data: { user: { id: coordinatorId, app_metadata: { roles } } }, error: null }
+            : { data: { user: null }, error: new Error("Invalid token") };
         },
       },
     },
-    venuesService: {
-      listVenues: vi.fn().mockResolvedValue([]),
-      getVenueById: vi.fn().mockResolvedValue(venue),
-      updateVenue: vi.fn().mockResolvedValue(venue),
-      listBookingsInRange: vi.fn().mockResolvedValue([]),
-      listUnavailabilityInRange: vi.fn().mockResolvedValue([]),
-      listBookingsForVenuesOnDate: vi.fn().mockResolvedValue([]),
-      listUnavailabilityForVenuesOnDate: vi.fn().mockResolvedValue([]),
-      getEventById: vi.fn().mockResolvedValue(event),
-      listBookableEvents: vi.fn().mockResolvedValue([event]),
-      listSlotRowsForDate: vi.fn().mockResolvedValue([]),
-      submitBookingRequest: vi.fn().mockResolvedValue("req-123"),
-      getBookingRequestById: vi.fn().mockResolvedValue({ id: "req-123", event, venue, slots: [] }),
-      listBookingRequests: vi.fn().mockResolvedValue([]),
-      decideBookingRequest: vi.fn().mockResolvedValue({ id: "req-123", status: "pending" }),
-      recheckConflictsAfterUpdate: vi.fn().mockResolvedValue(),
-      listConflictingRequests: vi.fn().mockResolvedValue([]),
-      listActiveHoldsInRange: vi.fn().mockResolvedValue([]),
-      listHolds: vi.fn().mockResolvedValue([]),
-      createHold: vi.fn().mockResolvedValue([]),
-    },
+    venuesService: service,
   }).listen(0, "127.0.0.1");
   await once(server, "listening");
   base = `http://127.0.0.1:${server.address().port}`;
@@ -107,152 +73,105 @@ beforeAll(async () => {
 
 afterAll(() => new Promise((resolve) => server.close(resolve)));
 
-// Reset all mocks before each test case
 beforeEach(() => {
   vi.clearAllMocks();
+  service.getVenueById.mockResolvedValue(venue);
+  service.getEventById.mockResolvedValue({
+    id: eventId,
+    name: "Annual conference",
+    status: "PREPARATION",
+    start_time: "2099-10-10T00:00:00Z",
+    end_time: "2099-10-10T15:00:00Z",
+  });
+  service.listSlotRowsForDate.mockResolvedValue([]);
+  service.listUnavailabilityInRange.mockResolvedValue([]);
+  service.listActiveHoldsInRange.mockResolvedValue([]);
+  service.submitBookingRequest.mockResolvedValue("55555555-5555-4555-8555-555555555555");
+  service.getBookingRequestById.mockResolvedValue({
+    id: "55555555-5555-4555-8555-555555555555",
+    venue,
+    event: { id: eventId, name: "Annual conference" },
+    slots: [{ slot: "am", status: "pending" }],
+  });
 });
 
-function send(path = "", role = "event_coordinator", method = "GET", data) {
-  const headers = {
-    "Content-Type": "application/json",
-    ...(role ? { "x-user-role": role } : {}),
-    ...(role ? { Authorization: "Bearer " + role } : {}),
-  };
+function send(path, { token = "coordinator", method = "GET", body } = {}) {
   return fetch(base + "/api/venues" + path, {
     method,
-    headers,
-    ...(data === undefined ? {} : { body: JSON.stringify(data) }),
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      "Content-Type": "application/json",
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
 
-describe("SCRUM-145: Venue Replacement Integration Tests - Core Flow", () => {
-  describe("Authentication & Permissions", () => {
-    test("[SCRUM-145-PERM-001] Attendees cannot access replacement endpoints", async () => {
-      const paths = [
-        `/booking-requests/${affectedBookingId}/replacement-search`,
-        `/booking-requests/${affectedBookingId}/mark-affected`,
-        `/booking-requests/${affectedBookingId}/release`,
-      ];
+describe("SCRUM-145 venue replacement routes", () => {
+  test("[SCRUM-145] AC1: the assigned coordinator receives the preserved affected booking and candidates", async () => {
+    const result = {
+      originalBooking: { bookingId: originalBookingId, eventId, venueName: "Closed Hall", slots: ["am"] },
+      candidateVenues: [{ venueId, name: venue.name }],
+    };
+    service.searchReplacementVenues.mockResolvedValue(result);
 
-      for (const path of paths) {
-        const response = await send(
-          path,
-          "attendee",
-          path.includes("search") ? "GET" : "POST",
-          path.includes("search") ? undefined : { reason: "test" }
-        );
-        expect(response.status).toBe(403);
-      }
+    const response = await send(`/booking-requests/${originalBookingId}/replacement-search?minCapacity=100&facilities=Projector`);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: result });
+    expect(service.searchReplacementVenues).toHaveBeenCalledWith(originalBookingId, coordinatorId, {
+      minCapacity: 100,
+      facilities: ["Projector"],
+      accessibility: undefined,
+      roomLayout: undefined,
     });
+  });
 
-    test("[SCRUM-145-PERM-002] Unauthenticated requests are rejected with 401", async () => {
-      const paths = [
-        `/booking-requests/${affectedBookingId}/replacement-search`,
-        `/booking-requests/${affectedBookingId}/mark-affected`,
-        `/booking-requests/${affectedBookingId}/release`,
-      ];
+  test("[SCRUM-145] AC1: an invalid replacement search id is refused before storage", async () => {
+    const response = await send("/booking-requests/not-a-uuid/replacement-search");
 
-      for (const path of paths) {
-        const response = await send(
-          path,
-          "",
-          path.includes("search") ? "GET" : "POST",
-          path.includes("search") ? undefined : { reason: "test" }
-        );
-        expect(response.status).toBe(401);
-      }
-    });
+    expect(response.status).toBe(400);
+    expect(service.searchReplacementVenues).not.toHaveBeenCalled();
+  });
 
-    test("[SCRUM-145-PERM-003] Event organisers cannot access replacement endpoints", async () => {
-      const response = await send(
-        `/booking-requests/${affectedBookingId}/replacement-search`,
-        "event_organiser"
-      );
+  test("[SCRUM-145] AC3: an ordinary request remains blocked in PREPARATION", async () => {
+    const ordinaryBody = { ...replacementBody };
+    delete ordinaryBody.replaces_booking_id;
+
+    const response = await send(`/${venueId}/booking-requests`, { method: "POST", body: ordinaryBody });
+
+    expect(response.status).toBe(400);
+    expect(service.submitBookingRequest).not.toHaveBeenCalled();
+  });
+
+  test("[SCRUM-145] AC5: a linked replacement is allowed in PREPARATION for safety review to run again", async () => {
+    const response = await send(`/${venueId}/booking-requests`, { method: "POST", body: replacementBody });
+
+    expect(response.status).toBe(201);
+    expect(service.submitBookingRequest).toHaveBeenCalledWith(
+      venueId,
+      "Annual conference",
+      expect.objectContaining({ replaces_booking_id: originalBookingId }),
+      coordinatorId,
+    );
+  });
+
+  test("[SCRUM-145] AC2: an attendee cannot search, mark, or release a replacement booking", async () => {
+    for (const [path, method] of [
+      [`/booking-requests/${originalBookingId}/replacement-search`, "GET"],
+      [`/booking-requests/${originalBookingId}/mark-affected`, "POST"],
+      [`/booking-requests/${originalBookingId}/release`, "POST"],
+    ]) {
+      const response = await send(path, { token: "attendee", method, body: method === "POST" ? { reason: "Maintenance" } : undefined });
       expect(response.status).toBe(403);
-    });
-
-    test("[SCRUM-145-PERM-004] Venue staff can mark affected bookings", async () => {
-      const response = await send(
-        `/booking-requests/${affectedBookingId}/mark-affected`,
-        "venue_staff",
-        "POST",
-        { reason: "Emergency maintenance" }
-      );
-      expect([200, 403]).toContain(response.status);
-    });
+    }
   });
 
-  describe("Replacement Search Flow", () => {
-    test("[TC-SCRUM-145-01] Coordinator can search for replacement venues", async () => {
-      const response = await send(
-        `/booking-requests/${affectedBookingId}/replacement-search`,
-        "event_coordinator"
-      );
-      expect([200, 403]).toContain(response.status);
-    });
+  test("[SCRUM-145] AC3: the coordinator can release an affected booking", async () => {
+    service.releaseAffectedVenueBooking.mockResolvedValue(originalBookingId);
 
-    test("[TC-SCRUM-145-02] Search returns original booking details preserved", async () => {
-      const response = await send(
-        `/booking-requests/${affectedBookingId}/replacement-search`,
-        "event_coordinator"
-      );
-      if (response.status === 200) {
-        const data = await response.json();
-        expect(data.data.originalBooking).toBeDefined();
-        expect(data.data.originalBooking.bookingId).toBe(affectedBookingId);
-      }
-    });
-  });
+    const response = await send(`/booking-requests/${originalBookingId}/release`, { method: "POST" });
 
-  describe("Mark Affected Flow", () => {
-    test("[TC-SCRUM-145-03] Coordinator can mark booking as affected", async () => {
-      const response = await send(
-        `/booking-requests/${affectedBookingId}/mark-affected`,
-        "event_coordinator",
-        "POST",
-        { reason: "Venue maintenance closure" }
-      );
-      expect([200, 400, 403]).toContain(response.status);
-    });
-
-    test("[TC-SCRUM-145-04] Mark affected requires a reason", async () => {
-      const response = await send(
-        `/booking-requests/${affectedBookingId}/mark-affected`,
-        "event_coordinator",
-        "POST",
-        {} // No reason
-      );
-      expect([400, 403]).toContain(response.status);
-    });
-
-    test("[TC-SCRUM-145-05] Whitespace-only reason is rejected", async () => {
-      const response = await send(
-        `/booking-requests/${affectedBookingId}/mark-affected`,
-        "event_coordinator",
-        "POST",
-        { reason: "   " }
-      );
-      expect([400, 403]).toContain(response.status);
-    });
-  });
-
-  describe("Release Flow", () => {
-    test("[TC-SCRUM-145-06] Coordinator can release affected booking", async () => {
-      const response = await send(
-        `/booking-requests/${affectedBookingId}/release`,
-        "event_coordinator",
-        "POST"
-      );
-      expect([200, 403]).toContain(response.status);
-    });
-
-    test("[TC-SCRUM-145-07] Release requires affected booking status", async () => {
-      const response = await send(
-        `/booking-requests/invalid/release`,
-        "event_coordinator",
-        "POST"
-      );
-      expect([400, 403]).toContain(response.status);
-    });
+    expect(response.status).toBe(200);
+    expect(service.releaseAffectedVenueBooking).toHaveBeenCalledWith(originalBookingId, coordinatorId);
   });
 });

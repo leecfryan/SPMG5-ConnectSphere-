@@ -281,7 +281,7 @@ function MarkAffectedPanel({ request, token, onMarked }) {
   );
 }
 
-function RequestCard({ request, canDecide, onDecided, token }) {
+function RequestCard({ request, canDecide, canManageReplacement, onDecided, token }) {
   const hasTiming = Boolean(request.event.start_time && request.event.end_time);
 
   return (
@@ -310,9 +310,11 @@ function RequestCard({ request, canDecide, onDecided, token }) {
         <div className="v-alert v-alert-error" role="status" style={{ borderLeft: "4px solid #ef4444", margin: "8px 0", padding: "8px" }}>
           <strong>Venue arrangement unresolved</strong>
           <p>{request.affected_reason ? `Reason: ${request.affected_reason}` : "The booked venue has become unavailable."}</p>
-          <Link className="v-btn v-btn-secondary" to={`/venues/booking-requests/${request.id}/replacement`}>
-            Find replacement venue
-          </Link>
+          {canManageReplacement && (
+            <Link className="v-btn v-btn-secondary" to={`/venues/booking-requests/${request.id}/replacement`}>
+              Find replacement venue
+            </Link>
+          )}
         </div>
       )}
 
@@ -423,6 +425,7 @@ function VenueBookingRequestList({ onBack }) {
   const [searchParams] = useSearchParams();
   const eventId = searchParams.get("event") || searchParams.get("event_id");
   const canDecide = hasPermission("bookings.decide");
+  const canManageReplacement = hasPermission("bookings.request");
   const [status, setStatus] = useState(eventId ? "" : "pending");
   const [result, setResult] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -608,6 +611,7 @@ function VenueBookingRequestList({ onBack }) {
                 key={request.id}
                 request={request}
                 canDecide={canDecide}
+                canManageReplacement={canManageReplacement}
                 token={token}
                 onDecided={() => setRefreshKey((key) => key + 1)}
               />

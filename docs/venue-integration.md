@@ -20,6 +20,7 @@ middleware and hardcoded development roles have been removed.
 | `/venues/:id/edit` | `venues.update` | Venue Staff, Event Coordinator |
 | `/venues/:id/booking-request` | `bookings.request` | Event Coordinator |
 | `/venues/booking-requests` | `bookings.read` | Venue Staff, Event Coordinator |
+| `/venues/booking-requests/:requestId/replacement` | `bookings.request` | Event Coordinator |
 | `/venues/booking-requests` decide controls | `bookings.decide` | Venue Staff |
 | `/venues/:id/unavailability` | `venues.unavailability` | Venue Staff |
 | `/venues/:id/holds` | `venues.holds` | Venue Staff |
@@ -952,6 +953,24 @@ Apply this SQL manually in the Supabase dashboard after the existing booking
 decision function. Do not add a migration file. The columns preserve the
 original request while linking a replacement to it; the RPCs keep affected
 state and replacement approval atomic.
+
+**Coordinator experience and access.** A failed venue suitability, availability
+or conflict check on the coordinator's **My Events** detail marks that booking
+as affected and reloads the venue list. The affected card is visually distinct
+and states why the arrangement is unresolved. Venue Staff can identify and mark
+an affected booking, but only an Event Coordinator may search for a replacement
+or release it. The frontend hides those two actions from Venue Staff, and the
+API independently requires `bookings.request`, which is Event Coordinator-only.
+
+`GET /api/venues/booking-requests/:requestId/replacement-search` starts from
+the affected booking's date, slots, attendance, layout, facilities and
+accessibility requirements. It returns active venues other than the affected
+venue only when they meet those requirements and are free for the requested
+period. The replacement page displays every returned venue as a card. When the
+list is empty, it states **No suitable venue found** and directs the coordinator
+to release the booking and consider replanning the event. A selected card is
+submitted through the ordinary booking-request endpoint and therefore follows
+the standard Venue Staff approval flow.
 
 ```sql
 alter table public.venue_booking_requests

@@ -51,6 +51,17 @@ module.exports = function venueStorage(accounts) {
     },
     async getBookingRequestById(id, scope) { return requests.find(r => r.id === id && visible(r, scope)) || null; },
     async listBookingRequests(scope, eventId) { return requests.filter(r => visible(r, scope) && (!eventId || r.event_id === eventId)); },
+    // SCRUM-145: the browser fixture must preserve the production route's
+    // affected state so a failed booking check does not produce a test-server 500.
+    async markVenueBookingAffected(id, userId, reason, isVenueStaff) {
+      const request = requests.find(item => item.id === id);
+      if (!request || (!isVenueStaff && request.event.coordinator_id !== userId)) return null;
+      request.is_affected = true;
+      request.affected_reason = reason;
+      request.affected_at = new Date().toISOString();
+      if (request.event.status === 'CONFIRMED') request.event.status = 'APPROVED';
+      return id;
+    },
     // Same rule as decide_venue_booking_request: coordinator-cancelled slots stay cancelled.
     async decideBookingRequest(id, decision) { const r = requests.find(r => r.id === id); if (!r) return null; for (const slot of r.slots) if (slot.status !== 'cancelled') slot.status = decision; return id; },
     // SCRUM-148/149: mirror the production release RPC for cancellation and postponement.
