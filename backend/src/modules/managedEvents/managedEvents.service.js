@@ -16,7 +16,7 @@ const {
 // that story's owner.
 const WAITLIST_STATUS = "waitlisted";
 const VENUE_BOOKING_FIELDS =
-  "id, event_id, purpose, booking_date, venue:venues!venue_id(id, name, city, country), " +
+  "id, event_id, purpose, booking_date, is_affected, affected_reason, replaces_booking_id, venue:venues!venue_id(id, name, city, country), " +
   "slots:venue_bookings!request_id(slot, status)";
 
 // Built from the verified session id, never from request input. Postgrest
@@ -63,6 +63,9 @@ function createManagedEventsService(client) {
         event_id: row.event_id,
         purpose: row.purpose ?? null,
         booking_date: row.booking_date ?? null,
+        is_affected: row.is_affected === true,
+        affected_reason: row.affected_reason ?? null,
+        replaces_booking_id: row.replaces_booking_id ?? null,
         venue: row.venue ?? null,
         slots: Array.isArray(row.slots)
           ? row.slots.map((slot) => ({ slot: slot.slot, status: slot.status }))

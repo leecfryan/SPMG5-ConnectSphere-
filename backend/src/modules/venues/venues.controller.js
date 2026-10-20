@@ -79,6 +79,9 @@ function createVenuesController(service) {
     listActiveHoldsInRange,
     listHolds,
     createHold,
+    searchReplacementVenues,
+    markVenueBookingAffected,
+    releaseAffectedVenueBooking,
   } = service;
 
   // SCRUM-18: narrow the catalogue to potential venues.
@@ -431,7 +434,16 @@ function createVenuesController(service) {
       // That is fine: this request is only pending, and the exclusion constraint
       // on venue_bookings stops the slot ever being confirmed
       // twice.
-      const requestId = await submitBookingRequest(id, event.name, value, req.user.id);
+      let requestId;
+      try {
+        requestId = await submitBookingRequest(id, event.name, value, req.user.id);
+      } catch (err) {
+        if (err.message.includes("active replacement request") ||
+            err.message.includes("Replacement must reference")) {
+          return res.status(409).json({ error: err.message });
+        }
+        throw err;
+      }
 
       // SCRUM-88: return the request exactly as Venue Staff will see it
       const created = await getBookingRequestById(requestId, req.bookingScope || { coordinatorId: req.user.id });
@@ -662,6 +674,69 @@ function createVenuesController(service) {
       const request = await getBookingRequestById(requestId, req.bookingScope);
       res.status(200).json({ data: withStatus(request) });
     } catch (err) {
+      next(err);
+    }
+  }
+
+  async function getReplacementSearch(req, res, next) {
+    try {
+      const { requestId } = req.params;
+      if (!UUID_PATTERN.test(requestId)) {
+        return res.status(400).json({ error: "Invalid booking request id" });
+      }
+      const parseList = (value) => value === undefined
+        ? undefined
+        : value.split(",").map((item) => item.trim()).filter(Boolean);
+      const minCapacity = req.query.minCapacity === undefined
+        ? undefined
+        : Number(req.query.minCapacity);
+      if (minCapacity !== undefined && (!Number.isInteger(minCapacity) || minCapacity <= 0)) {
+        return validationFailed(res, "minCapacity must be a positive whole number");
+      }
+      const data = await searchReplacementVenues(requestId, req.user.id, {
+        minCapacity,
+        facilities: parseList(req.query.facilities),
+        accessibility: parseList(req.query.accessibility),
+        roomLayout: req.query.roomLayout || undefined,
+      });
+      res.status(200).json({ data });
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ error: err.message });
+      next(err);
+    }
+  }
+
+  async function postMarkBookingAffected(req, res, next) {
+    try {
+      const { requestId } = req.params;
+      if (!UUID_PATTERN.test(requestId)) {
+        return res.status(400).json({ error: "Invalid booking request id" });
+      }
+      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+      if (!reason) return validationFailed(res, "reason is required");
+      const data = await markVenueBookingAffected(
+        requestId,
+        req.user.id,
+        reason,
+        req.user.roles.includes("venue_staff")
+      );
+      res.status(200).json({ data });
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ error: err.message });
+      next(err);
+    }
+  }
+
+  async function postReleaseAffectedBooking(req, res, next) {
+    try {
+      const { requestId } = req.params;
+      if (!UUID_PATTERN.test(requestId)) {
+        return res.status(400).json({ error: "Invalid booking request id" });
+      }
+      const data = await releaseAffectedVenueBooking(requestId, req.user.id);
+      res.status(200).json({ data });
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ error: err.message });
       next(err);
     }
   }
@@ -999,6 +1074,9 @@ function createVenuesController(service) {
     getBookingRequest,
     getEventBookingChecks,
     patchBookingRequestDecision,
+    getReplacementSearch,
+    postMarkBookingAffected,
+    postReleaseAffectedBooking,
     getConflictFlags,
     patchBookingRequest,
     patchBookingRequestCancel,

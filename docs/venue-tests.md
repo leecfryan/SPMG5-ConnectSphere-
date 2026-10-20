@@ -689,6 +689,11 @@ Story: as Venue Staff, I want to see which bookings are affected when I mark a v
 
 UI to display the affected list (the 201 JSON is the delivery channel for this story); coordinator notification; cancellation or rescheduling of affected bookings.
 
+Latest local execution (2026-10-20): the Playwright venue browser suite passed
+all 8 tests after its in-memory venue fixture gained the same read-only
+`listAffectedBookingRequests` behaviour as the production service. This was a
+merge-integration repair; it does not alter production SCRUM-136 behaviour.
+
 ---
 
 ## 8. Coverage note
@@ -700,3 +705,29 @@ files import nothing, which is what makes direct unit tests cheap to add; that g
 
 `venueBookingChecks.js` (SCRUM-138) is the exception: it has a direct unit suite and reports 100% on statements,
 branches and lines.
+# SCRUM-145 replacement venue coverage
+
+The replacement flow uses the existing venue request and decision pipeline.
+Apply the manual SQL in [`venue-integration.md`](./venue-integration.md) before
+running live database checks.
+
+| Test case | Expected behavior | Automated coverage |
+| --- | --- | --- |
+| `TC-SCRUM-145-01` | Original requirements are returned with the preserved affected booking and candidates. | `backend/tests/unit/venues/venueReplacement.test.js`; `backend/tests/integration/venues.replacement.test.js` |
+| `TC-SCRUM-145-02` | Invalid identifiers and callers without permission are refused before replacement storage is used. | `backend/tests/integration/venues.replacement.test.js` |
+| `TC-SCRUM-145-03` | A replacement is submitted through the existing booking request flow, while release remains available. | `backend/tests/integration/venues.replacement.test.js`; `frontend/src/features/venues/components/VenueReplacementSearch.test.jsx` |
+| `TC-SCRUM-145-04` | A different Event Coordinator cannot inspect an affected booking or its replacement candidates. | `tests/e2e/venue-replacement-api.spec.cjs`; API ownership check in `venueReplacement.service.js` |
+| `TC-SCRUM-145-05` | Only a linked replacement, never an ordinary request, may be made while the event is in `PREPARATION`; only one active replacement can exist. | `backend/tests/integration/venues.replacement.test.js`; SQL/RPC constraint |
+| `TC-SCRUM-145-06` | Approval resolves the original and repeats safety review when required. | SQL/RPC integration test after SQL is applied. |
+| `TC-SCRUM-145-07` | Release cancels the affected booking and pending replacement. | SQL/RPC integration test after SQL is applied. |
+| `TC-SCRUM-145-08` | The affected booking's event and venue details, replacement action and release action are visible to the Event Coordinator; Venue Staff see the red affected state but neither action. | `frontend/src/features/venues/components/EventVenueBookings.test.jsx`; `frontend/src/features/venues/components/VenueReplacementSearch.test.jsx` |
+| `TC-SCRUM-145-09` | Matching available venues are rendered as cards; no candidates gives the coordinator a clear release-and-replan next step. | `frontend/src/features/venues/components/VenueReplacementSearch.test.jsx` |
+
+Latest execution (2026-10-20): the full local backend suite passed 1,034 tests
+(43 opt-in live tests skipped); the full local frontend suite passed 485 tests;
+and the local Playwright API/browser suite passed 190 tests. The venue browser
+subset was rerun after its fixture repair and passed 7 tests. Backend and
+frontend lint passed, and the frontend production build passed. Live-database
+checks are deliberately run by the developer, not the agent: the developer's
+focused rerun passed all three SCRUM-145 cases, `TC-SCRUM-145-01`,
+`TC-SCRUM-145-04`, and `TC-SCRUM-145-07`.

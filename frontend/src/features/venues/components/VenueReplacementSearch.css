@@ -1,0 +1,125 @@
+.venue-replacement {
+  max-width: 900px;
+}
+
+.venue-replacement__back {
+  display: inline-block;
+  margin-bottom: 16px;
+}
+
+.venue-replacement__affected {
+  margin: 18px 0 24px;
+  padding: 18px;
+  border: 1px solid #d94a3d;
+  border-left-width: 5px;
+  border-radius: 10px;
+  background: #fff7f6;
+}
+
+.venue-replacement__eyebrow {
+  margin: 0;
+  color: #b42318;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.venue-replacement__affected h2,
+.venue-replacement__intro h2,
+.venue-replacement__empty h2 {
+  margin: 5px 0 0;
+}
+
+.venue-replacement__details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 24px;
+  margin: 18px 0 0;
+}
+
+.venue-replacement__details dt {
+  color: #6b3c38;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.venue-replacement__details dd {
+  margin: 3px 0 0;
+  color: #3e2522;
+  font-weight: 600;
+}
+
+.venue-replacement__reason {
+  margin: 18px 0 0;
+  color: #8d2119;
+}
+
+.venue-replacement__intro {
+  margin: 24px 0 14px;
+}
+
+.venue-replacement__intro p,
+.venue-replacement__candidate p,
+.venue-replacement__empty p {
+  margin: 6px 0 0;
+}
+
+.venue-replacement__candidates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.venue-replacement__candidate {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid #cfded7;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.venue-replacement__candidate h3 {
+  margin: 0;
+  color: #153e2b;
+  font-size: 18px;
+}
+
+.venue-replacement__capacity {
+  color: #263d38;
+  font-weight: 700;
+}
+
+.venue-replacement__match {
+  color: #26734d;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.venue-replacement__candidate .v-btn {
+  width: 100%;
+}
+
+.venue-replacement__empty {
+  margin-top: 14px;
+  padding: 22px;
+  border: 1px solid #d8a25a;
+  border-radius: 10px;
+  background: #fffaf0;
+}
+
+.venue-replacement__empty .v-btn {
+  margin-top: 18px;
+}
+
+@media (max-width: 480px) {
+  .venue-replacement__details {
+    grid-template-columns: 1fr;
+  }
+}

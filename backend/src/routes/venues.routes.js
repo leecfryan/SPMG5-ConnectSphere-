@@ -19,6 +19,9 @@ module.exports = function createVenuesRoutes(service) {
   router.get("/booking-events", requirePermission("bookings.request"), available, controller.getBookableEvents);
   router.get("/booking-requests", requirePermission("bookings.read", bookingScope), available, controller.getBookingRequests);
   router.get("/booking-requests/:requestId", requirePermission("bookings.read", bookingScope), available, controller.getBookingRequest);
+  router.get("/booking-requests/:requestId/replacement-search", requirePermission("bookings.request"), available, controller.getReplacementSearch);
+  router.post("/booking-requests/:requestId/mark-affected", requirePermission("venues.update"), available, controller.postMarkBookingAffected);
+  router.post("/booking-requests/:requestId/release", requirePermission("bookings.request"), available, controller.postReleaseAffectedBooking);
   // SCRUM-138: one event's bookings, each checked on its own.
   router.get("/events/:eventId/booking-checks", requirePermission("bookings.read", bookingScope), available, controller.getEventBookingChecks);
   router.get("/", requirePermission("venues.read"), available, controller.getVenues);

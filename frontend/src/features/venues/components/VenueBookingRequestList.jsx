@@ -1,6 +1,6 @@
 import { useAuth } from "../../auth/useAuth";
 import { useState, useEffect } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import {
   cancelBookingRequest,
   changeBookingRequest,
@@ -8,6 +8,7 @@ import {
   fetchBookingRequests,
   fetchVenueBookingChecks,
   fetchVenueById,
+  markVenueBookingAffected,
 } from "../../../lib/api";
 import ChipToggleGroup from "./ChipToggleGroup";
 import {
@@ -202,6 +203,61 @@ function DecisionPanel({ request, onDecided }) {
         )}
       </div>
     </div>
+  );
+}
+
+// SCRUM-145: Venue Staff mark a confirmed/pending booking as affected when the
+// venue becomes unavailable. Coordinators see the flag and the replacement flow.
+function MarkAffectedPanel({ request, token, onMarked }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const hasReason = reason.trim() !== "";
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (!hasReason) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await markVenueBookingAffected(request.id, reason.trim(), token);
+      onMarked();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return <div className="v-decision"><div className="v-decision-actions">
+      <button type="button" className="v-btn v-btn-secondary" onClick={() => setOpen(true)}>
+        <IconAlert />
+        Mark as affected
+      </button>
+    </div></div>;
+  }
+
+  return (
+    <form className="v-decision" onSubmit={handleSubmit}>
+      <label className="v-field">
+        <span className="v-label">Reason this venue is no longer suitable</span>
+        <textarea className="v-input" rows="2" value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder="e.g. Venue under maintenance on the booking date" required disabled={busy} />
+        <span className="v-hint">{hasReason
+          ? "Shared with the coordinator, who will arrange a replacement."
+          : "A reason is required. It is shared with the coordinator."}</span>
+      </label>
+      {error && <p className="v-alert v-alert-error" role="alert"><IconAlert /><span>{error}</span></p>}
+      <div className="v-decision-actions">
+        <button type="button" className="v-btn v-btn-secondary"
+          onClick={() => { setOpen(false); setReason(""); setError(null); }} disabled={busy}>Cancel</button>
+        <button type="submit" className="v-btn v-btn-danger" disabled={busy || !hasReason}
+          title={hasReason ? undefined : "Type a reason first"}>{busy ? "Marking…" : "Confirm — mark as affected"}</button>
+      </div>
+    </form>
   );
 }
 
@@ -446,7 +502,7 @@ function EditPanel({ request, onChanged }) {
   );
 }
 
-function RequestCard({ request, canDecide, canManage, onDecided, onCancelled, onChanged }) {
+function RequestCard({ request, canDecide, canManage, canManageReplacement, onDecided, onCancelled, onChanged, token }) {
   const hasTiming = Boolean(request.event.start_time && request.event.end_time);
 
   return (
@@ -466,6 +522,16 @@ function RequestCard({ request, canDecide, canManage, onDecided, onCancelled, on
           {STATUS_LABELS[request.status] || request.status}
         </span>
       </header>
+      {request.replaces_booking_id && (
+        <p className="v-alert" role="status">Replacement request for affected booking {request.replaces_booking_id}.</p>
+      )}
+      {request.is_affected && (
+        <div className="v-alert v-alert-error" role="status" style={{ borderLeft: "4px solid #ef4444", margin: "8px 0", padding: "8px" }}>
+          <strong>Venue arrangement unresolved</strong>
+          <p>{request.affected_reason ? `Reason: ${request.affected_reason}` : "The booked venue has become unavailable."}</p>
+          {canManageReplacement && <Link className="v-btn v-btn-secondary" to={`/venues/booking-requests/${request.id}/replacement`}>Find replacement venue</Link>}
+        </div>
+      )}
 
       <div className="v-request-body">
         {/* SCRUM-86: what was asked for, next to when the event actually runs */}
@@ -538,6 +604,12 @@ function RequestCard({ request, canDecide, canManage, onDecided, onCancelled, on
         </div>
       )}
 
+      {canDecide && !request.is_affected && ["pending", "confirmed"].includes(request.status) && (
+        <div className="v-request-body">
+          <MarkAffectedPanel request={request} token={token} onMarked={onDecided} />
+        </div>
+      )}
+
       {/* SCRUM-154: only the assigned coordinator, and only while live */}
       {canManage && ["pending", "confirmed"].includes(request.status) && (
         <div className="v-request-body">
@@ -573,6 +645,7 @@ function VenueBookingRequestList({ onBack }) {
   const eventId = searchParams.get("event") || searchParams.get("event_id");
   const canDecide = hasPermission("bookings.decide");
   const canManage = hasPermission("bookings.manage");
+  const canManageReplacement = hasPermission("bookings.request");
   const [status, setStatus] = useState(eventId ? "" : "pending");
   const [result, setResult] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -587,10 +660,28 @@ function VenueBookingRequestList({ onBack }) {
   // coordinator asks for it.
   const [check, setCheck] = useState(null);
 
+  async function autoMarkFailed(report) {
+    const toMark = (report.results || []).filter((result) => result.overall === "failed" && result.booking_id
+      && requests.some((request) => request.id === result.booking_id && !request.is_affected));
+    if (toMark.length === 0) return;
+    await Promise.allSettled(toMark.map((result) => {
+      const reasons = [
+        ...(result.suitability?.reasons || []),
+        ...(result.availability?.reasons || []),
+        ...(result.conflicts?.reasons || []),
+      ];
+      return markVenueBookingAffected(result.booking_id, reasons.join("; ") || "Venue booking check failed", token);
+    }));
+    setRefreshKey((key) => key + 1);
+  }
+
   function runCheck() {
     setCheck({ status: "loading" });
     fetchVenueBookingChecks(eventId, token)
-      .then((report) => setCheck({ status: "ready", report }))
+      .then(async (report) => {
+        setCheck({ status: "ready", report });
+        await autoMarkFailed(report);
+      })
       .catch((err) => setCheck({ status: "error", message: err.message }));
   }
 
@@ -726,6 +817,8 @@ function VenueBookingRequestList({ onBack }) {
                 request={request}
                 canDecide={canDecide}
                 canManage={canManage}
+                canManageReplacement={canManageReplacement}
+                token={token}
                 onDecided={() => setRefreshKey((key) => key + 1)}
                 onCancelled={() => setRefreshKey((key) => key + 1)}
                 onChanged={() => setRefreshKey((key) => key + 1)}

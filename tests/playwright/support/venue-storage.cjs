@@ -1,5 +1,6 @@
 // Test-only storage. Production auth, venue controllers and validation stay real.
 const { randomUUID } = require('node:crypto');
+const { committedSlots } = require('../../../backend/src/modules/venues/venues.availability');
 const venueId = '11111111-1111-4111-8111-111111111111';
 module.exports = function venueStorage(accounts) {
   let venue = { id: venueId, name: 'Integration Hall', address: '1 Test Street', city: 'Singapore', country: 'Singapore',
@@ -51,6 +52,28 @@ module.exports = function venueStorage(accounts) {
     },
     async getBookingRequestById(id, scope) { return requests.find(r => r.id === id && visible(r, scope)) || null; },
     async listBookingRequests(scope, eventId) { return requests.filter(r => visible(r, scope) && (!eventId || r.event_id === eventId)); },
+    // SCRUM-136: mirrors the production read-only affected-booking query for
+    // unavailability periods, including setup and turnaround buffer slots.
+    async listAffectedBookingRequests(id, period, venueDetail) {
+      const unavailableSlots = new Set(period.slots);
+      return requests.filter((request) => {
+        if (request.venue.id !== id || request.booking_date < period.start_date || request.booking_date > period.end_date) return false;
+        const confirmedSlots = request.slots.filter((slot) => slot.status === 'confirmed').map((slot) => slot.slot);
+        return committedSlots(confirmedSlots, venueDetail.setup_minutes, venueDetail.turnaround_minutes)
+          .some((slot) => unavailableSlots.has(slot));
+      });
+    },
+    // SCRUM-145: the browser fixture must preserve the production route's
+    // affected state so a failed booking check does not produce a test-server 500.
+    async markVenueBookingAffected(id, userId, reason, isVenueStaff) {
+      const request = requests.find(item => item.id === id);
+      if (!request || (!isVenueStaff && request.event.coordinator_id !== userId)) return null;
+      request.is_affected = true;
+      request.affected_reason = reason;
+      request.affected_at = new Date().toISOString();
+      if (request.event.status === 'CONFIRMED') request.event.status = 'APPROVED';
+      return id;
+    },
     // Same rule as decide_venue_booking_request: coordinator-cancelled slots stay cancelled.
     async decideBookingRequest(id, decision) { const r = requests.find(r => r.id === id); if (!r) return null; for (const slot of r.slots) if (slot.status !== 'cancelled') slot.status = decision; return id; },
     // SCRUM-148/149: mirror the production release RPC for cancellation and postponement.
@@ -71,17 +94,6 @@ module.exports = function venueStorage(accounts) {
         created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
       periods.push(period);
       return period;
-    },
-    // SCRUM-136: confirmed booking requests whose committed slots overlap the period.
-    // The fake uses a simple slot-intersection check without setup/turnaround buffers
-    // (those are zero in the test venue fixture), which is sufficient for Playwright AC coverage.
-    async listAffectedBookingRequests(venueId, period) {
-      const periodSlotSet = new Set(period.slots);
-      return requests.filter(r => {
-        if (r.venue.id !== venueId) return false;
-        if (r.booking_date < period.start_date || r.booking_date > period.end_date) return false;
-        return r.slots.some(s => s.status === 'confirmed' && periodSlotSet.has(s.slot));
-      });
     },
     async listUnavailabilityPeriods(venueId) {
       return periods.filter(p => p.venue_id === venueId).sort((a, b) => a.start_date.localeCompare(b.start_date));
@@ -117,8 +129,10 @@ module.exports = function venueStorage(accounts) {
       holds.push(...rows);
       return rows;
     },
-    // SCRUM-135: no-op in fake storage — conflict flag updates rely on Supabase
-    // queries (getSupabase()) that have no in-memory equivalent here.
-    async recheckConflictsAfterUpdate() {},
+    // SCRUM-135: no-op for test fixture - recheckConflictsAfterUpdate is called after
+    // venue updates but the fake storage doesn't track conflict flags
+    async recheckConflictsAfterUpdate() {
+      return;
+    },
   };
 };

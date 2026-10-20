@@ -12,6 +12,7 @@ import VenueBookingRequestList from "./components/VenueBookingRequestList";
 import VenueUnavailabilityPage from "./pages/VenueUnavailabilityPage";
 import VenueHoldsPage from "./pages/VenueHoldsPage";
 import VenueConflictsPage from "./pages/VenueConflictsPage";
+import VenueReplacementSearch from "./components/VenueReplacementSearch";
 import "./venues.css";
 
 function VenueRecordPage({ mode = "detail" }) {
@@ -93,6 +94,7 @@ export default function VenueRoutes() {
         <Route path=":id/edit" element={<VenueRecordPage key="edit" mode="edit" />} />
       </Route>
       <Route element={<RequirePermission permission="bookings.request" />}>
+        <Route path="booking-requests/:requestId/replacement" element={<VenueReplacementSearch />} />
         <Route path=":id/booking-request" element={<VenueRecordPage key="booking" mode="booking" />} />
       </Route>
       <Route element={<RequirePermission permission="venues.unavailability" />}>

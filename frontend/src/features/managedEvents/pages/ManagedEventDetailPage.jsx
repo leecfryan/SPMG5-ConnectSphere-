@@ -5,6 +5,7 @@ import { fetchEventRegistrationSummary, fetchManagedRegistrationWindow } from ".
 import RegistrationWindowEditor from "../components/RegistrationWindowEditor";
 import WaitlistCoordinatorPanel from "../components/WaitlistCoordinatorPanel";
 import EventVenueBookings from "../../venues/components/EventVenueBookings";
+import { fetchVenueBookingChecks, markVenueBookingAffected } from "../../../lib/api";
 import "../../events/events.css";
 
 // The server answers 403 for an event that belongs to someone else and for one
@@ -41,6 +42,50 @@ export default function ManagedEventDetailPage() {
     return () => { active = false; };
   }, [eventId, token, key]);
 
+  // SCRUM-145: on every load, silently run venue booking checks and mark any
+  // booking that fails a suitability/availability/conflict check as affected.
+  // This is fire-and-forget: a check error must never block the event page from
+  // loading. The mark calls are also fire-and-forget for the same reason.
+  useEffect(() => {
+    if (!token || !eventId) return;
+    let active = true;
+    fetchVenueBookingChecks(eventId, token)
+      .then(async (report) => {
+        if (!active) return;
+        const failed = (report.results || []).filter(
+          (result) => result.overall === "failed" && result.booking_id
+        );
+        await Promise.allSettled(
+          failed.map((result) => {
+            const reasons = [
+              ...((result.suitability?.reasons) || []),
+              ...((result.availability?.reasons) || []),
+              ...((result.conflicts?.reasons) || []),
+            ];
+            const reason =
+              reasons.length > 0 ? reasons.join("; ") : "Venue booking check failed";
+            return markVenueBookingAffected(result.booking_id, reason, token);
+          })
+        );
+        // Re-fetch the summary so the venue list reflects the new affected flags.
+        if (active && failed.length > 0) {
+          fetchEventRegistrationSummary(eventId, token)
+            .then(async (summary) => {
+              let window;
+              try { window = await fetchManagedRegistrationWindow(eventId, token); } catch { /* keep existing */ }
+              if (active) setResult((prev) =>
+                prev?.key === key
+                  ? { ...prev, summary: { ...summary, ...window } }
+                  : prev
+              );
+            })
+            .catch(() => { /* ignore refresh errors */ });
+        }
+      })
+      .catch(() => { /* swallow — check errors must not block the page */ });
+    return () => { active = false; };
+  }, [eventId, token, key]);
+
   const back = <Link to="/events/managed">Back to my events</Link>;
 
   if (result?.key !== key) return <p role="status">Loading registration information…</p>;
@@ -68,6 +113,7 @@ export default function ManagedEventDetailPage() {
           bookings={summary.venueBookings}
           eventId={summary.id}
           canCheck={typeof hasPermission === "function" && hasPermission("bookings.read")}
+          canManageReplacement={typeof hasPermission === "function" && hasPermission("bookings.request")}
         />
       </section>
       <dl className="account-details managed-event-summary">

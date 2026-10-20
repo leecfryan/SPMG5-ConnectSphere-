@@ -20,6 +20,7 @@ middleware and hardcoded development roles have been removed.
 | `/venues/:id/edit` | `venues.update` | Venue Staff, Event Coordinator |
 | `/venues/:id/booking-request` | `bookings.request` | Event Coordinator |
 | `/venues/booking-requests` | `bookings.read` | Venue Staff, Event Coordinator |
+| `/venues/booking-requests/:requestId/replacement` | `bookings.request` | Event Coordinator |
 | `/venues/booking-requests` decide controls | `bookings.decide` | Venue Staff |
 | `/venues/:id/unavailability` | `venues.unavailability` | Venue Staff |
 | `/venues/:id/holds` | `venues.holds` | Venue Staff |
@@ -1022,6 +1023,260 @@ revoke execute on function public.decide_venue_booking_request(uuid, text, uuid,
   from public, anon, authenticated;
 grant execute on function public.decide_venue_booking_request(uuid, text, uuid, text)
   to service_role;
+```
+
+### Affected bookings and replacement requests (SCRUM-145)
+
+Apply this SQL manually in the Supabase dashboard after the existing booking
+decision function. Do not add a migration file. The columns preserve the
+original request while linking a replacement to it; the RPCs keep affected
+state and replacement approval atomic.
+
+**Coordinator experience and access.** A failed venue suitability, availability
+or conflict check on the coordinator's **My Events** detail marks that booking
+as affected and reloads the venue list. The affected card is visually distinct
+and states why the arrangement is unresolved. Venue Staff can identify and mark
+an affected booking, but only an Event Coordinator may search for a replacement
+or release it. The frontend hides those two actions from Venue Staff, and the
+API independently requires `bookings.request`, which is Event Coordinator-only.
+
+`GET /api/venues/booking-requests/:requestId/replacement-search` starts from
+the affected booking's date, slots, attendance, layout, facilities and
+accessibility requirements. It returns active venues other than the affected
+venue only when they meet those requirements and are free for the requested
+period. The replacement page displays every returned venue as a card. When the
+list is empty, it states **No suitable venue found** and directs the coordinator
+to release the booking and consider replanning the event. A selected card is
+submitted through the ordinary booking-request endpoint and therefore follows
+the standard Venue Staff approval flow.
+
+```sql
+alter table public.venue_booking_requests
+  add column if not exists purpose text,
+  add column if not exists is_affected boolean not null default false,
+  add column if not exists affected_at timestamptz,
+  add column if not exists affected_reason text,
+  add column if not exists replaces_booking_id uuid
+    references public.venue_booking_requests(id) on delete set null;
+
+create index if not exists venue_booking_requests_affected
+  on public.venue_booking_requests (event_id, is_affected);
+
+create unique index if not exists venue_booking_requests_one_open_replacement
+  on public.venue_booking_requests (replaces_booking_id)
+  where replaces_booking_id is not null
+    and is_affected = false
+    and decided_at is null;
+```
+
+Replace the authenticated submit wrapper with this additive overload. It
+supports the optional purpose and replacement link for SCRUM-145 requests while
+defaulting them to null for older callers.
+
+```sql
+create or replace function public.submit_authenticated_venue_booking_request(
+  p_venue_id uuid,
+  p_event_id uuid,
+  p_event_name text,
+  p_booking_date date,
+  p_slots text[],
+  p_expected_attendees integer,
+  p_room_layout text,
+  p_required_facilities text[],
+  p_accessibility_requirements text[],
+  p_additional_requirements text,
+  p_requested_by uuid,
+  p_purpose text default null,
+  p_replaces_booking_id uuid default null
+)
+returns uuid
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_request_id uuid;
+begin
+  if p_requested_by is null then
+    raise exception 'Verified requester is required';
+  end if;
+
+  perform 1 from public.events
+    where id = p_event_id and coordinator_id = p_requested_by
+    for share;
+  if not found then
+    raise exception 'Event is not assigned to this coordinator';
+  end if;
+
+  if p_replaces_booking_id is not null then
+    perform 1
+      from public.venue_booking_requests
+      where id = p_replaces_booking_id
+        and event_id = p_event_id
+        and is_affected
+      for update;
+    if not found then
+      raise exception 'Replacement must reference an affected booking';
+    end if;
+    if exists (
+      select 1 from public.venue_booking_requests
+      where replaces_booking_id = p_replaces_booking_id
+        and decided_at is null
+    ) then
+      raise exception 'An active replacement request already exists';
+    end if;
+  end if;
+
+  insert into public.venue_booking_requests (
+    venue_id, event_id, booking_date, expected_attendees, room_layout,
+    required_facilities, accessibility_requirements, additional_requirements,
+    purpose, requested_by, replaces_booking_id
+  ) values (
+    p_venue_id, p_event_id, p_booking_date, p_expected_attendees, p_room_layout,
+    coalesce(p_required_facilities, '{}'),
+    coalesce(p_accessibility_requirements, '{}'),
+    p_additional_requirements, p_purpose, p_requested_by, p_replaces_booking_id
+  )
+  returning id into v_request_id;
+
+  insert into public.venue_bookings
+    (venue_id, booking_date, slot, status, event_name, requested_by, request_id)
+  select p_venue_id, p_booking_date, requested_slot::public.venue_slot,
+    'pending', p_event_name, p_requested_by::text, v_request_id
+  from unnest(p_slots) as requested_slot;
+
+  return v_request_id;
+end;
+$$;
+
+revoke execute on function public.submit_authenticated_venue_booking_request(
+  uuid, uuid, text, date, text[], integer, text, text[], text[], text, uuid, text, uuid
+) from public, anon, authenticated;
+grant execute on function public.submit_authenticated_venue_booking_request(
+  uuid, uuid, text, date, text[], integer, text, text[], text[], text, uuid, text, uuid
+) to service_role;
+```
+
+Add the affected/release RPCs. Venue Staff pass `p_is_venue_staff = true`;
+coordinators must own the event. Marking an affected booking returns a
+`CONFIRMED` event to `APPROVED`. Approving a replacement cancels the original
+slot rows but leaves the original request row visible. If the event had
+reached `PREPARATION`, approval returns it to `SAFETY_REVIEW`, requiring the
+existing safety review again before confirmation.
+
+```sql
+create or replace function public.mark_venue_booking_affected(
+  p_booking_id uuid,
+  p_user_id uuid,
+  p_reason text,
+  p_is_venue_staff boolean default false
+)
+returns uuid
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_event_id uuid;
+begin
+  if nullif(trim(p_reason), '') is null then
+    raise exception 'Reason required';
+  end if;
+  select event_id into v_event_id
+  from public.venue_booking_requests
+  where id = p_booking_id
+    and (p_is_venue_staff or requested_by = p_user_id
+      or exists (select 1 from public.events e where e.id = event_id and e.coordinator_id = p_user_id))
+  for update;
+  if not found then raise exception 'Not your event'; end if;
+
+  update public.venue_booking_requests
+  set is_affected = true, affected_at = now(), affected_reason = trim(p_reason)
+  where id = p_booking_id;
+  update public.events set status = 'APPROVED'
+  where id = v_event_id and status = 'CONFIRMED';
+  return p_booking_id;
+end;
+$$;
+
+create or replace function public.release_affected_venue_booking(
+  p_booking_id uuid,
+  p_coordinator_id uuid
+)
+returns uuid
+language plpgsql
+set search_path = public
+as $$
+begin
+  if not exists (
+    select 1 from public.venue_booking_requests r
+    join public.events e on e.id = r.event_id
+    where r.id = p_booking_id and r.is_affected
+      and e.coordinator_id = p_coordinator_id
+  ) then raise exception 'Not your event'; end if;
+
+  update public.venue_bookings
+  set status = 'cancelled'
+  where request_id = p_booking_id and status in ('pending', 'confirmed');
+  update public.venue_booking_requests
+  set is_affected = false, updated_at = now()
+  where id = p_booking_id;
+  update public.venue_bookings
+  set status = 'cancelled'
+  where request_id in (
+    select id from public.venue_booking_requests
+    where replaces_booking_id = p_booking_id
+  ) and status = 'pending';
+  return p_booking_id;
+end;
+$$;
+
+revoke execute on function public.mark_venue_booking_affected(uuid, uuid, text, boolean)
+  from public, anon, authenticated;
+grant execute on function public.mark_venue_booking_affected(uuid, uuid, text, boolean)
+  to service_role;
+revoke execute on function public.release_affected_venue_booking(uuid, uuid)
+  from public, anon, authenticated;
+grant execute on function public.release_affected_venue_booking(uuid, uuid)
+  to service_role;
+```
+
+Extend the existing `decide_venue_booking_request` function in the dashboard
+so its confirmed branch also performs, in the same transaction:
+
+```sql
+-- Inside the existing function, after the replacement request's slots are
+-- confirmed:
+update public.venue_bookings
+set status = 'cancelled'
+where request_id = (select replaces_booking_id
+                    from public.venue_booking_requests
+                    where id = p_request_id)
+  and status in ('pending', 'confirmed');
+
+update public.venue_booking_requests
+set is_affected = false, updated_at = now()
+where id = (select replaces_booking_id
+           from public.venue_booking_requests
+           where id = p_request_id);
+
+update public.events e
+set status = case when e.status = 'PREPARATION'
+                  then 'SAFETY_REVIEW' else 'APPROVED' end
+where e.id = (select event_id from public.venue_booking_requests
+              where id = p_request_id)
+  and exists (select 1 from public.venue_booking_requests r
+             where r.id = p_request_id and r.replaces_booking_id is not null);
+```
+
+The event confirmation routine must reject `CONFIRMED` while an affected
+request exists:
+
+```sql
+if exists (
+  select 1 from public.venue_booking_requests
+  where event_id = p_event_id and is_affected
+) then
+  raise exception 'Venue arrangement unresolved';
+end if;
 ```
 
 ### Tentative holds schema (SCRUM-146)

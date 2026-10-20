@@ -1,0 +1,82 @@
+.event-venue-bookings .event-venues {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event-venue-bookings .event-venues__item {
+  padding: 16px;
+  border: 1px solid #dfe8e3;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.event-venue-bookings .event-venues__item--affected {
+  border-color: #d94a3d;
+  background: #fff7f6;
+}
+
+.event-venue-bookings .event-venues__heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.event-venue-bookings .event-venues__status {
+  color: #426e60;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.event-venue-bookings .event-venues__item--affected .event-venues__status,
+.event-venue-bookings .event-venues__affected-message {
+  color: #b42318;
+}
+
+.event-venue-bookings .event-venues__affected-message {
+  margin: 10px 0 0;
+  font-weight: 700;
+}
+
+.event-venue-bookings .event-venues__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 12px 0 0;
+}
+
+.event-venue-bookings .event-venues__facts dt {
+  color: #61716f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.event-venue-bookings .event-venues__facts dd {
+  margin: 3px 0 0;
+}
+
+.event-venue-bookings .event-venues__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+@media (max-width: 480px) {
+  .event-venue-bookings .event-venues__heading,
+  .event-venue-bookings .event-venues__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .event-venue-bookings .event-venues__facts {
+    grid-template-columns: 1fr;
+  }
+
+  .event-venue-bookings .event-venues__actions .btn {
+    width: 100%;
+  }
+}
