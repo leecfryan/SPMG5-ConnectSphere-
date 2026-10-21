@@ -81,20 +81,9 @@ const authClient = {
   },
 };
 
-const dataClient = {
-  auth: { admin: {
-    listUsers: vi.fn().mockResolvedValue({
-      data: { users: [
-        { id: coordinatorId, app_metadata: { roles: ["event_coordinator"] }, user_metadata: { full_name: "Test Coordinator" }, email: "coord@test.com" },
-      ]},
-      error: null,
-    }),
-  }},
-};
-
 let server, base;
 beforeAll(async () => {
-  server = createApp({ authClient, venuesService: service, dataClient }).listen(0, "127.0.0.1");
+  server = createApp({ authClient, venuesService: service }).listen(0, "127.0.0.1");
   await once(server, "listening");
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -268,16 +257,3 @@ test("[TC-SCRUM-162-09] POST /booking-requests with hold owned by different coor
   expect(service.linkHoldsToRequest).not.toHaveBeenCalled();
 });
 
-test("[TC-SCRUM-162-10] GET /coordinators as venue_staff returns coordinator list", async () => {
-  const res = await send("/coordinators", "venue_staff");
-  expect(res.status).toBe(200);
-  const body = await res.json();
-  expect(body.data).toHaveLength(1);
-  expect(body.data[0].id).toBe(coordinatorId);
-  expect(body.data[0].name).toBe("Test Coordinator");
-});
-
-test("[TC-SCRUM-162-11] GET /coordinators as event_coordinator → 403", async () => {
-  const res = await send("/coordinators", "event_coordinator");
-  expect(res.status).toBe(403);
-});

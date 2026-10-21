@@ -2,7 +2,7 @@ const express = require("express");
 const createVenuesController = require("../modules/venues/venues.controller");
 const requirePermission = require("../middleware/requirePermission");
 
-module.exports = function createVenuesRoutes(service, dataClient = null) {
+module.exports = function createVenuesRoutes(service) {
   const router = express.Router();
   // Role checks run before storage checks, including when storage is unavailable.
   const available = (req, res, next) => service ? next() : res.status(503).json({
@@ -20,30 +20,6 @@ module.exports = function createVenuesRoutes(service, dataClient = null) {
   // SCRUM-162: events with assigned coordinators, for the hold placement form.
   // Must be before /:id to avoid "events" matching as a venue id.
   router.get("/events", requirePermission("venues.holds"), controller.getEventsForHolds);
-  // SCRUM-162: venue staff picks a coordinator when placing a hold so coordinator_id
-  // is set correctly. Must be before /:id to avoid "coordinators" matching as a venue id.
-  router.get("/coordinators", requirePermission("venues.holds"), async (req, res, next) => {
-    if (!dataClient) return res.status(503).json({ message: "Coordinator list is not configured." });
-    try {
-      const choices = [];
-      for (let page = 1; ; page++) {
-        const { data, error } = await dataClient.auth.admin.listUsers({ page, perPage: 100 });
-        if (error) throw error;
-        for (const user of data.users) {
-          const roles = user.app_metadata?.roles ?? [];
-          if (roles.includes("event_coordinator")) {
-            const name = user.user_metadata?.full_name;
-            choices.push({ id: user.id, name: typeof name === "string" && name.trim() ? name.trim() : user.email || user.id });
-          }
-        }
-        if (data.users.length < 100) break;
-      }
-      choices.sort((a, b) => a.name.localeCompare(b.name));
-      res.json({ data: choices });
-    } catch (err) {
-      next(err);
-    }
-  });
   router.get("/booking-requests", requirePermission("bookings.read", bookingScope), available, controller.getBookingRequests);
   router.get("/booking-requests/:requestId", requirePermission("bookings.read", bookingScope), available, controller.getBookingRequest);
   router.get("/booking-requests/:requestId/replacement-search", requirePermission("bookings.request"), available, controller.getReplacementSearch);

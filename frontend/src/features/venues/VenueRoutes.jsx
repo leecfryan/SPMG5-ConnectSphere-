@@ -72,7 +72,7 @@ function VenueRecordPage({ mode = "detail" }) {
       }}}
     ) : undefined} />;
   if (mode === "booking") return <VenueBookingRequestForm venue={venue}
-    onDone={() => navigate(availabilityPath)} onCancel={() => navigate(availabilityPath)} />;
+    onDone={() => navigate("/venues/booking-requests")} onCancel={() => navigate(availabilityPath)} />;
   // SCRUM-133: Venue Staff manage unavailability periods
   if (mode === "unavailability") return <VenueUnavailabilityPage venue={venue}
     onBack={() => navigate(detailPath)} />;

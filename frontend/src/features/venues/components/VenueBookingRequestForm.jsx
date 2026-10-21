@@ -9,7 +9,7 @@ import {
 import {
   IconAlert,
   IconArrowLeft,
-  IconCalendar,
+  IconArrowRight,
   IconCheck,
   IconClock,
 } from "./VenueIcons";
@@ -235,8 +235,8 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
           </dl>
 
           <button type="button" className="v-btn v-btn-primary v-btn-lg" onClick={onDone}>
-            <IconCalendar />
-            Back to calendar
+            View my booking requests
+            <IconArrowRight />
           </button>
         </div>
       </div>
