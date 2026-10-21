@@ -1,7 +1,7 @@
 // SCRUM-146: Venue Staff place and view tentative holds on a venue.
 import { useState, useEffect } from "react";
 import { useAuth } from "../../auth/useAuth";
-import { fetchHolds, createHold } from "../venueHoldsService";
+import { fetchHolds, createHold, fetchCoordinators } from "../venueHoldsService";
 import { IconAlert, IconArrowLeft } from "../components/VenueIcons";
 
 const SLOTS = ["am", "pm", "night"];
@@ -31,12 +31,22 @@ function HoldRow({ hold }) {
 
 function HoldForm({ venueId, onCreated, onCancel }) {
   const { token } = useAuth();
+  const [coordinators, setCoordinators] = useState(null);
   const [eventName, setEventName] = useState("");
+  const [coordinatorId, setCoordinatorId] = useState("");
   const [bookingDate, setBookingDate] = useState("");
   const [slots, setSlots] = useState(() => new Set());
   const [expiresAt, setExpiresAt] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    fetchCoordinators(token)
+      .then((data) => { if (active) setCoordinators(data.data); })
+      .catch(() => { if (active) setCoordinators([]); });
+    return () => { active = false; };
+  }, [token]);
 
   function toggleSlot(slot) {
     setSlots((prev) => {
@@ -56,6 +66,7 @@ function HoldForm({ venueId, onCreated, onCancel }) {
         booking_date: bookingDate,
         slots: SLOTS.filter((s) => slots.has(s)),
         expires_at: expiresAt ? new Date(expiresAt).toISOString() : "",
+        coordinator_id: coordinatorId,
       }, token);
       onCreated();
     } catch (err) {
@@ -65,7 +76,7 @@ function HoldForm({ venueId, onCreated, onCancel }) {
     }
   }
 
-  const canSubmit = eventName.trim() && bookingDate && slots.size > 0 && expiresAt && !saving;
+  const canSubmit = eventName.trim() && coordinatorId && bookingDate && slots.size > 0 && expiresAt && !saving;
 
   return (
     <form className="v-card v-stack" onSubmit={handleSubmit}>
@@ -85,8 +96,28 @@ function HoldForm({ venueId, onCreated, onCancel }) {
           type="text"
           value={eventName}
           onChange={(e) => setEventName(e.target.value)}
+          placeholder="e.g. Charity Gala 2027"
           required
         />
+      </div>
+
+      <div className="v-field">
+        <label className="v-label" htmlFor="hold-coordinator">Coordinator</label>
+        {coordinators === null && <p role="status" style={{ fontSize: 14, color: "var(--v-text-muted)" }}>Loading coordinators…</p>}
+        {coordinators !== null && (
+          <select
+            id="hold-coordinator"
+            className="v-input"
+            value={coordinatorId}
+            onChange={(e) => setCoordinatorId(e.target.value)}
+            required
+          >
+            <option value="">Select a coordinator</option>
+            {coordinators.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       <div className="v-field">

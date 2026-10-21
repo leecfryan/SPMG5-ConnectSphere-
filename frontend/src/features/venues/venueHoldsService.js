@@ -8,3 +8,13 @@ export function fetchHolds(venueId, token) {
 export function createHold(venueId, data, token) {
   return apiFetch(`/api/venues/${venueId}/holds`, token, { method: "POST", body: data });
 }
+
+// SCRUM-162: active holds that match the coordinator's event names, ready to convert.
+export function fetchEligibleHolds(venueId, token) {
+  return apiFetch(`/api/venues/${venueId}/holds/eligible`, token);
+}
+
+// SCRUM-162: venue staff coordinator picker — list of event coordinators.
+export function fetchCoordinators(token) {
+  return apiFetch("/api/venues/coordinators", token);
+}

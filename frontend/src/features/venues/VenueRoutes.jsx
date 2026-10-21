@@ -58,8 +58,19 @@ function VenueRecordPage({ mode = "detail" }) {
   if (mode === "edit") return <VenueEditForm venue={venue} onSave={save}
     onCancel={() => navigate(detailPath)} isSaving={isSaving} saveError={saveError} />;
   if (mode === "availability") return <VenueAvailabilityCalendar venue={venue}
-    onBack={() => navigate(detailPath)} onRequestBooking={hasPermission("bookings.request")
-      ? () => navigate(`${detailPath}/booking-request`) : undefined} />;
+    onBack={() => navigate(detailPath)}
+    onRequestBooking={hasPermission("bookings.request")
+      ? () => navigate(`${detailPath}/booking-request`) : undefined}
+    onConvertHold={hasPermission("bookings.request") ? (group) => navigate(
+      `${detailPath}/booking-request`,
+      { state: { holdConversion: {
+        holdIds: group.slots.map((s) => s.id),
+        eventId: group.event.id,
+        eventName: group.event.name,
+        bookingDate: group.booking_date,
+        slots: group.slots.map((s) => s.slot),
+      }}}
+    ) : undefined} />;
   if (mode === "booking") return <VenueBookingRequestForm venue={venue}
     onDone={() => navigate(availabilityPath)} onCancel={() => navigate(availabilityPath)} />;
   // SCRUM-133: Venue Staff manage unavailability periods
