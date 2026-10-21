@@ -5,6 +5,7 @@ import { useApiResource } from "../../../hooks/useApiResource";
 import { workspaces } from "../workspaces";
 import StatusBadge from "../components/StatusBadge";
 import DraftList from "../components/DraftList";
+import CoordinatorWorkloadOverview from "../components/CoordinatorWorkloadOverview";
 import "../workspace.css";
 
 function EventList({ events, workspace, userId }) {
@@ -49,7 +50,9 @@ export default function EventWorkspacePage({ scope }) {
         <EventList events={otherEvents} workspace={workspace} userId={user.id} />
       </section>
     </>}
-    {scope !== "organiser" && <EventList events={events} workspace={workspace} />}
+    {/* Mounted while loading too, so Refresh events keeps the Lead's filters. */}
+    {scope === "manager" && <CoordinatorWorkloadOverview events={data?.events ?? []} path={workspace.path} />}
+    {scope === "coordinator" && <EventList events={events} workspace={workspace} />}
     {scope === "organiser" && <Link to="/events/new">Submit an event request</Link>}
   </section>;
 }

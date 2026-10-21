@@ -580,3 +580,40 @@ test("[SCRUM-99] AC3: a colleague in the organiser's company sees the decision; 
   expect(outsider.status).toBe(404);
   expect(await outsider.text()).not.toContain("Dates clash with exams.");
 });
+
+// SCRUM-161 AC1: the Lead's workload overview is the manager workspace list, so
+// an event in every active status comes back with the coordinator responsible
+// for it. Cancelled events stay in the same list (SCRUM-148 AC4); the browser,
+// not the server, opens the overview on the active ones.
+test("[SCRUM-161] AC1: the Lead's list carries an event in every active status with its coordinator, and keeps cancelled events", async t => {
+  const { send, records, users } = await setup(t);
+  const laterStages = ["UNDER_REVIEW", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED", "POSTPONED"].map(status =>
+    addEvent(records, { name: "Overview " + status, status, coordinator_id: users.second.id, organiser_id: users.organiser.id }));
+  const closed = addEvent(records, { status: "CANCELLED", coordinator_id: users.first.id, organiser_id: users.organiser.id,
+    cancelled_by: users.first.id, cancelled_at: "2099-09-06T00:00:00.000Z", cancellation_reason: "Venue flooded." });
+
+  const response = await send("/event-workspace/manager");
+  expect(response.status).toBe(200);
+  const byId = new Map((await response.json()).events.map(event => [event.id, event]));
+  expect(byId.get(records[0].id)).toMatchObject({ status: "APPROVED", coordinator_id: users.first.id });
+  expect(byId.get(records[1].id)).toMatchObject({ status: "APPROVED", coordinator_id: users.second.id });
+  expect(byId.get(records[2].id)).toMatchObject({ status: "SUBMITTED", coordinator_id: null });
+  for (const event of laterStages) expect(byId.get(event.id)).toMatchObject({ status: event.status, coordinator_id: users.second.id });
+  expect(byId.get(closed.id)).toMatchObject({ status: "CANCELLED", coordinator_id: users.first.id });
+});
+
+// SCRUM-161 AC3: the coordinator's scope is the server-side assignment filter.
+// Another coordinator's event must be absent from the payload altogether, not
+// merely hidden by the browser.
+test("[SCRUM-161] AC3: an Event Coordinator's list contains only the events assigned to them", async t => {
+  const { send, records, users } = await setup(t);
+  const response = await send("/event-workspace/coordinator", "first");
+  expect(response.status).toBe(200);
+  const events = (await response.json()).events;
+
+  expect(events.map(event => event.id)).toEqual([records[0].id]);
+  const payload = JSON.stringify(events);
+  expect(payload).not.toContain(records[1].id);
+  expect(payload).not.toContain(records[1].name);
+  expect(payload).not.toContain(users.second.id);
+});

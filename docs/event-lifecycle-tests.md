@@ -5,7 +5,8 @@ Historical acceptance criteria and customer quotations retain their original wor
 Earlier execution results are historical evidence; rename verification is recorded separately.
 
 **Deliverable evidence for SCRUM-97 (Progress an event through its status lifecycle), epic Event Lifecycle &
-Approval.** SCRUM-98 (review) and SCRUM-99 (approve) are in §8; SCRUM-139 (safety check) is in §9, SCRUM-140 (safety review) in §10, SCRUM-141 (safety decision) in §11 and SCRUM-144 (confirmation) in §12. Branch: `feature/eventLifecycleStatus` · **15 documented cases, 43 automated tests, all passing**
+Approval.** SCRUM-98 (review) and SCRUM-99 (approve) are in §8; SCRUM-139 (safety check) is in §9, SCRUM-140 (safety review) in §10, SCRUM-141 (safety decision) in §11, SCRUM-144 (confirmation) in §12 and SCRUM-161 (the Lead's
+coordinator workload overview) in §13. Branch: `feature/eventLifecycleStatus` · **15 documented cases, 43 automated tests, all passing**
 — 34 backend unit, 9 frontend component, plus 1 manual database case.
 
 Story context — the eight statuses, the permitted moves, who sets each status and the schema change — is in
@@ -576,7 +577,53 @@ passes because the page also disables *Confirm event*, which is why the API jour
 SCRUM-97/139/141 tests were updated for `PREPARATION → CONFIRMED`, the readiness `optional` list and item ids, not
 loosened.
 
-## 13. Requirements sources
+## 13. SCRUM-161 — the Lead's coordinator workload overview
+
+The Lead opens **Manage event requests** (`/event-management`) and sees a table of every active event — event,
+status, coordinator — filtered by coordinator and by status. It reads the same `/api/event-workspace/manager` list as
+before, so the existing status view and the links into the event detail page are unchanged; the overview simply
+opens on *All active statuses*, with *All statuses* one choice away. Code: `components/CoordinatorWorkloadOverview.jsx`.
+Rules and design decisions in [event-requests.md](event-requests.md) and the task note
+`.agent/docs/other/SCRUM-161-coordinator-workload-overview.md`.
+
+> **SCRUM-161:** As an Event Coordinator Lead, I want to see every coordinator's assigned and active events so that I
+> can balance workload and spot events needing attention.
+>
+> 1. The Lead can view all active events and the coordinator assigned to each.
+> 2. The view can be filtered by coordinator and by event status.
+> 3. An Event Coordinator sees only the events assigned to them.
+
+| Layer | File | Pre-conditions |
+| --- | --- | --- |
+| HTTP (integration) | `backend/tests/integration/eventWorkspace.test.js` | `setup()` as in §8; the in-memory records already hold two coordinators' events and one unassigned event |
+| Frontend (page) | `frontend/src/features/events/pages/EventWorkspacePage.overview.test.jsx` | Only Auth and `fetch` are faked; `App`, the real `getPermissions`, guards, pages and `CoordinatorWorkloadOverview` are real; `open()` answers the overview, the directory and the detail routes |
+| Frontend (page, pre-existing) | `frontend/src/features/events/pages/EventWorkspacePage.test.jsx` | Unchanged by this story: the organiser's own/colleague groups and search |
+| Playwright | `tests/playwright/event-workspace.browser.spec.cjs` (`E2E-EVENT-102`) | Real Express app and fake storage; `setupWorkflow` plus three extra events: one for each coordinator, one unassigned, one cancelled |
+
+| ID | AC | Type | Scenario | Test data | Expected result | Automated test | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-161-01 | 1 | Happy | The Lead's list carries an event in every active status with its coordinator | One event in each of the seven active statuses (two coordinators, one unassigned) plus a `CANCELLED` record | 200; every active record present with its `coordinator_id`; the cancelled record stays in the list (SCRUM-148 AC4) | `"[SCRUM-161] AC1: the Lead's list carries an event in every active status…"`; `[SCRUM-161-UI-001]`; `[E2E-EVENT-102]` | 2026-10-20 · pass · local |
+| TC-SCRUM-161-02 | 3 | Negative | A coordinator's list never carries another coordinator's event | Two coordinators, one active event each | 200 for the first; the second's id, name and owner are absent from the payload, not just hidden by the browser | `"[SCRUM-161] AC3: an Event Coordinator's list contains only the events assigned to them"` | 2026-10-20 · pass · local |
+| TC-SCRUM-161-UI-01 | 1 | Happy | The overview table names each event's coordinator and opens an event | Two named coordinators, one unassigned event, one deactivated coordinator, one cancelled event | Each row shows the status and the coordinator's name, *Awaiting coordinator* or *No longer active*; "4 of 5 events shown"; the cancelled event is absent by default; the link opens the existing manager detail route | `[SCRUM-161-UI-001]` | 2026-10-20 · pass · local |
+| TC-SCRUM-161-UI-02 | 2 | Happy | The coordinator select narrows the table | A named coordinator, then *Awaiting coordinator*, then *All coordinators* | Only that person's event ("1 of 5 events shown"); then only the unassigned event; then all four active events | `[SCRUM-161-UI-002]` | 2026-10-20 · pass · local |
+| TC-SCRUM-161-UI-03 | 2 | Happy | The status select lists statuses in lifecycle order, narrows the table, and *All statuses* restores the existing view | `CONFIRMED`, then *All statuses* | Options: All active, All, Submitted, Approved – planning, Confirmed, Cancelled; then only the confirmed event; then all five | `[SCRUM-161-UI-003]` | 2026-10-20 · pass · local |
+| TC-SCRUM-161-UI-04 | 2 | Boundary | Filters that match nothing explain themselves, and *Clear filters* resets them | *Ada Tan* + `CONFIRMED` (no such event) | "No events match these filters. Clear the filters to see every active event."; no table, no alert; *Clear filters* returns both selects to their defaults and hides itself | `[SCRUM-161-UI-004]` | 2026-10-20 · pass · local |
+| TC-SCRUM-161-UI-05 | 1 | Failure | The overview request fails and recovers | First `/manager` call 503, second 200 | Safe sentence in an alert, no table, *Refresh events* brings the list back and clears the alert | `[SCRUM-161-UI-005]` | 2026-10-20 · pass · local |
+| TC-SCRUM-161-UI-06 | 1, 2 | Failure | The coordinator directory fails but the overview still works | `/event-workspace/coordinators` 503 | Safe sentence; rows keep *Coordinator assigned* rather than inventing *No longer active*; the coordinator filter still narrows | `[SCRUM-161-UI-006]` | 2026-10-20 · pass · local |
+| TC-SCRUM-161-UI-07 | 1 | Boundary | Nothing active, and a status the labels do not know | Only a `CANCELLED` event plus an `ON_HOLD` event | "No active events right now. Choose All statuses to see closed events." with no error; `ON_HOLD` is the last status option; *All statuses* shows both | `[SCRUM-161-UI-007]` | 2026-10-20 · pass · local |
+| TC-SCRUM-161-UI-08 | 2 | Happy | *Refresh events* keeps the Lead's filters | Coordinator filter set to *Ben Lim* | The list is fetched again; the select still reads *Ben Lim* and only his event shows | `[SCRUM-161-UI-008]` | 2026-10-20 · pass · local |
+| TC-SCRUM-161-13 | 1–3 | Cross-cutting | Phone width and the real policy | 375 px; the real `getPermissions` decides the route | No sideways page scroll; filters narrow; *Clear filters* resets; the detail page opens; coordinator scope is enforced by the server (TC-SCRUM-161-02) | `[E2E-EVENT-102]`; `[SCRUM-161-UI-001]` | 2026-10-20 · pass · local |
+
+**Coverage (2026-10-20):** `CoordinatorWorkloadOverview.jsx` and `statuses.js` are the story's own code; see the task
+note for the figures. `EventWorkspacePage.jsx` is back to its pre-story code apart from the one line that mounts the
+overview.
+
+**Test review:** expected values come from the acceptance criteria and the lifecycle table, not from the code under
+test. TC-SCRUM-161-01 seeds every active status, so dropping one from `ACTIVE_STATUSES` fails it; UI-01 asserts the
+link's `href`, so removing the detail flow fails rather than passing silently; UI-08 counts the list requests, so it
+cannot pass on a list that was never reloaded. No pre-existing test was edited.
+
+## 14. Requirements sources
 
 | Ref | What it says |
 | --- | --- |
@@ -586,4 +633,5 @@ loosened.
 | **SCRUM-139** (backlog US-83) | Submit for the Operational Safety Check, 3 SP. See §9. |
 | **SCRUM-141** (backlog US-85) | Approve or reject the safety arrangement, 2 SP. See §11. Rejection back to `APPROVED` is roadmap decision 4; history is optional in Release 1 (#33) but this story's AC4 requires it. |
 | **SCRUM-144** (backlog US-41) | Confirm an event once essential arrangements are complete, 1 SP. See §12. Discussions #106 (the coordinator decides with Technical Support whether an item is essential) and #80 (essential arrangements are event-specific; non-essential follow-ups may remain). |
+| **SCRUM-161** | View all coordinator assignments. See §13. Placed in *Manage event requests* by the developer, keeping that page's existing status view (SCRUM-148 AC4), so the overview opens on active events and *All statuses* returns the closed ones. |
 | Discussions #80, #94, #95, #101, #125 | The assigned coordinator decides; the manager only assigns; assignment doesn't start review; `approved_rejected_by` kept apart from `coordinator_id`; who sees the outcome |

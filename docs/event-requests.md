@@ -734,7 +734,7 @@ Feature folder at `frontend/src/features/events/`.
 | File | Route | Scrum | Description |
 | --- | --- | --- | --- |
 | `pages/EventRequestPage.jsx` | /events/new, /events/new?draft=`<id>` | 23, 25, 147 | Protected event request form; with `?draft=` it loads and continues that draft |
-| `pages/EventWorkspacePage.jsx` | /my-event-requests, /assigned-events, /event-management | 97, 98 | Role-scoped event list with a status badge per event |
+| `pages/EventWorkspacePage.jsx` | /my-event-requests, /assigned-events, /event-management | 97, 98, 161 | Role-scoped event list with a status badge per event; on /event-management it shows `CoordinatorWorkloadOverview` instead (SCRUM-161) |
 | `pages/EventWorkspaceDetailPage.jsx` | the same paths + `/:eventId` | 98, 99 | Event details, the review decision summary, and the assigned coordinator's review controls |
 
 ### Components
@@ -742,8 +742,9 @@ Feature folder at `frontend/src/features/events/`.
 | File | Used by | Description |
 | --- | --- | --- |
 | `components/EventRequestForm.jsx` | EventRequestPage | The request form. Displays every server-side error against its own input. SCRUM-147: *Save draft* on new requests, and submitting an opened draft submits that draft. |
+| `components/CoordinatorWorkloadOverview.jsx` | EventWorkspacePage (manager) | SCRUM-161: the Lead's table of events (event, status, coordinator) from the existing manager list. Opens on *All active statuses*; coordinator filter (each named coordinator, *Awaiting coordinator*) and status filter (lifecycle order, *All statuses* brings back rejected and cancelled events); *Clear filters*; "N of M events shown". Names come from `GET /api/event-workspace/coordinators`: an unknown id reads *No longer active*, and if the directory fails rows keep *Coordinator assigned*. Unassigned and departed coordinators are highlighted. Filters survive *Refresh events* |
 | `components/DraftList.jsx` | EventWorkspacePage (organiser) | SCRUM-147: *Your drafts*, the organiser's own drafts linking back into the form; loading, empty and error states |
-| `components/StatusBadge.jsx` | Event request, assignment and workspace screens | Displays the stored status value as words ("Approved – planning" for `APPROVED`) |
+| `components/StatusBadge.jsx` | Event request, assignment and workspace screens | Displays the stored status value as words ("Approved – planning" for `APPROVED`); the labels themselves live in [`statuses.js`](#services) |
 | `components/EventDecisionControls.jsx` | EventWorkspaceDetailPage (assigned coordinator only) | *Start review* on `SUBMITTED`; note + *Approve* / *Reject* on `UNDER_REVIEW`; nothing otherwise |
 | `components/EventDecisionSummary.jsx` | EventWorkspaceDetailPage (every scope) | Outcome, approver ("Not recorded" when unknown), time, and note or reason; hidden until `approved_rejected_at` is set |
 | `components/EventActivityHistory.jsx` | EventWorkspaceDetailPage (every scope) | SCRUM-141: recorded decisions newest first, with the note or rejection reason; empty and unavailable states |
@@ -758,6 +759,7 @@ Feature folder at `frontend/src/features/events/`.
 | `eventsService.js` | Submits the request and converts event and registration timestamps to ISO with a zone; `saveDraft`, `updateDraft`, `submitDraft` (SCRUM-147) |
 | `eventFormat.js` | Date and reference formatting shared with the assignment screens |
 | `reviewService.js` | `startReview`, `approveEvent`, `rejectEvent`: the three review calls; only the note is sent |
+| `statuses.js` | `STATUS_LABELS`, the words for every `events.status` (used by the badges and the overview's status filter), and `ACTIVE_STATUSES`, which mirrors `ACTIVE_STATUSES` in `backend/src/modules/events/lifecycle.js` (SCRUM-161) |
 
 ---
 
@@ -847,12 +849,14 @@ SCRUM-23/25; [event lifecycle tests](event-lifecycle-tests.md) §8 covers SCRUM-
 | Unit | `tests/unit/events/drafts.{service,repository}.test.js` | SCRUM-147 draft rules and the owner-scoped queries |
 | Integration | `tests/integration/events.drafts.test.js` | SCRUM-147 over HTTP: every denied role on all five routes, 400 / 404 / 409 / 500 / 503 |
 | Frontend | `pages/EventRequestPage.test.jsx`, `pages/EventWorkspacePage.test.jsx` | SCRUM-147 save, reopen, submit and *Your drafts* |
+| Frontend | `pages/EventWorkspacePage.overview.test.jsx` | SCRUM-161 overview: active-by-default table with coordinator names, coordinator and status filters, *Clear filters*, filters kept on refresh, no-match, closed-only and directory-failure states |
 | Playwright | `tests/playwright/drafts.{api,browser}.spec.cjs` | SCRUM-147 journeys, including a same-company colleague refused |
 | Unit | `tests/unit/events/review.service.test.js` | Review transitions, note rules and the decision columns (SCRUM-98/99) |
 | Integration | `tests/integration/events.review.test.js` | Review actions over HTTP: 401 / 403 / 404 / 409 / 400 / 500 / 503 |
-| Integration | `tests/integration/eventWorkspace.test.js` | Who sees the request and the decision; approver name boundaries |
+| Integration | `tests/integration/eventWorkspace.test.js` | Who sees the request and the decision; approver name boundaries; SCRUM-161's Lead and coordinator scopes |
 | Frontend | `features/events/components/EventDecision*.test.jsx`, `pages/EventWorkspaceDetailPage.test.jsx` | Review controls, decision summary and the pages each role sees |
 | Playwright | `tests/playwright/event-workspace.{api,browser}.spec.cjs` (`REVIEW-E2E-*`) | Role × action matrix and the submit → assign → review → decide journey |
+| Playwright | `tests/playwright/event-workspace.browser.spec.cjs` (`E2E-EVENT-102`) | SCRUM-161 overview in a real browser: coordinator and status filters and *Clear filters* at 375 px, then the detail link |
 
 Test names lead with their Jira key, so the terminal output is the traceability
 record. Cases are grouped by the Week 4 five-step method: happy path,
