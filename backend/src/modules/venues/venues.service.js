@@ -197,17 +197,18 @@ async function getEventForCheckReport(id, scope) {
 
 // SCRUM-85: the events a coordinator can pick from. Only approved events may be
 // booked (SCRUM-99 AC1, see validateAgainstEvent), and events that have already
-// ended have nothing left to book.
-async function listBookableEvents(coordinatorId) {
-  const { data, error } = await getSupabase()
+// ended have nothing left to book. coordinatorId = null returns all events (for
+// SCRUM-162 eligible-holds grouping when called without a coordinator filter).
+async function listBookableEvents(coordinatorId = null) {
+  let query = getSupabase()
     .from("events")
     .select(EVENT_FIELDS)
-    .eq("coordinator_id", coordinatorId)
     .in("status", PLANNING_STATUSES)
     .not("start_time", "is", null)
     .gte("end_time", new Date().toISOString())
     .order("start_time", { ascending: true });
-
+  if (coordinatorId) query = query.eq("coordinator_id", coordinatorId);
+  const { data, error } = await query;
   if (error) throw new Error(`Failed to list events: ${error.message}`);
   return data;
 }
@@ -406,7 +407,9 @@ async function listHolds(venueId) {
 }
 
 // SCRUM-146: one row per slot, all in one insert so the hold is atomic.
-async function createHold(venueId, { event_name, booking_date, slots, expires_at }, heldBy) {
+// SCRUM-162: coordinator_id links the hold to the coordinator whose event it is,
+// so they (and only they) can convert it later.
+async function createHold(venueId, { event_name, booking_date, slots, expires_at, coordinator_id }, heldBy) {
   const rows = slots.map((slot) => ({
     venue_id: venueId,
     booking_date,
@@ -415,6 +418,7 @@ async function createHold(venueId, { event_name, booking_date, slots, expires_at
     event_name,
     requested_by: heldBy,
     expires_at,
+    coordinator_id,
   }));
 
   const { data, error } = await getSupabase()
@@ -427,6 +431,68 @@ async function createHold(venueId, { event_name, booking_date, slots, expires_at
 }
 
 // ---------------------------------------------------------------------------
+// SCRUM-162: fetch specific hold rows by ID for conversion validation.
+// Filters to active (expires_at > now()), status='hold', and not yet linked
+// to a request so the same hold cannot be double-converted.
+async function getActiveHoldsByIds(holdIds) {
+  const { data, error } = await getSupabase()
+    .from("venue_bookings")
+    .select("id, venue_id, booking_date, slot, event_name, expires_at, request_id, coordinator_id")
+    .in("id", holdIds)
+    .eq("status", "hold")
+    .gt("expires_at", new Date().toISOString())
+    .is("request_id", null);
+  if (error) throw new Error(`Failed to fetch hold rows: ${error.message}`);
+  return data;
+}
+
+// SCRUM-162: set request_id on hold rows so decide_venue_booking_request can
+// cancel them atomically when the booking request is approved.
+async function linkHoldsToRequest(holdIds, requestId) {
+  const { error } = await getSupabase()
+    .from("venue_bookings")
+    .update({ request_id: requestId })
+    .in("id", holdIds)
+    .eq("status", "hold");
+  if (error) throw new Error(`Failed to link hold rows to request: ${error.message}`);
+}
+
+// SCRUM-162: returns active unlinked holds for the venue that belong to this
+// coordinator (by coordinator_id), then matches them to the coordinator's own
+// upcoming events by event_name to get the event object for navigation.
+// Grouped by (event_name, booking_date) so one card covers all its slots.
+async function listEligibleHoldsForCoordinator(venueId, coordinatorId) {
+  const [events, holdRows] = await Promise.all([
+    listBookableEvents(coordinatorId),
+    getSupabase()
+      .from("venue_bookings")
+      .select("id, booking_date, slot, event_name, expires_at")
+      .eq("venue_id", venueId)
+      .eq("status", "hold")
+      .eq("coordinator_id", coordinatorId)
+      .gt("expires_at", new Date().toISOString())
+      .is("request_id", null)
+      .order("booking_date", { ascending: true }),
+  ]);
+
+  if (holdRows.error) throw new Error(`Failed to list holds: ${holdRows.error.message}`);
+
+  const eventsByName = new Map(events.map((e) => [e.name.toLowerCase(), e]));
+
+  const groups = new Map();
+  for (const hold of holdRows.data) {
+    const event = eventsByName.get(hold.event_name.toLowerCase());
+    if (!event) continue;
+    const key = `${hold.event_name}|${hold.booking_date}`;
+    if (!groups.has(key)) {
+      groups.set(key, { event, booking_date: hold.booking_date, slots: [] });
+    }
+    groups.get(key).slots.push({ id: hold.id, slot: hold.slot, expires_at: hold.expires_at });
+  }
+
+  return Array.from(groups.values());
+}
+
 // SCRUM-133: venue unavailability periods
 // ---------------------------------------------------------------------------
 
@@ -631,6 +697,9 @@ module.exports = {
   listActiveHoldsInRange,
   listHolds,
   createHold,
+  getActiveHoldsByIds,
+  linkHoldsToRequest,
+  listEligibleHoldsForCoordinator,
   markVenueBookingAffected: require("./venueReplacement.service").markVenueBookingAffected,
   releaseAffectedVenueBooking: require("./venueReplacement.service").releaseAffectedVenueBooking,
   searchReplacementVenues: require("./venueReplacement.service").searchReplacementVenues,
