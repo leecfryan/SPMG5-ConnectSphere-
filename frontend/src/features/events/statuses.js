@@ -2,7 +2,7 @@
 // APPROVED reads "Approved – planning": the stored value stays APPROVED because
 // other lanes query it. An unknown status shows as-is rather than blank, so a
 // new backend state is visible instead of hidden.
-export const STATUS_LABELS = Object.freeze({
+export const statusLabels = Object.freeze({
   DRAFT: "Draft",
   SUBMITTED: "Submitted",
   UNDER_REVIEW: "Under review",
@@ -18,6 +18,6 @@ export const STATUS_LABELS = Object.freeze({
 
 // Must match ACTIVE_STATUSES in backend/src/modules/events/lifecycle.js: the
 // browser applies the same meaning of "active" when SCRUM-161's overview opens.
-export const ACTIVE_STATUSES = Object.freeze([
+export const activeStatuses = Object.freeze([
   "SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED", "POSTPONED",
 ]);

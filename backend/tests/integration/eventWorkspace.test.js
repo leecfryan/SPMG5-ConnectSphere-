@@ -36,11 +36,17 @@ async function setup(t) {
   return { send, users, records, client };
 }
 
+// Also the evidence for SCRUM-161 AC3: the other coordinator's event must be
+// absent from the payload altogether, not merely hidden by the browser.
 test("[ACCESS-001] Two coordinators see only their own list and direct event details", async t => {
   const { send, records } = await setup(t);
   for (const [role, own, other] of [["first", records[0], records[1]], ["second", records[1], records[0]]]) {
     const list = await (await send("/event-workspace/coordinator?coordinator_id=forged", role)).json();
     expect(list.events.map(event => event.id)).toEqual([own.id]);
+    const payload = JSON.stringify(list.events);
+    expect(payload).not.toContain(other.id);
+    expect(payload).not.toContain(other.name);
+    expect(payload).not.toContain(other.coordinator_id);
     expect((await send(`/event-workspace/coordinator/${own.id}`, role)).status).toBe(200);
     const denied = await send(`/event-workspace/coordinator/${other.id}`, role);
     expect(denied.status).toBe(404);
@@ -600,20 +606,4 @@ test("[SCRUM-161] AC1: the Lead's list carries an event in every active status w
   expect(byId.get(records[2].id)).toMatchObject({ status: "SUBMITTED", coordinator_id: null });
   for (const event of laterStages) expect(byId.get(event.id)).toMatchObject({ status: event.status, coordinator_id: users.second.id });
   expect(byId.get(closed.id)).toMatchObject({ status: "CANCELLED", coordinator_id: users.first.id });
-});
-
-// SCRUM-161 AC3: the coordinator's scope is the server-side assignment filter.
-// Another coordinator's event must be absent from the payload altogether, not
-// merely hidden by the browser.
-test("[SCRUM-161] AC3: an Event Coordinator's list contains only the events assigned to them", async t => {
-  const { send, records, users } = await setup(t);
-  const response = await send("/event-workspace/coordinator", "first");
-  expect(response.status).toBe(200);
-  const events = (await response.json()).events;
-
-  expect(events.map(event => event.id)).toEqual([records[0].id]);
-  const payload = JSON.stringify(events);
-  expect(payload).not.toContain(records[1].id);
-  expect(payload).not.toContain(records[1].name);
-  expect(payload).not.toContain(users.second.id);
 });

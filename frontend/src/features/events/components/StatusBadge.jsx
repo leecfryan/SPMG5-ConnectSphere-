@@ -1,7 +1,7 @@
-import { STATUS_LABELS } from "../statuses";
+import { statusLabels } from "../statuses";
 
 export default function StatusBadge({ status }) {
-  const label = STATUS_LABELS[status] ?? status;
+  const label = statusLabels[status] ?? status;
   return (
     <span className={`status-badge status-${String(status).toLowerCase()}`}>
       {label}

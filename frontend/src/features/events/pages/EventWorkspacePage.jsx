@@ -22,14 +22,15 @@ export default function EventWorkspacePage({ scope }) {
   const workspace = workspaces[scope];
   const { user } = useAuth();
   const [search, setSearch] = useState("");
-  const { data, loading, error, reload } = useApiResource(`/api/event-workspace/${scope}`);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const { data, loading, error } = useApiResource(`/api/event-workspace/${scope}`, refreshKey);
   const events = (data?.events || []).filter(event => event.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
   const ownEvents = events.filter(event => event.organiser_id === user.id);
   const otherEvents = events.filter(event => event.organiser_id !== user.id);
   return <section className="card event-workspace">
     <h1>{workspace.title}</h1>
     <p>{workspace.description}</p>
-    <button type="button" onClick={reload}>Refresh events</button>
+    <button type="button" onClick={() => setRefreshKey(key => key + 1)}>Refresh events</button>
     {loading && <p role="status">Loading events…</p>}
     {error && <p role="alert">{error}</p>}
     {scope === "organiser" && <>
@@ -51,7 +52,7 @@ export default function EventWorkspacePage({ scope }) {
       </section>
     </>}
     {/* Mounted while loading too, so Refresh events keeps the Lead's filters. */}
-    {scope === "manager" && <CoordinatorWorkloadOverview events={data?.events ?? []} path={workspace.path} />}
+    {scope === "manager" && <CoordinatorWorkloadOverview events={data?.events ?? []} path={workspace.path} refreshKey={refreshKey} />}
     {scope === "coordinator" && <EventList events={events} workspace={workspace} />}
     {scope === "organiser" && <Link to="/events/new">Submit an event request</Link>}
   </section>;

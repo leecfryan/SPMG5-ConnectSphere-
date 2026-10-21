@@ -742,7 +742,7 @@ Feature folder at `frontend/src/features/events/`.
 | File | Used by | Description |
 | --- | --- | --- |
 | `components/EventRequestForm.jsx` | EventRequestPage | The request form. Displays every server-side error against its own input. SCRUM-147: *Save draft* on new requests, and submitting an opened draft submits that draft. |
-| `components/CoordinatorWorkloadOverview.jsx` | EventWorkspacePage (manager) | SCRUM-161: the Lead's table of events (event, status, coordinator) from the existing manager list. Opens on *All active statuses*; coordinator filter (each named coordinator, *Awaiting coordinator*) and status filter (lifecycle order, *All statuses* brings back rejected and cancelled events); *Clear filters*; "N of M events shown". Names come from `GET /api/event-workspace/coordinators`: an unknown id reads *No longer active*, and if the directory fails rows keep *Coordinator assigned*. Unassigned and departed coordinators are highlighted. Filters survive *Refresh events* |
+| `components/CoordinatorWorkloadOverview.jsx` | EventWorkspacePage (manager) | SCRUM-161: the Lead's table of events (event, status, coordinator) from the existing manager list. Opens on *All active statuses*; coordinator filter (each named coordinator, *Awaiting coordinator*, and *No longer active* for assignments held by someone the directory no longer lists) and status filter (lifecycle order, *All statuses* brings back rejected and cancelled events); *Clear filters*; "N of M events shown". Names come from `GET /api/event-workspace/coordinators`: an unknown id reads *No longer active*, and if the directory fails rows keep *Coordinator assigned*. Unassigned and departed coordinators are highlighted. Filters survive *Refresh events*, which also retries a directory that failed to load |
 | `components/DraftList.jsx` | EventWorkspacePage (organiser) | SCRUM-147: *Your drafts*, the organiser's own drafts linking back into the form; loading, empty and error states |
 | `components/StatusBadge.jsx` | Event request, assignment and workspace screens | Displays the stored status value as words ("Approved – planning" for `APPROVED`); the labels themselves live in [`statuses.js`](#services) |
 | `components/EventDecisionControls.jsx` | EventWorkspaceDetailPage (assigned coordinator only) | *Start review* on `SUBMITTED`; note + *Approve* / *Reject* on `UNDER_REVIEW`; nothing otherwise |
@@ -759,7 +759,7 @@ Feature folder at `frontend/src/features/events/`.
 | `eventsService.js` | Submits the request and converts event and registration timestamps to ISO with a zone; `saveDraft`, `updateDraft`, `submitDraft` (SCRUM-147) |
 | `eventFormat.js` | Date and reference formatting shared with the assignment screens |
 | `reviewService.js` | `startReview`, `approveEvent`, `rejectEvent`: the three review calls; only the note is sent |
-| `statuses.js` | `STATUS_LABELS`, the words for every `events.status` (used by the badges and the overview's status filter), and `ACTIVE_STATUSES`, which mirrors `ACTIVE_STATUSES` in `backend/src/modules/events/lifecycle.js` (SCRUM-161) |
+| `statuses.js` | `statusLabels`, the words for every `events.status` (used by the badges and the overview's status filter), and `activeStatuses`, which mirrors `ACTIVE_STATUSES` in `backend/src/modules/events/lifecycle.js` (SCRUM-161) |
 
 ---
 

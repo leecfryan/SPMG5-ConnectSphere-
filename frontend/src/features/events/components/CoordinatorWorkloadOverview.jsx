@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { useApiResource } from "../../../hooks/useApiResource";
-import { ACTIVE_STATUSES, STATUS_LABELS } from "../statuses";
+import { activeStatuses, statusLabels } from "../statuses";
 import StatusBadge from "./StatusBadge";
 
 // SCRUM-161: the Event Coordinator Lead's workload overview on /event-management.
@@ -12,20 +12,27 @@ import StatusBadge from "./StatusBadge";
 // Deliberately absent: reassigning from this list (the event detail page owns
 // it, SCRUM-26) and workload counts or balancing rules (no AC asks for them).
 
-const DEFAULT_FILTERS = Object.freeze({ coordinator: "all", status: "active" });
+const defaultFilters = Object.freeze({ coordinator: "all", status: "active" });
 
 // "active" opens the overview on events still in progress (AC1); "all" keeps
 // the workspace's existing view, where rejected and cancelled events stay
 // visible to the Lead (SCRUM-148 AC4).
 function matchesStatus(status, filter) {
   if (filter === "all") return true;
-  if (filter === "active") return ACTIVE_STATUSES.includes(status);
+  if (filter === "active") return activeStatuses.includes(status);
   return status === filter;
 }
 
-function matchesCoordinator(coordinatorId, filter) {
+// The directory lists only active coordinators, so anyone who has left the
+// role can't be named; "departed" groups their assignments under one option.
+function isDeparted(coordinatorId, names) {
+  return Boolean(coordinatorId) && names !== null && !names.has(coordinatorId);
+}
+
+function matchesCoordinator(coordinatorId, filter, names) {
   if (filter === "all") return true;
   if (filter === "unassigned") return coordinatorId === null;
+  if (filter === "departed") return isDeparted(coordinatorId, names);
   return coordinatorId === filter;
 }
 
@@ -33,8 +40,8 @@ function matchesCoordinator(coordinatorId, filter) {
 // backend state stays selectable instead of vanishing.
 function statusOptions(events) {
   const present = new Set(events.map(event => event.status));
-  const known = Object.keys(STATUS_LABELS).filter(status => present.has(status));
-  return [...known, ...[...present].filter(status => !Object.hasOwn(STATUS_LABELS, status))];
+  const known = Object.keys(statusLabels).filter(status => present.has(status));
+  return [...known, ...[...present].filter(status => !Object.hasOwn(statusLabels, status))];
 }
 
 // Never invent an outcome: without the directory the row keeps the plain
@@ -45,14 +52,20 @@ function coordinatorLabel(coordinatorId, names) {
   return names.get(coordinatorId) ?? "No longer active";
 }
 
-export default function CoordinatorWorkloadOverview({ events, path }) {
-  const [filters, setFilters] = useState(DEFAULT_FILTERS);
-  const directory = useApiResource("/api/event-workspace/coordinators");
+export default function CoordinatorWorkloadOverview({ events, path, refreshKey }) {
+  const [filters, setFilters] = useState(defaultFilters);
+  // Refresh events retries the directory only after it failed: a loaded
+  // directory is kept, so names and the chosen coordinator don't flicker.
+  const [directoryKey, setDirectoryKey] = useState(refreshKey);
+  const directory = useApiResource("/api/event-workspace/coordinators", directoryKey);
+  if (directory.error && directoryKey !== refreshKey) setDirectoryKey(refreshKey);
+
   const coordinators = directory.data?.coordinators ?? [];
   const names = directory.data ? new Map(coordinators.map(coordinator => [coordinator.id, coordinator.name])) : null;
+  const showDeparted = filters.coordinator === "departed" || events.some(event => isDeparted(event.coordinator_id, names));
   const visible = events.filter(event =>
-    matchesCoordinator(event.coordinator_id, filters.coordinator) && matchesStatus(event.status, filters.status));
-  const filtersApplied = filters.coordinator !== DEFAULT_FILTERS.coordinator || filters.status !== DEFAULT_FILTERS.status;
+    matchesCoordinator(event.coordinator_id, filters.coordinator, names) && matchesStatus(event.status, filters.status));
+  const filtersApplied = filters.coordinator !== defaultFilters.coordinator || filters.status !== defaultFilters.status;
   const choose = key => change => setFilters(current => ({ ...current, [key]: change.target.value }));
 
   return <>
@@ -64,6 +77,7 @@ export default function CoordinatorWorkloadOverview({ events, path }) {
           <option value="all">All coordinators</option>
           <option value="unassigned">Awaiting coordinator</option>
           {coordinators.map(coordinator => <option key={coordinator.id} value={coordinator.id}>{coordinator.name}</option>)}
+          {showDeparted && <option value="departed">No longer active</option>}
         </select>
       </div>
       <div className="event-overview-field">
@@ -71,10 +85,10 @@ export default function CoordinatorWorkloadOverview({ events, path }) {
         <select id="assignment-status-filter" value={filters.status} onChange={choose("status")}>
           <option value="active">All active statuses</option>
           <option value="all">All statuses</option>
-          {statusOptions(events).map(status => <option key={status} value={status}>{STATUS_LABELS[status] ?? status}</option>)}
+          {statusOptions(events).map(status => <option key={status} value={status}>{statusLabels[status] ?? status}</option>)}
         </select>
       </div>
-      {filtersApplied && <button type="button" className="secondary event-overview-clear" onClick={() => setFilters(DEFAULT_FILTERS)}>Clear filters</button>}
+      {filtersApplied && <button type="button" className="secondary event-overview-clear" onClick={() => setFilters(defaultFilters)}>Clear filters</button>}
       {directory.error && <p className="error" role="alert">{directory.error}</p>}
     </section>
     {events.length > 0 && visible.length === 0 && <p className="event-overview-empty">{filtersApplied
