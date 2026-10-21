@@ -482,3 +482,36 @@ Deleting a draft, auto-save, and draft expiry (#116) are outside the AC.
 **Why one live test.** It is the only check that the real `events` table accepts a draft with only a name and that
 PostgREST's `neq` filter really hides `DRAFT` rows from the workspace — both depend on the real schema, which the
 fakes cannot prove.
+
+## SCRUM-117 Task 2 — return for changes
+
+Scope: AC1 and the saved-message display portion of AC3. Notification delivery,
+resubmission and difference presentation are later slices, not acceptance claims here.
+
+| Source tests | Observable outcome |
+| --- | --- |
+| SCRUM-117-API-001–007 in backend/tests/integration/events.review.test.js | Assigned coordinator only, UNDER_REVIEW only, required note, trusted actor, duplicate/stale refusals, safe storage failure, cancellation/postponement by coordinator or lead. Denials assert unchanged state. |
+| SCRUM-117-API-008 in backend/tests/integration/eventWorkspace.test.js | Returned request remains visible; lead reassignment returns 409 and leaves stored events unchanged. |
+| SCRUM-117-UNIT-001 in lifecycle.test.js | Returned requests count in workload but are neither assignable nor planning eligible. |
+| SCRUM-117-UNIT-002 in eventWorkspace.service.test.js | Saved note is readable without leaking stored snapshots/actor details. |
+| SCRUM-117-UNIT-003–004 in clarification.repository.test.js | Exact atomic RPC arguments, no-row conflict and storage error handling. |
+| SCRUM-117-UNIT-005 in review.service.test.js | Deletion before the atomic return is not found. |
+| SCRUM-117-UI-001–004 in EventDecisionControls.test.jsx | Required note, correct API call, retained input on error, state visibility and duplicate-click prevention. |
+| SCRUM-117-UI-005–006 in EventWorkspaceDetailPage.test.jsx | Organiser reads the note after refresh; permitted cancellation/postponement; no reassignment/approval while returned. |
+| E2E-CLARIFICATION-001 in tests/playwright/clarification.browser.spec.cjs | Real local UI/API return journey, reload, organiser sign-in/read, retained coordinator, one history entry and 375px layout. |
+
+Run from the repository root using installed dependencies:
+
+```sh
+npm --prefix backend run test:events -- tests/unit/events tests/integration/events.review.test.js tests/integration/eventWorkspace.test.js --pool=threads --maxWorkers=1
+npm --prefix frontend test -- --run src/features/events --maxWorkers=1 --reporter=default
+npm run test:playwright -- tests/playwright/clarification.browser.spec.cjs --reporter=list
+```
+
+Expected: all selected tests pass; a nonzero exit requires investigation. These tests use
+local storage substitutes, not deployed Supabase. They do not prove the installed SQL's
+transaction/locking behavior. Human UAT remains Not Executed. Formal execution logs and
+coverage reports are kept in Ryan's external ConnectSphere 2 workspace.
+
+The existing workload/cancellation/postponement query-shape tests now include
+CHANGES_REQUESTED to match Ryan's explicit rules; their assertions were retained.

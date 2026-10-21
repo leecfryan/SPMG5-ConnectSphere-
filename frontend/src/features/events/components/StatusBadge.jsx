@@ -6,6 +6,7 @@ const LABELS = Object.freeze({
   DRAFT: "Draft",
   SUBMITTED: "Submitted",
   UNDER_REVIEW: "Under review",
+  CHANGES_REQUESTED: "Changes requested",
   APPROVED: "Approved – planning",
   SAFETY_REVIEW: "Safety review",
   PREPARATION: "Preparation",

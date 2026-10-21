@@ -1,0 +1,32 @@
+const { test, expect, signIn } = require('./support/fixtures.cjs');
+const { setupWorkflow } = require('./support/event-workspace-fixtures.cjs');
+const { backendURL } = require('./support/settings.cjs');
+
+test('[E2E-CLARIFICATION-001] SCRUM-117: coordinator returns a request and organiser reads the saved message on mobile', async ({ page, accounts, request }) => {
+  const { event, first, organiser, headers, update } = await setupWorkflow(accounts, request);
+  expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
+  expect((await request.post(backendURL + '/api/internal/events/' + event.id + '/start-review', { headers: headers.first })).status()).toBe(200);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto('/sign-in');
+  await signIn(page, first);
+  await expect(page.getByRole('link', { name: 'Account', exact: true })).toBeVisible();
+  await page.goto('/assigned-events/' + event.id);
+  await page.getByLabel('Decision note').fill('Please clarify the room layout and attendance.');
+  await page.getByRole('button', { name: 'Return for changes' }).click();
+  await expect(page.locator('.status-badge')).toHaveText('Changes requested');
+  await page.reload();
+  await expect(page.getByRole('region', { name: 'Clarification requested' })).toContainText('Please clarify the room layout and attendance.');
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await signIn(page, organiser);
+  await expect(page.getByRole('link', { name: 'Account', exact: true })).toBeVisible();
+  await page.goto('/my-event-requests/' + event.id);
+  await expect(page.getByRole('region', { name: 'Clarification requested' })).toContainText('Please clarify the room layout and attendance.');
+  await expect(page.getByRole('button', { name: 'Edit event', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Return for changes' })).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const detail = await request.get(backendURL + '/api/event-workspace/coordinator/' + event.id, { headers: headers.first });
+  const saved = (await detail.json()).event;
+  expect(saved.status).toBe('CHANGES_REQUESTED');
+  expect(saved.coordinator_id).toBe(first.id);
+  expect(saved.activity.filter(row => row.action === 'CHANGES_REQUESTED')).toHaveLength(1);
+});

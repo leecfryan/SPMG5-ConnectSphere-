@@ -232,3 +232,12 @@ for the course app, but larger deployments would need measured follow-up work.
 ### SCRUM-100 test evidence
 
 See the existing [Access test guide](testing/frontend-acceptance.md#scrum-100-organiser-event-scope-2026-10-05) for the agreed cases, unit/integration/API/browser boundaries, standalone commands, full-row denied-write checks, latest regression results and measured coverage gaps. All new automated tests use isolated Auth/storage fixtures; live Supabase/RLS verification remains separate.
+
+## Returned requests (SCRUM-117)
+
+CHANGES_REQUESTED requests remain in the assigned coordinator and lead workspaces and
+count in workload. They cannot be reassigned. Only their assigned coordinator can return
+an UNDER_REVIEW request, using events.decide and POST /api/internal/events/:eventId/request-changes.
+The owner and existing authorized readers see the clarification message; snapshots stay
+server-side. Cancellation and postponement remain available to the assigned coordinator
+or lead. See event-requests.md for the atomic RPC and Task 2 scope.

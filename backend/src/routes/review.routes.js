@@ -25,6 +25,7 @@ function createReviewRoutes(repository, cancelDependencies) {
   const postponeGuard = requirePermission("events.postpone", assignedOrCoordinatorLead);
 
   router.post("/events/:eventId/start-review", guard, controller.startReview);
+  router.post("/events/:eventId/request-changes", guard, controller.requestChanges);
   router.post("/events/:eventId/approve", guard, controller.approve);
   router.post("/events/:eventId/reject", guard, controller.reject);
   router.post("/events/:eventId/cancel", cancelGuard, controller.cancel);

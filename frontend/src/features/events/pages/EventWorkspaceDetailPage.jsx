@@ -23,6 +23,7 @@ function Detail({ scope, eventId }) {
   const [saved, setSaved] = useState(false);
   const { data, loading, error, reload } = useApiResource(`/api/event-workspace/${scope}/${eventId}`);
   const event = data?.event;
+  const clarification = event?.activity?.find(entry => entry.action === "CHANGES_REQUESTED");
   const fields = [
     ["Purpose", "purpose"], ["Description", "description"],
     ["Start", "start_time"], ["End", "end_time"], ["Expected attendance", "expected_attendance"],
@@ -37,6 +38,12 @@ function Detail({ scope, eventId }) {
     {event && <>
       <h1>{event.name}</h1>
       {saved && <p role="status">Event changes saved.</p>}
+      {event.status === "CHANGES_REQUESTED" && <section aria-labelledby="clarification-heading">
+        <h2 id="clarification-heading">Clarification requested</h2>
+        {clarification?.note
+          ? <p style={{ whiteSpace: "pre-wrap" }}>{clarification.note}</p>
+          : <p>The clarification message is unavailable. Refresh the event to try again.</p>}
+      </section>}
       {scope === "organiser" && <>
         {event.organiser_id === user.id && hasPermission("events.own.update") ?
           (editing ? <EventRequestForm key={event.id} event={event} onCancel={() => setEditing(false)} onSubmitted={() => {

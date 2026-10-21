@@ -232,3 +232,13 @@ test("[SCRUM-147-UNIT-013] AC4: drafts stay out of the organisation view, a coll
   expect(await service.find("organiser", "alice", "draft-alice")).toBeNull();
   expect(await service.updateOrganiserEvent("alice", "draft-alice", { name: "Renamed" })).toEqual({ ok: false, reason: "not_found" });
 });
+
+test("[SCRUM-117-UNIT-002] organiser sees the saved message without internal snapshot or actor details", async () => {
+  const { service, client, records } = setup();
+  records[0].status = "CHANGES_REQUESTED";
+  client.activity.push({ id: "cycle-1", event_id: records[0].id, user_id: "coordinator-one", action: "CHANGES_REQUESTED",
+    details: { note: "Clarify room layout.", before: { name: "Original" }, coordinator_id: "coordinator-one" }, created_at: "2099-01-01T00:00:00Z" });
+  const result = await service.find("organiser", "alice", records[0].id);
+  expect(result.activity).toEqual([{ id: "cycle-1", action: "CHANGES_REQUESTED", from_status: null, to_status: null,
+    note: "Clarify room layout.", created_at: "2099-01-01T00:00:00Z" }]);
+});

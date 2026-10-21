@@ -930,3 +930,83 @@ The following paragraph, *Draft Event Requests*, is built by SCRUM-147 (Sprint 3
   `EventWorkspaceDetailPage.jsx`).
 - US-13 has no Jira issue, so `US-13` remains the label in code and tests.
 
+
+## Returning requests for clarification (SCRUM-117, Task 2)
+
+The assigned Event Coordinator can select **Return for changes** on an UNDER_REVIEW
+request. A nonblank decision note is required. The request becomes CHANGES_REQUESTED;
+its organiser and coordinator are preserved. The message is shown prominently on the
+returned request and retained in its activity history. Existing event read access applies
+(including same-company organiser view-only access); raw snapshots and actor IDs are
+not added to the workspace response.
+
+POST /api/internal/events/:eventId/request-changes accepts { note } and uses
+internal.access plus events.decide with the assigned-coordinator record check. The
+server supplies the authenticated coordinator ID. The database RPC locks the event and
+checks assignment/status again before saving its 12-field snapshot and status together.
+Blank/non-text notes return 400; unauthenticated callers 401; wrong roles/assignments 403;
+stale status/assignment 409; write failures a safe 500, matching existing review actions.
+
+Returned requests remain visible and count towards coordinator workload. ACTIVE_STATUSES
+includes them for cancellation/workload; ASSIGNABLE_STATUSES excludes them. Assigned
+coordinators and leads can cancel or postpone them, with the existing required-reason and
+release rules. Venue/equipment planning and attendee registration do not admit this status.
+The unassigned queue still requires SUBMITTED plus a null coordinator.
+
+This commit implements returning and message display only. Notification delivery,
+resubmission and field-difference presentation remain subsequent SCRUM-117 tasks.
+The organiser's existing Edit event action still saves details without changing status.
+
+### Schema reference — SCRUM-117 return action
+
+Ryan reported applying this SQL manually before code implementation. The supplied column
+and constraint exports establish the schema contract. The agent did not access shared
+Supabase or execute this SQL there. The existing event_activity_log table is reused.
+The definition below has the same statements and behavior as the supplied SQL, with
+formatting condensed. It is installation SQL, not a script to rerun on an installed database.
+
+```sql
+begin;
+alter table public.events drop constraint events_status_check;
+alter table public.events add constraint events_status_check check (status in (
+  'DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'CHANGES_REQUESTED', 'APPROVED',
+  'SAFETY_REVIEW', 'PREPARATION', 'CONFIRMED', 'COMPLETED', 'CANCELLED', 'REJECTED', 'POSTPONED'
+));
+create function public.request_event_changes(p_event_id uuid, p_coordinator_id uuid, p_message text)
+returns setof public.events
+language plpgsql security invoker set search_path = public
+as $$
+declare
+  v_event public.events%rowtype;
+  v_snapshot jsonb;
+  v_cycle_id uuid := gen_random_uuid();
+begin
+  if p_message is null or btrim(p_message) = '' then
+    raise exception 'A clarification message is required.' using errcode = '22023';
+  end if;
+  select * into v_event from public.events where id = p_event_id for update;
+  if not found then return; end if;
+  if p_coordinator_id is null
+     or v_event.coordinator_id is distinct from p_coordinator_id
+     or v_event.status <> 'UNDER_REVIEW' then return; end if;
+  v_snapshot := jsonb_build_object(
+    'name', v_event.name, 'purpose', v_event.purpose, 'description', v_event.description,
+    'start_time', v_event.start_time, 'end_time', v_event.end_time,
+    'registration_start', v_event.registration_start, 'registration_end', v_event.registration_end,
+    'expected_attendance', v_event.expected_attendance, 'venue_requirements', v_event.venue_requirements,
+    'accessibility_needs', v_event.accessibility_needs, 'equipment_needs', v_event.equipment_needs,
+    'other_comments', v_event.other_comments
+  );
+  insert into public.event_activity_log(id, event_id, user_id, action, details)
+  values (v_cycle_id, v_event.id, p_coordinator_id, 'CHANGES_REQUESTED', jsonb_build_object(
+    'cycle_id', v_cycle_id, 'from_status', 'UNDER_REVIEW', 'to_status', 'CHANGES_REQUESTED',
+    'note', btrim(p_message), 'organiser_id', v_event.organiser_id,
+    'coordinator_id', v_event.coordinator_id, 'before', v_snapshot
+  ));
+  return query update public.events set status = 'CHANGES_REQUESTED' where id = v_event.id returning *;
+end;
+$$;
+revoke all on function public.request_event_changes(uuid, uuid, text) from public, anon, authenticated;
+grant execute on function public.request_event_changes(uuid, uuid, text) to service_role;
+commit;
+```

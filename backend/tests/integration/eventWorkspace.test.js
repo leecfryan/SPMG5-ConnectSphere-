@@ -580,3 +580,18 @@ test("[SCRUM-99] AC3: a colleague in the organiser's company sees the decision; 
   expect(outsider.status).toBe(404);
   expect(await outsider.text()).not.toContain("Dates clash with exams.");
 });
+
+test("[SCRUM-117-API-008] returned events stay visible but lead reassignment is refused", async t => {
+  const { send, records, users } = await setup(t);
+  records[0].status = "CHANGES_REQUESTED";
+  const before = structuredClone(records);
+  for (const [scope, user] of [["coordinator", "first"], ["manager", "manager"], ["organiser", "organiser"]]) {
+    const response = await send("/event-workspace/" + scope, user);
+    expect((await response.json()).events.map(row => row.id)).toContain(records[0].id);
+  }
+  const response = await send("/event-workspace/" + records[0].id + "/coordinator", "manager", "PATCH", {
+    coordinatorId: users.second.id, expectedCoordinatorId: users.first.id,
+  });
+  expect(response.status).toBe(409);
+  expect(records).toEqual(before);
+});

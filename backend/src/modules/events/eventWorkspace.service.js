@@ -1,4 +1,4 @@
-const { ACTIVE_STATUSES } = require("./lifecycle");
+const { ACTIVE_STATUSES, ASSIGNABLE_STATUSES } = require("./lifecycle");
 const { assignWithHistory } = require("./assignmentHistory.repository");
 const { WRITABLE_COLS } = require("./events.repository");
 const { normalise } = require("./events.service");
@@ -167,7 +167,7 @@ function createEventWorkspaceService(client, equipmentService) {
     assign(id, coordinatorId, expectedCoordinatorId, actor) {
       return unwrap(assignWithHistory(client, {
         eventId: id, coordinatorId, expectedCoordinatorId,
-        allowedStatuses: ACTIVE_STATUSES, actor,
+        allowedStatuses: ASSIGNABLE_STATUSES, actor,
       }).select(FIELDS).maybeSingle());
     },
   };

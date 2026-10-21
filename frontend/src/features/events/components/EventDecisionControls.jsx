@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useAuth } from "../../auth/useAuth";
-import { approveEvent, rejectEvent, startReview } from "../reviewService";
+import { approveEvent, rejectEvent, startReview, requestEventChanges } from "../reviewService";
 
 // SCRUM-98/99: the assigned coordinator starts the review, then approves or
 // rejects. The server re-checks the assignment on every action, so showing
@@ -15,12 +15,22 @@ export default function EventDecisionControls({ event, onDecided }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const inFlight = useRef(false);
+
   async function run(action) {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setError("");
     try { onDecided(await action()); }
     catch (failure) { setError(failure.message); }
-    finally { setBusy(false); }
+    finally { inFlight.current = false; setBusy(false); }
+  }
+
+  function requestChanges() {
+    if (!note.trim()) return setNoteError("Explain what the organiser needs to clarify or amend.");
+    setNoteError("");
+    run(() => requestEventChanges(event.id, note, token));
   }
 
   function reject() {
@@ -48,12 +58,14 @@ export default function EventDecisionControls({ event, onDecided }) {
     {error && <p role="alert">{error}</p>}
     <form>
       <label htmlFor="decision-note">Decision note</label>
-      <span id="decision-note-hint" className="field-hint">Required to reject. Optional to approve.</span>
+      <span id="decision-note-hint" className="field-hint">Required to reject or return for changes. Optional to approve.</span>
       <textarea id="decision-note" value={note} onChange={e => setNote(e.target.value)}
         aria-invalid={Boolean(noteError)}
         aria-describedby={noteError ? "decision-note-hint decision-note-error" : "decision-note-hint"} />
       {noteError && <p id="decision-note-error" className="field-error">{noteError}</p>}
+      <p>Returning for changes saves your message on the organiser’s request.</p>
       <div className="event-actions">
+        <button type="button" disabled={busy} onClick={requestChanges}>Return for changes</button>
         <button type="button" disabled={busy} onClick={() => run(() => approveEvent(event.id, note, token))}>Approve</button>
         <button type="button" disabled={busy} onClick={reject}>Reject</button>
       </div>

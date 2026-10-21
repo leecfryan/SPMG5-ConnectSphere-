@@ -239,3 +239,11 @@ Coordinators use `/equipment/requests`; technical support uses `/technical-suppo
 ## Attendee registration
 
 Signed-in users can browse approved events at `/events` and manage their own registrations at `/registrations/me`. Staff permissions and existing feature routes are unchanged. See [Registration integration](docs/registration-integration.md) for integration details, tests and database requirements.
+
+## Return a request for clarification (SCRUM-117)
+
+The assigned coordinator can return an Under review request with a required message.
+It becomes Changes requested, and the organiser sees the message on the request.
+Cancellation/postponement remain available; reassignment is blocked while corrections
+are pending. This slice does not yet implement notifications or resubmission.
+See [event requests](docs/event-requests.md#returning-requests-for-clarification-scrum-117-task-2).
