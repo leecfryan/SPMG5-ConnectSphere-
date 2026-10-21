@@ -153,6 +153,7 @@ function send(path, role = "venue_staff", method = "GET", data) {
 }
 
 const validHoldBody = {
+  event_id: "aaaaaaaa-0000-4000-8000-000000000099",
   event_name: "Charity Gala",
   booking_date: futureDate,
   slots: ["am"],

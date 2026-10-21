@@ -307,8 +307,8 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
             holdConversion ? (
               // SCRUM-162: event is locked to the hold's event — changing it would 409
               <div className="v-field">
-                <span className="v-label">Event</span>
-                <p className="v-input" style={{ background: "var(--v-surface-2, #f5f5f5)", cursor: "default" }}>
+                <label className="v-label" htmlFor="booking-event-locked">Event</label>
+                <p id="booking-event-locked" className="v-input" style={{ background: "var(--v-surface-2, #f5f5f5)", cursor: "default" }}>
                   {holdConversion.eventName}
                 </p>
               </div>
@@ -354,8 +354,8 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
           {holdConversion ? (
             // SCRUM-162: date is locked to the hold's date
             <div className="v-field" style={{ maxWidth: 240 }}>
-              <span className="v-label">Date</span>
-              <p className="v-input" style={{ background: "var(--v-surface-2, #f5f5f5)", cursor: "default" }}>
+              <label className="v-label" htmlFor="booking-date-locked">Date</label>
+              <p id="booking-date-locked" className="v-input" style={{ background: "var(--v-surface-2, #f5f5f5)", cursor: "default" }}>
                 {formatDate(bookingDate, { weekday: true, year: true })}
               </p>
             </div>

@@ -1,7 +1,7 @@
 // SCRUM-146: Venue Staff place and view tentative holds on a venue.
 import { useState, useEffect } from "react";
 import { useAuth } from "../../auth/useAuth";
-import { fetchHolds, createHold, fetchCoordinators } from "../venueHoldsService";
+import { fetchHolds, createHold, fetchEventsForHolds } from "../venueHoldsService";
 import { IconAlert, IconArrowLeft } from "../components/VenueIcons";
 
 const SLOTS = ["am", "pm", "night"];
@@ -31,9 +31,8 @@ function HoldRow({ hold }) {
 
 function HoldForm({ venueId, onCreated, onCancel }) {
   const { token } = useAuth();
-  const [coordinators, setCoordinators] = useState(null);
-  const [eventName, setEventName] = useState("");
-  const [coordinatorId, setCoordinatorId] = useState("");
+  const [events, setEvents] = useState(null);
+  const [selectedEventId, setSelectedEventId] = useState("");
   const [bookingDate, setBookingDate] = useState("");
   const [slots, setSlots] = useState(() => new Set());
   const [expiresAt, setExpiresAt] = useState("");
@@ -42,11 +41,13 @@ function HoldForm({ venueId, onCreated, onCancel }) {
 
   useEffect(() => {
     let active = true;
-    fetchCoordinators(token)
-      .then((data) => { if (active) setCoordinators(data.data); })
-      .catch(() => { if (active) setCoordinators([]); });
+    fetchEventsForHolds(token)
+      .then((data) => { if (active) setEvents(data.data); })
+      .catch(() => { if (active) setEvents([]); });
     return () => { active = false; };
   }, [token]);
+
+  const selectedEvent = events?.find((e) => e.id === selectedEventId) ?? null;
 
   function toggleSlot(slot) {
     setSlots((prev) => {
@@ -58,15 +59,17 @@ function HoldForm({ venueId, onCreated, onCancel }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (!selectedEvent) return;
     setSaving(true);
     setError(null);
     try {
       await createHold(venueId, {
-        event_name: eventName.trim(),
+        event_id: selectedEvent.id,
+        event_name: selectedEvent.name,
+        coordinator_id: selectedEvent.coordinator_id,
         booking_date: bookingDate,
         slots: SLOTS.filter((s) => slots.has(s)),
         expires_at: expiresAt ? new Date(expiresAt).toISOString() : "",
-        coordinator_id: coordinatorId,
       }, token);
       onCreated();
     } catch (err) {
@@ -76,7 +79,7 @@ function HoldForm({ venueId, onCreated, onCancel }) {
     }
   }
 
-  const canSubmit = eventName.trim() && coordinatorId && bookingDate && slots.size > 0 && expiresAt && !saving;
+  const canSubmit = selectedEvent && bookingDate && slots.size > 0 && expiresAt && !saving;
 
   return (
     <form className="v-card v-stack" onSubmit={handleSubmit}>
@@ -89,32 +92,19 @@ function HoldForm({ venueId, onCreated, onCancel }) {
       </div>
 
       <div className="v-field">
-        <label className="v-label" htmlFor="hold-event-name">Event name</label>
-        <input
-          id="hold-event-name"
-          className="v-input"
-          type="text"
-          value={eventName}
-          onChange={(e) => setEventName(e.target.value)}
-          placeholder="e.g. Charity Gala 2027"
-          required
-        />
-      </div>
-
-      <div className="v-field">
-        <label className="v-label" htmlFor="hold-coordinator">Coordinator</label>
-        {coordinators === null && <p role="status" style={{ fontSize: 14, color: "var(--v-text-muted)" }}>Loading coordinators…</p>}
-        {coordinators !== null && (
+        <label className="v-label" htmlFor="hold-event">Event</label>
+        {events === null && <p role="status" style={{ fontSize: 14, color: "var(--v-text-muted)" }}>Loading events…</p>}
+        {events !== null && (
           <select
-            id="hold-coordinator"
+            id="hold-event"
             className="v-input"
-            value={coordinatorId}
-            onChange={(e) => setCoordinatorId(e.target.value)}
+            value={selectedEventId}
+            onChange={(e) => setSelectedEventId(e.target.value)}
             required
           >
-            <option value="">Select a coordinator</option>
-            {coordinators.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
+            <option value="">Select an event</option>
+            {events.map((ev) => (
+              <option key={ev.id} value={ev.id}>{ev.name}</option>
             ))}
           </select>
         )}

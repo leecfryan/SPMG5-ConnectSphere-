@@ -75,7 +75,16 @@ module.exports = function venueStorage(accounts) {
       return id;
     },
     // Same rule as decide_venue_booking_request: coordinator-cancelled slots stay cancelled.
-    async decideBookingRequest(id, decision) { const r = requests.find(r => r.id === id); if (!r) return null; for (const slot of r.slots) if (slot.status !== 'cancelled') slot.status = decision; return id; },
+    // SCRUM-162: on confirmed, cancel linked holds so the calendar clears the tentative marker.
+    async decideBookingRequest(id, decision) {
+      const r = requests.find(r => r.id === id);
+      if (!r) return null;
+      for (const slot of r.slots) if (slot.status !== 'cancelled') slot.status = decision;
+      if (decision === 'confirmed') {
+        for (const hold of holds) { if (hold.request_id === id) hold.status = 'cancelled'; }
+      }
+      return id;
+    },
     // SCRUM-148/149: mirror the production release RPC for cancellation and postponement.
     async releaseBookingsForCancelledEvent(eventId) {
       let released = 0;
@@ -116,18 +125,64 @@ module.exports = function venueStorage(accounts) {
     // SCRUM-146: tentative holds
     async listActiveHoldsInRange(id, from, to) {
       const now = new Date().toISOString();
-      return holds.filter(h => h.venue_id === id && h.booking_date >= from && h.booking_date <= to && h.expires_at > now)
+      return holds.filter(h => h.venue_id === id && h.booking_date >= from && h.booking_date <= to && h.expires_at > now && h.status !== 'cancelled')
         .map(h => ({ booking_date: h.booking_date, slot: h.slot, event_name: h.event_name }));
     },
     async listHolds(id) {
       return holds.filter(h => h.venue_id === id)
         .sort((a, b) => b.booking_date.localeCompare(a.booking_date) || b.created_at.localeCompare(a.created_at));
     },
-    async createHold(id, { event_name, booking_date, slots, expires_at }, heldBy) {
+    async createHold(id, { event_name, event_id, booking_date, slots, expires_at, coordinator_id }, heldBy) {
       const now = new Date().toISOString();
-      const rows = slots.map(slot => ({ id: randomUUID(), venue_id: id, booking_date, slot, event_name, requested_by: heldBy, expires_at, created_at: now }));
+      const rows = slots.map(slot => ({ id: randomUUID(), venue_id: id, booking_date, slot, event_name, event_id: event_id || null, coordinator_id: coordinator_id || null, requested_by: heldBy, expires_at, status: 'hold', created_at: now }));
       holds.push(...rows);
       return rows;
+    },
+    // SCRUM-162: events with assigned coordinators for the hold placement form.
+    // Restricted to APPROVED/CONFIRMED — holds can only be placed for events
+    // that are eligible for booking conversion.
+    async listEventsWithCoordinator() {
+      const now = new Date().toISOString();
+      return events()
+        .filter(e => e.coordinator_id && ['APPROVED', 'CONFIRMED'].includes(e.status) && e.start_time && e.end_time > now)
+        .sort((a, b) => a.start_time.localeCompare(b.start_time));
+    },
+    // SCRUM-162: eligible holds for a coordinator — matched by event_id
+    async listEligibleHoldsForCoordinator(venueId, coordinatorId) {
+      const now = new Date().toISOString();
+      const bookableEvents = events().filter(e => e.coordinator_id === coordinatorId && ['APPROVED', 'CONFIRMED'].includes(e.status));
+      const eventsById = new Map(bookableEvents.map(e => [e.id, e]));
+      const activeHolds = holds.filter(h => h.venue_id === venueId && h.coordinator_id === coordinatorId && h.expires_at > now && !h.request_id && h.status !== 'cancelled');
+      function localDate(instant) {
+        return new Date(instant).toLocaleDateString('sv-SE', { timeZone: 'Asia/Singapore' });
+      }
+      const groups = new Map();
+      for (const hold of activeHolds) {
+        const event = hold.event_id ? eventsById.get(hold.event_id) : null;
+        if (!event) continue;
+        if (event.start_time && event.end_time) {
+          const startDate = localDate(event.start_time);
+          const endDate = localDate(event.end_time);
+          if (hold.booking_date < startDate || hold.booking_date > endDate) continue;
+        }
+        const key = `${hold.event_id}|${hold.booking_date}`;
+        if (!groups.has(key)) groups.set(key, { event, booking_date: hold.booking_date, slots: [] });
+        groups.get(key).slots.push({ id: hold.id, slot: hold.slot, expires_at: hold.expires_at });
+      }
+      return Array.from(groups.values());
+    },
+    // SCRUM-162: fetch active hold rows by id for conversion validation
+    async getActiveHoldsByIds(holdIds) {
+      const now = new Date().toISOString();
+      return holds
+        .filter(h => holdIds.includes(h.id) && h.expires_at > now && !h.request_id)
+        .map(h => ({ id: h.id, venue_id: h.venue_id, booking_date: h.booking_date, slot: h.slot, event_name: h.event_name, event_id: h.event_id, coordinator_id: h.coordinator_id }));
+    },
+    // SCRUM-162: link holds to the created booking request so approval can cancel them
+    async linkHoldsToRequest(holdIds, requestId) {
+      for (const hold of holds) {
+        if (holdIds.includes(hold.id)) hold.request_id = requestId;
+      }
     },
     // SCRUM-135: no-op for test fixture - recheckConflictsAfterUpdate is called after
     // venue updates but the fake storage doesn't track conflict flags

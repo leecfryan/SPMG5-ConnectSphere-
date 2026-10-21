@@ -18,3 +18,8 @@ export function fetchEligibleHolds(venueId, token) {
 export function fetchCoordinators(token) {
   return apiFetch("/api/venues/coordinators", token);
 }
+
+// SCRUM-162: events with assigned coordinators for the hold placement form.
+export function fetchEventsForHolds(token) {
+  return apiFetch("/api/venues/events", token);
+}

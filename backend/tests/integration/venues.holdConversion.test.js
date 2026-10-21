@@ -60,7 +60,7 @@ const ALL_SERVICE_METHODS = [
   "getUnavailabilityPeriodById", "updateUnavailabilityPeriod", "deleteUnavailabilityPeriod",
   "recheckConflictsAfterUpdate", "listConflictingRequests", "listAffectedBookingRequests",
   "listActiveHoldsInRange", "listHolds", "createHold",
-  "getActiveHoldsByIds", "linkHoldsToRequest", "listEligibleHoldsForCoordinator",
+  "getActiveHoldsByIds", "linkHoldsToRequest", "listEligibleHoldsForCoordinator", "listEventsWithCoordinator",
   "searchReplacementVenues", "markVenueBookingAffected", "releaseAffectedVenueBooking",
 ];
 
@@ -191,7 +191,7 @@ test("[TC-SCRUM-162-05] POST /booking-requests with valid hold_ids converts tent
   });
   service.getActiveHoldsByIds.mockResolvedValue([{
     id: holdId, venue_id: venueId, booking_date: futureDate,
-    slot: "am", event_name: "Charity Gala", coordinator_id: coordinatorId,
+    slot: "am", event_name: "Charity Gala", event_id: eventId, coordinator_id: coordinatorId,
   }]);
   // hold makes the slot tentative on the calendar — the conversion path overrides it to available
   service.listActiveHoldsInRange.mockResolvedValue([
@@ -216,16 +216,17 @@ test("[TC-SCRUM-162-05] POST /booking-requests with valid hold_ids converts tent
 
 test("[TC-SCRUM-162-06] POST /booking-requests with hold_ids from different event → 409", async () => {
   const eventId = "aabbccdd-1162-4000-8000-000000000009";
+  const otherEventId = "aabbccdd-1162-4000-8000-000000000029";
   const holdId = "aabbccdd-1162-4000-8000-000000000019";
 
   service.getEventById.mockResolvedValue({
     id: eventId, name: "Tech Summit", status: "APPROVED",
     start_time: "2099-12-01T00:00:00Z", end_time: "2099-12-01T23:00:00Z",
   });
-  // hold is for "Charity Gala", not "Tech Summit"
+  // hold is linked to a different event by event_id
   service.getActiveHoldsByIds.mockResolvedValue([{
     id: holdId, venue_id: venueId, booking_date: futureDate,
-    slot: "am", event_name: "Charity Gala",
+    slot: "am", event_name: "Charity Gala", event_id: otherEventId,
   }]);
 
   const res = await send(`/${venueId}/booking-requests`, "event_coordinator", "POST", {
@@ -252,7 +253,7 @@ test("[TC-SCRUM-162-09] POST /booking-requests with hold owned by different coor
   // hold belongs to a different coordinator
   service.getActiveHoldsByIds.mockResolvedValue([{
     id: holdId, venue_id: venueId, booking_date: futureDate,
-    slot: "am", event_name: "Charity Gala", coordinator_id: otherCoordinatorId,
+    slot: "am", event_name: "Charity Gala", event_id: eventId, coordinator_id: otherCoordinatorId,
   }]);
 
   const res = await send(`/${venueId}/booking-requests`, "event_coordinator", "POST", {

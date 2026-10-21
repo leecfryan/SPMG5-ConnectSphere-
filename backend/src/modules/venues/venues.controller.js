@@ -82,6 +82,7 @@ function createVenuesController(service) {
     getActiveHoldsByIds,
     linkHoldsToRequest,
     listEligibleHoldsForCoordinator,
+    listEventsWithCoordinator,
     searchReplacementVenues,
     markVenueBookingAffected,
     releaseAffectedVenueBooking,
@@ -412,7 +413,7 @@ function createVenuesController(service) {
         if (validatedHolds.some((h) => h.venue_id !== id)) {
           return res.status(409).json({ error: "Holds must belong to this venue" });
         }
-        if (validatedHolds.some((h) => h.event_name.toLowerCase() !== event.name.toLowerCase())) {
+        if (validatedHolds.some((h) => h.event_id !== value.event_id)) {
           return res.status(409).json({ error: "Holds do not match the selected event" });
         }
         if (validatedHolds.some((h) => h.booking_date !== value.booking_date)) {
@@ -1055,6 +1056,9 @@ function createVenuesController(service) {
 
   function validateHoldBody(body) {
     const errors = [];
+    if (!body.event_id || !UUID_PATTERN.test(body.event_id)) {
+      errors.push("event_id must be a valid event UUID");
+    }
     if (!body.event_name || typeof body.event_name !== "string" || !body.event_name.trim()) {
       errors.push("event_name is required");
     }
@@ -1116,8 +1120,18 @@ function createVenuesController(service) {
     }
   }
 
+  // SCRUM-162: events with an assigned coordinator for the hold placement form.
+  async function getEventsForHolds(req, res, next) {
+    try {
+      const events = await listEventsWithCoordinator();
+      res.status(200).json({ data: events });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   // SCRUM-162 AC1: returns active holds for this venue that match one of the
-  // coordinator's bookable event names, grouped by (event_name, booking_date).
+  // coordinator's approved events by event_id, grouped by (event_id, booking_date).
   async function getEligibleHolds(req, res, next) {
     try {
       const { id } = req.params;
@@ -1157,6 +1171,7 @@ function createVenuesController(service) {
     postHold,
     getHolds,
     getEligibleHolds,
+    getEventsForHolds,
   };
 
 }

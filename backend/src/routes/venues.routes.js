@@ -17,6 +17,9 @@ module.exports = function createVenuesRoutes(service, dataClient = null) {
     return true;
   };
   router.get("/booking-events", requirePermission("bookings.request"), available, controller.getBookableEvents);
+  // SCRUM-162: events with assigned coordinators, for the hold placement form.
+  // Must be before /:id to avoid "events" matching as a venue id.
+  router.get("/events", requirePermission("venues.holds"), controller.getEventsForHolds);
   // SCRUM-162: venue staff picks a coordinator when placing a hold so coordinator_id
   // is set correctly. Must be before /:id to avoid "coordinators" matching as a venue id.
   router.get("/coordinators", requirePermission("venues.holds"), async (req, res, next) => {

@@ -3,6 +3,7 @@ const getSupabase = () => require("../../supabase");
 const { eachDateInRange, committedSlots } = require("./venues.availability");
 const { PLANNING_STATUSES } = require("../events/lifecycle");
 const { findBufferConflicts } = require("./venues.conflicts");
+const { localDateInTimeZone, VENUE_TIME_ZONE } = require("./venues.bookingRequests.validation");
 
 // SCRUM-82, 83, 84: everything a Coordinator needs to assess a venue
 const VENUE_FIELDS = [
@@ -409,13 +410,14 @@ async function listHolds(venueId) {
 // SCRUM-146: one row per slot, all in one insert so the hold is atomic.
 // SCRUM-162: coordinator_id links the hold to the coordinator whose event it is,
 // so they (and only they) can convert it later.
-async function createHold(venueId, { event_name, booking_date, slots, expires_at, coordinator_id }, heldBy) {
+async function createHold(venueId, { event_name, event_id, booking_date, slots, expires_at, coordinator_id }, heldBy) {
   const rows = slots.map((slot) => ({
     venue_id: venueId,
     booking_date,
     slot,
     status: "hold",
     event_name,
+    event_id: event_id || null,
     requested_by: heldBy,
     expires_at,
     coordinator_id,
@@ -437,7 +439,7 @@ async function createHold(venueId, { event_name, booking_date, slots, expires_at
 async function getActiveHoldsByIds(holdIds) {
   const { data, error } = await getSupabase()
     .from("venue_bookings")
-    .select("id, venue_id, booking_date, slot, event_name, expires_at, request_id, coordinator_id")
+    .select("id, venue_id, booking_date, slot, event_name, event_id, expires_at, request_id, coordinator_id")
     .in("id", holdIds)
     .eq("status", "hold")
     .gt("expires_at", new Date().toISOString())
@@ -458,15 +460,14 @@ async function linkHoldsToRequest(holdIds, requestId) {
 }
 
 // SCRUM-162: returns active unlinked holds for the venue that belong to this
-// coordinator (by coordinator_id), then matches them to the coordinator's own
-// upcoming events by event_name to get the event object for navigation.
-// Grouped by (event_name, booking_date) so one card covers all its slots.
+// coordinator (by coordinator_id), matched to the coordinator's approved events
+// by event_id. Grouped by (event_id, booking_date) so one card covers all slots.
 async function listEligibleHoldsForCoordinator(venueId, coordinatorId) {
   const [events, holdRows] = await Promise.all([
     listBookableEvents(coordinatorId),
     getSupabase()
       .from("venue_bookings")
-      .select("id, booking_date, slot, event_name, expires_at")
+      .select("id, booking_date, slot, event_name, event_id, expires_at")
       .eq("venue_id", venueId)
       .eq("status", "hold")
       .eq("coordinator_id", coordinatorId)
@@ -477,13 +478,20 @@ async function listEligibleHoldsForCoordinator(venueId, coordinatorId) {
 
   if (holdRows.error) throw new Error(`Failed to list holds: ${holdRows.error.message}`);
 
-  const eventsByName = new Map(events.map((e) => [e.name.toLowerCase(), e]));
+  const eventsById = new Map(events.map((e) => [e.id, e]));
 
   const groups = new Map();
   for (const hold of holdRows.data) {
-    const event = eventsByName.get(hold.event_name.toLowerCase());
+    const event = hold.event_id ? eventsById.get(hold.event_id) : null;
     if (!event) continue;
-    const key = `${hold.event_name}|${hold.booking_date}`;
+    // SCRUM-162: only include holds whose booking_date falls within the event's
+    // date range — the same check validateAgainstEvent applies on conversion.
+    if (event.start_time && event.end_time) {
+      const eventStartDate = localDateInTimeZone(event.start_time, VENUE_TIME_ZONE);
+      const eventEndDate = localDateInTimeZone(event.end_time, VENUE_TIME_ZONE);
+      if (hold.booking_date < eventStartDate || hold.booking_date > eventEndDate) continue;
+    }
+    const key = `${hold.event_id}|${hold.booking_date}`;
     if (!groups.has(key)) {
       groups.set(key, { event, booking_date: hold.booking_date, slots: [] });
     }
@@ -491,6 +499,23 @@ async function listEligibleHoldsForCoordinator(venueId, coordinatorId) {
   }
 
   return Array.from(groups.values());
+}
+
+// SCRUM-162: events with an assigned coordinator that venue staff can select
+// when placing a hold. Restricted to APPROVED/CONFIRMED so a hold can only be
+// placed for an event that is eligible for booking — the conversion step would
+// reject anything outside PLANNING_STATUSES anyway.
+async function listEventsWithCoordinator() {
+  const { data, error } = await getSupabase()
+    .from("events")
+    .select(EVENT_FIELDS + ", coordinator_id")
+    .not("coordinator_id", "is", null)
+    .in("status", PLANNING_STATUSES)
+    .not("start_time", "is", null)
+    .gte("end_time", new Date().toISOString())
+    .order("start_time", { ascending: true });
+  if (error) throw new Error(`Failed to list events: ${error.message}`);
+  return data;
 }
 
 // SCRUM-133: venue unavailability periods
@@ -700,6 +725,7 @@ module.exports = {
   getActiveHoldsByIds,
   linkHoldsToRequest,
   listEligibleHoldsForCoordinator,
+  listEventsWithCoordinator,
   markVenueBookingAffected: require("./venueReplacement.service").markVenueBookingAffected,
   releaseAffectedVenueBooking: require("./venueReplacement.service").releaseAffectedVenueBooking,
   searchReplacementVenues: require("./venueReplacement.service").searchReplacementVenues,
