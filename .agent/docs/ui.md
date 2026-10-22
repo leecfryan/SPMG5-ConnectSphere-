@@ -79,7 +79,7 @@ bare-element rules) is the one to copy if a feature needs many colours.
 | `.form-section` | Titled group inside a long form |
 | `.status-line` | One-line progress text ("Submitting…") |
 | `.event-summary`, `.account-details` | `<dl>` read-only detail lists with dividers |
-| `.status-badge` (+ `.status-<status>`) | Pill for event status. Labels come from `StatusBadge.jsx`'s `LABELS` |
+| `.status-badge` (+ `.status-<status>`) | Pill for event status. Labels come from `statusLabels` in `features/events/statuses.js` |
 | `.card-note` | Small footnote under a card |
 | `.visually-hidden` | Screen-reader-only text (in `events.css`) |
 

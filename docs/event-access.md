@@ -73,8 +73,8 @@ assignment to an individual technician.
 | --- | --- |
 | `GET /api/event-workspace/organiser[/<id>]` | `events.own.read`; own events plus owners sharing trusted organisation metadata |
 | `PATCH /api/event-workspace/organiser/<id>` | `events.own.update`; authenticated ID must equal organiser_id in both lookup and UPDATE |
-| `GET /api/event-workspace/coordinator[/<id>]` | `events.assigned.read`; coordinator_id = authenticated ID, active and rejected events |
-| `GET /api/event-workspace/manager[/<id>]` | `events.review`; active and rejected requests |
+| `GET /api/event-workspace/coordinator[/<id>]` | `events.assigned.read`; coordinator_id = authenticated ID, active, rejected and cancelled events |
+| `GET /api/event-workspace/manager[/<id>]` | `events.review`; active, rejected and cancelled requests — the source of the Lead's workload overview (SCRUM-161), which narrows it to active events in the browser |
 | `GET /api/event-workspace/coordinators` | `events.assign`; only IDs, names and emails of active coordinator accounts |
 | `PATCH /api/event-workspace/<id>/coordinator` | Manager; `{coordinatorId, expectedCoordinatorId}`; active events only |
 
