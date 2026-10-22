@@ -58,8 +58,7 @@ function createApp({ authClient, dataClient, eventsRepository, assignmentDepende
   }));
   app.use("/api/internal", createSafetyCheckRoutes(eventsRepository));
   app.use("/api/internal", createSafetyReviewRoutes(eventsRepository));
-  // SCRUM-162: dataClient passed so venues can list coordinators for the hold form.
-  app.use("/api/venues", authenticate, requirePermission("internal.access"), createVenuesRoutes(venuesService, dataClient));
+  app.use("/api/venues", authenticate, requirePermission("internal.access"), createVenuesRoutes(venuesService));
   // Event Organisers hold no internal.access, so this cannot live under
   // /api/internal. Nor under /api/events: the registration router's GET /:eventId
   // would swallow the detail path, the same reason Venue sits on its own prefix.

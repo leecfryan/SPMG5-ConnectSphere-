@@ -47,7 +47,7 @@ const REQUEST_STATUS_LABELS = {
   confirmed: "Confirmed",
   rejected: "Rejected",
   cancelled: "Cancelled",
-  mixed: "Partly decided",
+  mixed: "Partly confirmed",
 };
 
 function toggle(list, item) {

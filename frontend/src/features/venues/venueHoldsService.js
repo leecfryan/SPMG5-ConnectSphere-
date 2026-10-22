@@ -14,11 +14,6 @@ export function fetchEligibleHolds(venueId, token) {
   return apiFetch(`/api/venues/${venueId}/holds/eligible`, token);
 }
 
-// SCRUM-162: venue staff coordinator picker — list of event coordinators.
-export function fetchCoordinators(token) {
-  return apiFetch("/api/venues/coordinators", token);
-}
-
 // SCRUM-162: events with assigned coordinators for the hold placement form.
 export function fetchEventsForHolds(token) {
   return apiFetch("/api/venues/events", token);
