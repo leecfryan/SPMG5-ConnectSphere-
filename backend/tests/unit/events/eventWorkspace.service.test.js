@@ -15,7 +15,8 @@ function setup({ equipmentService = { flagReservationsForReview: vi.fn(async () 
     id: "event-" + user.id, organiser_id: user.id, name: user.id + " workshop",
     purpose: "Training", description: "Client workshop", expected_attendance: 20,
     start_time: "2099-01-01T01:00:12.345Z", end_time: "2099-01-01T03:00:12.345Z",
-    status: "APPROVED", coordinator_id: "coordinator-one", other_comments: "Private requirements",
+    // SCRUM-164: edits are only allowed at SUBMITTED; fixtures updated accordingly.
+    status: "SUBMITTED", coordinator_id: null, other_comments: "Private requirements",
     equipment_needs: "Projector and a lectern",
     submitted_at: "2026-01-0" + (index + 1) + "T00:00:00Z",
   }));
@@ -47,7 +48,7 @@ test("[SCRUM-100-UNIT-002] Owner saves normalised partial details while protecte
   const { service, records, updates } = setup();
   const before = structuredClone(records);
   const result = await service.updateOrganiserEvent("alice", "event-alice", {
-    name: "  Revised workshop  ", expected_attendance: "1", other_comments: "  ",
+    name: "  Revised workshop  ", expected_attendance: "1", other_comments: "  ", reason: "Fixing workshop name",
   });
   expect(result.ok).toBe(true);
   expect(result.event).toMatchObject({ ...before[0], name: "Revised workshop", expected_attendance: 1, other_comments: null });
@@ -86,7 +87,7 @@ test("[SCRUM-100-UNIT-005] Missing trusted membership ignores profile claims and
   users[0].user_metadata.organisation_id = "alpha";
   expect((await service.list("organiser", "alice")).map(event => event.id)).toEqual(["event-alice"]);
   expect(await service.find("organiser", "alice", "event-bob")).toBeNull();
-  expect((await service.updateOrganiserEvent("alice", "event-alice", { name: "Own correction" })).ok).toBe(true);
+  expect((await service.updateOrganiserEvent("alice", "event-alice", { name: "Own correction", reason: "Fixing name" })).ok).toBe(true);
   expect(records[0].name).toBe("Own correction");
   expect(client.auth.admin.listUsers).not.toHaveBeenCalled();
 });
@@ -122,7 +123,7 @@ test("[SCRUM-100-UNIT-007] Changed responsibility prevents the previous owner fr
     query.update = fields => { records[0].organiser_id = "bob"; return update(fields); };
     return query;
   });
-  expect(await service.updateOrganiserEvent("alice", "event-alice", { name: "Stale change" })).toEqual({ ok: false, reason: "conflict" });
+  expect(await service.updateOrganiserEvent("alice", "event-alice", { name: "Stale change", reason: "Correction" })).toEqual({ ok: false, reason: "conflict" });
   expect(records).toEqual([{ ...before[0], organiser_id: "bob" }, ...before.slice(1)]);
 });
 
@@ -142,7 +143,7 @@ test("[TC-150-01] changing start_time flags equipment, with the new window and d
   const { service, equipmentService } = setup();
   // Still before the fixture's unchanged end_time (2099-01-01T03:00:12.345Z) -
   // only start_time moves, so the write itself stays valid.
-  const result = await service.updateOrganiserEvent("alice", "event-alice", { start_time: "2099-01-01T00:30:00.000Z" });
+  const result = await service.updateOrganiserEvent("alice", "event-alice", { start_time: "2099-01-01T00:30:00.000Z", reason: "Rescheduled" });
   expect(result.ok).toBe(true);
   expect(equipmentService.flagReservationsForReview).toHaveBeenCalledExactlyOnceWith("event-alice", {
     startTime: "2099-01-01T00:30:00.000Z",
@@ -153,7 +154,7 @@ test("[TC-150-01] changing start_time flags equipment, with the new window and d
 
 test("[TC-150-02] changing only equipment_needs flags equipment with datesChanged false", async () => {
   const { service, equipmentService } = setup();
-  const result = await service.updateOrganiserEvent("alice", "event-alice", { equipment_needs: "Also a whiteboard" });
+  const result = await service.updateOrganiserEvent("alice", "event-alice", { equipment_needs: "Also a whiteboard", reason: "Need extra equipment" });
   expect(result.ok).toBe(true);
   expect(equipmentService.flagReservationsForReview).toHaveBeenCalledExactlyOnceWith("event-alice", expect.objectContaining({ datesChanged: false }));
 });
@@ -164,6 +165,7 @@ test("[TC-150-03] resubmitting the same start_time/end_time/equipment_needs valu
     start_time: records[0].start_time,
     end_time: records[0].end_time,
     equipment_needs: records[0].equipment_needs,
+    reason: "No real change",
   });
   expect(result.ok).toBe(true);
   expect(equipmentService.flagReservationsForReview).not.toHaveBeenCalled();
@@ -171,7 +173,7 @@ test("[TC-150-03] resubmitting the same start_time/end_time/equipment_needs valu
 
 test("[TC-150-22] a change unrelated to date/time/equipment needs (name) does not flag equipment", async () => {
   const { service, equipmentService } = setup();
-  const result = await service.updateOrganiserEvent("alice", "event-alice", { name: "Renamed only" });
+  const result = await service.updateOrganiserEvent("alice", "event-alice", { name: "Renamed only", reason: "Clearer name" });
   expect(result.ok).toBe(true);
   expect(equipmentService.flagReservationsForReview).not.toHaveBeenCalled();
 });
@@ -219,6 +221,68 @@ test("[SCRUM-141 AC4] A failed history read still loads the event, with the hist
 
   expect(event).toMatchObject({ id: "event-alice", activity: null });
 });
+
+// SCRUM-164: status guard, reason requirement and activity log writing.
+
+test("[TC-SCRUM-164-01] organiser saves valid changes to their own SUBMITTED event; activity is recorded", async () => {
+  const { service, records, client } = setup();
+  const result = await service.updateOrganiserEvent("alice", "event-alice", { name: "New title", reason: "Client requested rename" });
+  expect(result.ok).toBe(true);
+  expect(records[0].name).toBe("New title");
+  expect(client.activity).toHaveLength(1);
+  expect(client.activity[0]).toMatchObject({ event_id: "event-alice", user_id: "alice", action: "EDIT" });
+  expect(client.activity[0].details).toMatchObject({ note: "Client requested rename" });
+});
+
+test("[TC-SCRUM-164-02] update is refused when event has moved past SUBMITTED", async () => {
+  const { service, records, updates } = setup();
+  records[0].status = "UNDER_REVIEW";
+  const result = await service.updateOrganiserEvent("alice", "event-alice", { name: "Denied", reason: "any reason" });
+  expect(result).toEqual({ ok: false, reason: "locked" });
+  expect(updates).not.toHaveBeenCalled();
+});
+
+test.each(["APPROVED", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED", "CANCELLED", "REJECTED", "POSTPONED"])(
+  "[TC-SCRUM-164-03] update is refused for every non-SUBMITTED status (%s)",
+  async (status) => {
+    const { service, records, updates } = setup();
+    records[0].status = status;
+    expect(await service.updateOrganiserEvent("alice", "event-alice", { name: "Any", reason: "any" }))
+      .toEqual({ ok: false, reason: "locked" });
+    expect(updates).not.toHaveBeenCalled();
+  },
+);
+
+test("[TC-SCRUM-164-04] update without a reason is a 400", async () => {
+  const { service, updates } = setup();
+  const result = await service.updateOrganiserEvent("alice", "event-alice", { name: "No reason" });
+  expect(result).toMatchObject({ ok: false, reason: "invalid" });
+  expect(result.errors.some(e => e.field === "reason")).toBe(true);
+  expect(updates).not.toHaveBeenCalled();
+});
+
+test.each([{ name: "Valid", reason: "" }, { name: "Valid", reason: "   " }, { name: "Valid", reason: null }])(
+  "[TC-SCRUM-164-05] a whitespace-only or empty reason is treated as blank (%j)",
+  async (input) => {
+    const { service, updates } = setup();
+    const result = await service.updateOrganiserEvent("alice", "event-alice", input);
+    expect(result).toMatchObject({ ok: false, reason: "invalid" });
+    expect(result.errors.some(e => e.field === "reason")).toBe(true);
+    expect(updates).not.toHaveBeenCalled();
+  },
+);
+
+test("[TC-SCRUM-164-06] the activity log row carries actor, action and trimmed reason", async () => {
+  const { service, client } = setup();
+  await service.updateOrganiserEvent("alice", "event-alice", { name: "Updated", reason: "  fix typo  " });
+  expect(client.activity[0]).toMatchObject({
+    event_id: "event-alice",
+    user_id: "alice",
+    action: "EDIT",
+    details: { note: "fix typo" },
+  });
+});
+
 
 test("[SCRUM-147-UNIT-013] AC4: drafts stay out of the organisation view, a colleague's and the owner's alike", async () => {
   const { service, records } = setup();
