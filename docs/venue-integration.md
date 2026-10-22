@@ -1348,6 +1348,70 @@ create index if not exists venue_bookings_event_id
   where status = 'hold';
 ```
 
+Extend `decide_venue_booking_request` by moving the hold `if/else` block to run
+**before** the main `update venue_bookings set status = p_decision` line.
+
+The function already had hold handling after the main UPDATE, but that order causes a
+23P01 exclusion constraint violation on confirmation: the main UPDATE sets both the
+`pending` booking row and the `hold` row to `confirmed` in one statement before the
+cancel runs. Moving the block above the main UPDATE fixes the ordering. The `else`
+branch (clear `request_id` on rejection so the coordinator can retry) is unchanged.
+
+Replace the existing function body with:
+
+```sql
+declare
+  v_exists boolean;
+begin
+  if p_decided_by is null then
+    raise exception 'Verified reviewer is required';
+  end if;
+  if p_decision not in ('confirmed', 'rejected') then
+    raise exception 'Decision must be confirmed or rejected';
+  end if;
+
+  select true into v_exists
+  from public.venue_booking_requests
+  where id = p_request_id
+  for update;
+
+  if not found then
+    return null;
+  end if;
+
+  update public.venue_booking_requests
+  set decided_by = p_decided_by,
+      decided_at = now(),
+      decision_note = p_note,
+      updated_at = now()
+  where id = p_request_id;
+
+  -- SCRUM-162: must run before the booking UPDATE below. On confirm, cancelling
+  -- holds first prevents a 23P01 exclusion constraint violation. On reject,
+  -- clearing request_id releases the hold so the coordinator can retry.
+  if p_decision = 'confirmed' then
+    update public.venue_bookings
+    set status = 'cancelled', updated_at = now()
+    where request_id = p_request_id
+      and status = 'hold';
+  else
+    update public.venue_bookings
+    set request_id = null, updated_at = now()
+    where request_id = p_request_id
+      and status = 'hold';
+  end if;
+
+  update public.venue_bookings
+  set status = p_decision::public.booking_status
+  where request_id = p_request_id
+    and status <> 'cancelled';
+
+  return p_request_id;
+end;
+```
+
+Proven by `tests/e2e/venue-hold-conversion.spec.cjs` (TC-SCRUM-162-12 and -13).
+
 ### Releasing bookings on event cancellation (SCRUM-148)
 
 Cross-lane addition, approved by the Venue owner and kept to exactly this: one SQL function and one
