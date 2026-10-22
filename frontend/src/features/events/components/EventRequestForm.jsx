@@ -132,6 +132,9 @@ export default function EventRequestForm({ onSubmitted, event: existingEvent, on
   const [fields, setFields] = useState(() => initial);
   const [errors, setErrors] = useState([]);
   const [message, setMessage] = useState("");
+  // SCRUM-164 AC3: reason is required for every edit of a submitted event;
+  // kept separate from EMPTY because it is not an event column.
+  const [reason, setReason] = useState("");
   // false, or which button is working: "draft" or "submit".
   const [pending, setPending] = useState(false);
   const busy = Boolean(pending);
@@ -187,7 +190,7 @@ export default function EventRequestForm({ onSubmitted, event: existingEvent, on
     }
     const changes = Object.fromEntries(Object.entries(fields).filter(([field, value]) => value !== initial[field]));
     const submitted = await send("submit", () => existingEvent
-      ? updateEventRequest(existingEvent.id, changes, token)
+      ? updateEventRequest(existingEvent.id, { ...changes, reason }, token)
       : draft ? submitDraft(draft.id, fields, token) : submitEventRequest(fields, token));
     if (!submitted) return;
     if (!existingEvent) setFields(EMPTY);
@@ -316,6 +319,21 @@ export default function EventRequestForm({ onSubmitted, event: existingEvent, on
         />
       </div>
 
+      {existingEvent && (
+        <div className="form-section">
+          <h2>Reason for change</h2>
+          <TextAreaField
+            id="reason"
+            label="Why are you making these changes?"
+            required
+            busy={busy}
+            value={reason}
+            error={errorFor("reason")}
+            onChange={e => setReason(e.target.value)}
+          />
+        </div>
+      )}
+
       {message ? (
         <p className="error" role="alert">
           {message}
@@ -329,7 +347,7 @@ export default function EventRequestForm({ onSubmitted, event: existingEvent, on
         )
       )}
 
-      <button className="primary" type="submit" disabled={busy || (existingEvent && Object.keys(fields).every(field => fields[field] === initial[field]))}>
+      <button className="primary" type="submit" disabled={busy || (existingEvent && (Object.keys(fields).every(field => fields[field] === initial[field]) || !reason.trim()))}>
         {existingEvent ? (busy ? "Saving…" : "Save changes") : (pending === "submit" ? "Submitting…" : "Submit request")}
       </button>
       {existingEvent && <button className="secondary" type="button" disabled={busy} onClick={onCancel}>Cancel editing</button>}

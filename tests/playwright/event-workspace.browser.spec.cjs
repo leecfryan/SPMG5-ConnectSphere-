@@ -170,6 +170,9 @@ test('[E2E-EVENT-100] SCRUM-100: Client organiser edits their request, reads col
   await expect(page.getByRole('button', { name: 'Save changes' })).toBeDisabled();
   await page.getByLabel('Event name', { exact: false }).fill('Client request updated in the browser');
   await page.getByLabel('Equipment needs', { exact: true }).fill('Two microphones');
+  // SCRUM-164 AC3: reason is required; Save stays disabled until it is filled.
+  await expect(page.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+  await page.getByLabel('Why are you making these changes?').fill('Updating requirements for the venue');
   await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByRole('heading', { name: 'Client request updated in the browser' })).toBeVisible();
   await page.reload();
@@ -198,6 +201,8 @@ test('[E2E-EVENT-101] SCRUM-100: Revocation while editing is refused by the real
   await signIn(page, organiser);
   await page.getByRole('button', { name: 'Edit event', exact: true }).click();
   await page.getByLabel('Event name', { exact: false }).fill('Do not save this revoked edit');
+  // SCRUM-164 AC3: fill reason to enable Save before the role is revoked.
+  await page.getByLabel('Why are you making these changes?').fill('Fixing the name');
   const before = await accounts.events(organiser);
   await accounts.update(organiser, { roles: [] });
   const responsePromise = page.waitForResponse(response => response.url().endsWith('/api/event-workspace/organiser/' + events.organiser.id) && response.request().method() === 'PATCH');
