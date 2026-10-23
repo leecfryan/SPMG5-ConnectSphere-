@@ -198,18 +198,16 @@ async function getEventForCheckReport(id, scope) {
 
 // SCRUM-85: the events a coordinator can pick from. Only approved events may be
 // booked (SCRUM-99 AC1, see validateAgainstEvent), and events that have already
-// ended have nothing left to book. coordinatorId = null returns all events (for
-// SCRUM-162 eligible-holds grouping when called without a coordinator filter).
-async function listBookableEvents(coordinatorId = null) {
-  let query = getSupabase()
+async function listBookableEvents(coordinatorId) {
+  if (!coordinatorId) throw new Error("coordinatorId is required");
+  const { data, error } = await getSupabase()
     .from("events")
     .select(EVENT_FIELDS)
+    .eq("coordinator_id", coordinatorId)
     .in("status", PLANNING_STATUSES)
     .not("start_time", "is", null)
     .gte("end_time", new Date().toISOString())
     .order("start_time", { ascending: true });
-  if (coordinatorId) query = query.eq("coordinator_id", coordinatorId);
-  const { data, error } = await query;
   if (error) throw new Error(`Failed to list events: ${error.message}`);
   return data;
 }
