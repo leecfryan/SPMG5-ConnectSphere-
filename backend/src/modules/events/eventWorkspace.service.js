@@ -157,12 +157,14 @@ function createEventWorkspaceService(client, equipmentService) {
 
       // SCRUM-164 AC3: record actor, timestamp (db default) and reason.
       // Best-effort: a log write failure does not undo the edit.
-      await client.from("event_activity_log").insert({
-        event_id: id,
-        user_id: userId,
-        action: "EDIT",
-        details: { from_status: null, to_status: null, note: trimmedReason },
-      });
+      try {
+        await client.from("event_activity_log").insert({
+          event_id: id,
+          user_id: userId,
+          action: "EDIT",
+          details: { from_status: null, to_status: null, note: trimmedReason },
+        });
+      } catch { /* intentional: edit stands even if log write fails */ }
 
       return { ok: true, event };
     },
