@@ -29,5 +29,14 @@ module.exports = function createCoordinatorDirectory(client = require("../../sup
       (a.fullName || a.email).localeCompare(b.fullName || b.email));
   }
 
-  return { listCoordinators };
+  // SCRUM-159 AC2: the organiser's name for the queue - full name, else email.
+  // A deleted account or a failed lookup is unknown (null) rather than an error,
+  // so one bad lookup can never hide a request from the queue.
+  async function displayNameOf(userId) {
+    const { data, error } = await client.auth.admin.getUserById(userId);
+    if (error || !data?.user) return null;
+    return displayName(data.user) || data.user.email || null;
+  }
+
+  return { listCoordinators, displayNameOf };
 };
