@@ -3,11 +3,12 @@ import { useAuth } from "../features/auth/useAuth";
 import { apiFetch } from "../lib/api";
 
 // Hide stale records immediately when the URL, account or refresh revision changes.
-export function useApiResource(path) {
+// refreshKey lets a caller refetch from outside, so one button can refresh several resources.
+export function useApiResource(path, refreshKey = 0) {
   const { token } = useAuth();
   const [result, setResult] = useState(null);
   const [revision, setRevision] = useState(0);
-  const key = JSON.stringify([path, token, revision]);
+  const key = JSON.stringify([path, token, revision, refreshKey]);
   const current = result?.key === key;
   useEffect(() => {
     const controller = new AbortController();

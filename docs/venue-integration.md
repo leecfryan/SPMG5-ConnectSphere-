@@ -151,14 +151,20 @@ All four endpoints require `venues.unavailability`, held by Venue Staff only. Th
 Venue Staff can place a time-limited tentative hold on one or more slots for a named event. A hold reserves
 the slot while the coordinator finalises arrangements without permanently consuming it.
 
-`POST /api/venues/:id/holds` — body: `{ event_name, booking_date, slots[], expires_at }`. `booking_date` is
+`POST /api/venues/:id/holds` — body: `{ event_id, event_name, booking_date, slots[], expires_at, coordinator_id }`. `booking_date` is
 `YYYY-MM-DD`; `slots` is a non-empty subset of `["am", "pm", "night"]`; `expires_at` is an ISO 8601 timestamp
-that must be in the future (400 if not). Returns 201 with an array of the created slot rows.
+that must be in the future (400 if not); `event_id` and `coordinator_id` are UUIDs (SCRUM-162: both required so
+the coordinator can be identified for hold conversion). The `event_id` and `coordinator_id` values come from
+`GET /api/venues/events` (SCRUM-162), which returns only APPROVED/CONFIRMED events with an assigned coordinator.
+Returns 201 with an array of the created slot rows.
 
 `GET /api/venues/:id/holds` — returns 200 with all hold rows for the venue, including expired ones, ordered
 by booking date and creation time descending. Expired holds are kept for history; they are never deleted.
 
-Both endpoints require `venues.holds`, held by Venue Staff only.
+`GET /api/venues/events` — returns 200 with APPROVED/CONFIRMED events that have an assigned coordinator,
+ordered by start_time. Used to populate the hold placement form.
+
+All three endpoints require `venues.holds`, held by Venue Staff only.
 
 **How the hold is stored.** Each hold is one row per slot in `venue_bookings` with `status = 'hold'` and an
 `expires_at` column. Reusing the existing table keeps the calendar query and conflict check unified;
@@ -182,6 +188,30 @@ committed slot against `REQUESTABLE_STATUSES = ["available", "pending"]`. Becaus
 list, any slot covered by an active hold produces a 409 with the same error format as other conflicts.
 Once the hold expires, `listActiveHoldsInRange` returns nothing for that slot and a new booking request
 can proceed.
+
+## Converting a tentative hold to a booking request (SCRUM-162)
+
+A coordinator whose event has an active hold can convert it to a booking request from the venue's availability
+calendar. The conversion path reuses the existing `POST /api/venues/:id/booking-requests` endpoint with an extra
+`hold_ids` field in the body.
+
+**Finding eligible holds.** `GET /api/venues/:id/holds/eligible` (requires `bookings.request`, coordinator only)
+returns hold groups the signed-in coordinator can convert. The service (`listEligibleHoldsForCoordinator`) queries
+holds where `coordinator_id = req.user.id`, `status = 'hold'`, `expires_at > now()` and `request_id IS NULL`,
+then cross-references each hold's `event_id` against the coordinator's APPROVED/CONFIRMED events. Holds whose
+`booking_date` falls outside the event's `start_time`/`end_time` are excluded (they could not pass
+`validateAgainstEvent` at conversion anyway). Results are grouped by `(event_id, booking_date)` so one card
+covers all slots held for the same event on the same day.
+
+**Converting.** `POST /api/venues/:id/booking-requests` with `hold_ids: [uuid, ...]` in the body. After the
+booking request is created and saved, `linkHoldsToRequest` sets `request_id` on every hold row in the group.
+The hold `status` stays `'hold'` — it remains active on the calendar as `tentative` while the request is
+`pending` (hold outranks pending in the precedence table). A stale or expired hold in `hold_ids` returns 409.
+A hold whose `event_id` or `coordinator_id` doesn't match the request is rejected 409.
+
+**After approval.** `decide_venue_booking_request` confirms the slot rows. A confirmed booking outranks a hold
+(`booked > tentative`), so the calendar shows the slot as booked regardless of whether the hold row is
+still present.
 
 ## Committed period: setup and turnaround time (SCRUM-134)
 
@@ -1307,6 +1337,91 @@ create index if not exists venue_bookings_expires_at
   on public.venue_bookings (expires_at)
   where status = 'hold';
 ```
+
+### Hold-to-booking conversion schema (SCRUM-162)
+
+```sql
+-- SCRUM-162: link a hold to its event and coordinator so the conversion path
+-- can match holds to the coordinator's approved events by ID.
+-- coordinator_id is required on every new hold row (400 if missing).
+-- event_id links to events; nullable so old rows without it are not broken.
+
+alter table public.venue_bookings
+  add column if not exists coordinator_id uuid references auth.users (id),
+  add column if not exists event_id       uuid references public.events (id) on delete set null;
+
+create index if not exists venue_bookings_coordinator_id
+  on public.venue_bookings (coordinator_id)
+  where status = 'hold';
+
+create index if not exists venue_bookings_event_id
+  on public.venue_bookings (event_id)
+  where status = 'hold';
+```
+
+Extend `decide_venue_booking_request` by moving the hold `if/else` block to run
+**before** the main `update venue_bookings set status = p_decision` line.
+
+The function already had hold handling after the main UPDATE, but that order causes a
+23P01 exclusion constraint violation on confirmation: the main UPDATE sets both the
+`pending` booking row and the `hold` row to `confirmed` in one statement before the
+cancel runs. Moving the block above the main UPDATE fixes the ordering. The `else`
+branch (clear `request_id` on rejection so the coordinator can retry) is unchanged.
+
+Replace the existing function body with:
+
+```sql
+declare
+  v_exists boolean;
+begin
+  if p_decided_by is null then
+    raise exception 'Verified reviewer is required';
+  end if;
+  if p_decision not in ('confirmed', 'rejected') then
+    raise exception 'Decision must be confirmed or rejected';
+  end if;
+
+  select true into v_exists
+  from public.venue_booking_requests
+  where id = p_request_id
+  for update;
+
+  if not found then
+    return null;
+  end if;
+
+  update public.venue_booking_requests
+  set decided_by = p_decided_by,
+      decided_at = now(),
+      decision_note = p_note,
+      updated_at = now()
+  where id = p_request_id;
+
+  -- SCRUM-162: must run before the booking UPDATE below. On confirm, cancelling
+  -- holds first prevents a 23P01 exclusion constraint violation. On reject,
+  -- clearing request_id releases the hold so the coordinator can retry.
+  if p_decision = 'confirmed' then
+    update public.venue_bookings
+    set status = 'cancelled', updated_at = now()
+    where request_id = p_request_id
+      and status = 'hold';
+  else
+    update public.venue_bookings
+    set request_id = null, updated_at = now()
+    where request_id = p_request_id
+      and status = 'hold';
+  end if;
+
+  update public.venue_bookings
+  set status = p_decision::public.booking_status
+  where request_id = p_request_id
+    and status <> 'cancelled';
+
+  return p_request_id;
+end;
+```
+
+Proven by `tests/e2e/venue-hold-conversion.spec.cjs` (TC-SCRUM-162-12 and -13).
 
 ### Releasing bookings on event cancellation (SCRUM-148)
 
