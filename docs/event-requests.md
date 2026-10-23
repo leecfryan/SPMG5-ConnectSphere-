@@ -35,7 +35,7 @@ draft (`DRAFT`) and submit it later; see *Draft event requests (SCRUM-147)* belo
 ## Role-scoped review and planning
 
 Organisers see their own requests and view-only requests from their client organisation
-(SCRUM-100); they can edit only their own event details. Coordinators see only their assigned active
+(SCRUM-100); they can edit only their own event details while the event is `SUBMITTED` (SCRUM-164 AC2). Coordinators see only their assigned active
 events and the requests they rejected. Managers assign and reassign coordinators but do not decide: the assigned
 coordinator approves or rejects (SCRUM-98/99). Venue and equipment arrangements
 need an approved event. Only attendees can browse the registration catalogue.
@@ -741,13 +741,13 @@ Feature folder at `frontend/src/features/events/`.
 
 | File | Used by | Description |
 | --- | --- | --- |
-| `components/EventRequestForm.jsx` | EventRequestPage | The request form. Displays every server-side error against its own input. SCRUM-147: *Save draft* on new requests, and submitting an opened draft submits that draft. |
+| `components/EventRequestForm.jsx` | EventRequestPage, EventWorkspaceDetailPage | The request form. Displays every server-side error against its own input. SCRUM-147: *Save draft* on new requests, and submitting an opened draft submits that draft. SCRUM-164: shows a *Reason for change* textarea in edit mode; Save is disabled until a reason is entered and at least one field differs. |
 | `components/CoordinatorWorkloadOverview.jsx` | EventWorkspacePage (manager) | SCRUM-161: the Lead's table of events (event, status, coordinator) from the existing manager list. Opens on *All active statuses*; coordinator filter (each named coordinator, *Awaiting coordinator*, and *No longer active* for assignments held by someone the directory no longer lists) and status filter (lifecycle order, *All statuses* brings back rejected and cancelled events); *Clear filters*; "N of M events shown". Names come from `GET /api/event-workspace/coordinators`: an unknown id reads *No longer active*, and if the directory fails rows keep *Coordinator assigned*. Unassigned and departed coordinators are highlighted. Filters survive *Refresh events*, which also retries a directory that failed to load |
 | `components/DraftList.jsx` | EventWorkspacePage (organiser) | SCRUM-147: *Your drafts*, the organiser's own drafts linking back into the form; loading, empty and error states |
 | `components/StatusBadge.jsx` | Event request, assignment and workspace screens | Displays the stored status value as words ("Approved – planning" for `APPROVED`); the labels themselves live in [`statuses.js`](#services) |
 | `components/EventDecisionControls.jsx` | EventWorkspaceDetailPage (assigned coordinator only) | *Start review* on `SUBMITTED`; note + *Approve* / *Reject* on `UNDER_REVIEW`; nothing otherwise |
 | `components/EventDecisionSummary.jsx` | EventWorkspaceDetailPage (every scope) | Outcome, approver ("Not recorded" when unknown), time, and note or reason; hidden until `approved_rejected_at` is set |
-| `components/EventActivityHistory.jsx` | EventWorkspaceDetailPage (every scope) | SCRUM-141: recorded decisions newest first, with the note or rejection reason; empty and unavailable states |
+| `components/EventActivityHistory.jsx` | EventWorkspaceDetailPage (every scope) | SCRUM-141: recorded decisions newest first, with the note or rejection reason; SCRUM-164: EDIT entries with "Reason:" label; empty and unavailable states |
 | `components/SafetyDecisionControls.jsx` | SafetyReviewDetailPage (`events.safety.decide`) | SCRUM-141: note + *Approve* / *Reject*; reject needs a reason |
 | `components/ArrangementChecklist.jsx` | SafetyCheckControls, ConfirmEventControls | SCRUM-144: missing and non-essential lists, with *Mark as non-essential* / *Mark as essential* per request |
 | `components/ConfirmEventControls.jsx` | EventWorkspaceDetailPage (assigned coordinator, `PREPARATION`) | SCRUM-144: readiness, the checklist and *Confirm event*; loading, error and busy states |
@@ -857,6 +857,10 @@ SCRUM-23/25; [event lifecycle tests](event-lifecycle-tests.md) §8 covers SCRUM-
 | Frontend | `features/events/components/EventDecision*.test.jsx`, `pages/EventWorkspaceDetailPage.test.jsx` | Review controls, decision summary and the pages each role sees |
 | Playwright | `tests/playwright/event-workspace.{api,browser}.spec.cjs` (`REVIEW-E2E-*`) | Role × action matrix and the submit → assign → review → decide journey |
 | Playwright | `tests/playwright/event-workspace.browser.spec.cjs` (`E2E-EVENT-102`) | SCRUM-161 overview in a real browser: coordinator and status filters and *Clear filters* at 375 px, then the detail link |
+| Unit (service) | `tests/unit/events/eventWorkspace.service.test.js` | SCRUM-164: lock guard, reason validation, activity log write (TC-SCRUM-164-01 through 06) |
+| Integration | `tests/integration/eventWorkspace.test.js` | SCRUM-164: full PATCH with reason, locked status 409, missing reason 400 (TC-SCRUM-164-10 through 12) |
+| Frontend | `pages/EventWorkspaceDetailPage.test.jsx` | SCRUM-164: locked message, reason field, EDIT activity label (TC-SCRUM-164-13 through 15) |
+| Playwright API | `tests/playwright/event-workspace.api.spec.cjs` | SCRUM-164: lock 409, activity log with reason, missing reason 400 (TC-SCRUM-164-E2E-API-01 through 03) |
 
 Test names lead with their Jira key, so the terminal output is the traceability
 record. Cases are grouped by the Week 4 five-step method: happy path,

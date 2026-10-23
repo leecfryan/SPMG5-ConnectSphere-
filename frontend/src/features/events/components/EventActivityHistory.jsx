@@ -5,6 +5,8 @@ import { formatWhen } from "../eventFormat";
 const ACTIONS = Object.freeze({
   SAFETY_APPROVED: "Safety arrangement approved",
   SAFETY_REJECTED: "Safety arrangement rejected",
+  // SCRUM-164 AC3: organiser edits during planning.
+  EDIT: "Updated event details",
 });
 
 export default function EventActivityHistory({ activity }) {
@@ -15,7 +17,7 @@ export default function EventActivityHistory({ activity }) {
     {activity?.length > 0 && <ol className="event-workspace-list">
       {activity.map(entry => <li key={entry.id}>
         <span>{ACTIONS[entry.action] ?? entry.action} · {formatWhen(entry.created_at)}</span>
-        {entry.note && <span>{entry.action === "SAFETY_REJECTED" ? "Reason" : "Note"}: {entry.note}</span>}
+        {entry.note && <span>{["SAFETY_REJECTED", "EDIT"].includes(entry.action) ? "Reason" : "Note"}: {entry.note}</span>}
       </li>)}
     </ol>}
   </section>;

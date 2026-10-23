@@ -26,6 +26,7 @@ function isCoordinator(user) {
 // "must be in the future" check), not by string, so re-submitting an
 // equivalent timestamp in a different format is still a no-op.
 const RESCHEDULE_FIELDS = ["start_time", "end_time", "equipment_needs"];
+
 function rescheduleFieldChanged(field, before, after) {
   if (field === "start_time" || field === "end_time") {
     const beforeTime = before ? new Date(before).getTime() : null;
@@ -115,11 +116,22 @@ function createEventWorkspaceService(client, equipmentService) {
       const current = await read("organiser", userId, id);
       if (!current) return { ok: false, reason: "not_found" };
       if (current.organiser_id !== userId) return { ok: false, reason: "forbidden" };
-      if (!input || Array.isArray(input) || typeof input !== "object" ||
-        Object.keys(input).length === 0 || Object.keys(input).some(field => !WRITABLE_COLS.includes(field))) {
+      // SCRUM-164 AC2: edits are locked once the event moves past SUBMITTED.
+      if (current.status !== "SUBMITTED") return { ok: false, reason: "locked" };
+      // SCRUM-164 AC3: reason is extracted before the WRITABLE_COLS check so it
+      // is not treated as an unknown column.
+      if (!input || Array.isArray(input) || typeof input !== "object") {
         return { ok: false, reason: "invalid", errors: [{ field: "event", message: "Provide only editable event details." }] };
       }
-      const { fields, errors } = normalise(input);
+      const { reason, ...eventInput } = input;
+      if (Object.keys(eventInput).length === 0 || Object.keys(eventInput).some(field => !WRITABLE_COLS.includes(field))) {
+        return { ok: false, reason: "invalid", errors: [{ field: "event", message: "Provide only editable event details." }] };
+      }
+      const trimmedReason = typeof reason === "string" ? reason.trim() : "";
+      if (!trimmedReason) {
+        return { ok: false, reason: "invalid", errors: [{ field: "reason", message: "required" }] };
+      }
+      const { fields, errors } = normalise(eventInput);
       const unreadable = new Set(errors.map(problem => problem.field));
       const problems = [...errors, ...validateUpdate(fields, current).errors.filter(problem => !unreadable.has(problem.field))];
       if (problems.length) return { ok: false, reason: "invalid", errors: problems };
@@ -142,6 +154,17 @@ function createEventWorkspaceService(client, equipmentService) {
           datesChanged,
         });
       }
+
+      // SCRUM-164 AC3: record actor, timestamp (db default) and reason.
+      // Best-effort: a log write failure does not undo the edit.
+      try {
+        await client.from("event_activity_log").insert({
+          event_id: id,
+          user_id: userId,
+          action: "EDIT",
+          details: { from_status: null, to_status: null, note: trimmedReason },
+        });
+      } catch { /* intentional: edit stands even if log write fails */ }
 
       return { ok: true, event };
     },

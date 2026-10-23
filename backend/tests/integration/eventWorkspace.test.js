@@ -344,16 +344,18 @@ test("[TC-149-06] the assigned coordinator and the manager both still see a post
 });
 
 test("[SCRUM-100 AC1] A responsible organiser persists valid event edits without changing protected fields", async t => {
+  // SCRUM-164: edits allowed at SUBMITTED; records[2] is the SUBMITTED fixture.
   const { send, records } = await setup(t);
-  const before = structuredClone(records[0]);
+  const before = structuredClone(records[2]);
   const response = await send(`/event-workspace/organiser/${before.id}`, "organiser", "PATCH", {
     name: "  Updated private event  ", equipment_needs: "Two microphones", expected_attendance: "1",
+    reason: "Correcting event details",
   });
   expect(response.status).toBe(200);
-  expect(records[0]).toMatchObject({ ...before, name: "Updated private event", equipment_needs: "Two microphones", expected_attendance: 1 });
+  expect(records[2]).toMatchObject({ ...before, name: "Updated private event", equipment_needs: "Two microphones", expected_attendance: 1 });
   expect((await response.json()).event.name).toBe("Updated private event");
   const refreshed = await (await send(`/event-workspace/organiser/${before.id}`, "organiser")).json();
-  expect(refreshed.event).toMatchObject({ name: "Updated private event", organiser_id: before.organiser_id, coordinator_id: before.coordinator_id, status: before.status });
+  expect(refreshed.event).toMatchObject({ name: "Updated private event", organiser_id: before.organiser_id, status: before.status });
 });
 
 test("[SCRUM-100 AC4] Another organiser cannot edit a directly referenced event and the whole row is unchanged", async t => {
@@ -366,15 +368,16 @@ test("[SCRUM-100 AC4] Another organiser cannot edit a directly referenced event 
 });
 
 test("[SCRUM-100 AC4] Forged protected fields, empty changes and invalid event details save nothing", async t => {
+  // SCRUM-164: edits allowed at SUBMITTED; records[2] is the SUBMITTED fixture.
   const { send, records, users } = await setup(t);
-  const before = structuredClone(records[0]);
+  const before = structuredClone(records[2]);
   const path = `/event-workspace/organiser/${before.id}`;
   for (const body of [null, [], {}, { name: "" }, { name: "x".repeat(201) },
     { expected_attendance: 0 }, { expected_attendance: "invalid" }, { purpose: " " },
     { equipment_needs: {} }, { name: "Forged", organiser_id: users.otherOrganiser.id },
     { status: "APPROVED" }, { coordinator_id: users.first.id }, { client_organisation_id: users.otherOrganiser.id }]) {
     expect((await send(path, "organiser", "PATCH", body)).status).toBe(400);
-    expect(records[0]).toEqual(before);
+    expect(records[2]).toEqual(before);
   }
 });
 
@@ -393,26 +396,28 @@ test("[SCRUM-100 AC4] Anonymous, wrong-role and revoked-role edits are refused w
 });
 
 test("[SCRUM-100 AC4] Responsibility changing between lookup and save refuses the edit", async t => {
+  // SCRUM-164: edits allowed at SUBMITTED; records[2] is the SUBMITTED fixture.
   const { send, records, users, client } = await setup(t);
-  const before = structuredClone(records[0]);
+  const before = structuredClone(records[2]);
   const from = client.from.bind(client);
   client.from = table => {
     const query = from(table);
     const update = query.update;
     query.update = fields => {
-      records[0].organiser_id = users.otherOrganiser.id;
+      records[2].organiser_id = users.otherOrganiser.id;
       return update(fields);
     };
     return query;
   };
-  const response = await send(`/event-workspace/organiser/${before.id}`, "organiser", "PATCH", { name: "Stale owner edit" });
+  const response = await send(`/event-workspace/organiser/${before.id}`, "organiser", "PATCH", { name: "Stale owner edit", reason: "Testing stale ownership" });
   expect(response.status).toBe(409);
-  expect(records[0]).toEqual({ ...before, organiser_id: users.otherOrganiser.id });
+  expect(records[2]).toEqual({ ...before, organiser_id: users.otherOrganiser.id });
 });
 
 test("[SCRUM-100 AC4] A lookup or save outage refuses updates safely and changes no fields", async t => {
+  // SCRUM-164: edits allowed at SUBMITTED; records[2] is the SUBMITTED fixture.
   const { send, records, client } = await setup(t);
-  const before = structuredClone(records[0]);
+  const before = structuredClone(records[2]);
   const from = client.from.bind(client);
   for (const failingStage of ["lookup", "save"]) {
     client.from = table => {
@@ -425,36 +430,76 @@ test("[SCRUM-100 AC4] A lookup or save outage refuses updates safely and changes
         ? Promise.resolve({ data: null, error: { message: "Private storage error" } }) : single();
       return query;
     };
-    const response = await send(`/event-workspace/organiser/${before.id}`, "organiser", "PATCH", { name: "Must not save" });
+    const response = await send(`/event-workspace/organiser/${before.id}`, "organiser", "PATCH", { name: "Must not save", reason: "Testing outage handling" });
     expect(response.status).toBe(503);
     expect(await response.text()).not.toContain("Private storage error");
-    expect(records[0]).toEqual(before);
+    expect(records[2]).toEqual(before);
   }
 });
 
 test("[SCRUM-100 AC1] Editing existing past events leaves unchanged schedules intact", async t => {
+  // SCRUM-164: edits allowed at SUBMITTED; records[2] is the SUBMITTED fixture.
   const { send, records } = await setup(t);
-  records[0].start_time = "2020-01-01T01:00:00.000Z";
-  records[0].end_time = "2020-01-01T02:00:00.000Z";
-  const response = await send(`/event-workspace/organiser/${records[0].id}`, "organiser", "PATCH", {
-    name: "Updated history", start_time: records[0].start_time, end_time: records[0].end_time,
+  records[2].start_time = "2020-01-01T01:00:00.000Z";
+  records[2].end_time = "2020-01-01T02:00:00.000Z";
+  const response = await send(`/event-workspace/organiser/${records[2].id}`, "organiser", "PATCH", {
+    name: "Updated history", start_time: records[2].start_time, end_time: records[2].end_time,
+    reason: "Correcting historical record",
   });
   expect(response.status).toBe(200);
-  expect(records[0]).toMatchObject({ name: "Updated history", start_time: "2020-01-01T01:00:00.000Z", end_time: "2020-01-01T02:00:00.000Z" });
+  expect(records[2]).toMatchObject({ name: "Updated history", start_time: "2020-01-01T01:00:00.000Z", end_time: "2020-01-01T02:00:00.000Z" });
 });
 
 test("[SCRUM-100 AC4] Invalid timing and below-boundary attendance leave the event unchanged", async t => {
+  // SCRUM-164: edits allowed at SUBMITTED; records[2] is the SUBMITTED fixture.
+  // Bodies without a reason return 400 (reason required), which is the same expected status.
   const { send, records } = await setup(t);
-  records[0].start_time = "2099-01-01T01:00:00.000Z";
-  records[0].end_time = "2099-01-01T02:00:00.000Z";
-  const before = structuredClone(records[0]);
+  records[2].start_time = "2099-01-01T01:00:00.000Z";
+  records[2].end_time = "2099-01-01T02:00:00.000Z";
+  const before = structuredClone(records[2]);
   for (const fields of [{ start_time: "invalid" }, { end_time: "" }, { start_time: "2020-01-01" },
     { end_time: before.start_time }, { expected_attendance: null }, { expected_attendance: 1.5 }, { other_comments: "x".repeat(2001) }]) {
     expect((await send(`/event-workspace/organiser/${before.id}`, "organiser", "PATCH", fields)).status).toBe(400);
-    expect(records[0]).toEqual(before);
+    expect(records[2]).toEqual(before);
   }
   expect((await send("/event-workspace/organiser/not-a-uuid", "organiser", "PATCH", { name: "Invalid reference" })).status).toBe(400);
-  expect(records[0]).toEqual(before);
+  expect(records[2]).toEqual(before);
+});
+
+test("[TC-SCRUM-164-10] integration: organiser patches a SUBMITTED event; activity appears in the workspace detail", async t => {
+  const { send, records, users, client } = await setup(t);
+  const before = structuredClone(records[2]);
+  const response = await send(`/event-workspace/organiser/${before.id}`, "organiser", "PATCH", {
+    name: "  Updated name  ", reason: "  Correcting a typo  ",
+  });
+  expect(response.status).toBe(200);
+  expect((await response.json()).event.name).toBe("Updated name");
+  const activity = client.activity ?? [];
+  const entry = activity.find(row => row.event_id === before.id);
+  expect(entry).toBeDefined();
+  expect(entry.user_id).toBe(users.organiser.id);
+  expect(entry.action).toBe("EDIT");
+  expect(entry.details.note).toBe("Correcting a typo");
+});
+
+test("[TC-SCRUM-164-11] integration: locked status returns 409", async t => {
+  // records[0] is APPROVED and owned by the organiser — past SUBMITTED, so locked.
+  const { send, records } = await setup(t);
+  const response = await send(`/event-workspace/organiser/${records[0].id}`, "organiser", "PATCH", {
+    name: "Must not save", reason: "Testing lock",
+  });
+  expect(response.status).toBe(409);
+  expect((await response.json()).message).toMatch(/no longer accepted/i);
+});
+
+test("[TC-SCRUM-164-12] integration: missing reason returns 400", async t => {
+  const { send, records } = await setup(t);
+  const response = await send(`/event-workspace/organiser/${records[2].id}`, "organiser", "PATCH", {
+    name: "No reason provided",
+  });
+  expect(response.status).toBe(400);
+  const body = await response.json();
+  expect(body.errors).toContainEqual(expect.objectContaining({ field: "reason" }));
 });
 
 async function setupOrganisation(t) {
@@ -526,7 +571,8 @@ test("[SCRUM-100 AC3] Missing, blank or malformed organisation metadata grants o
     expect((await response.json()).events.map(event => event.id).sort()).toEqual([records[0].id, records[2].id].sort());
     expect((await send(`/event-workspace/organiser/${records[1].id}`, "organiser")).status).toBe(404);
   }
-  expect((await send(`/event-workspace/organiser/${records[0].id}`, "organiser", "PATCH", { name: "Own access retained" })).status).toBe(200);
+  // SCRUM-164: edits allowed at SUBMITTED; records[2] is the SUBMITTED fixture.
+  expect((await send(`/event-workspace/organiser/${records[2].id}`, "organiser", "PATCH", { name: "Own access retained", reason: "Correcting name" })).status).toBe(200);
 });
 
 test("[SCRUM-100 AC3] An organisation change revokes old-client visibility on the very next request", async t => {

@@ -38,11 +38,14 @@ function Detail({ scope, eventId }) {
       <h1>{event.name}</h1>
       {saved && <p role="status">Event changes saved.</p>}
       {scope === "organiser" && <>
-        {event.organiser_id === user.id && hasPermission("events.own.update") ?
-          (editing ? <EventRequestForm key={event.id} event={event} onCancel={() => setEditing(false)} onSubmitted={() => {
-            setEditing(false); setSaved(true); reload();
-          }} /> : <button type="button" onClick={() => { setSaved(false); setEditing(true); }}>Edit event</button>) :
-          <p>View only. Only the responsible organiser can edit this event.</p>}
+        {event.organiser_id === user.id && hasPermission("events.own.update") ? (
+          // SCRUM-164 AC2: editing is only allowed while the event is still SUBMITTED.
+          event.status === "SUBMITTED" ?
+            (editing ? <EventRequestForm key={event.id} event={event} onCancel={() => setEditing(false)} onSubmitted={() => {
+              setEditing(false); setSaved(true); reload();
+            }} /> : <button type="button" onClick={() => { setSaved(false); setEditing(true); }}>Edit event</button>) :
+            <p>Editing is no longer available. The event has moved to review and changes are locked.</p>
+        ) : <p>View only. Only the responsible organiser can edit this event.</p>}
       </>}
       <p>Coordinator: {event.coordinator_id || "Not assigned yet"}</p>
       <dl>
