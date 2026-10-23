@@ -192,11 +192,19 @@ async function assignCoordinator(id, coordinatorId, actor) {
   );
 }
 
+// SCRUM-159 AC2: what the Lead's queue rows and detail panel show, plus
+// organiser_id so the service can name the organiser. Nothing else leaves the table.
+const QUEUE_COLUMNS = [
+  "id", "name", "status", "organiser_id", "start_time", "end_time", "expected_attendance",
+  "purpose", "description", "venue_requirements", "accessibility_needs", "equipment_needs",
+  "other_comments", "submitted_at",
+].join(", ");
+
 async function findSubmittedUnassigned() {
   return unwrap(
     await getSupabase()
       .from(TABLE)
-      .select("*")
+      .select(QUEUE_COLUMNS)
       .eq("status", "SUBMITTED")
       .is("coordinator_id", null)
       .order("submitted_at", { ascending: true, nullsFirst: false })
