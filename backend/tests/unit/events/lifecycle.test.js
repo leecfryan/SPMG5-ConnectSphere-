@@ -30,15 +30,19 @@ const AGREED_TRANSITIONS = [
   ["APPROVED", "SAFETY_REVIEW"],
   ["APPROVED", "CANCELLED"],
   ["APPROVED", "POSTPONED"],
+  ["APPROVED", "SUBMITTED"],
   ["SAFETY_REVIEW", "APPROVED"],
   ["SAFETY_REVIEW", "PREPARATION"],
   ["SAFETY_REVIEW", "CANCELLED"],
   ["SAFETY_REVIEW", "POSTPONED"],
+  ["SAFETY_REVIEW", "SUBMITTED"],
   ["PREPARATION", "CONFIRMED"],
   ["PREPARATION", "CANCELLED"],
+  ["PREPARATION", "SUBMITTED"],
   ["CONFIRMED", "COMPLETED"],
   ["CONFIRMED", "CANCELLED"],
   ["CONFIRMED", "POSTPONED"],
+  ["CONFIRMED", "SUBMITTED"],
   ["POSTPONED", "CANCELLED"],
 ];
 
@@ -119,8 +123,14 @@ test("SCRUM-139 AC3: only an approved event can be submitted for the safety chec
   expect(STATUSES.filter((from) => canTransition(from, "SAFETY_REVIEW"))).toEqual(["APPROVED"]);
 });
 
-test("SCRUM-139 AC4/SCRUM-149/SCRUM-141: under safety review, the event can only move to approved, preparation, cancelled or postponed", () => {
-  expect(STATUSES.filter((to) => canTransition("SAFETY_REVIEW", to)).sort()).toEqual(["APPROVED", "CANCELLED", "POSTPONED", "PREPARATION"]);
+test("SCRUM-139 AC4/SCRUM-149/SCRUM-141/SCRUM-37: under safety review, the event can only move to approved, preparation, cancelled, postponed or submitted", () => {
+  expect(STATUSES.filter((to) => canTransition("SAFETY_REVIEW", to)).sort()).toEqual(["APPROVED", "CANCELLED", "POSTPONED", "PREPARATION", "SUBMITTED"]);
+});
+
+test("SCRUM-37: a significant edit with live arrangements can regress APPROVED, PREPARATION or CONFIRMED back to SUBMITTED", () => {
+  for (const from of ["APPROVED", "PREPARATION", "CONFIRMED"]) {
+    expect(canTransition(from, "SUBMITTED")).toBe(true);
+  }
 });
 
 test("SCRUM-141 AC3: only an event under safety review can move to preparation", () => {
