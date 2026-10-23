@@ -56,3 +56,10 @@ general Vitest entry point; the explicit paths select notification files only.
 The HTTP integration tests use a local provider substitute. These tests do not
 prove live Novu inbox delivery or the event assignment operation; those remain
 manual acceptance checks.
+
+
+## SCRUM-117 returned-request notifications
+
+From the repository root, with Docker running and the existing postgres:17-alpine image cached, run `node tests/sql/run-assignment-notifications.cjs --clarification`. The existing isolated runner additionally extracts the exact Task 2 return function and Task 3 trigger from the guides. No cloud credentials or shared database connection are used. Expected: `CLARIFICATION SQL ASSERTIONS PASSED`, exit zero. S01 proves refusal without mutations; S02 exact saved recipient/message/link and duplicate rejection; S03 independent cycles; S04 transaction rollback on enqueue failure; S05 browser access restrictions. The setup and assertions are disposable test fixtures, never migrations or shared-database scripts. Executed by Codex on 22 Oct 2026 after Ryan started Docker: all five clarification scenarios passed along with the existing decision/assignment assertions. This optional SQL suite is not part of CI.
+
+The --clarification option also verifies the documented SCRUM-117 resubmission RPC and trigger with resubmission.assertions.sql. It checks all twelve fields, stale snapshots/cycles, equivalent timestamps, unchanged/reverted values, retained coordinator, duplicate refusal, queue rollback and browser-role privileges. Success includes RESUBMISSION SQL ASSERTIONS PASSED.

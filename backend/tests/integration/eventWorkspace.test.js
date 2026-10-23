@@ -19,6 +19,8 @@ async function setup(t) {
   const accounts = new Map([[users.organiser.id, { events: records }]]);
   const client = storage(accounts);
   require("../../../tests/playwright/support/assignment-notification-storage.cjs")(client, new Map());
+  const pending = new Map();
+  require("../../../tests/playwright/support/resubmission-storage.cjs")(client, pending);
   client.auth = { admin: {
     async listUsers() { return { data: { users: Object.values(users) }, error: null }; },
     async getUserById(id) { return { data: { user: Object.values(users).find(user => user.id === id) }, error: null }; },
@@ -33,7 +35,7 @@ async function setup(t) {
     method, headers: { ...(user ? { Authorization: "Bearer " + user } : {}), "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  return { send, users, records, client };
+  return { send, users, records, client, pending };
 }
 
 test("[ACCESS-001] Two coordinators see only their own list and direct event details", async t => {
@@ -594,4 +596,92 @@ test("[SCRUM-117-API-008] returned events stay visible but lead reassignment is 
   });
   expect(response.status).toBe(409);
   expect(records).toEqual(before);
+});
+
+async function returnedRequest(t) {
+  const f = await setup(t);
+  const event = f.records[0];
+  Object.assign(event, { status: "CHANGES_REQUESTED", purpose: "Workshop", description: "Community workshop",
+    start_time: "2099-01-01T01:00:00Z", end_time: "2099-01-01T03:00:00Z", expected_attendance: 30,
+    registration_start: "2098-12-01T00:00:00Z", registration_end: "2098-12-31T00:00:00Z" });
+  const cycle = { id: randomUUID(), event_id: event.id, action: "CHANGES_REQUESTED", created_at: new Date().toISOString(),
+    details: { coordinator_id: f.users.first.id, before: { ...event }, note: "Clarify layout" } };
+  f.client.activity.push(cycle);
+  return { ...f, event, cycle, path: `/event-workspace/organiser/${event.id}/resubmit` };
+}
+
+test("[SCRUM-117-R01] Owner saves and resubmits to the same coordinator once with immutable field changes", async t => {
+  const f = await returnedRequest(t);
+  const patch = await f.send(`/event-workspace/organiser/${f.event.id}`, "organiser", "PATCH", { expected_attendance: 45, venue_requirements: "Round tables" });
+  expect(patch.status).toBe(200);
+  expect(f.event.status).toBe("CHANGES_REQUESTED");
+  expect(f.pending.size).toBe(0);
+  const response = await f.send(f.path, "organiser", "POST", { cycleId: f.cycle.id });
+  expect(response.status).toBe(200);
+  expect((await response.json()).event).toMatchObject({ status: "UNDER_REVIEW", coordinator_id: f.users.first.id });
+  expect(f.pending.size).toBe(1);
+  expect([...f.pending.values()][0]).toMatchObject({ recipient_id: f.users.first.id, workflow: "event-request-resubmitted",
+    payload: { cycleId: f.cycle.id, changedFieldCount: 2, requestPath: "/assigned-events/" + f.event.id } });
+  expect((await f.send(f.path, "organiser", "POST", { cycleId: f.cycle.id })).status).toBe(409);
+  expect(f.client.activity.filter(row => row.action === "REQUEST_RESUBMITTED")).toHaveLength(1);
+  expect(f.pending.size).toBe(1);
+  f.event.expected_attendance = 99;
+  const result = await (await f.send(`/event-workspace/coordinator/${f.event.id}`, "first")).json();
+  expect(result.event.activity.find(row => row.action === "REQUEST_RESUBMITTED").changes).toEqual([
+    { field: "expected_attendance", before: 30, after: 45 }, { field: "venue_requirements", before: null, after: "Round tables" },
+  ]);
+  const owner = await (await f.send(`/event-workspace/organiser/${f.event.id}`, "organiser")).json();
+  expect(owner.event.activity.find(row => row.action === "REQUEST_RESUBMITTED")).not.toHaveProperty("changes");
+});
+
+test("[SCRUM-117-R02] Anonymous, wrong roles and other organisers cannot resubmit or mutate the request", async t => {
+  const f = await returnedRequest(t);
+  for (const [role, status] of [[null,401],["first",403],["manager",403],["attendee",403],["venue",403],["technical",403],["otherOrganiser",404]]) {
+    expect((await f.send(f.path, role, "POST", { cycleId: f.cycle.id })).status).toBe(status);
+  }
+  f.users.organiser.app_metadata.organisation_id = "same-company";
+  f.users.otherOrganiser.app_metadata.organisation_id = "same-company";
+  expect((await f.send(f.path,"otherOrganiser","POST",{cycleId:f.cycle.id})).status).toBe(403);
+  expect(f.event.status).toBe("CHANGES_REQUESTED");
+  expect(f.client.activity).toHaveLength(1);
+  expect(f.pending.size).toBe(0);
+});
+
+test("[SCRUM-117-R03] Invalid payload, stale cycle, changed status and invalid saved details leave no resubmission", async t => {
+  const f = await returnedRequest(t);
+  for (const body of [{}, {cycleId:"invalid"}, {cycleId:f.cycle.id,coordinatorId:f.users.second.id}]) {
+    expect((await f.send(f.path,"organiser","POST",body)).status).toBe(400);
+  }
+  expect((await f.send(f.path,"organiser","POST",{cycleId:randomUUID()})).status).toBe(409);
+  f.event.status = "POSTPONED";
+  expect((await f.send(f.path,"organiser","POST",{cycleId:f.cycle.id})).status).toBe(409);
+  f.event.status = "CHANGES_REQUESTED";
+  f.event.description = "";
+  const invalid = await f.send(f.path,"organiser","POST",{cycleId:f.cycle.id});
+  expect(invalid.status).toBe(400);
+  expect((await invalid.json()).errors).toContainEqual({field:"description",message:"required"});
+  expect(f.client.activity).toHaveLength(1);
+  expect(f.pending.size).toBe(0);
+});
+
+test("[SCRUM-117-R04] No-change resubmission is allowed and a partial registration edit validates the saved window", async t => {
+  const f = await returnedRequest(t);
+  expect((await f.send(`/event-workspace/organiser/${f.event.id}`,"organiser","PATCH",{registration_start:"2099-01-02T00:00:00Z"})).status).toBe(400);
+  expect(f.event.registration_start).toBe("2098-12-01T00:00:00Z");
+  expect((await f.send(f.path,"organiser","POST",{cycleId:f.cycle.id})).status).toBe(200);
+  expect(f.client.activity.at(-1).details.changes).toEqual([]);
+});
+
+test("[SCRUM-117-R05] A database outage or save racing validation cannot partially resubmit", async t => {
+  const f = await returnedRequest(t);
+  const originalRpc = f.client.rpc;
+  f.client.rpc = () => { throw new Error("private database failure"); };
+  const unavailable = await f.send(f.path,"organiser","POST",{cycleId:f.cycle.id});
+  expect(unavailable.status).toBe(503);
+  expect(await unavailable.text()).not.toContain("private database failure");
+  f.client.rpc = (name,args) => { f.event.description = "Saved by another tab"; return originalRpc(name,args); };
+  expect((await f.send(f.path,"organiser","POST",{cycleId:f.cycle.id})).status).toBe(409);
+  expect(f.event.status).toBe("CHANGES_REQUESTED");
+  expect(f.client.activity).toHaveLength(1);
+  expect(f.pending.size).toBe(0);
 });

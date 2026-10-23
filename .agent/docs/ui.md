@@ -118,3 +118,7 @@ Confirmations before destructive actions follow `WithdrawButton.jsx`: an inline 
 - **Tables**: `<caption>`, `<thead>` with small uppercase headers, numeric columns right-aligned with tabular
   numbers, selected row tinted.
 - **Mobile**: check at 375px wide. No horizontal page scroll; wide tables scroll inside their own container.
+
+### SCRUM-117 clarification presentation
+
+The Under review decision form uses a scoped event-review-decision card with a larger note field, a separate return action explaining notification and retained assignment, and secondary approve/reject controls. Saving disables the note and actions and announces progress. The Changes requested panel uses the existing warning palette, preserves message line breaks, wraps long text and explains Edit, Save changes, then Resubmit request. Resubmission is a separate owner-only action outside edit mode. The coordinator sees the latest immutable before/after comparison with its timestamp. Both layouts stack at 760px and were visually checked at 375px. Styles stay in features/events/workspace.css.

@@ -308,4 +308,4 @@ and editable-field snapshot atomically in events/event_activity_log. ACTIVE_STAT
 returned events visible/counted/cancellable; ASSIGNABLE_STATUSES excludes them.
 POSTPONABLE_STATUSES includes them; PLANNING_STATUSES does not. Existing event readers
 receive the activity message, not the snapshot. SQL is in docs/event-requests.md.
-Notification delivery and resubmission are subsequent slices.
+Returned-request notification queueing is documented in docs/notifications.md; the existing worker delivers the saved message and request path through event-changes-requested. The owner resubmits through POST /api/event-workspace/organiser/:id/resubmit with the latest cycleId. The resubmit_event_request RPC checks validated saved fields under a lock, retains assignment, records immutable changes and queues event-request-resubmitted atomically. Only the coordinator workspace exposes changed-field comparisons. Both SQL/workflow setups are user-reported; live resubmission verification remains pending.

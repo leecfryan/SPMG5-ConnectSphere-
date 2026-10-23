@@ -101,8 +101,8 @@ the agreed matrix, integration examples, tests and remaining work.
 
 Event Organisers can open `/events/new` through the workspace navigation. The
 frontend and backend both enforce `events.submit`; the API obtains ownership
-from the verified user. *Save draft* keeps an unfinished request that needs only
-a name; the organiser's drafts are listed under *Your drafts* on
+from the verified user. _Save draft_ keeps an unfinished request that needs only
+a name; the organiser's drafts are listed under _Your drafts_ on
 `/my-event-requests`, visible to no one else, and the full checks run when a
 draft is submitted (SCRUM-147). At `/my-event-requests`, organisers can edit responsible
 events and view colleagues’ events in their client organisation. Unrelated clients
@@ -240,10 +240,4 @@ Coordinators use `/equipment/requests`; technical support uses `/technical-suppo
 
 Signed-in users can browse approved events at `/events` and manage their own registrations at `/registrations/me`. Staff permissions and existing feature routes are unchanged. See [Registration integration](docs/registration-integration.md) for integration details, tests and database requirements.
 
-## Return a request for clarification (SCRUM-117)
-
-The assigned coordinator can return an Under review request with a required message.
-It becomes Changes requested, and the organiser sees the message on the request.
-Cancellation/postponement remain available; reassignment is blocked while corrections
-are pending. This slice does not yet implement notifications or resubmission.
-See [event requests](docs/event-requests.md#returning-requests-for-clarification-scrum-117-task-2).
+SCRUM-117: coordinators return requests with a message; organisers save and resubmit to the same coordinator. In-app notifications link both roles to the request, and coordinators see the changed fields. See [event request workflow](docs/event-requests.md#resubmission-and-coordinator-changes-scrum-117) for setup and the applied SQL reference.

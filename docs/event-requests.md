@@ -953,8 +953,8 @@ coordinators and leads can cancel or postpone them, with the existing required-r
 release rules. Venue/equipment planning and attendee registration do not admit this status.
 The unassigned queue still requires SUBMITTED plus a null coordinator.
 
-This commit implements returning and message display only. Notification delivery,
-resubmission and field-difference presentation remain subsequent SCRUM-117 tasks.
+Task 2 implements returning and message display. Task 3 adds notification delivery as
+documented below; the completed resubmission slice is described after the UI notes.
 The organiser's existing Edit event action still saves details without changing status.
 
 ### Schema reference — SCRUM-117 return action
@@ -1010,3 +1010,22 @@ revoke all on function public.request_event_changes(uuid, uuid, text) from publi
 grant execute on function public.request_event_changes(uuid, uuid, text) to service_role;
 commit;
 ```
+
+
+### Task 3 — organiser notification
+
+The CHANGES_REQUESTED activity insert now queues an organiser notice through the trigger documented in [notifications](notifications.md#returned-request-notifications--scrum-117-task-3). Message, event name, recipient and link are captured from saved history. Queue failure rolls back the return; provider failure leaves pending work for retry. Existing request visibility applies when opening the link. Ryan reports SQL and Novu workflow setup completed and the return journey working. Formal live UAT results have not been recorded.
+
+### Clarification UI polish
+
+The review form separates Return for changes from Approve/Reject and explains that the organiser receives the message while the coordinator remains assigned. The message field is larger and disabled during saving, with a progress announcement. The organiser's saved feedback appears in a highlighted, wrapping panel with guidance to Edit event. The existing status rules, permissions, endpoints and notification payload are unchanged. The resubmission slice below adds a separate action after saving.
+
+### Resubmission and coordinator changes (SCRUM-117)
+
+The responsible organiser saves edits, then selects **Resubmit request**. Saving alone leaves CHANGES_REQUESTED unchanged. Resubmission sets UNDER_REVIEW and retains coordinator_id; the request never enters the unassigned queue. No-change resubmission is allowed. Rejected requests remain final.
+
+POST /api/event-workspace/organiser/:id/resubmit accepts only { cycleId }, the latest CHANGES_REQUESTED activity ID. It uses events.own.update, owner checking and full submission validation. Invalid payload/details return 400; missing authentication 401; wrong role or same-company non-owner 403; inaccessible event 404; stale status/cycle/saved details 409; dependency failure 503. The server passes all twelve validated saved fields to resubmit_event_request. The locked operation compares them again before changing status, writing REQUEST_RESUBMITTED history and queuing the coordinator notice in one transaction. Failed queue writes roll back; delivery failures remain retryable through the existing worker.
+
+All twelve editable fields are compared with the returned snapshot: name, purpose, description, start_time, end_time, registration_start, registration_end, expected_attendance, venue_requirements, accessibility_needs, equipment_needs and other_comments. Timestamp equivalents compare by instant; optional empty/null values compare equally. The stored changes contain field/before/after and remain unchanged by later edits. Only the assigned coordinator workspace returns these comparisons, without raw snapshots or actor identifiers. The latest resubmission is displayed with its timestamp; previous activity remains in history. Workspace reads include registration dates and partial date edits validate against the complete saved registration window.
+
+Exact applied resubmission/queue SQL is in [the notification schema reference](notifications.md#scrum-117-resubmission-schema-reference). Ryan reported applying it and creating event-request-resubmitted on 22 October 2026. The coordinator payload is eventId, cycleId, eventName, changedFieldCount and requestPath; the path is /assigned-events/<eventId>. Live resubmission delivery still requires a manual check after this code is running.

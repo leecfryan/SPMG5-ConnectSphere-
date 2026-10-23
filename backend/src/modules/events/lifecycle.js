@@ -17,8 +17,8 @@ const TRANSITIONS = Object.freeze({
   DRAFT: Object.freeze(["SUBMITTED"]),
   SUBMITTED: Object.freeze(["UNDER_REVIEW", "CANCELLED", "POSTPONED"]),
   UNDER_REVIEW: Object.freeze(["CHANGES_REQUESTED", "APPROVED", "REJECTED", "CANCELLED", "POSTPONED"]),
-  // SCRUM-117: resubmission is a separate slice; returned requests may be cancelled or postponed.
-  CHANGES_REQUESTED: Object.freeze(["CANCELLED", "POSTPONED"]),
+  // SCRUM-117: the owner resubmits to the same assigned coordinator.
+  CHANGES_REQUESTED: Object.freeze(["UNDER_REVIEW", "CANCELLED", "POSTPONED"]),
   // SCRUM-144 AC1: no APPROVED -> CONFIRMED; confirming needs the safety pass.
   APPROVED: Object.freeze(["SAFETY_REVIEW", "CANCELLED", "POSTPONED"]),
   // SCRUM-139 AC4: back to APPROVED is the coordinator withdrawing the submission.

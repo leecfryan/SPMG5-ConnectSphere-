@@ -8,3 +8,38 @@
 .event-workspace select { padding: .7rem; font: inherit; }
 .event-actions { display: flex; flex-wrap: wrap; gap: 1rem; margin-block: 1rem; }
 .safety-venue { border: 1px solid #d6dedb; border-radius: .5rem; padding: 0 1rem; margin-block: 1rem; }
+
+/* SCRUM-117: distinguish organiser feedback and the return action from final decisions. */
+.event-workspace .event-review-decision { margin-block: 2rem; padding: 1.5rem; border: 1px solid #e0e7e2; border-radius: 14px; background: #f9fbfa; }
+.event-review-decision .eyebrow, .event-clarification .eyebrow { margin-bottom: .5rem; }
+.event-review-decision h2, .event-clarification h2 { margin-bottom: .75rem; font-size: 1.3rem; }
+.event-workspace .event-review-decision form { max-width: none; margin-top: 1.25rem; gap: .65rem; }
+.event-review-decision > p:not(.eyebrow), .event-return-action p { color: #61716f; line-height: 1.6; }
+.event-review-decision textarea { min-height: 9rem; line-height: 1.6; }
+.event-review-decision textarea:focus-visible { outline: 3px solid #56a993; outline-offset: 3px; }
+.event-return-action { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; padding: 1.25rem; margin-top: .5rem; border: 1px solid #a2bbb0; border-radius: 10px; background: #f2f8f4; }
+.event-return-action h3 { margin: 0 0 .4rem; font-size: 1rem; }
+.event-return-action p { margin: 0; max-width: 38rem; font-size: .875rem; }
+.event-review-decision .primary, .event-review-decision .secondary { width: auto; margin: 0; padding-inline: 1.25rem; }
+.event-return-action .primary { flex-shrink: 0; }
+.event-review-outcomes { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-top: 1rem; margin-top: .5rem; border-top: 1px solid #e7ece8; }
+.event-review-outcomes > span { color: #61716f; font-size: .875rem; }
+.event-review-outcomes .event-actions { margin: 0; gap: .65rem; }
+.event-review-decision .event-review-reject { color: #97372c; }
+.event-clarification { margin-block: 1.5rem; padding: 1.5rem; border: 1px solid #e0e7e2; border-left: 4px solid #7a5800; border-radius: 10px; background: #fff; }
+.event-clarification .eyebrow { color: #7a5800; }
+.event-clarification-message { margin: 1rem 0; padding: 1rem 1.25rem; border-radius: 8px; background: #fef3cd; color: #152c37; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.event-clarification-next { margin-bottom: 0; color: #61716f; line-height: 1.6; font-size: .875rem; }
+@media (max-width: 760px) {
+  .event-workspace .event-review-decision, .event-clarification { padding: 1rem; }
+  .event-return-action, .event-review-outcomes { align-items: stretch; flex-direction: column; gap: 1rem; }
+  .event-return-action { padding: 1rem; }
+  .event-review-outcomes .event-actions > button { flex: 1; }
+}
+
+.event-resubmit { margin: 16px 0; max-width: 560px; }
+.event-resubmission { margin: 24px 0; padding: 20px; border: 1px solid #cbd7d0; border-radius: 12px; background: #f9fbfa; }
+.event-change-list { padding: 0; list-style: none; }
+.event-change-list li + li { border-top: 1px solid #e7ece8; padding-top: 12px; }
+.event-change-list dd { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .event-resubmission { padding: 14px; } }
