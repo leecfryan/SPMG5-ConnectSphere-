@@ -27,22 +27,12 @@ module.exports = function equipmentStorage(accounts) {
       for (const row of releasable) row.status = 'RELEASED';
       return { released: releasable.map(row => row.id), equipmentReverted: [], equipmentSkipped: [] };
     },
-    // SCRUM-150: eventWorkspace.service.js calls this through `?.`, so a missing
-    // method here would silently flag nothing rather than fail loudly - matching
-    // the real equipment.service.js's filter (PENDING/APPROVED/REVIEW_REQUIRED,
-    // re-flaggable) and borrow-window update (only when datesChanged). No
-    // Playwright test calls this path yet (see the task note's Found, not built).
-    async flagReservationsForReview(eventId, { startTime, endTime, datesChanged = false } = {}) {
-      const flaggable = requests.filter(row => row.event_id === eventId && ['PENDING', 'APPROVED', 'REVIEW_REQUIRED'].includes(row.status));
-      for (const row of flaggable) {
-        row.status = 'REVIEW_REQUIRED';
-        if (datesChanged) {
-          row.borrow_start = startTime;
-          row.borrow_end = endTime;
-        }
-      }
-      return { flagged: flaggable.map(row => row.id) };
-    },
+    // SCRUM-150: flagReservationsForReview used to live here, called by
+    // eventWorkspace.service.js through `?.` - SCRUM-37 moved that whole call
+    // into apply_organiser_event_edit (SQL, real Postgres only), so
+    // eventWorkspace.routes.js no longer threads equipmentService through at
+    // all. Removed rather than left unreachable (it was already unreachable
+    // by every Playwright spec before this, per its own prior comment).
     // SCRUM-150: equipment.controller.js calls this directly, not through `?.` -
     // a missing method here would throw, not silently no-op, the moment any
     // REVIEW_REQUIRED row is read or approved.
