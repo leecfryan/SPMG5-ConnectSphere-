@@ -79,6 +79,10 @@ function createVenuesController(service) {
     listActiveHoldsInRange,
     listHolds,
     createHold,
+    getActiveHoldsByIds,
+    linkHoldsToRequest,
+    listEligibleHoldsForCoordinator,
+    listEventsWithCoordinator,
     searchReplacementVenues,
     markVenueBookingAffected,
     releaseAffectedVenueBooking,
@@ -397,6 +401,31 @@ function createVenuesController(service) {
           .json({ error: "Validation failed", details: contextErrors });
       }
 
+      // SCRUM-162: if hold_ids are supplied, validate each hold before the
+      // calendar check. All must be active (not expired, not already linked),
+      // for this venue, for this date, and named after the submitted event.
+      let validatedHolds = [];
+      if (value.hold_ids) {
+        validatedHolds = await getActiveHoldsByIds(value.hold_ids);
+        if (validatedHolds.length !== value.hold_ids.length) {
+          return res.status(409).json({ error: "One or more holds have expired or are already being converted" });
+        }
+        if (validatedHolds.some((h) => h.venue_id !== id)) {
+          return res.status(409).json({ error: "Holds must belong to this venue" });
+        }
+        if (validatedHolds.some((h) => h.event_id !== value.event_id)) {
+          return res.status(409).json({ error: "Holds do not match the selected event" });
+        }
+        if (validatedHolds.some((h) => h.booking_date !== value.booking_date)) {
+          return res.status(409).json({ error: "Holds must be for the requested booking date" });
+        }
+        // SCRUM-162: ownership check — coordinator_id on the hold must match
+        // the authenticated coordinator so no one can convert another's hold.
+        if (validatedHolds.some((h) => h.coordinator_id !== req.user.id)) {
+          return res.status(409).json({ error: "Holds do not belong to your coordinator account" });
+        }
+      }
+
       // 4. The slots against that day's calendar. 409 rather than 400: the
       // request is well formed, it just clashes with what is already booked.
       const [slotRows, unavailability, holds] = await Promise.all([
@@ -414,10 +443,25 @@ function createVenuesController(service) {
         to: value.booking_date,
       });
 
+      // SCRUM-162: for a hold conversion, treat the held slots as available so
+      // findSlotProblems allows them. Only overrides tentative; a confirmed
+      // booking on the same slot still blocks the request.
+      let calendarDayForCheck = calendarDay;
+      if (validatedHolds.length > 0) {
+        const holdSlotSet = new Set(validatedHolds.map((h) => h.slot));
+        const adjustedSlots = { ...calendarDay.slots };
+        for (const slot of holdSlotSet) {
+          if (adjustedSlots[slot]?.status === "tentative") {
+            adjustedSlots[slot] = { status: "available", label: "Available" };
+          }
+        }
+        calendarDayForCheck = { ...calendarDay, slots: adjustedSlots };
+      }
+
       // SCRUM-134: venue passed so committed period (setup + turnaround) is checked
       const { conflicts, duplicates } = findSlotProblems(
         value,
-        calendarDay,
+        calendarDayForCheck,
         slotRows,
         value.event_id,
         venue
@@ -443,6 +487,12 @@ function createVenuesController(service) {
           return res.status(409).json({ error: err.message });
         }
         throw err;
+      }
+
+      // SCRUM-162 AC2: link hold rows to this request so decide_venue_booking_request
+      // can cancel them when the booking is approved (AC3).
+      if (validatedHolds.length > 0) {
+        await linkHoldsToRequest(value.hold_ids, requestId);
       }
 
       // SCRUM-88: return the request exactly as Venue Staff will see it
@@ -1006,6 +1056,9 @@ function createVenuesController(service) {
 
   function validateHoldBody(body) {
     const errors = [];
+    if (!body.event_id || !UUID_PATTERN.test(body.event_id)) {
+      errors.push("event_id must be a valid event UUID");
+    }
     if (!body.event_name || typeof body.event_name !== "string" || !body.event_name.trim()) {
       errors.push("event_name is required");
     }
@@ -1027,6 +1080,11 @@ function createVenuesController(service) {
         // AC2: expiry cannot be in the past
         errors.push("expires_at must be in the future");
       }
+    }
+    // SCRUM-162: coordinator_id links the hold to the coordinator whose event it
+    // is, so only that coordinator can later convert it.
+    if (!body.coordinator_id || !UUID_PATTERN.test(body.coordinator_id)) {
+      errors.push("coordinator_id must be a valid user UUID");
     }
     return errors;
   }
@@ -1062,6 +1120,31 @@ function createVenuesController(service) {
     }
   }
 
+  // SCRUM-162: events with an assigned coordinator for the hold placement form.
+  async function getEventsForHolds(req, res, next) {
+    try {
+      const events = await listEventsWithCoordinator();
+      res.status(200).json({ data: events });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // SCRUM-162 AC1: returns active holds for this venue that match one of the
+  // coordinator's approved events by event_id, grouped by (event_id, booking_date).
+  async function getEligibleHolds(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+      const venue = await getVenueById(id);
+      if (!venue) return res.status(404).json({ error: "Venue not found" });
+      const groups = await listEligibleHoldsForCoordinator(id, req.user.id);
+      res.status(200).json({ data: groups });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   return {
     getVenues,
     getVenue,
@@ -1087,6 +1170,8 @@ function createVenuesController(service) {
     getUnavailabilityPeriodAffected,
     postHold,
     getHolds,
+    getEligibleHolds,
+    getEventsForHolds,
   };
 
 }

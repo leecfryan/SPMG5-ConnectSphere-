@@ -36,6 +36,8 @@ const ALLOWED_FIELDS = [
   "additional_requirements",
   "purpose",
   "replaces_booking_id",
+  // SCRUM-162: IDs of active hold rows being converted to a booking request
+  "hold_ids",
 ];
 
 // Slots a request can be made on. "pending" is included on purpose: SCRUM-94
@@ -86,6 +88,14 @@ function validateBookingRequestShape(payload) {
   if (payload.replaces_booking_id !== undefined &&
       (typeof payload.replaces_booking_id !== "string" || !UUID_PATTERN.test(payload.replaces_booking_id))) {
     errors.push("replaces_booking_id must be a valid booking request id");
+  }
+
+  // SCRUM-162: hold conversion — optional array of UUID strings
+  if (payload.hold_ids !== undefined) {
+    if (!isStringArray(payload.hold_ids) || payload.hold_ids.length === 0 ||
+        !payload.hold_ids.every((id) => UUID_PATTERN.test(id))) {
+      errors.push("hold_ids must be a non-empty array of valid UUIDs");
+    }
   }
 
   // SCRUM-86
@@ -165,6 +175,8 @@ function validateBookingRequestShape(payload) {
       additional_requirements: trimmedAdditional === "" ? null : trimmedAdditional,
       purpose: trimmedPurpose,
       replaces_booking_id: payload.replaces_booking_id || null,
+      // SCRUM-162: only included when the coordinator is converting a hold
+      ...(payload.hold_ids !== undefined ? { hold_ids: payload.hold_ids } : {}),
     },
   };
 }

@@ -153,10 +153,12 @@ function send(path, role = "venue_staff", method = "GET", data) {
 }
 
 const validHoldBody = {
+  event_id: "aaaaaaaa-0000-4000-8000-000000000099",
   event_name: "Charity Gala",
   booking_date: futureDate,
   slots: ["am"],
   expires_at: "2099-12-01T06:00:00.000Z",
+  coordinator_id: "aaaaaaaa-0000-4000-8000-000000000001",
 };
 
 test("[TC-SCRUM-146-01] POST /holds happy path returns 201 with hold records", async () => {
@@ -246,6 +248,15 @@ test("[TC-SCRUM-146-09] booking request blocked when active hold covers the slot
   expect(res.status).toBe(409);
   const body = await res.json();
   expect(body.details.some((d) => /am/.test(d))).toBe(true);
+});
+
+test("[TC-SCRUM-162-08] POST /holds missing coordinator_id returns 400", async () => {
+  const { coordinator_id: _omit, ...noCoordinator } = validHoldBody;
+  const res = await send(`/${venueId}/holds`, "venue_staff", "POST", noCoordinator);
+  expect(res.status).toBe(400);
+  const body = await res.json();
+  expect(body.details).toContain("coordinator_id must be a valid user UUID");
+  expect(service.createHold).not.toHaveBeenCalled();
 });
 
 test("[TC-SCRUM-146-10] booking request succeeds when hold is expired (not in active list)", async () => {

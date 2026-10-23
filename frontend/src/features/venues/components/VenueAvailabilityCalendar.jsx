@@ -9,6 +9,7 @@ import {
   IconChevronRight,
 } from "./VenueIcons";
 import { formatDate } from "../venueFormat";
+import VenueEligibleHoldsSection from "./VenueEligibleHoldsSection";
 
 // SCRUM-95: a day is three slots. A full day booking fills all three.
 const SLOTS = ["am", "pm", "night"];
@@ -64,7 +65,7 @@ function shiftDate(dateString, days) {
   return date.toISOString().slice(0, 10);
 }
 
-function VenueAvailabilityCalendar({ venue, onBack, onRequestBooking }) {
+function VenueAvailabilityCalendar({ venue, onBack, onRequestBooking, onConvertHold }) {
   const { token } = useAuth();
   // Read the id once here rather than inside the effect or a handler. The
   // React Compiler hoists a closure's property reads into its memo check, and
@@ -125,6 +126,11 @@ function VenueAvailabilityCalendar({ venue, onBack, onRequestBooking }) {
           </button>
         </div>}
       </header>
+
+      {/* SCRUM-162: coordinator sees their active holds and can convert from here */}
+      {onConvertHold && (
+        <VenueEligibleHoldsSection venueId={venueId} onConvert={onConvertHold} />
+      )}
 
       <div className="v-card v-cal-toolbar">
         <div className="v-cal-toolbar-left">
