@@ -34,9 +34,13 @@ function createApp({ authClient, dataClient, eventsRepository, assignmentDepende
   });
   app.use("/api/notifications", createNotificationsRoutes(notificationsService, authenticate));
   app.use("/api/events", createEventsRoutes(eventsRepository, authenticate));
-  // SCRUM-150: the organiser's reschedule PATCH flags equipment_requests for
-  // review - equipment is in-lane, same reasoning as review.routes.js below.
-  app.use("/api/event-workspace", authenticate, createEventWorkspaceRoutes(dataClient, equipmentDependencies?.equipmentService));
+  // SCRUM-150's own equipment-flagging on a reschedule is retired (see
+  // equipment.service.js); SCRUM-37's significance check now lives entirely
+  // inside apply_organiser_event_edit (SQL, called by the service itself),
+  // which only regresses the event's own status - it never writes to
+  // equipment_requests/venue_bookings. So equipmentDependencies no longer
+  // needs threading through here.
+  app.use("/api/event-workspace", authenticate, createEventWorkspaceRoutes(dataClient));
   app.use("/api", equipmentRoutes({ authenticate, ...equipmentDependencies }));
   // These routes expose approved event information and each user's own registrations.
   app.use("/api/events", authenticate, requirePermission("events.browse"), registrationEventRoutes(dataClient));
