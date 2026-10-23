@@ -26,18 +26,44 @@ function createReviewService({ repository }) {
     return move(eventId, coordinatorId, "SUBMITTED", "UNDER_REVIEW");
   }
 
-  // SCRUM-99 AC2: approval writes the decision only. It books no venue,
-  // equipment, technical support or registration arrangement (discussion #80).
-  async function approve(eventId, coordinatorId, note) {
+  // SCRUM-99 AC2: approval writes the decision only, for a first-time review.
+  // SCRUM-37 team design: for a resubmission (an event apply_organiser_event_edit
+  // sent back to SUBMITTED), approving releases whatever arrangements it had -
+  // the coordinator re-requests fresh ones rather than the same reservation
+  // being re-reviewed by Technical Support/Venue Staff. Both release calls are
+  // already no-ops when nothing is live, so this is safe on an ordinary
+  // first-time approval too (discussion #80: approval itself still books
+  // nothing new; it only ever releases what a significant edit had flagged
+  // as stale).
+  async function approve(eventId, coordinatorId, note, { equipmentService, releaseVenueBookingsForCancelledEvent } = {}) {
     const parsed = readNote(note);
     if (!parsed.ok) return { ok: false, reason: "invalid_note" };
-    return move(eventId, coordinatorId, "UNDER_REVIEW", "APPROVED", outcome(coordinatorId, parsed.note));
+    const result = await move(eventId, coordinatorId, "UNDER_REVIEW", "APPROVED", outcome(coordinatorId, parsed.note));
+    if (!result.ok) return result;
+
+    await equipmentService?.releaseReservationsForEvent?.(eventId, coordinatorId);
+    await releaseVenueBookingsForCancelledEvent?.(eventId);
+
+    return result;
   }
 
-  async function reject(eventId, coordinatorId, note) {
+  // SCRUM-37 team design: rejecting a resubmission (an event sent back to
+  // SUBMITTED by a significant edit, then returned here via startReview) must
+  // also release whatever arrangements it had - same two release functions
+  // cancel()/postpone()/approve() already call, reused as-is. Both are
+  // already no-ops when nothing is live, so this is safe on an ordinary
+  // first-time rejection too (nothing has ever been arranged yet at that
+  // point, since arrangements only exist from APPROVED onward).
+  async function reject(eventId, coordinatorId, note, { equipmentService, releaseVenueBookingsForCancelledEvent } = {}) {
     const parsed = readNote(note);
     if (!parsed.ok || parsed.note === null) return { ok: false, reason: "note_required" };
-    return move(eventId, coordinatorId, "UNDER_REVIEW", "REJECTED", outcome(coordinatorId, parsed.note));
+    const result = await move(eventId, coordinatorId, "UNDER_REVIEW", "REJECTED", outcome(coordinatorId, parsed.note));
+    if (!result.ok) return result;
+
+    await equipmentService?.releaseReservationsForEvent?.(eventId, coordinatorId);
+    await releaseVenueBookingsForCancelledEvent?.(eventId);
+
+    return result;
   }
 
   // SCRUM-148 AC1/AC2: the assigned coordinator or the coordinator lead may cancel
@@ -80,12 +106,11 @@ function createReviewService({ repository }) {
   // uses, synchronously - it releases every venue_bookings row tied to the
   // event regardless of why the event changed.
   //
-  // SCRUM-150: postpone never carries a new date, so there is no window left
-  // to hold equipment against - unlike a reschedule (eventWorkspace.service.js),
-  // which flags reservations for review instead of releasing them. Equipment
-  // release on postpone reuses the exact same function cancel() calls above;
-  // releaseReservationsForEvent never reads events.status, so the same call
-  // is correct here without any new equipment-side code path.
+  // SCRUM-150: equipment release on postpone reuses the exact same function
+  // cancel() calls above; releaseReservationsForEvent never reads
+  // events.status, so the same call is correct here without any new
+  // equipment-side code path. (A reschedule releases the same way too, as of
+  // SCRUM-37's team design - see approve()/reject() above.)
   async function postpone(eventId, actorId, reason, { isCoordinatorLead = false, equipmentService, releaseVenueBookingsForCancelledEvent } = {}) {
     const parsed = readNote(reason);
     // A distinct key from cancel's "reason_required" - same FAILURES map in
