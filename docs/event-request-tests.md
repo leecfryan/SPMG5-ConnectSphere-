@@ -564,3 +564,23 @@ Final local verification, 22 October 2026: full backend Vitest 1158/1158 (live s
 Additional cases: SCRUM-117-R05 proves outage and concurrent-save refusal without partial resubmission; SCRUM-117-N02 parameterises retry for both workflow identifiers. SCRUM-117-UI-R03/R04 prove stored dates, cleared values, safe text and the latest no-change cycle.
 
 LIVE-CLARIFICATION-001 in tests/e2e/clarification-request.spec.js checks the installed PostgREST RPCs and both notification queue records using disposable accounts/request. Syntax checked only; Not Executed. User only: notify teammates, then run npm --prefix tests/e2e test -- clarification-request.spec.js from repository root. Expect one passing test; share failure output if not. This checks installed schema, not Novu template delivery.
+
+### SCRUM-117 reported no-change review blocker — 24 October 2026
+
+E2E-CLARIFICATION-003 reproduces an organiser editing attendance during UNDER_REVIEW, followed by the assigned coordinator returning the request and the organiser resubmitting without further edits. It asserts No request fields changed, then uses the real coordinator Review decision section to approve and verifies APPROVED with the same coordinator and saved attendance. All three clarification browser cases passed locally (9.3 seconds). This is local fixture evidence, not a resolution of Ryan's reported live blocker.
+
+Review decision is rendered on the assigned coordinator route below event details/activity history. The organiser route does not expose coordinator decisions. Existing organiser editing and no-change resubmission rules are unchanged pending agreement on any policy change. Logs for this run are external in outputs/scrum117-nochange-review-20261024.
+
+### SCRUM-117 saved-edit baseline correction — 24 October 2026
+
+Ryan clarified that saved organiser edits must be visible to the assigned coordinator before a formal return, and must remain in the comparison if resubmitted without more edits. This supersedes the former return-time baseline semantics, including the earlier E2E-CLARIFICATION-003 expectation.
+
+- SCRUM-117-BASE-UNIT-001/002: all twelve editable fields, protected-field exclusion, equivalent times, optional clearing and reverted edits.
+- SCRUM-117-BASE-API-001: owner save becomes visible to assigned coordinator before return; owner/peer/lead responses exclude comparison and internal baseline history; unrelated coordinator gets 404.
+- SCRUM-117-BASE-UI-001/002: current saved changes show the right baseline; unavailable reads and limited older history are explicit.
+- E2E-CLARIFICATION-003: edit 30 → 45 before return; coordinator sees it immediately; unchanged resubmission retains 30 → 45; later save 50 shows 45 → 50 while history stays 30 → 45; coordinator can approve.
+- BASELINE01–06 in requestBaseline.assertions.sql: real SQL submitted-version retention, draft submission, advancement/revert, queue rollback, restricted trigger execution and all twelve field values. The --clarification harness option loads the exact correction block from docs/notifications.md.
+
+Manual retest (Not Executed): create a fresh request with attendance 30 and start review. Owner edits/saves 45 before any return. Assigned coordinator refreshes and sees Saved organiser changes: 30 → 45. Return it, then owner resubmits without another edit. Coordinator sees 30 → 45 under Last resubmission. Owner later saves 50; coordinator refreshes and sees current 45 → 50 while historical 30 → 45 remains. Verify the unchanged status and same coordinator throughout. Earlier overwritten edits on existing requests are only recoverable if retained history contains them.
+
+Final verification, 24 October 2026: local backend regression 1163/1163 (67 files, live Supabase suites excluded), frontend 553/553 (55 files), isolated Playwright 211/211. Focused clarification browser 3/3, exact applied SQL BASELINE01–06, production build and four acceptance gates pass. Source lint has zero errors; frontend retains one pre-existing generated coverage-file warning. No shared-cloud test or Docker application image build performed. Final external evidence/manual instructions: outputs/scrum117-nochange-review-20261024/saved-edit-implementation-review.md and manual-saved-edit-retest.md in Ryan's ConnectSphere 2 workspace. Manual saved-edit UAT remains Not Executed. No commit or push for this correction.

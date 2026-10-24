@@ -606,6 +606,7 @@ async function returnedRequest(t) {
     registration_start: "2098-12-01T00:00:00Z", registration_end: "2098-12-31T00:00:00Z" });
   const cycle = { id: randomUUID(), event_id: event.id, action: "CHANGES_REQUESTED", created_at: new Date().toISOString(),
     details: { coordinator_id: f.users.first.id, before: { ...event }, note: "Clarify layout" } };
+  f.client.recordRequestBaseline(event);
   f.client.activity.push(cycle);
   return { ...f, event, cycle, path: `/event-workspace/organiser/${event.id}/resubmit` };
 }
@@ -643,7 +644,7 @@ test("[SCRUM-117-R02] Anonymous, wrong roles and other organisers cannot resubmi
   f.users.otherOrganiser.app_metadata.organisation_id = "same-company";
   expect((await f.send(f.path,"otherOrganiser","POST",{cycleId:f.cycle.id})).status).toBe(403);
   expect(f.event.status).toBe("CHANGES_REQUESTED");
-  expect(f.client.activity).toHaveLength(1);
+  expect(f.client.activity).toHaveLength(2);
   expect(f.pending.size).toBe(0);
 });
 
@@ -660,7 +661,7 @@ test("[SCRUM-117-R03] Invalid payload, stale cycle, changed status and invalid s
   const invalid = await f.send(f.path,"organiser","POST",{cycleId:f.cycle.id});
   expect(invalid.status).toBe(400);
   expect((await invalid.json()).errors).toContainEqual({field:"description",message:"required"});
-  expect(f.client.activity).toHaveLength(1);
+  expect(f.client.activity).toHaveLength(2);
   expect(f.pending.size).toBe(0);
 });
 
@@ -669,7 +670,7 @@ test("[SCRUM-117-R04] No-change resubmission is allowed and a partial registrati
   expect((await f.send(`/event-workspace/organiser/${f.event.id}`,"organiser","PATCH",{registration_start:"2099-01-02T00:00:00Z"})).status).toBe(400);
   expect(f.event.registration_start).toBe("2098-12-01T00:00:00Z");
   expect((await f.send(f.path,"organiser","POST",{cycleId:f.cycle.id})).status).toBe(200);
-  expect(f.client.activity.at(-1).details.changes).toEqual([]);
+  expect(f.client.activity.find(row => row.action === "REQUEST_RESUBMITTED").details.changes).toEqual([]);
 });
 
 test("[SCRUM-117-R05] A database outage or save racing validation cannot partially resubmit", async t => {
@@ -682,6 +683,29 @@ test("[SCRUM-117-R05] A database outage or save racing validation cannot partial
   f.client.rpc = (name,args) => { f.event.description = "Saved by another tab"; return originalRpc(name,args); };
   expect((await f.send(f.path,"organiser","POST",{cycleId:f.cycle.id})).status).toBe(409);
   expect(f.event.status).toBe("CHANGES_REQUESTED");
-  expect(f.client.activity).toHaveLength(1);
+  expect(f.client.activity).toHaveLength(2);
   expect(f.pending.size).toBe(0);
+});
+
+test("[SCRUM-117-BASE-API-001] organiser saves are visible to the assigned coordinator before a return; internal baselines remain private", async t => {
+  const f = await setup(t), event=f.records[0];
+  Object.assign(event,{status:"UNDER_REVIEW",purpose:"Workshop",description:"Original description",expected_attendance:30});
+  f.client.activity.push({id:randomUUID(),event_id:event.id,action:"REQUEST_BASELINE_RECORDED",created_at:"2026-10-01T00:00:00Z",
+    details:{source:"SUBMITTED",version_at:"2026-10-01T00:00:00Z",snapshot:{...event}}});
+  expect((await f.send(`/event-workspace/organiser/${event.id}`,"organiser","PATCH",{expected_attendance:45})).status).toBe(200);
+  expect(event.status).toBe("UNDER_REVIEW");
+  const detail=await (await f.send(`/event-workspace/coordinator/${event.id}`,"first")).json();
+  expect(detail.event.request_changes).toEqual({source:"SUBMITTED",version_at:"2026-10-01T00:00:00Z",
+    changes:[{field:"expected_attendance",before:30,after:45}]});
+  expect(detail.event.activity).toEqual([]);
+  expect(JSON.stringify(detail)).not.toContain('"snapshot"');
+  f.users.organiser.app_metadata.organisation_id="same-company";
+  f.users.otherOrganiser.app_metadata.organisation_id="same-company";
+  for(const role of ["organiser","otherOrganiser","manager"]){
+    const scope=role==="manager"?"manager":"organiser";
+    const response=await (await f.send(`/event-workspace/${scope}/${event.id}`,role)).json();
+    expect(response.event).not.toHaveProperty("request_changes");
+    expect(response.event.activity).toEqual([]);
+  }
+  expect((await f.send(`/event-workspace/coordinator/${event.id}`,"second")).status).toBe(404);
 });

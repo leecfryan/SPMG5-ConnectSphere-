@@ -49,7 +49,9 @@ function run() {
       schemaBlock(blocks, "create function public.enqueue_event_changes_requested_notification()"),
       readSql("clarificationNotifications.assertions.sql"),
       schemaBlock(blocks, "create function public.resubmit_event_request("),
-      readSql("resubmission.assertions.sql"));
+      readSql("resubmission.assertions.sql"),
+      schemaBlock(blocks, "create function public.capture_event_request_baseline()"),
+      readSql("requestBaseline.assertions.sql"));
   }
   const script = parts.join("\n");
 
@@ -83,6 +85,7 @@ function run() {
       throw new Error("Clarification SQL assertions did not complete.");
     }
     if (process.argv.includes("--clarification") && !output.includes("RESUBMISSION SQL ASSERTIONS PASSED")) throw new Error("Resubmission SQL assertions did not complete.");
+    if (process.argv.includes("--clarification") && !output.includes("SAVED EDIT BASELINE ASSERTIONS PASSED")) throw new Error("Saved baseline assertions did not complete.");
     process.stdout.write(output);
     for (const [id, description] of [
       ["S01", "Initial assignment recipient and names"],

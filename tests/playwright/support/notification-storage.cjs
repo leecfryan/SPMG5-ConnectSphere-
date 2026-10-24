@@ -5,6 +5,7 @@ const { createNotificationDeliveryService } = require('../../../backend/src/modu
 module.exports = function notificationStorage({ auth, eventsRepository, dataClient }) {
   const pending = new Map(), inbox = new Map();
   const prepareAssignments = require('./assignment-notification-storage.cjs')(dataClient, pending);
+  require('./request-baseline-storage.cjs')(dataClient, eventsRepository);
   require('./resubmission-storage.cjs')(dataClient, pending);
   const transition = eventsRepository.transitionStatus.bind(eventsRepository);
   eventsRepository.transitionStatus = async (...args) => {
