@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router";
 import { Inbox } from "@novu/react";
 import { useAuth } from "../../auth/useAuth";
 import { useApiResource } from "../../../hooks/useApiResource";
@@ -9,6 +10,7 @@ const appearance = {
 };
 
 export default function NotificationCentrePage() {
+  const navigate = useNavigate();
   const { user, token } = useAuth();
   const { data, error, loading, reload } = useApiResource("/api/notifications/inbox-config");
   return (
@@ -23,6 +25,7 @@ export default function NotificationCentrePage() {
           applicationIdentifier={data.applicationIdentifier}
           subscriber={data.subscriberId}
           subscriberHash={data.subscriberHash}
+          routerPush={navigate}
           appearance={appearance}
           localization={{ "notifications.emptyNotice": "You have no notifications yet." }}
         >

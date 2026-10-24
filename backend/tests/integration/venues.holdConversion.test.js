@@ -256,4 +256,3 @@ test("[TC-SCRUM-162-09] POST /booking-requests with hold owned by different coor
   expect(body.error).toMatch(/coordinator/i);
   expect(service.linkHoldsToRequest).not.toHaveBeenCalled();
 });
-

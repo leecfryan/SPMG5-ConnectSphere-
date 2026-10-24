@@ -201,7 +201,7 @@ Feed and the real inbox for actual in-app delivery.
 2. Create a dashboard workflow named Event decision with identifier exactly
    **event-decision**. Add one **In-App** step; no bridge endpoint is required.
 3. Subject: `Event {{payload.outcome}}`.
-4. Body: `Your event “{{payload.eventName | escape}}” was {{payload.outcome}}. {% if payload.remark != "" %}Note: {{payload.remark | escape}}{% endif %}`.
+4. Body: `Your event “{{payload.eventName | escape}}” was {{payload.outcome}}. {% if payload.remark != '' %}Note: {{payload.remark | escape}}{% endif %}`.
    Use the escape filter for organiser/coordinator text. Keep all recipients
    subscribed to this transactional workflow (set Critical if offered).
 5. Save and activate the workflow and its In-App step; confirm the Novu In-App
@@ -976,3 +976,359 @@ executions. The complete backend/CI pipeline was not run by this correction.
 
 The command and repository-test mapping are in
 [the assignment test guide](event-assignment-tests.md#scrum-155-compatibility-verification--17-oct-2026).
+
+
+## Returned-request notifications — SCRUM-117 Task 3
+
+Ryan reports applying the following SQL and creating the Novu workflow on 22 Oct 2026. Live delivery has not been verified by the agent.
+
+Each new CHANGES_REQUESTED activity record queues an organiser notification in the same return transaction. If queue insertion fails, the return and history roll back together. Provider outages after commit leave durable pending work for the existing worker. The activity UUID is the delivery UUID: retries keep it, later return cycles receive another UUID. No existing activity is backfilled. The current worker already selects row.workflow, so no production worker change is needed.
+
+### Schema reference — return notification (reported applied)
+
+This is a one-time change, not a reset. Preserve any additional workflow values if the shared schema has evolved.
+
+```sql
+begin;
+
+alter table public.notification_outbox
+  drop constraint notification_outbox_workflow_check;
+alter table public.notification_outbox
+  add constraint notification_outbox_workflow_check
+  check (workflow in (
+    'event-decision', 'event-assignment', 'equipment-issue',
+    'event-changes-requested'
+  ));
+
+create function public.enqueue_event_changes_requested_notification()
+returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  insert into public.notification_outbox
+    (id, event_id, recipient_id, workflow, payload)
+  values (
+    new.id,
+    new.event_id,
+    (new.details ->> 'organiser_id')::uuid,
+    'event-changes-requested',
+    jsonb_build_object(
+      'eventId', new.event_id,
+      'cycleId', new.id,
+      'eventName', new.details -> 'before' ->> 'name',
+      'message', new.details ->> 'note',
+      'requestPath', '/my-event-requests/' || new.event_id::text
+    )
+  );
+  return new;
+end;
+$$;
+
+revoke all on function public.enqueue_event_changes_requested_notification()
+  from public, anon, authenticated;
+
+create trigger enqueue_event_changes_requested_notification
+  after insert on public.event_activity_log
+  for each row when (new.action = 'CHANGES_REQUESTED')
+  execute function public.enqueue_event_changes_requested_notification();
+
+commit;
+```
+
+### Novu configuration
+
+Use the same environment as the app. Workflow identifier: `event-changes-requested`; one active In-App step. Payload strings: `eventId`, `cycleId`, `eventName`, `message`, `requestPath`. Subject: `Changes requested: {{payload.eventName | escape}}`. Body: `Your event coordinator has requested changes to your event request. {{payload.message | escape}} Open your request to review the clarification.` Redirect URL: `{{payload.requestPath}}`, same tab. The server constructs the relative path from the saved event UUID; the request page still enforces authentication and visibility.
+
+Novu editor correction: the Event Decision optional-note condition must use single quotes: `{% if payload.remark != '' %}Note: {{payload.remark | escape}}{% endif %}`. Ryan confirmed that this resolves the editor error.
+
+Manual UAT (Not Executed): return a fresh agreed test request as its assigned coordinator, open Notifications as the owner, confirm the exact message and follow the link. Another organiser must receive no notice. Historical returns before the trigger was installed do not enqueue notices. Dashboard preview alone does not prove application delivery.
+
+The inbox supplies React Router navigate as Novu routerPush. Without this integration the SDK can change browser history while React still renders the inbox. E2E-CLARIFICATION-002 verifies that the destination actually renders, not just that the URL changes.
+
+## SCRUM-117 resubmission schema reference
+
+Applied manually by Ryan on 22 October 2026. Install once after the clarification SQL above. The existing worker delivers `event-request-resubmitted` to the retained coordinator; its requestPath opens the assigned request.
+
+```sql
+begin;
+
+alter table public.notification_outbox
+  drop constraint notification_outbox_workflow_check;
+alter table public.notification_outbox
+  add constraint notification_outbox_workflow_check
+  check (workflow in ('event-decision', 'event-assignment', 'equipment-issue',
+    'event-changes-requested', 'event-request-resubmitted'));
+
+create function public.resubmit_event_request(
+  p_event_id uuid,
+  p_organiser_id uuid,
+  p_cycle_id uuid,
+  p_expected_fields jsonb
+) returns setof public.events
+language plpgsql security invoker set search_path = public as $$
+declare
+  v_event public.events%rowtype;
+  v_expected public.events%rowtype;
+  v_before public.events%rowtype;
+  v_cycle public.event_activity_log%rowtype;
+  v_current_fields jsonb;
+  v_expected_fields jsonb;
+  v_before_fields jsonb;
+  v_changes jsonb := '[]'::jsonb;
+  v_field text;
+  v_old text;
+  v_new text;
+  v_activity_id uuid := gen_random_uuid();
+  v_fields text[] := array['name', 'purpose', 'description', 'start_time', 'end_time',
+    'registration_start', 'registration_end', 'expected_attendance', 'venue_requirements',
+    'accessibility_needs', 'equipment_needs', 'other_comments'];
+begin
+  if p_expected_fields is null or jsonb_typeof(p_expected_fields) <> 'object' then
+    raise exception 'Expected saved request fields are required.' using errcode = '22023';
+  end if;
+  if not (p_expected_fields ?& v_fields)
+     or (select count(*) from jsonb_object_keys(p_expected_fields)) <> cardinality(v_fields) then
+    raise exception 'Provide exactly the editable request fields.' using errcode = '22023';
+  end if;
+
+  select * into v_event from public.events where id = p_event_id for update;
+  if not found then return; end if;
+  if p_organiser_id is null or v_event.organiser_id is distinct from p_organiser_id
+     or v_event.status <> 'CHANGES_REQUESTED' or v_event.coordinator_id is null then return; end if;
+
+  select * into v_cycle from public.event_activity_log
+  where event_id = p_event_id and action = 'CHANGES_REQUESTED'
+  order by created_at desc, id desc limit 1;
+  if not found then return; end if;
+  if p_cycle_id is null or v_cycle.id is distinct from p_cycle_id
+     or (v_cycle.details ->> 'coordinator_id')::uuid is distinct from v_event.coordinator_id then return; end if;
+  if exists(select 1 from public.event_activity_log
+    where event_id = p_event_id and action = 'REQUEST_RESUBMITTED'
+      and details ->> 'cycle_id' = p_cycle_id::text) then return; end if;
+
+  select * into v_expected from jsonb_populate_record(null::public.events, p_expected_fields);
+  select * into v_before from jsonb_populate_record(null::public.events, v_cycle.details -> 'before');
+  select jsonb_object_agg(key,value) into v_current_fields
+    from jsonb_each(to_jsonb(v_event)) where key = any(v_fields);
+  select jsonb_object_agg(key,value) into v_expected_fields
+    from jsonb_each(to_jsonb(v_expected)) where key = any(v_fields);
+  select jsonb_object_agg(key,value) into v_before_fields
+    from jsonb_each(to_jsonb(v_before)) where key = any(v_fields);
+
+  -- Recheck the same saved values validated by the server while holding the event lock.
+  if v_current_fields is distinct from v_expected_fields then return; end if;
+
+  foreach v_field in array v_fields loop
+    v_old := nullif(v_before_fields ->> v_field, '');
+    v_new := nullif(v_current_fields ->> v_field, '');
+    if v_old is distinct from v_new then
+      v_changes := v_changes || jsonb_build_array(jsonb_build_object(
+        'field', v_field, 'before', v_before_fields -> v_field,
+        'after', v_current_fields -> v_field));
+    end if;
+  end loop;
+
+  insert into public.event_activity_log(id,event_id,user_id,action,details)
+  values(v_activity_id,p_event_id,p_organiser_id,'REQUEST_RESUBMITTED',jsonb_build_object(
+    'cycle_id',p_cycle_id,'from_status','CHANGES_REQUESTED','to_status','UNDER_REVIEW',
+    'organiser_id',p_organiser_id,'coordinator_id',v_event.coordinator_id,
+    'before',v_before_fields,'after',v_current_fields,'changes',v_changes));
+
+  return query update public.events set status = 'UNDER_REVIEW'
+    where id = p_event_id returning *;
+end;
+$$;
+revoke all on function public.resubmit_event_request(uuid,uuid,uuid,jsonb)
+  from public, anon, authenticated;
+grant execute on function public.resubmit_event_request(uuid,uuid,uuid,jsonb) to service_role;
+
+create function public.enqueue_event_request_resubmitted_notification()
+returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  insert into public.notification_outbox(id,event_id,recipient_id,workflow,payload)
+  values(new.id,new.event_id,(new.details ->> 'coordinator_id')::uuid,
+    'event-request-resubmitted',jsonb_build_object(
+      'eventId',new.event_id,'cycleId',new.details ->> 'cycle_id',
+      'eventName',new.details -> 'after' ->> 'name',
+      'changedFieldCount',jsonb_array_length(new.details -> 'changes'),
+      'requestPath','/assigned-events/' || new.event_id::text));
+  return new;
+end;
+$$;
+revoke all on function public.enqueue_event_request_resubmitted_notification()
+  from public, anon, authenticated;
+create trigger enqueue_event_request_resubmitted_notification
+  after insert on public.event_activity_log
+  for each row when (new.action = 'REQUEST_RESUBMITTED')
+  execute function public.enqueue_event_request_resubmitted_notification();
+
+commit;
+```
+
+### Novu configuration for resubmission
+
+Workflow identifier: event-request-resubmitted. One In-App step; subject: Request resubmitted. Body: The organiser has resubmitted {{payload.eventName | escape}}. Open the request to review the updated details. Same-tab redirect: {{payload.requestPath}}. Required payload properties: eventId, cycleId, eventName, requestPath (strings) and changedFieldCount (number). Ryan reports creating the workflow on 22 October 2026. No additional worker deployment change is needed; the existing worker dispatches the queued workflow identifier.
+
+## SCRUM-117 saved-edit version baseline schema reference
+
+Ryan reported applying this correction on 24 October 2026. Apply once after the previous clarification/resubmission setup. No new table, column, status or Novu field. This replaces the comparison baseline; ordinary saves do not advance it.
+
+```sql
+begin;
+
+-- SCRUM-117: preserve a submitted version independently of ordinary edits and returns.
+create function public.capture_event_request_baseline()
+returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_snapshot jsonb;
+  v_source text;
+begin
+  if tg_op = 'INSERT' then
+    if new.status = 'DRAFT' then return new; end if;
+    v_source := case when new.status = 'SUBMITTED' then 'SUBMITTED' else 'TRACKING_STARTED' end;
+  elsif old.status = 'DRAFT' and new.status = 'SUBMITTED' then
+    v_source := 'SUBMITTED';
+  elsif old.status = 'CHANGES_REQUESTED' and new.status = 'UNDER_REVIEW' then
+    v_source := 'RESUBMITTED';
+  else
+    return new;
+  end if;
+
+  select jsonb_object_agg(key,value) into v_snapshot
+  from jsonb_each(to_jsonb(new)) where key = any(array['name','purpose','description','start_time','end_time','registration_start','registration_end','expected_attendance','venue_requirements','accessibility_needs','equipment_needs','other_comments']);
+  insert into public.event_activity_log(id,event_id,user_id,action,details,created_at)
+  values(gen_random_uuid(),new.id,null,'REQUEST_BASELINE_RECORDED',
+    jsonb_build_object('source',v_source,'version_at',clock_timestamp(),'snapshot',v_snapshot),
+    clock_timestamp());
+  return new;
+end;
+$$;
+revoke all on function public.capture_event_request_baseline() from public, anon, authenticated;
+create trigger capture_event_request_baseline
+  after insert or update of status on public.events
+  for each row execute function public.capture_event_request_baseline();
+
+-- SCRUM-117: retain the best available historical version without inventing old values.
+insert into public.event_activity_log(id,event_id,user_id,action,details,created_at)
+select gen_random_uuid(),e.id,null,'REQUEST_BASELINE_RECORDED',jsonb_build_object(
+  'source',case when submitted.id is not null then 'RESUBMITTED'
+    when returned.id is not null then 'RECOVERED_RETURN' else 'TRACKING_STARTED' end,
+  'version_at',coalesce(submitted.created_at,returned.created_at,clock_timestamp()),
+  'snapshot',coalesce(submitted.details -> 'after',returned.details -> 'before',current_fields.snapshot)
+),clock_timestamp()
+from public.events e
+cross join lateral (
+  select jsonb_object_agg(key,value) as snapshot from jsonb_each(to_jsonb(e))
+  where key = any(array['name','purpose','description','start_time','end_time','registration_start','registration_end','expected_attendance','venue_requirements','accessibility_needs','equipment_needs','other_comments'])
+) current_fields
+left join lateral (
+  select h.id,h.details,h.created_at from public.event_activity_log h
+  where h.event_id=e.id and h.action='REQUEST_RESUBMITTED'
+    and jsonb_typeof(h.details -> 'after')='object'
+  order by h.created_at desc,h.id desc limit 1
+) submitted on true
+left join lateral (
+  select h.id,h.details,h.created_at from public.event_activity_log h
+  where h.event_id=e.id and h.action='CHANGES_REQUESTED'
+    and jsonb_typeof(h.details -> 'before')='object'
+  order by h.created_at asc,h.id asc limit 1
+) returned on true
+where e.status <> 'DRAFT' and not exists(
+  select 1 from public.event_activity_log h
+  where h.event_id=e.id and h.action='REQUEST_BASELINE_RECORDED'
+);
+
+create or replace function public.resubmit_event_request(
+  p_event_id uuid,
+  p_organiser_id uuid,
+  p_cycle_id uuid,
+  p_expected_fields jsonb
+) returns setof public.events
+language plpgsql security invoker set search_path = public as $$
+declare
+  v_event public.events%rowtype;
+  v_expected public.events%rowtype;
+  v_before public.events%rowtype;
+  v_cycle public.event_activity_log%rowtype;
+  v_baseline public.event_activity_log%rowtype;
+  v_current_fields jsonb;
+  v_expected_fields jsonb;
+  v_before_fields jsonb;
+  v_changes jsonb := '[]'::jsonb;
+  v_field text;
+  v_old text;
+  v_new text;
+  v_activity_id uuid := gen_random_uuid();
+  v_fields text[] := array['name', 'purpose', 'description', 'start_time', 'end_time',
+    'registration_start', 'registration_end', 'expected_attendance', 'venue_requirements',
+    'accessibility_needs', 'equipment_needs', 'other_comments'];
+begin
+  if p_expected_fields is null or jsonb_typeof(p_expected_fields) <> 'object' then
+    raise exception 'Expected saved request fields are required.' using errcode = '22023';
+  end if;
+  if not (p_expected_fields ?& v_fields)
+     or (select count(*) from jsonb_object_keys(p_expected_fields)) <> cardinality(v_fields) then
+    raise exception 'Provide exactly the editable request fields.' using errcode = '22023';
+  end if;
+
+  select * into v_event from public.events where id = p_event_id for update;
+  if not found then return; end if;
+  if p_organiser_id is null or v_event.organiser_id is distinct from p_organiser_id
+     or v_event.status <> 'CHANGES_REQUESTED' or v_event.coordinator_id is null then return; end if;
+
+  select * into v_cycle from public.event_activity_log
+  where event_id = p_event_id and action = 'CHANGES_REQUESTED'
+  order by created_at desc, id desc limit 1;
+  if not found then return; end if;
+  if p_cycle_id is null or v_cycle.id is distinct from p_cycle_id
+     or (v_cycle.details ->> 'coordinator_id')::uuid is distinct from v_event.coordinator_id then return; end if;
+  if exists(select 1 from public.event_activity_log
+    where event_id = p_event_id and action = 'REQUEST_RESUBMITTED'
+      and details ->> 'cycle_id' = p_cycle_id::text) then return; end if;
+
+  select * into v_baseline from public.event_activity_log
+  where event_id = p_event_id and action = 'REQUEST_BASELINE_RECORDED'
+  order by created_at desc, id desc limit 1;
+  if not found then return; end if;
+
+  select * into v_expected from jsonb_populate_record(null::public.events, p_expected_fields);
+  select * into v_before from jsonb_populate_record(null::public.events, v_baseline.details -> 'snapshot');
+  select jsonb_object_agg(key,value) into v_current_fields
+    from jsonb_each(to_jsonb(v_event)) where key = any(v_fields);
+  select jsonb_object_agg(key,value) into v_expected_fields
+    from jsonb_each(to_jsonb(v_expected)) where key = any(v_fields);
+  select jsonb_object_agg(key,value) into v_before_fields
+    from jsonb_each(to_jsonb(v_before)) where key = any(v_fields);
+
+  -- Recheck the same saved values validated by the server while holding the event lock.
+  if v_current_fields is distinct from v_expected_fields then return; end if;
+
+  foreach v_field in array v_fields loop
+    v_old := nullif(v_before_fields ->> v_field, '');
+    v_new := nullif(v_current_fields ->> v_field, '');
+    if v_old is distinct from v_new then
+      v_changes := v_changes || jsonb_build_array(jsonb_build_object(
+        'field', v_field, 'before', v_before_fields -> v_field,
+        'after', v_current_fields -> v_field));
+    end if;
+  end loop;
+
+  insert into public.event_activity_log(id,event_id,user_id,action,details)
+  values(v_activity_id,p_event_id,p_organiser_id,'REQUEST_RESUBMITTED',jsonb_build_object(
+    'cycle_id',p_cycle_id,'from_status','CHANGES_REQUESTED','to_status','UNDER_REVIEW',
+    'organiser_id',p_organiser_id,'coordinator_id',v_event.coordinator_id,
+    'before',v_before_fields,'after',v_current_fields,'changes',v_changes,
+    'baseline_id',v_baseline.id,'baseline_source',v_baseline.details ->> 'source',
+    'baseline_version_at',v_baseline.details -> 'version_at'));
+
+  return query update public.events set status = 'UNDER_REVIEW'
+    where id = p_event_id returning *;
+end;
+$$;
+revoke all on function public.resubmit_event_request(uuid,uuid,uuid,jsonb)
+  from public, anon, authenticated;
+grant execute on function public.resubmit_event_request(uuid,uuid,uuid,jsonb) to service_role;
+
+commit;
+```

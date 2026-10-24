@@ -482,3 +482,111 @@ Deleting a draft, auto-save, and draft expiry (#116) are outside the AC.
 **Why one live test.** It is the only check that the real `events` table accepts a draft with only a name and that
 PostgREST's `neq` filter really hides `DRAFT` rows from the workspace — both depend on the real schema, which the
 fakes cannot prove.
+
+## SCRUM-117 Task 2 — return for changes
+
+Scope: AC1 and the saved-message display portion of AC3. Notification delivery,
+resubmission and difference presentation are covered in the later sections below; this table describes Task 2 only.
+
+| Source tests | Observable outcome |
+| --- | --- |
+| SCRUM-117-API-001–007 in backend/tests/integration/events.review.test.js | Assigned coordinator only, UNDER_REVIEW only, required note, trusted actor, duplicate/stale refusals, safe storage failure, cancellation/postponement by coordinator or lead. Denials assert unchanged state. |
+| SCRUM-117-API-008 in backend/tests/integration/eventWorkspace.test.js | Returned request remains visible; lead reassignment returns 409 and leaves stored events unchanged. |
+| SCRUM-117-UNIT-001 in lifecycle.test.js | Returned requests count in workload but are neither assignable nor planning eligible. |
+| SCRUM-117-UNIT-002 in eventWorkspace.service.test.js | Saved note is readable without leaking stored snapshots/actor details. |
+| SCRUM-117-UNIT-003–004 in clarification.repository.test.js | Exact atomic RPC arguments, no-row conflict and storage error handling. |
+| SCRUM-117-UNIT-005 in review.service.test.js | Deletion before the atomic return is not found. |
+| SCRUM-117-UI-001–004 in EventDecisionControls.test.jsx | Required note, correct API call, retained input on error, state visibility and duplicate-click prevention. |
+| SCRUM-117-UI-005–006 in EventWorkspaceDetailPage.test.jsx | Organiser reads the note after refresh; permitted cancellation/postponement; no reassignment/approval while returned. |
+| E2E-CLARIFICATION-001 in tests/playwright/clarification.browser.spec.cjs | Real local UI/API return journey, reload, organiser sign-in/read, retained coordinator, one history entry and 375px layout. |
+
+Run from the repository root using installed dependencies:
+
+```sh
+npm --prefix backend run test:events -- tests/unit/events tests/integration/events.review.test.js tests/integration/eventWorkspace.test.js --pool=threads --maxWorkers=1
+npm --prefix frontend test -- --run src/features/events --maxWorkers=1 --reporter=default
+npm run test:playwright -- tests/playwright/clarification.browser.spec.cjs --reporter=list
+```
+
+Expected: all selected tests pass; a nonzero exit requires investigation. These tests use
+local storage substitutes, not deployed Supabase. They do not prove the installed SQL's
+transaction/locking behavior. Human UAT remains Not Executed. Formal execution logs and
+coverage reports are kept in Ryan's external ConnectSphere 2 workspace.
+
+The existing workload/cancellation/postponement query-shape tests now include
+CHANGES_REQUESTED to match Ryan's explicit rules; their assertions were retained.
+
+## SCRUM-117 Task 3 — organiser notification
+
+AC2: The Event Organiser is notified, with the coordinator's message and a link to the request.
+
+| Source ID | Layer | Observable result |
+| --- | --- | --- |
+| SCRUM-117-N01 | Automated worker unit | Saved owner receives the exact message/path and workflow; successful delivery clears pending work. |
+| SCRUM-117-N02 | Automated worker unit | Provider failure retains pending work; recovery sends the identical payload and idempotency ID. |
+| SCRUM-117-N03 | Automated worker unit | Separate return cycles produce separate notices without overwriting the earlier message. |
+| E2E-CLARIFICATION-002 | Automated isolated browser | Owner reads a worker-emitted notice, clicks it and sees the request message at 375px; duplicate return adds no notice and unrelated users receive none. |
+| SCRUM-117-S01–S05 | Automated local PostgreSQL | Exact documented SQL proves denied-input isolation, recipient/message/link, separate cycles, rollback and browser-role restrictions. |
+
+Commands from repository root:
+- Worker regression: `npm --prefix backend run test:events -- tests/unit/notifications tests/integration/notifications.delivery.test.js tests/integration/notifications.assignment.test.js --maxWorkers=1 --reporter=dot`.
+- Frontend: `npm --prefix frontend test -- --run src/features/notifications/NotificationCentre.test.jsx --maxWorkers=1 --reporter=default`.
+- Browser regression: `npm run test:playwright -- tests/playwright/clarification.browser.spec.cjs tests/playwright/assignment-notifications.browser.spec.cjs tests/playwright/notifications.browser.spec.cjs --reporter=list`.
+- SQL: `node tests/sql/run-assignment-notifications.cjs --clarification` with Docker running and the cached postgres:17-alpine image. Never run fixture SQL in Supabase.
+
+All commands return zero on success. SQL prints CLARIFICATION SQL ASSERTIONS PASSED; Vitest and Playwright show passed totals. Investigate named failures before rerunning. No installation is required. Execution logs and coverage remain outside the repository in Ryan's ChatGPT workspace. These checks do not verify deployed Novu templates or shared Supabase schema; manual UAT remains Not Executed.
+
+Executed by Codex on 22 Oct 2026: focused worker regression 40/40, inbox frontend 25/25, related browser regression 10/10, and all five local SQL scenarios passed. Four verification gates met. Earlier failing tests caught missing router integration; the final browser assertion requires the actual request page to render, not just a changed URL.
+
+Final broader regression on 22 Oct 2026: frontend 548/548 across 52 files and isolated Playwright 210/210 passed. All 12 statements and recorded branch arms in NotificationCentrePage are covered. Frontend build passed. Backend source/test lint passed excluding existing generated .vitest UI assets; the plain command encounters those assets. Frontend lint reports zero errors and one existing generated coverage-file warning. Full backend regression and Docker image builds were not repeated for this slice; live cloud UAT is pending. Full execution details and changed-file list are in the external SCRUM-117-task3-review.md.
+
+
+Test pruning requested by Ryan on 22 Oct 2026: removed the redundant SCRUM-117-N04 router-callback component test and three screenshot captures. E2E-CLARIFICATION-002 retains the stronger proof that clicking the actual notification renders the request and its message. Other acceptance and failure-path tests remain. Counts above describe historical runs before this pruning.
+
+## SCRUM-117 resubmission acceptance checks
+
+| Source ID | Acceptance criterion / risk | Observable result |
+| --- | --- | --- |
+| SCRUM-117-R01 | Organiser resubmits; same coordinator; coordinator sees changes | Save leaves returned status; resubmit moves to UNDER_REVIEW, queues one coordinator notice, duplicate is refused and later edits do not alter history. Organiser responses omit comparison values. |
+| SCRUM-117-R02 | Only the responsible organiser can resubmit | Anonymous, wrong-role, unrelated and same-company non-owner attempts leave status, history and queue unchanged. |
+| SCRUM-117-R03 | Valid resubmission before review proceeds | Invalid body, stale cycle, postponed request and invalid saved requirements refuse without a new notice/history. |
+| SCRUM-117-R04 | All request details editable; no-change resubmission allowed | Partial registration edits validate the whole saved window; unchanged resubmission succeeds with an empty comparison. |
+| RSQL01–05 in tests/sql/resubmission.assertions.sql | Database semantics supporting the AC | Real PostgreSQL rejects stale expected values/cycles/owners, compares all twelve fields, preserves snapshots and assignment, emits exact notice once, handles equivalent timestamps/clearing/reverts, rolls back failed queues and denies browser execution. |
+| E2E-CLARIFICATION-002 | Full cross-role AC journey | Owner opens notice, edits attendance/layout, saves then resubmits; retained coordinator opens their notice and sees exactly those two before/after changes at 375px. |
+| SCRUM-117-UI-R01–02 | Organiser can recover from failed resubmission | Conflict remains retryable; validation identifies details to correct; successful retry reloads. |
+
+Run the existing local SQL command with --clarification, the focused browser spec, and backend eventWorkspace.test.js. SQL must print RESUBMISSION SQL ASSERTIONS PASSED. Frontend and backend runners must exit zero with no failed tests. No decorative UI assertions were added.
+
+Manual UAT remains Not Executed until Ryan runs the completed workflow: return an assigned UNDER_REVIEW request with a message; owner opens the inbox link, edits and saves; verify it remains Changes requested; resubmit; verify Under review with the same coordinator; coordinator opens the new inbox notice and checks before/after fields. Also resubmit a second cycle without edits and expect No request fields changed. SQL/workflow setup is reported complete; this is not evidence of live delivery for the new action.
+
+Final local verification, 22 October 2026: full backend Vitest 1158/1158 (live suites excluded), separate Auth 29/29 and equipment 68/68; frontend 549/549; Playwright 210/210; local SQL and production build passed. After final acceptance-case additions, focused backend 448/448 and frontend 252/252 passed. Four acceptance gates met. Source lint passes; backend command excludes pre-existing generated .vitest assets. No Docker application image builds or shared-cloud tests were run. Detailed logs/coverage and coverage limitations are in Ryan's external SCRUM-117-final-review.md.
+
+Additional cases: SCRUM-117-R05 proves outage and concurrent-save refusal without partial resubmission; SCRUM-117-N02 parameterises retry for both workflow identifiers. SCRUM-117-UI-R03/R04 prove stored dates, cleared values, safe text and the latest no-change cycle.
+
+LIVE-CLARIFICATION-001 in tests/e2e/clarification-request.spec.js checks the installed PostgREST RPCs and both notification queue records using disposable accounts/request. Syntax checked only; Not Executed. User only: notify teammates, then run npm --prefix tests/e2e test -- clarification-request.spec.js from repository root. Expect one passing test; share failure output if not. This checks installed schema, not Novu template delivery.
+
+### SCRUM-117 reported no-change review blocker — 24 October 2026
+
+E2E-CLARIFICATION-003 reproduces an organiser editing attendance during UNDER_REVIEW, followed by the assigned coordinator returning the request and the organiser resubmitting without further edits. It asserts No request fields changed, then uses the real coordinator Review decision section to approve and verifies APPROVED with the same coordinator and saved attendance. All three clarification browser cases passed locally (9.3 seconds). This is local fixture evidence, not a resolution of Ryan's reported live blocker.
+
+Review decision is rendered on the assigned coordinator route below event details/activity history. The organiser route does not expose coordinator decisions. Existing organiser editing and no-change resubmission rules are unchanged pending agreement on any policy change. Logs for this run are external in outputs/scrum117-nochange-review-20261024.
+
+### SCRUM-117 saved-edit baseline correction — 24 October 2026
+
+Ryan clarified that saved organiser edits must be visible to the assigned coordinator before a formal return, and must remain in the comparison if resubmitted without more edits. This supersedes the former return-time baseline semantics, including the earlier E2E-CLARIFICATION-003 expectation.
+
+- SCRUM-117-BASE-UNIT-001/002: all twelve editable fields, protected-field exclusion, equivalent times, optional clearing and reverted edits.
+- SCRUM-117-BASE-API-001: owner save becomes visible to assigned coordinator before return; owner/peer/lead responses exclude comparison and internal baseline history; unrelated coordinator gets 404.
+- SCRUM-117-BASE-UI-001/002: current saved changes show the right baseline; unavailable reads and limited older history are explicit.
+- E2E-CLARIFICATION-003: edit 30 → 45 before return; coordinator sees it immediately; unchanged resubmission retains 30 → 45; later save 50 shows 45 → 50 while history stays 30 → 45; coordinator can approve.
+- BASELINE01–06 in requestBaseline.assertions.sql: real SQL submitted-version retention, draft submission, advancement/revert, queue rollback, restricted trigger execution and all twelve field values. The --clarification harness option loads the exact correction block from docs/notifications.md.
+
+Manual retest (Not Executed): create a fresh request with attendance 30 and start review. Owner edits/saves 45 before any return. Assigned coordinator refreshes and sees Saved organiser changes: 30 → 45. Return it, then owner resubmits without another edit. Coordinator sees 30 → 45 under Last resubmission. Owner later saves 50; coordinator refreshes and sees current 45 → 50 while historical 30 → 45 remains. Verify the unchanged status and same coordinator throughout. Earlier overwritten edits on existing requests are only recoverable if retained history contains them.
+
+Final verification, 24 October 2026: local backend regression 1163/1163 (67 files, live Supabase suites excluded), frontend 553/553 (55 files), isolated Playwright 211/211. Focused clarification browser 3/3, exact applied SQL BASELINE01–06, production build and four acceptance gates pass. Source lint has zero errors; frontend retains one pre-existing generated coverage-file warning. No shared-cloud test or Docker application image build performed. Final external evidence/manual instructions: outputs/scrum117-nochange-review-20261024/saved-edit-implementation-review.md and manual-saved-edit-retest.md in Ryan's ConnectSphere 2 workspace. Manual saved-edit UAT remains Not Executed. No commit or push for this correction.
+
+PR #62 integration with staging (SCRUM-117/SCRUM-161): StatusBadge uses the shared statuses.js map, including CHANGES_REQUESTED. The frontend active-status filter includes returned requests, matching the backend. SCRUM-117-UI-MERGE-001 verifies default visibility and explicit filtering in the Lead overview; the SCRUM-161 manager API case now includes returned requests alongside the other active stages. Existing clarification and overview assertions are retained.
+
+PR #62 conflict-resolution verification (24 October 2026): local backend regression 1173/1173 across 68 Vitest files (shared Supabase suites excluded), frontend 564/564 across 56 files, isolated Playwright 213/213, production build and three merge gates passed. The targeted overview/badge/list rerun passed 30/30. Source lint has zero errors; existing generated report exclusions/warnings remain. Earlier focused UI failures were resolved by correcting the new test's field label and using bounded workers; all existing assertions were retained. No shared database, commit, push or PR merge performed during resolution. Evidence is external under ConnectSphere 2/outputs/pr62-merge-20261024.
+
+PR #62 CI correction (2026-10-24): SCRUM-117-UI-R03 explicitly exercises en-US and en-SG date formatting and checks the formatted before/after registration dates, rather than assuming a British date order. This preserves the date-value assertions on both local Windows and CI Linux. Verification: `npm --prefix frontend test -- --run --maxWorkers=2 --reporter=dot` passed 565 tests; frontend lint passed with one existing generated-coverage warning, and production build passed. The first unrestricted run hit an unrelated SCRUM-100-UI-007 loading timeout (563 passed, 1 failed); the reduced-worker full run passed all cases.

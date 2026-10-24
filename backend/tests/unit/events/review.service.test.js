@@ -80,3 +80,8 @@ test("SCRUM-98: a guarded write that matches nothing is not_found when the event
 
   expect(await review.startReview("evt-1", "coord-1")).toEqual({ ok: false, reason: "not_found" });
 });
+
+test("[SCRUM-117-UNIT-005] a request deleted before the atomic return is not found", async () => {
+  repository.requestChanges = vi.fn(async () => null);
+  expect(await review.requestChanges("evt-1", "coord-1", "Clarify attendance.")).toEqual({ ok: false, reason: "not_found" });
+});

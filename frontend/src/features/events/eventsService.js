@@ -111,3 +111,10 @@ export function submitDraft(draftId, fields, token) {
     malformed: "Could not submit the event request. Please try again.",
   });
 }
+
+export function resubmitEventRequest(eventId, cycleId, token) {
+  return sendEventFields(`/api/event-workspace/organiser/${encodeURIComponent(eventId)}/resubmit`, "POST", { cycleId }, token, {
+    signedOut: "Please sign in to resubmit a request.",
+    malformed: "Unable to resubmit the request. Refresh and try again.",
+  });
+}

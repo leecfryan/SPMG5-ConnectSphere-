@@ -28,3 +28,8 @@ export function postponeEvent(eventId, reason, token) {
   return apiFetch(`/api/internal/events/${eventId}/postpone`, token, { method: "POST", body: { reason } })
     .then((body) => body.event);
 }
+
+export function requestEventChanges(eventId, note, token) {
+  return apiFetch(`/api/internal/events/${eventId}/request-changes`, token, { method: "POST", body: { note } })
+    .then((body) => body.event);
+}

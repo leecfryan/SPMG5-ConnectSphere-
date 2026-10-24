@@ -790,3 +790,7 @@ frontend lint passed, and the frontend production build passed. Live-database
 checks are deliberately run by the developer, not the agent: the developer's
 focused rerun passed all three SCRUM-145 cases, `TC-SCRUM-145-01`,
 `TC-SCRUM-145-04`, and `TC-SCRUM-145-07`.
+
+PR #62 CI correction (2026-10-24): TC-SCRUM-154-LIVE-01/02/04 snapshot existing event history before the booking operation. Successful operations must preserve all previous entries and append exactly one entry with the expected action and details; refusal must leave the history identical. This accommodates SCRUM-117 baseline entries without ignoring unexpected writes. These live cases require a new CI or human run; the agent does not execute them against shared Supabase.
+
+Offline verification on 2026-10-24: backend lint passed, and Vitest passed 1,173 tests with `tests/live/**` and the six shared-database integration suites excluded. These results do not count as execution of TC-SCRUM-154-LIVE-01/02/04; their updated assertions await CI.

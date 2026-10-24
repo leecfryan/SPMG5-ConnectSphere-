@@ -3,6 +3,8 @@ import { formatWhen } from "../eventFormat";
 // SCRUM-141 AC4: the event's recorded decisions, newest first, for whoever may
 // see the event. null (or absent) means the server could not read the history.
 const ACTIONS = Object.freeze({
+  REQUEST_RESUBMITTED: "Request resubmitted",
+  CHANGES_REQUESTED: "Changes requested",
   SAFETY_APPROVED: "Safety arrangement approved",
   SAFETY_REJECTED: "Safety arrangement rejected",
 });
