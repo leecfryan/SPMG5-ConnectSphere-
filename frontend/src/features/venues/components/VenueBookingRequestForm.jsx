@@ -1,5 +1,6 @@
 import { useAuth } from "../../auth/useAuth";
 import { useState, useEffect } from "react";
+import { useLocation } from "react-router";
 import {
   fetchBookableEvents,
   fetchVenueAvailability,
@@ -8,7 +9,7 @@ import {
 import {
   IconAlert,
   IconArrowLeft,
-  IconCalendar,
+  IconArrowRight,
   IconCheck,
   IconClock,
 } from "./VenueIcons";
@@ -29,12 +30,16 @@ const STATUS_LABELS = {
   available: "Available",
   booked: "Booked",
   pending: "Requested",
+  // SCRUM-146: active hold — same label as the availability calendar
+  tentative: "Tentative hold",
   unavailable: "Unavailable",
   closed: "Closed",
 };
 
 // Matches REQUESTABLE_STATUSES in venues.bookingRequests.validation.js.
 // The backend re-checks, this only stops the obvious mistakes early.
+// SCRUM-162: tentative slots are also requestable when they belong to the hold
+// being converted — checked per-slot using holdSlotSet below.
 const REQUESTABLE_STATUSES = ["available", "pending"];
 
 const REQUEST_STATUS_LABELS = {
@@ -42,7 +47,7 @@ const REQUEST_STATUS_LABELS = {
   confirmed: "Confirmed",
   rejected: "Rejected",
   cancelled: "Cancelled",
-  mixed: "Partly decided",
+  mixed: "Partly confirmed",
 };
 
 function toggle(list, item) {
@@ -51,9 +56,14 @@ function toggle(list, item) {
     : [...list, item];
 }
 
-function slotHint(cell) {
+function slotHint(cell, isHoldSlot) {
   if (cell.status === "pending") return `${cell.label}, already requested but still open`;
-  if (cell.status === "tentative") return `${cell.label}, held tentatively — cannot be requested`;
+  if (cell.status === "tentative") {
+    // SCRUM-162: this coordinator's own hold — selecting it converts the hold
+    return isHoldSlot
+      ? `${cell.label}, your active hold — select to include in this request`
+      : `${cell.label}, held tentatively — cannot be requested`;
+  }
   if (cell.status === "booked" || cell.status === "unavailable") return cell.label;
   if (cell.status === "closed") return "Outside operating hours";
   return "Open for booking";
@@ -75,6 +85,11 @@ function StepHeader({ number, title, description }) {
 
 function VenueBookingRequestForm({ venue, onDone, onCancel }) {
   const { token } = useAuth();
+  const { state } = useLocation();
+  // SCRUM-162: location state is set when navigating from the "Convert to booking request" button.
+  const holdConversion = state?.holdConversion ?? null;
+  const holdSlotSet = new Set(holdConversion?.slots ?? []);
+
   // Plain values read once, never venue.something inside a handler. The React
   // Compiler hoists property reads out of closures into its memo checks, which
   // is what crashed the catalogue page in SCRUM-16.
@@ -88,10 +103,10 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
   const [eventsError, setEventsError] = useState(null);
   const [isLoadingEvents, setIsLoadingEvents] = useState(true);
 
-  // SCRUM-85 and SCRUM-86
-  const [eventId, setEventId] = useState("");
-  const [bookingDate, setBookingDate] = useState(() => localDate(new Date()));
-  const [slots, setSlots] = useState([]);
+  // SCRUM-85 and SCRUM-86 — pre-filled from hold conversion state when present
+  const [eventId, setEventId] = useState(() => holdConversion?.eventId ?? "");
+  const [bookingDate, setBookingDate] = useState(() => holdConversion?.bookingDate ?? localDate(new Date()));
+  const [slots, setSlots] = useState(() => holdConversion?.slots ?? []);
   const [dayResult, setDayResult] = useState(null);
   const dayKey = JSON.stringify([venueId, bookingDate, token]);
   const day = dayResult?.key === dayKey ? dayResult.day : null;
@@ -175,6 +190,9 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
       accessibility_requirements: accessibility,
       additional_requirements: additional.trim() === "" ? null : additional.trim(),
       purpose: purpose.trim(),
+      // SCRUM-162: present only when converting a hold; tells the backend to
+      // override the tentative conflict check and link the hold rows after creation.
+      ...(holdConversion ? { hold_ids: holdConversion.holdIds } : {}),
     }, token)
       .then((request) => setCreated(request))
       .catch((err) => setSubmitError(err.message))
@@ -217,8 +235,8 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
           </dl>
 
           <button type="button" className="v-btn v-btn-primary v-btn-lg" onClick={onDone}>
-            <IconCalendar />
-            Back to calendar
+            View my booking requests
+            <IconArrowRight />
           </button>
         </div>
       </div>
@@ -239,13 +257,26 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
 
       <header className="v-page-header">
         <div>
-          <p className="v-eyebrow">New booking request</p>
+          <p className="v-eyebrow">
+            {holdConversion ? "Convert hold to booking request" : "New booking request"}
+          </p>
           <h1 className="v-title">Request a booking</h1>
           <p className="v-subtitle">
             {venue.name}, capacity {capacity}
           </p>
         </div>
       </header>
+
+      {holdConversion && (
+        <p className="v-callout">
+          <IconClock />
+          <span>
+            Converting your active hold for <strong>{holdConversion.eventName}</strong> on{" "}
+            {formatDate(holdConversion.bookingDate, { weekday: true, year: true })}.
+            The event and date are locked to match the hold.
+          </span>
+        </p>
+      )}
 
       <div className="v-steps">
         {/* SCRUM-85: the event this request is for */}
@@ -273,21 +304,31 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
             </p>
           )}
           {events.length > 0 && (
-            <label className="v-field">
-              <span className="v-label">Event</span>
-              <select
-                className="v-input"
-                value={eventId}
-                onChange={(e) => handleEventChange(e.target.value)}
-              >
-                <option value="">Choose an event</option>
-                {events.map((event) => (
-                  <option key={event.id} value={event.id}>
-                    {event.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            holdConversion ? (
+              // SCRUM-162: event is locked to the hold's event — changing it would 409
+              <div className="v-field">
+                <label className="v-label" htmlFor="booking-event-locked">Event</label>
+                <p id="booking-event-locked" className="v-input" style={{ background: "var(--v-surface-2, #f5f5f5)", cursor: "default" }}>
+                  {holdConversion.eventName}
+                </p>
+              </div>
+            ) : (
+              <label className="v-field">
+                <span className="v-label">Event</span>
+                <select
+                  className="v-input"
+                  value={eventId}
+                  onChange={(e) => handleEventChange(e.target.value)}
+                >
+                  <option value="">Choose an event</option>
+                  {events.map((event) => (
+                    <option key={event.id} value={event.id}>
+                      {event.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )
           )}
 
           {/* SCRUM-86: the timing Venue Staff will assess */}
@@ -310,15 +351,25 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
             description="Pick a day within the event, then the slots you need. A full day is all three slots."
           />
 
-          <label className="v-field" style={{ maxWidth: 240 }}>
-            <span className="v-label">Date</span>
-            <input
-              className="v-input"
-              type="date"
-              value={bookingDate}
-              onChange={(e) => handleDateChange(e.target.value)}
-            />
-          </label>
+          {holdConversion ? (
+            // SCRUM-162: date is locked to the hold's date
+            <div className="v-field" style={{ maxWidth: 240 }}>
+              <label className="v-label" htmlFor="booking-date-locked">Date</label>
+              <p id="booking-date-locked" className="v-input" style={{ background: "var(--v-surface-2, #f5f5f5)", cursor: "default" }}>
+                {formatDate(bookingDate, { weekday: true, year: true })}
+              </p>
+            </div>
+          ) : (
+            <label className="v-field" style={{ maxWidth: 240 }}>
+              <span className="v-label">Date</span>
+              <input
+                className="v-input"
+                type="date"
+                value={bookingDate}
+                onChange={(e) => handleDateChange(e.target.value)}
+              />
+            </label>
+          )}
 
           {dayError && (
             <p className="v-alert v-alert-error" role="alert" style={{ marginTop: 16 }}>
@@ -339,7 +390,10 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
             <div className="v-slot-options">
               {SLOTS.map((slot) => {
                 const cell = day.slots[slot];
-                const requestable = REQUESTABLE_STATUSES.includes(cell.status);
+                const isHoldSlot = holdSlotSet.has(slot);
+                // SCRUM-162: hold slots are requestable even when tentative
+                const requestable = REQUESTABLE_STATUSES.includes(cell.status) ||
+                  (isHoldSlot && cell.status === "tentative");
                 const isSelected = slots.includes(slot);
                 return (
                   <label
@@ -357,7 +411,7 @@ function VenueBookingRequestForm({ venue, onDone, onCancel }) {
                     <span className={`v-status v-status-${cell.status}`}>
                       {STATUS_LABELS[cell.status]}
                     </span>
-                    <span className="v-hint">{slotHint(cell)}</span>
+                    <span className="v-hint">{slotHint(cell, isHoldSlot)}</span>
                   </label>
                 );
               })}

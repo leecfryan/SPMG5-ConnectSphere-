@@ -56,7 +56,8 @@ src/
 
 Features now contain their own pages, components and tests. Create folders only
 when they contain code; do not add empty placeholders. Existing CSS stays with
-its feature. `hooks/useApiResource.js` handles shared authenticated data loading.
+its feature. `hooks/useApiResource.js` handles shared authenticated data loading; an optional
+`refreshKey` argument lets one control refetch several resources.
 
 Other files inside `frontend/`:
 

@@ -487,6 +487,65 @@ Coordinator-facing hold request flow; automatic hold cancellation; notify on exp
 
 ---
 
+## 6b. SCRUM-162 — Convert a tentative hold into a booking request
+
+**Acceptance criteria, word for word**
+
+1. The coordinator can submit a booking request from an active hold for the same venue and period.
+2. The hold remains in place until the booking request is decided.
+3. Approving the booking request converts the hold into a confirmed booking.
+4. An expired hold cannot be converted; a new request must be submitted.
+
+### Traceability
+
+| AC | Criterion | Test cases | Where the rule lives |
+| --- | --- | --- | --- |
+| 1 | Eligible holds returned per coordinator; coordinator can convert via hold_ids | 01, 02, 03, 05, 08 | `listEligibleHoldsForCoordinator`, `validateHoldBody` (event_id required), `postBookingRequest` hold path |
+| 2 | Hold status stays 'hold' after conversion; calendar shows tentative while request is pending | 07 (unit), VENUE-E2E-007 | `linkHoldsToRequest` sets request_id, not status; `buildAvailabilityCalendar` hold+pending = tentative |
+| 3 | Confirmed booking outranks hold on calendar; hold cleared atomically | TC-146-12 (unit), VENUE-E2E-007 | `buildAvailabilityCalendar` booked > tentative; `decide_venue_booking_request` RPC |
+| 4 | Expired hold_ids rejected 409 | 04 | `getActiveHoldsByIds` filters `expires_at > now()` + `request_id IS NULL` |
+
+### Test cases
+
+| ID | AC | Type | Scenario | Expected | Automated by | Last run |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-162-01 | 1 | Happy | GET /holds/eligible as coordinator with matching holds | 200, one group with event name; service called with venueId + coordinatorId | `[TC-SCRUM-162-01]` | 2026-10-22 ✅ |
+| TC-SCRUM-162-02 | 1 | Negative | GET /holds/eligible as venue_staff | 403; service not called | `[TC-SCRUM-162-02]` | 2026-10-22 ✅ |
+| TC-SCRUM-162-03 | 1 | Boundary | GET /holds/eligible with no matching holds | 200, empty array | `[TC-SCRUM-162-03]` | 2026-10-22 ✅ |
+| TC-SCRUM-162-04 | 4 | Negative | POST /booking-requests with expired hold_ids | 409, error matches expired/no longer available | `[TC-SCRUM-162-04]` | 2026-10-22 ✅ |
+| TC-SCRUM-162-05 | 1, 2 | Happy | POST /booking-requests with valid hold_ids | 201; linkHoldsToRequest called with hold ids + new request id | `[TC-SCRUM-162-05]` | 2026-10-22 ✅ |
+| TC-SCRUM-162-06 | 1 | Conflict | POST /booking-requests where hold event_id differs from request event_id | 409, error mentions event match | `[TC-SCRUM-162-06]` | 2026-10-22 ✅ |
+| TC-SCRUM-162-07 | 2 | Unit | buildAvailabilityCalendar: active hold + pending request on same slot | slot status = tentative (hold outranks pending) | `[TC-SCRUM-162-07]` | 2026-10-22 ✅ |
+| TC-SCRUM-162-08 | 1 | Negative | POST /holds missing coordinator_id | 400, details name coordinator_id | `[TC-SCRUM-162-08]` | 2026-10-22 ✅ |
+| TC-SCRUM-162-09 | 1 | Negative | POST /booking-requests where hold coordinator_id differs from requester | 409, error mentions coordinator | `[TC-SCRUM-162-09]` | 2026-10-22 ✅ |
+| VENUE-E2E-007 | 1–4 | Browser | Staff places hold → coordinator converts → staff approves; slots confirmed via API | Full flow passes; hold linked to request; slots confirmed after approval | `[VENUE-E2E-007]` | 2026-10-22 ✅ |
+
+### Manual cases
+
+| ID | AC | Scenario | Expected |
+| --- | --- | --- | --- |
+| TC-SCRUM-162-M1 | 1, 2 | Staff places hold for APPROVED event on correct date; coordinator views calendar | "Holds ready to convert" section appears with the held date and slots |
+| TC-SCRUM-162-M2 | 1, 3 | Coordinator converts hold; staff approves booking request | Slot shows as booked on calendar; hold no longer blocks |
+| TC-SCRUM-162-M3 | 4 | Hold expires before coordinator converts | Eligible holds section is empty; coordinator must place a new hold |
+
+### Decisions
+
+- `event_id` FK on `venue_bookings` replaces fragile event-name string matching. Name comparison was
+  case-insensitive but broke on renames; a UUID is stable.
+- `listEventsWithCoordinator` restricted to APPROVED/CONFIRMED (matching `listBookableEvents`). A hold for a
+  non-approved event can never be converted, so showing it in the form would be misleading.
+- Hold `booking_date` must fall within the event's `start_time`/`end_time` range. Same constraint
+  `validateAgainstEvent` applies at conversion; filtering earlier avoids showing unconvertible holds.
+- `/coordinators` endpoint (original SCRUM-162 design) removed. The event dropdown (`/venues/events`)
+  carries the coordinator id on the selected event, so a separate coordinator picker is redundant.
+
+### Deliberately absent
+
+Post-conversion coordinator dashboard for tracking request status; automatic hold cancellation on approval
+(calendar shows booked which outranks tentative; explicit cancel is a UX improvement outside this story's AC).
+
+---
+
 ## 7. SCRUM-135 — Flag bookings conflicting after setup/turnaround change
 
 **Acceptance criteria, word for word**

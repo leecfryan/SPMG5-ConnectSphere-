@@ -1,5 +1,6 @@
 const { test, expect, signIn } = require('./support/fixtures.cjs');
 const { setupWorkflow, setupOrganiserAccess } = require('./support/event-workspace-fixtures.cjs');
+const { backendURL } = require('./support/settings.cjs');
 
 test('[ACCESS-E2E-UI-001] Manager assigns through the UI; coordinators have separate workspaces', async ({ page, accounts, request }) => {
   const { manager, first, second, event, update } = await setupWorkflow(accounts, request);
@@ -236,3 +237,66 @@ for (const [id, role, status] of [['001', 'event_coordinator_lead', 'SUBMITTED']
     await expect(page.getByText('No replacement date', { exact: true })).toBeVisible();
   });
 }
+
+// SCRUM-161 AC1/AC2: the workload overview sits inside Manage event requests.
+// Four events: one per coordinator, one awaiting a coordinator, one cancelled -
+// the cancelled one is what proves the retained status view.
+test('[E2E-EVENT-102] SCRUM-161: the Lead filters assignments by coordinator and status, then opens an event', async ({ page, accounts, request }) => {
+  const { manager, first, second, event, headers, update } = await setupWorkflow(accounts, request);
+  const day = new Date(Date.now() + 16 * 86400000).toISOString().slice(0, 10);
+  const create = async (name) => {
+    const response = await request.post(backendURL + '/api/events', { headers: headers.organiser, data: {
+      name, purpose: 'Workload overview', description: 'Event for the coordinator workload overview',
+      start_time: day + 'T01:00:00Z', end_time: day + 'T05:00:00Z', expected_attendance: 20,
+      venue_requirements: 'One room', equipment_needs: 'Projector', other_comments: 'Overview fixture',
+    } });
+    expect(response.status()).toBe(201);
+    return (await response.json()).event;
+  };
+  const forTwo = await create('Overview event for two ' + second.id);
+  const waiting = await create('Overview event awaiting a coordinator ' + first.id);
+  const closed = await create('Overview event that was cancelled ' + second.id);
+  const assign = (id, coordinatorId) => request.patch(`${backendURL}/api/event-workspace/${id}/coordinator`,
+    { headers: headers.manager, data: { coordinatorId, expectedCoordinatorId: null } });
+
+  expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
+  expect((await assign(forTwo.id, second.id)).status()).toBe(200);
+  expect((await assign(closed.id, first.id)).status()).toBe(200);
+  await accounts.updateEvent(forTwo.id, { status: 'APPROVED' });
+  expect((await request.post(`${backendURL}/api/internal/events/${closed.id}/cancel`,
+    { headers: headers.manager, data: { reason: 'Venue no longer available' } })).status()).toBe(200);
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto('/event-management');
+  await signIn(page, manager);
+
+  const link = name => page.getByRole('link', { name, exact: true });
+  const row = name => page.getByRole('row').filter({ has: link(name) });
+  await expect(link(event.name)).toBeVisible();
+  await expect(link(forTwo.name)).toBeVisible();
+  await expect(link(waiting.name)).toBeVisible();
+  await expect(link(closed.name)).toHaveCount(0);
+  await expect(row(event.name)).toContainText('Coordinator One');
+  await expect(row(forTwo.name)).toContainText('Coordinator Two');
+  await expect(row(waiting.name)).toContainText('Awaiting coordinator');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  await page.getByLabel('Coordinator', { exact: true }).selectOption(first.id);
+  await expect(link(event.name)).toBeVisible();
+  await expect(link(forTwo.name)).toHaveCount(0);
+  await expect(link(waiting.name)).toHaveCount(0);
+  await expect(link(closed.name)).toHaveCount(0);
+
+  await page.getByLabel('Coordinator', { exact: true }).selectOption('all');
+  await page.getByLabel('Event status', { exact: true }).selectOption('APPROVED');
+  await expect(link(forTwo.name)).toBeVisible();
+  await expect(link(event.name)).toHaveCount(0);
+
+  await page.getByLabel('Event status', { exact: true }).selectOption('all');
+  await expect(link(closed.name)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+  await expect(link(closed.name)).toHaveCount(0);
+  await link(event.name).click();
+  await expect(page.getByRole('heading', { name: event.name, exact: true })).toBeVisible();
+});

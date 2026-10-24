@@ -1,7 +1,7 @@
 // SCRUM-146: Venue Staff place and view tentative holds on a venue.
 import { useState, useEffect } from "react";
 import { useAuth } from "../../auth/useAuth";
-import { fetchHolds, createHold } from "../venueHoldsService";
+import { fetchHolds, createHold, fetchEventsForHolds } from "../venueHoldsService";
 import { IconAlert, IconArrowLeft } from "../components/VenueIcons";
 
 const SLOTS = ["am", "pm", "night"];
@@ -31,12 +31,23 @@ function HoldRow({ hold }) {
 
 function HoldForm({ venueId, onCreated, onCancel }) {
   const { token } = useAuth();
-  const [eventName, setEventName] = useState("");
+  const [events, setEvents] = useState(null);
+  const [selectedEventId, setSelectedEventId] = useState("");
   const [bookingDate, setBookingDate] = useState("");
   const [slots, setSlots] = useState(() => new Set());
   const [expiresAt, setExpiresAt] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    fetchEventsForHolds(token)
+      .then((data) => { if (active) setEvents(data.data); })
+      .catch(() => { if (active) setEvents([]); });
+    return () => { active = false; };
+  }, [token]);
+
+  const selectedEvent = events?.find((e) => e.id === selectedEventId) ?? null;
 
   function toggleSlot(slot) {
     setSlots((prev) => {
@@ -48,11 +59,14 @@ function HoldForm({ venueId, onCreated, onCancel }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (!selectedEvent) return;
     setSaving(true);
     setError(null);
     try {
       await createHold(venueId, {
-        event_name: eventName.trim(),
+        event_id: selectedEvent.id,
+        event_name: selectedEvent.name,
+        coordinator_id: selectedEvent.coordinator_id,
         booking_date: bookingDate,
         slots: SLOTS.filter((s) => slots.has(s)),
         expires_at: expiresAt ? new Date(expiresAt).toISOString() : "",
@@ -65,7 +79,7 @@ function HoldForm({ venueId, onCreated, onCancel }) {
     }
   }
 
-  const canSubmit = eventName.trim() && bookingDate && slots.size > 0 && expiresAt && !saving;
+  const canSubmit = selectedEvent && bookingDate && slots.size > 0 && expiresAt && !saving;
 
   return (
     <form className="v-card v-stack" onSubmit={handleSubmit}>
@@ -78,15 +92,22 @@ function HoldForm({ venueId, onCreated, onCancel }) {
       </div>
 
       <div className="v-field">
-        <label className="v-label" htmlFor="hold-event-name">Event name</label>
-        <input
-          id="hold-event-name"
-          className="v-input"
-          type="text"
-          value={eventName}
-          onChange={(e) => setEventName(e.target.value)}
-          required
-        />
+        <label className="v-label" htmlFor="hold-event">Event</label>
+        {events === null && <p role="status" style={{ fontSize: 14, color: "var(--v-text-muted)" }}>Loading events…</p>}
+        {events !== null && (
+          <select
+            id="hold-event"
+            className="v-input"
+            value={selectedEventId}
+            onChange={(e) => setSelectedEventId(e.target.value)}
+            required
+          >
+            <option value="">Select an event</option>
+            {events.map((ev) => (
+              <option key={ev.id} value={ev.id}>{ev.name}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       <div className="v-field">

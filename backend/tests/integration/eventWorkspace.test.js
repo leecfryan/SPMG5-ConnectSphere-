@@ -38,11 +38,17 @@ async function setup(t) {
   return { send, users, records, client, pending };
 }
 
+// Also the evidence for SCRUM-161 AC3: the other coordinator's event must be
+// absent from the payload altogether, not merely hidden by the browser.
 test("[ACCESS-001] Two coordinators see only their own list and direct event details", async t => {
   const { send, records } = await setup(t);
   for (const [role, own, other] of [["first", records[0], records[1]], ["second", records[1], records[0]]]) {
     const list = await (await send("/event-workspace/coordinator?coordinator_id=forged", role)).json();
     expect(list.events.map(event => event.id)).toEqual([own.id]);
+    const payload = JSON.stringify(list.events);
+    expect(payload).not.toContain(other.id);
+    expect(payload).not.toContain(other.name);
+    expect(payload).not.toContain(other.coordinator_id);
     expect((await send(`/event-workspace/coordinator/${own.id}`, role)).status).toBe(200);
     const denied = await send(`/event-workspace/coordinator/${other.id}`, role);
     expect(denied.status).toBe(404);
@@ -708,4 +714,25 @@ test("[SCRUM-117-BASE-API-001] organiser saves are visible to the assigned coord
     expect(response.event.activity).toEqual([]);
   }
   expect((await f.send(`/event-workspace/coordinator/${event.id}`,"second")).status).toBe(404);
+});
+
+// SCRUM-161 AC1: the Lead's workload overview is the manager workspace list, so
+// an event in every active status comes back with the coordinator responsible
+// for it. Cancelled events stay in the same list (SCRUM-148 AC4); the browser,
+// not the server, opens the overview on the active ones.
+test("[SCRUM-161] AC1: the Lead's list carries an event in every active status with its coordinator, and keeps cancelled events", async t => {
+  const { send, records, users } = await setup(t);
+  const laterStages = ["UNDER_REVIEW", "CHANGES_REQUESTED", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED", "POSTPONED"].map(status =>
+    addEvent(records, { name: "Overview " + status, status, coordinator_id: users.second.id, organiser_id: users.organiser.id }));
+  const closed = addEvent(records, { status: "CANCELLED", coordinator_id: users.first.id, organiser_id: users.organiser.id,
+    cancelled_by: users.first.id, cancelled_at: "2099-09-06T00:00:00.000Z", cancellation_reason: "Venue flooded." });
+
+  const response = await send("/event-workspace/manager");
+  expect(response.status).toBe(200);
+  const byId = new Map((await response.json()).events.map(event => [event.id, event]));
+  expect(byId.get(records[0].id)).toMatchObject({ status: "APPROVED", coordinator_id: users.first.id });
+  expect(byId.get(records[1].id)).toMatchObject({ status: "APPROVED", coordinator_id: users.second.id });
+  expect(byId.get(records[2].id)).toMatchObject({ status: "SUBMITTED", coordinator_id: null });
+  for (const event of laterStages) expect(byId.get(event.id)).toMatchObject({ status: event.status, coordinator_id: users.second.id });
+  expect(byId.get(closed.id)).toMatchObject({ status: "CANCELLED", coordinator_id: users.first.id });
 });

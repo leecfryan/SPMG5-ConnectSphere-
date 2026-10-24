@@ -13,7 +13,7 @@ function bookingStatus(booking) {
   if (statuses.length === 1) {
     return statuses[0].charAt(0).toUpperCase() + statuses[0].slice(1);
   }
-  return "Partly decided";
+  return "Partly confirmed";
 }
 
 function period(booking) {

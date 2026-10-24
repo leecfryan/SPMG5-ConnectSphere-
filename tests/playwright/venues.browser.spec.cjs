@@ -137,6 +137,85 @@ test('[VENUE-E2E-005] SCRUM-138: each booking of an event is checked on its own,
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+test('[VENUE-E2E-007] SCRUM-162: venue staff places hold, coordinator converts it to a booking request, staff approves', async ({ page, accounts, request }) => {
+  const organiser = await accounts.create(['event_organiser']);
+  const coordinator = await accounts.create(['event_coordinator']);
+  const staff = await accounts.create(['venue_staff']);
+  const orgSession = await accounts.session(organiser);
+  const staffSession = await accounts.session(staff);
+
+  // Use a date range no other browser spec touches.
+  const holdDate = futureDate(60);
+  const eventName = 'Hold Conversion Test ' + coordinator.id.slice(0, 8);
+
+  // Create and approve an event whose date range covers the hold date.
+  const eventResp = await request.post('/api/events', {
+    headers: { Authorization: 'Bearer ' + orgSession.access_token },
+    data: { name: eventName, purpose: 'Testing', description: 'SCRUM-162 e2e', start_time: holdDate + 'T00:00:00Z', end_time: holdDate + 'T23:00:00Z', expected_attendance: 50 },
+  });
+  expect(eventResp.status()).toBe(201);
+  const { event } = await eventResp.json();
+  await accounts.assignEvent(event.id, coordinator.id);
+  await accounts.updateEvent(event.id, { status: 'APPROVED' });
+
+  // --- Venue staff places hold tagged to the coordinator ---
+  await page.goto(`/venues/${venueId}/holds`);
+  await signIn(page, staff);
+  await expect(page.getByRole('heading', { name: /Holds/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Place hold' }).click();
+  await page.getByLabel('Event').selectOption(event.id);
+  await page.getByLabel('Date').fill(holdDate);
+  await page.getByRole('button', { name: /AM/ }).click();
+  const expiry = new Date(Date.now() + 30 * 86400000);
+  await page.getByLabel('Hold expires at').fill(
+    expiry.toISOString().slice(0, 16),
+  );
+  await page.getByRole('button', { name: 'Place hold', exact: true }).click();
+  await expect(page.getByText(eventName)).toBeVisible();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+
+  // --- Coordinator sees the eligible hold and converts it ---
+  await page.goto(`/venues/${venueId}/availability`);
+  await signIn(page, coordinator);
+  await expect(page.getByRole('heading', { name: 'Holds ready to convert' })).toBeVisible();
+  await expect(page.getByText(eventName)).toBeVisible();
+  await page.getByRole('button', { name: 'Convert to booking request' }).click();
+
+  // Booking form opens in hold conversion mode — event and date locked
+  await expect(page.getByText('Convert hold to booking request')).toBeVisible();
+  await expect(page.getByText('The event and date are locked to match the hold.')).toBeVisible();
+  // AM slot is pre-selected (from hold) once availability data loads
+  await expect(page.getByRole('checkbox', { name: /AM/ })).toBeChecked();
+  // Fill in required free fields
+  await page.getByLabel('Expected attendees').fill('40');
+  await page.getByRole('combobox', { name: 'Room layout' }).selectOption('Theatre');
+  await page.locator('label.v-field').filter({ hasText: 'Purpose' }).locator('textarea').fill('End-to-end hold conversion test');
+  await page.getByRole('button', { name: 'Submit booking request', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Booking request submitted' })).toBeVisible();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+
+  // --- Staff approves and the calendar slot clears ---
+  const requestsResp = await request.get('/api/venues/booking-requests', {
+    headers: { Authorization: 'Bearer ' + staffSession.access_token },
+  });
+  expect(requestsResp.status()).toBe(200);
+  const bookingRequest = (await requestsResp.json()).data.find(r => r.event.name === eventName);
+  expect(bookingRequest).toBeTruthy();
+
+  const decideResp = await request.patch(`/api/venues/booking-requests/${bookingRequest.id}/decision`, {
+    headers: { Authorization: 'Bearer ' + staffSession.access_token },
+    data: { decision: 'confirmed' },
+  });
+  expect(decideResp.status()).toBe(200);
+
+  // Booking request is confirmed and hold is no longer in the eligible section
+  const confirmedResp = await request.get('/api/venues/booking-requests', {
+    headers: { Authorization: 'Bearer ' + staffSession.access_token },
+  });
+  const confirmed = (await confirmedResp.json()).data.find(r => r.event.name === eventName);
+  expect(confirmed.slots.every(s => s.status === 'confirmed')).toBe(true);
+});
+
 test('[VENUE-E2E-006] SCRUM-136: affected bookings panel shown when a new period overlaps a confirmed booking', async ({ page, accounts, request }) => {
   const organiser = await accounts.create(['event_organiser']);
   const coordinator = await accounts.create(['event_coordinator']);
