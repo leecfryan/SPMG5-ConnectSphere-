@@ -1,16 +1,103 @@
+/* SCRUM-167: the design tokens every page is built from.
+ *
+ * One value, one name, one place. A feature stylesheet should reference these
+ * rather than repeating a hex code, so a change here reaches every screen.
+ * The venue lane's scoped `--v-*` tokens are derived from these.
+ */
 :root {
-  font-family: "Segoe UI", Arial, sans-serif;
-  color: #152c37;
-  background: #f4f6f5;
+  /* Brand. One primary only; a second would stop meaning "the main action". */
+  --cs-primary: #11564a;
+  --cs-primary-hover: #0c4238;
+  --cs-primary-soft: #e8f2ee;
+  --cs-primary-border: #bcd7cd;
+  --cs-accent: #3d7d6b;
+
+  /* Neutrals, tinted very slightly green so they sit with the brand rather
+     than looking like a separate grey palette dropped on top. */
+  --cs-bg: #f3f6f4;
+  --cs-surface: #ffffff;
+  --cs-surface-muted: #f8faf9;
+  --cs-surface-sunken: #eef2f0;
+  --cs-border: #dde5e1;
+  --cs-border-strong: #c3d1cb;
+  --cs-text: #13272f;
+  --cs-text-muted: #5a6b66;
+  --cs-text-subtle: #7d8c87;
+
+  /* Status. Each pairs a readable text colour with its own tint. */
+  --cs-success: #0a5c36;
+  --cs-success-soft: #e3f4ea;
+  --cs-warning: #7a5800;
+  --cs-warning-soft: #fdf3d6;
+  --cs-danger: #97372c;
+  --cs-danger-soft: #fdeeea;
+  --cs-danger-border: #e2c2ba;
+  --cs-info: #1d4e6b;
+  --cs-info-soft: #e7f0f5;
+  --cs-neutral: #5e6d65;
+  --cs-neutral-soft: #eef1ef;
+
+  /* Spacing, on a 4px base. Use these instead of arbitrary pixel values. */
+  --cs-space-1: 4px;
+  --cs-space-2: 8px;
+  --cs-space-3: 12px;
+  --cs-space-4: 16px;
+  --cs-space-5: 24px;
+  --cs-space-6: 32px;
+  --cs-space-7: 48px;
+  --cs-space-8: 64px;
+
+  /* Two radii and a pill, instead of the ten the codebase had grown. */
+  --cs-radius-sm: 8px;
+  --cs-radius-lg: 14px;
+  --cs-radius-pill: 999px;
+
+  /* Elevation. Low for resting cards, high for things floating above. */
+  --cs-shadow-sm: 0 1px 2px #13272f0d, 0 1px 3px #13272f0a;
+  --cs-shadow-md: 0 4px 12px #13272f0f, 0 2px 4px #13272f08;
+  --cs-shadow-lg: 0 18px 48px #13272f1f;
+
+  /* Type scale. */
+  --cs-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --cs-font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+  --cs-text-xs: 12px;
+  --cs-text-sm: 13px;
+  --cs-text-base: 15px;
+  --cs-text-lg: 17px;
+  --cs-text-xl: 21px;
+  --cs-text-2xl: 27px;
+  --cs-text-3xl: 34px;
+
+  --cs-focus: 2px solid var(--cs-accent);
+  --cs-transition: 140ms ease;
+
+  font-family: var(--cs-font);
+  color: var(--cs-text);
+  background: var(--cs-bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; }
-button, input { font: inherit; }
+button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
-button:disabled { cursor: wait; opacity: .65; }
-button:focus-visible, input:focus-visible { outline: 3px solid #56a993; outline-offset: 3px; }
-h1, h2, p { margin-top: 0; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+
+/* One focus treatment everywhere, so keyboard users get the same signal on
+   every control regardless of which lane built the page. */
+:focus-visible {
+  outline: var(--cs-focus);
+  outline-offset: 2px;
+  border-radius: var(--cs-radius-sm);
+}
+
+h1, h2, h3, p { margin-top: 0; }
+h1, h2, h3 { line-height: 1.25; letter-spacing: -.02em; font-weight: 600; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

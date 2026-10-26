@@ -11,27 +11,27 @@
    The resets at the top of this file keep the venue pages looking the same
    before and after develop is merged in.
 
-   Colours follow develop's palette: #185c4b green, #f4f6f5 page, #152c37 text.
+   Colours follow develop's palette: var(--cs-primary) green, var(--cs-bg) page, var(--cs-text) text.
    ========================================================================== */
 
 .venues {
-  --v-surface: #ffffff;
-  --v-surface-muted: #f8faf9;
-  --v-border: #e0e7e2;
-  --v-border-strong: #cbd7d0;
-  --v-text: #152c37;
-  --v-text-muted: #5d6e69;
-  --v-text-subtle: #7d8a83;
-  --v-primary: #185c4b;
-  --v-primary-hover: #104a3b;
-  --v-primary-soft: #e8f2ee;
-  --v-primary-text: #426e60;
+  --v-surface: var(--cs-surface);
+  --v-surface-muted: var(--cs-surface-muted);
+  --v-border: var(--cs-border);
+  --v-border-strong: var(--cs-border-strong);
+  --v-text: var(--cs-text);
+  --v-text-muted: var(--cs-text-muted);
+  --v-text-subtle: var(--cs-text-subtle);
+  --v-primary: var(--cs-primary);
+  --v-primary-hover: var(--cs-primary-hover);
+  --v-primary-soft: var(--cs-primary-soft);
+  --v-primary-text: var(--cs-accent);
   --v-focus-ring: 0 0 0 3px rgb(86 169 147 / 0.3);
-  --v-danger: #97372c;
-  --v-danger-soft: #fff2ee;
-  --v-danger-border: #f3d3cb;
-  --v-success: #1d6b4f;
-  --v-success-soft: #e6f4ec;
+  --v-danger: var(--cs-danger);
+  --v-danger-soft: var(--cs-danger-soft);
+  --v-danger-border: var(--cs-danger-border);
+  --v-success: var(--cs-success);
+  --v-success-soft: var(--cs-success-soft);
 
   --v-radius-lg: 18px;
   --v-radius-md: 12px;
@@ -41,25 +41,25 @@
 
   /* Slot and request states. Each state is always spelled out in words as
      well, so colour is a hint and never the only signal. */
-  --v-available-bg: #eaf6ef;
-  --v-available-fg: #1b6a4d;
-  --v-available-bd: #cbe6d7;
-  --v-booked-bg: #fdeeeb;
-  --v-booked-fg: #9a2d24;
-  --v-booked-bd: #f3cec8;
-  --v-pending-bg: #fff5e0;
-  --v-pending-fg: #83530a;
-  --v-pending-bd: #efd9a6;
-  --v-unavailable-bg: #eef1f4;
-  --v-unavailable-fg: #475361;
-  --v-unavailable-bd: #d9dfe6;
-  --v-closed-bg: #f6f7f7;
-  --v-closed-fg: #929d98;
-  --v-closed-bd: #e3e8e5;
+  --v-available-bg: var(--cs-success-soft);
+  --v-available-fg: var(--cs-success);
+  --v-available-bd: var(--cs-primary-border);
+  --v-booked-bg: var(--cs-danger-soft);
+  --v-booked-fg: var(--cs-danger);
+  --v-booked-bd: var(--cs-danger-border);
+  --v-pending-bg: var(--cs-warning-soft);
+  --v-pending-fg: var(--cs-warning);
+  --v-pending-bd: var(--cs-warning);
+  --v-unavailable-bg: var(--cs-info-soft);
+  --v-unavailable-fg: var(--cs-info);
+  --v-unavailable-bd: var(--cs-border-strong);
+  --v-closed-bg: var(--cs-surface-muted);
+  --v-closed-fg: var(--cs-text-subtle);
+  --v-closed-bd: var(--cs-border);
   /* SCRUM-146: tentative hold — distinct from pending (amber) and booked (red) */
-  --v-tentative-bg: #eff0fb;
-  --v-tentative-fg: #3d42a0;
-  --v-tentative-bd: #c9caf3;
+  --v-tentative-bg: var(--cs-info-soft);
+  --v-tentative-fg: var(--cs-info);
+  --v-tentative-bd: var(--cs-info);
 
   width: 100%;
   max-width: 1160px;
@@ -208,7 +208,7 @@
 }
 
 .v-btn-primary {
-  color: #fff;
+  color: var(--cs-surface);
   background: var(--v-primary);
   border-color: var(--v-primary);
   box-shadow: 0 1px 2px rgb(16 74 59 / 0.2);
@@ -334,11 +334,11 @@
 }
 
 .venues .v-input::placeholder {
-  color: #97a39d;
+  color: var(--cs-text-subtle);
 }
 
 .venues .v-input:hover:not(:disabled) {
-  border-color: #b1c3b9;
+  border-color: var(--cs-border-strong);
 }
 
 .venues .v-input:focus,
@@ -456,7 +456,7 @@
   gap: 6px;
   padding: 5px 11px;
   border: 1px solid var(--v-border);
-  border-radius: 999px;
+  border-radius: var(--cs-radius-pill);
   color: var(--v-text);
   background: var(--v-surface-muted);
   font-size: 13px;
@@ -481,7 +481,7 @@
   gap: 7px;
   padding: 8px 14px;
   border: 1px solid var(--v-border-strong);
-  border-radius: 999px;
+  border-radius: var(--cs-radius-pill);
   color: var(--v-text);
   background: var(--v-surface);
   font-size: 14px;
@@ -529,7 +529,7 @@
   gap: 7px;
   padding: 4px 11px 4px 9px;
   border: 1px solid;
-  border-radius: 999px;
+  border-radius: var(--cs-radius-pill);
   font-size: 12px;
   font-weight: 600;
   line-height: 1.3;
@@ -588,8 +588,8 @@
 .v-tag {
   display: inline-block;
   padding: 2px 7px;
-  border-radius: 999px;
-  color: #fff;
+  border-radius: var(--cs-radius-pill);
+  color: var(--cs-surface);
   background: var(--v-primary);
   font-size: 10px;
   font-weight: 700;
@@ -703,7 +703,7 @@
   width: 52px;
   height: 52px;
   margin: 0 auto 16px;
-  border-radius: 16px;
+  border-radius: var(--cs-radius-lg);
   color: var(--v-primary);
   background: var(--v-primary-soft);
 }
@@ -716,8 +716,8 @@
 }
 
 .v-skeleton {
-  border-radius: 8px;
-  background: linear-gradient(90deg, #edf1ef 25%, #f6f8f7 50%, #edf1ef 75%);
+  border-radius: var(--cs-radius-sm);
+  background: linear-gradient(90deg, var(--cs-surface-sunken) 25%, var(--cs-surface-muted) 50%, var(--cs-surface-sunken) 75%);
   background-size: 200% 100%;
   animation: v-shimmer 1.4s ease-in-out infinite;
 }
@@ -784,7 +784,7 @@
 
 .venues .v-venue-card:hover {
   transform: translateY(-2px);
-  border-color: #c6d6cd;
+  border-color: var(--cs-border-strong);
   box-shadow: var(--v-shadow-md);
 }
 
@@ -828,7 +828,7 @@
   width: 46px;
   height: 46px;
   flex: none;
-  border-radius: 13px;
+  border-radius: var(--cs-radius-lg);
   color: var(--v-primary);
   background: var(--v-primary-soft);
   font-size: 16px;
@@ -1219,7 +1219,7 @@
   min-height: 54px;
   padding: 8px 12px;
   border: 1px solid;
-  border-radius: 10px;
+  border-radius: var(--cs-radius-sm);
   font-size: 13px;
 }
 
@@ -1273,8 +1273,8 @@
     -45deg,
     var(--v-unavailable-bg),
     var(--v-unavailable-bg) 6px,
-    #e6eaee 6px,
-    #e6eaee 12px
+    var(--cs-border) 6px,
+    var(--cs-border) 12px
   );
   border-color: var(--v-unavailable-bd);
 }
@@ -1433,7 +1433,7 @@
   height: 6px;
   margin-top: 8px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--cs-radius-pill);
   background: var(--v-border);
 }
 
@@ -1739,7 +1739,7 @@
   .v-slot {
     min-height: 46px;
     padding: 6px 7px;
-    border-radius: 8px;
+    border-radius: var(--cs-radius-sm);
     font-size: 11px;
   }
 
@@ -1795,14 +1795,14 @@
 /* Rejecting cannot be undone by the reviewer, so it reads as destructive
    rather than as a second neutral button next to Approve. */
 .v-btn-danger {
-  color: #fff;
+  color: var(--cs-surface);
   background: var(--v-danger);
   border-color: var(--v-danger);
 }
 
 .v-btn-danger:hover:not(:disabled) {
-  background: #7d2c23;
-  border-color: #7d2c23;
+  background: var(--cs-danger);
+  border-color: var(--cs-danger);
 }
 
 @media (max-width: 640px) {
