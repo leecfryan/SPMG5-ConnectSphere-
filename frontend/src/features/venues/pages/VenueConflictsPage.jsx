@@ -15,7 +15,7 @@ const STATUS_LABELS = {
   confirmed: "Confirmed",
   rejected: "Rejected",
   cancelled: "Cancelled",
-  mixed: "Partly decided",
+  mixed: "Partly confirmed",
   unknown: "Unknown",
 };
 

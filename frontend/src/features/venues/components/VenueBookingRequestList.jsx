@@ -39,7 +39,7 @@ const STATUS_FILTERS = [
   { value: "confirmed", label: "Confirmed" },
   { value: "rejected", label: "Rejected" },
   { value: "cancelled", label: "Cancelled" },
-  { value: "mixed", label: "Partly decided" },
+  { value: "mixed", label: "Partly confirmed" },
 ];
 
 const STATUS_LABELS = {
@@ -47,7 +47,7 @@ const STATUS_LABELS = {
   confirmed: "Confirmed",
   rejected: "Rejected",
   cancelled: "Cancelled",
-  mixed: "Partly decided",
+  mixed: "Partly confirmed",
   unknown: "Unknown",
 };
 
