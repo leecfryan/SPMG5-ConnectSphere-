@@ -1043,3 +1043,6 @@ The assigned coordinator response includes request_changes with source, version_
 Existing requests use the last resubmission snapshot, otherwise the earliest retained return snapshot, otherwise current values at installation. The UI explains limited history for recovered-return/tracking-start baselines. Earlier overwritten values cannot be reconstructed. Legacy resubmission entries keep their original return-time explanation. No event status, edit permission, Novu payload or save-notification rule changed.
 
 Exact applied correction SQL: [saved-edit version baseline schema](notifications.md#scrum-117-saved-edit-version-baseline-schema-reference). Ryan reports successful manual application on 24 October 2026.
+
+
+PR #62 review corrections (26 October 2026): coordinator `request_changes` is `null` only when the activity/baseline read fails. A successful read without a baseline returns `{ source: "NO_BASELINE", version_at: null, changes: [] }`; the UI explains that earlier edits cannot be reconstructed, without suggesting a refresh. A real read failure retains the refresh guidance. Organiser and lead responses still omit the comparison. Resubmission always clears its pending state in `finally`; unexpected failures show a safe retry message without exposing exception details. No SQL change is required.

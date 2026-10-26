@@ -95,7 +95,7 @@ function createEventWorkspaceService(client, equipmentService) {
       request_changes: baseline ? {
         source: baseline.details.source, version_at: baseline.details.version_at,
         changes: compareRequestFields(baseline.details.snapshot, event),
-      } : null,
+      } : { source: "NO_BASELINE", version_at: null, changes: [] },
     } : {};
     const activity = data.filter(entry => entry.action !== "REQUEST_BASELINE_RECORDED").map(({ id, action, details, created_at }) => ({
       ...(scope === "coordinator" && action === "REQUEST_RESUBMITTED" ? {

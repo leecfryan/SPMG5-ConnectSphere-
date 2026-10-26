@@ -9,10 +9,15 @@ export default function EventResubmitControl({ eventId, cycleId, onResubmitted }
   async function resubmit() {
     setBusy(true);
     setError("");
-    const result = await resubmitEventRequest(eventId, cycleId, token);
-    if (result.event) onResubmitted();
-    else setError(result.message || result.errors.map(item => item.field.replaceAll("_", " ") + ": " + item.message).join("; "));
-    setBusy(false);
+    try {
+      const result = await resubmitEventRequest(eventId, cycleId, token);
+      if (result.event) onResubmitted();
+      else setError(result.message || result.errors.map(item => item.field.replaceAll("_", " ") + ": " + item.message).join("; "));
+    } catch {
+      setError("Unable to resubmit the request. Please try again.");
+    } finally {
+      setBusy(false);
+    }
   }
   return <div className="event-resubmit">
     <p>Ready for another review? Resubmit your saved details to the same coordinator.</p>

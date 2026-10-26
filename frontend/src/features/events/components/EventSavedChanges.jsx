@@ -10,6 +10,7 @@ const DESCRIPTIONS = {
 
 export default function EventSavedChanges({ comparison }) {
   if (!comparison) return <p>Saved-edit comparison is unavailable. Refresh the event to try again.</p>;
+  if (comparison.source === "NO_BASELINE") return <p>Saved-edit comparison is unavailable for this request because no baseline was recorded. Earlier edits cannot be reconstructed.</p>;
   if (!comparison.changes.length) return null;
   return <section className="event-resubmission" aria-labelledby="saved-changes-heading">
     <p className="eyebrow">Current saved details</p>

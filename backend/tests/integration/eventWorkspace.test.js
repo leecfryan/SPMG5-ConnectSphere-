@@ -1,4 +1,4 @@
-import { test, expect, vi } from "vitest";
+import { test, expect, vi, onTestFinished } from "vitest";
 const { once } = require("node:events");
 const { randomUUID } = require("node:crypto");
 const createApp = require("../../src/app");
@@ -735,4 +735,25 @@ test("[SCRUM-161] AC1: the Lead's list carries an event in every active status w
   expect(byId.get(records[2].id)).toMatchObject({ status: "SUBMITTED", coordinator_id: null });
   for (const event of laterStages) expect(byId.get(event.id)).toMatchObject({ status: event.status, coordinator_id: users.second.id });
   expect(byId.get(closed.id)).toMatchObject({ status: "CANCELLED", coordinator_id: users.first.id });
+});
+
+
+test.each([false, true])("[SCRUM-117-BASE-API-002] missing baseline differs from a failed comparison read (outage: %s)", async (outage) => {
+  const { send, records, client } = await setup({ onTestFinished });
+  if (outage) {
+    const from = client.from.bind(client);
+    client.from = table => table === "event_activity_log"
+      ? { select: () => ({ eq: () => ({ order: async () => ({ data: null, error: { message: "Private storage failure" } }) }) }) }
+      : from(table);
+  }
+  const response = await send(`/event-workspace/coordinator/${records[0].id}`, "first");
+  expect(response.status).toBe(200);
+  const { event } = await response.json();
+  expect(event.request_changes).toEqual(outage ? null : { source: "NO_BASELINE", version_at: null, changes: [] });
+  expect(event.activity).toEqual(outage ? null : []);
+  expect(JSON.stringify(event)).not.toContain("Private storage failure");
+  for (const [scope, caller] of [["organiser", "organiser"], ["manager", "manager"]]) {
+    const detail = await (await send(`/event-workspace/${scope}/${records[0].id}`, caller)).json();
+    expect(detail.event).not.toHaveProperty("request_changes");
+  }
 });

@@ -5,8 +5,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { AuthContext } from "../../auth/useAuth";
 import EventResubmitControl from "./EventResubmitControl";
+import * as eventsService from "../eventsService";
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 test("[SCRUM-117-UI-R01] A conflict keeps the request available for retry and success reloads it", async () => {
   const fetchMock = vi.fn().mockResolvedValueOnce({ ok:false,status:409,json:async()=>({message:"Refresh and review saved details."}) })
@@ -30,4 +31,22 @@ test("[SCRUM-117-UI-R02] Saved-detail validation errors explain what the organis
   await user.click(screen.getByRole("button",{name:"Resubmit request"}));
   expect(await screen.findByRole("alert")).toHaveTextContent("start time: must be in the future");
   expect(reload).not.toHaveBeenCalled();
+});
+
+
+test("[SCRUM-117-UI-R05] An unexpected resubmission rejection shows a safe error and allows a successful retry", async () => {
+  const submit = vi.spyOn(eventsService, "resubmitEventRequest")
+    .mockRejectedValueOnce(new Error("Private failure details"))
+    .mockResolvedValueOnce({ event: { id: "event", status: "UNDER_REVIEW" }, errors: [], message: "" });
+  const reload = vi.fn(), user = userEvent.setup();
+  render(<AuthContext.Provider value={{token:"owner-token"}}><EventResubmitControl eventId="event" cycleId="cycle" onResubmitted={reload}/></AuthContext.Provider>);
+  await user.click(screen.getByRole("button", { name: "Resubmit request" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Unable to resubmit the request. Please try again.");
+  expect(screen.queryByText(/Private failure details/)).not.toBeInTheDocument();
+  expect(reload).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Resubmit request" })).toBeEnabled();
+  await user.click(screen.getByRole("button", { name: "Resubmit request" }));
+  await waitFor(() => expect(reload).toHaveBeenCalledOnce());
+  expect(submit).toHaveBeenCalledTimes(2);
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
