@@ -5,9 +5,11 @@ Historical acceptance criteria and customer quotations retain their original wor
 Earlier execution results are historical evidence; rename verification is recorded separately.
 
 **Deliverable evidence for SCRUM-97 (Progress an event through its status lifecycle), epic Event Lifecycle &
-Approval.** SCRUM-98 (review) and SCRUM-99 (approve) are in §8; SCRUM-139 (safety check) is in §9, SCRUM-140 (safety review) in §10, SCRUM-141 (safety decision) in §11, SCRUM-144 (confirmation) in §12 and SCRUM-161 (the Lead's
-coordinator workload overview) in §13. Branch: `feature/eventLifecycleStatus` · **15 documented cases, 43 automated tests, all passing**
-— 34 backend unit, 9 frontend component, plus 1 manual database case.
+Approval.** SCRUM-98 (review) and SCRUM-99 (approve) are in §8; SCRUM-139 (safety check) is in §9, SCRUM-140 (safety review) in §10, SCRUM-141 (safety decision) in §11, SCRUM-144 (confirmation) in §12, SCRUM-37 (flag
+significant edits) in §13 and SCRUM-161 (the Lead's coordinator workload overview) in §14. Branch:
+`feature/eventLifecycleStatus` · **15 documented cases, 43 automated tests, all passing**
+— 34 backend unit, 9 frontend component, plus 1 manual database case. (Counts are SCRUM-97's own original scope;
+each later section carries its own count.)
 
 Story context — the eight statuses, the permitted moves, who sets each status and the schema change — is in
 [Event requests](event-requests.md) §Status values. The sibling catalogues for the same lane are
@@ -577,7 +579,110 @@ passes because the page also disables *Confirm event*, which is why the API jour
 SCRUM-97/139/141 tests were updated for `PREPARATION → CONFIRMED`, the readiness `optional` list and item ids, not
 loosened.
 
-## 13. SCRUM-161 — the Lead's coordinator workload overview
+## 13. SCRUM-37 — flag edits that could invalidate existing arrangements
+
+No live-DB or Playwright coverage was added for this story — every AC is provable at the mocked-repository /
+component level, same reasoning as §9. Full design history and every scoping decision:
+`.agent/docs/other/SCRUM-37-flag-significant-edits.md`.
+
+> **SCRUM-37:** As an Event Coordinator, I want the system to flag edits that could invalidate existing
+> arrangements so that only changes that matter trigger revalidation.
+>
+> 1. Changes to date, time, expected attendance, venue requirements, venue bookings or equipment requirements are
+>    treated as significant.
+> 2. Edits that cannot affect existing arrangements (for example description or internal notes) do not trigger
+>    revalidation.
+> 3. A significant change on an event with confirmed arrangements marks those arrangements for review.
+> 4. The user is told, before saving, that the change will require arrangements (and safety review where
+>    applicable) to be reviewed.
+
+The team's own design reads AC3/AC4's "for review" as the full re-check chain — the coordinator re-approves the
+edited request — and, after one design revision mid-build, resolves it by **releasing** arrangements outright on
+that re-approval decision (approve or reject) rather than holding the same reservation for Technical Support or
+Venue Staff to re-decide. See the task note's *Team design decision* for the word-for-word reasoning.
+
+| Layer | File | Pre-conditions |
+| --- | --- | --- |
+| Lifecycle (unit) | `backend/tests/unit/events/lifecycle.test.js` | Extended with four new edges to `SUBMITTED` (from `APPROVED`, `SAFETY_REVIEW`, `PREPARATION`, `CONFIRMED`) in `AGREED_TRANSITIONS`; the existing `SAFETY_REVIEW` target-list assertion fixed to include `SUBMITTED`. Same "typed from the agreed table" discipline as §3 — the exhaustive "every other pair stays refused" test extends automatically. |
+| Significance + regression (SQL, not JS) | `apply_organiser_event_edit` | One `plpgsql` function, applied by hand to the shared dev Supabase (no migration file) — the field write, the `is distinct from` significance check and the conditional `SUBMITTED` write are one transaction, so a mid-way failure can't leave an unreviewed edit live on a still-`CONFIRMED` event. Not independently testable at the JS layer (no live-DB suite was budgeted for this story); verified by reading the function. |
+| RPC call shape (unit) | `backend/tests/unit/events/eventWorkspace.service.test.js` | `setup()`'s fake `client.rpc` replaced the old `equipmentService`/`updates`-tracking doubles; every `WRITABLE_COLS` field given a real fixture value (not left `undefined`) specifically so a gap in `FIELDS` shows up as a wrong argument, not a silent pass. |
+| Release wiring (integration) | `backend/tests/integration/events.review.test.js` | `approve()`/`reject()` extended with the same `equipmentService`/`releaseVenueBookingsForCancelledEvent` dependencies `cancel`/`postpone` already had; `review.controller.js#approve` became its own dedicated handler (previously routed through the generic `handle` wrapper) so it could thread them through. |
+| Component | `frontend/src/features/events/components/EventRequestForm.test.jsx` | New file: `AuthContext.Provider` + `vi.stubGlobal("fetch", ...)`, same pattern as `EventCancelControl.test.jsx`. |
+| Release error handling (unit, PR #60) | `backend/tests/unit/events/review.service.test.js` | `releaseArrangements`'s two independent try/catches, each throwing one release while the other succeeds. |
+| Optimistic concurrency (unit, PR #60) | `backend/tests/unit/events/eventWorkspace.service.test.js` | Fake RPC now checks `p_expected_updated_at` against the fixture's `updated_at` and bumps it on a real write, same shape as the real `events_set_updated_at` trigger; `tests/playwright/support/registration-storage.cjs`'s fake RPC carries the same check so the Playwright suite doesn't diverge from the real function's behaviour. |
+
+| ID | AC | Type | Scenario | Expected result | Automated test | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-150-01/SCRUM-37 | 1 | Happy | Changing `start_time` | RPC called once with the new value merged onto every other current field | `eventWorkspace.service.test.js` › `[TC-150-01/SCRUM-37] changing start_time calls apply_organiser_event_edit with the new value merged onto the unchanged fields` | 2026-10-21 · pass · local |
+| TC-150-03/SCRUM-37 | 1 | Negative | Resubmitting identical `start_time`/`end_time`/`equipment_needs` values | RPC still called — significance is the function's own decision now, not the caller's | `eventWorkspace.service.test.js` › `[TC-150-03/SCRUM-37] …` | 2026-10-21 · pass · local |
+| TC-150-22/SCRUM-37 | 1, 2 | Negative | A change unrelated to date/time/equipment (`name`) | RPC called with `name` updated and every other field carried over unchanged | `eventWorkspace.service.test.js` › `[TC-150-22/SCRUM-37] …` | 2026-10-21 · pass · local |
+| TC-37-21 | — | Failure | Every writable column reaches the function as a real value, never `undefined`, including fields the edit itself didn't touch | Complete RPC argument object asserted (not `objectContaining`) | `eventWorkspace.service.test.js` › `[TC-37-21] …` | 2026-10-21 · pass · local |
+| — | — | Happy | `APPROVED`/`SAFETY_REVIEW`/`PREPARATION`/`CONFIRMED` each permit a transition to `SUBMITTED` (`test.each`, 4 rows) | Each new edge is a permitted transition; no other pair becomes permitted as a side effect | `lifecycle.test.js`'s extended `AGREED_TRANSITIONS` table and exhaustive-refusal test | 2026-10-21 · pass · local |
+| TC-37-13 | 3 | Happy | Coordinator rejects the re-submitted event | `REJECTED`; both release calls made exactly once; the event's edited field is **not** reverted (known limitation, below) | `events.review.test.js` › `[SCRUM-37] TC-37-13: …` | 2026-10-21 · pass · local |
+| TC-37-14 | 3 | Negative | Rejecting a first-time submission that never had arrangements | Release calls are safe no-ops | `events.review.test.js` › `[SCRUM-37] TC-37-14: …` | 2026-10-21 · pass · local |
+| — | — | Boundary | Rejecting without a reason (400) | Neither release call made | `events.review.test.js` (boundary assertion alongside TC-37-13/14) | 2026-10-21 · pass · local |
+| TC-37-19 | 3 | Happy | Approving a resubmission | `APPROVED`; both release calls made exactly once | `events.review.test.js` › `[SCRUM-37] TC-37-19: …` | 2026-10-21 · pass · local |
+| TC-37-20 | 3 | Negative | Approving a first-time submission that never had arrangements | Release calls are safe no-ops | `events.review.test.js` › `[SCRUM-37] TC-37-20: …` | 2026-10-21 · pass · local |
+| — | — | Boundary | Approving with an invalid note (400) | Neither release call made | `events.review.test.js` (boundary assertion alongside TC-37-19/20) | 2026-10-21 · pass · local |
+| TC-37-FE-01 | 4 | Happy | A significant edit on an `APPROVED`/`SAFETY_REVIEW`/`PREPARATION`/`CONFIRMED` event (`test.each`, 4 statuses) | Warning shown; names safety review only for the latter three | `EventRequestForm.test.jsx` | 2026-10-21 · pass · local |
+| TC-37-FE-02 | 4 | Boundary | Backing out with "Never mind" | Warning dismissed; nothing sent | `EventRequestForm.test.jsx` | 2026-10-21 · pass · local |
+| TC-37-FE-03 | 4 | Happy | Confirming a second time | PATCH sent with the changed field | `EventRequestForm.test.jsx` | 2026-10-21 · pass · local |
+| TC-37-FE-04 | 4 | Boundary | Editing another field while the warning is showing | Warning dismissed — what's about to save changed | `EventRequestForm.test.jsx` | 2026-10-21 · pass · local |
+| TC-37-FE-05 | 2, 4 | Negative | A non-significant edit on a `CONFIRMED` event | Saves in one click, no warning | `EventRequestForm.test.jsx` | 2026-10-21 · pass · local |
+| TC-37-FE-06 | 4 | Negative | A significant edit on a `SUBMITTED`/`UNDER_REVIEW` event (`test.each`, 2 statuses) | Saves in one click — nothing live to protect yet | `EventRequestForm.test.jsx` | 2026-10-21 · pass · local |
+| TC-37-FE-08 | 4 | Boundary | The "status stays the same" card note while the significant-edit warning is showing (reviewer feedback, PR #60) | Note hidden while the warning shows; reappears once dismissed | `EventRequestForm.test.jsx` | 2026-10-26 · pass · local |
+| TC-37-22 | 3 | Failure | The equipment release throws after `approve()`'s status write already committed (reviewer feedback, PR #60) | Still returns `{ ok: true }`; the venue release is still attempted; error logged, not thrown | `review.service.test.js` › `[TC-37-22] …` | 2026-10-26 · pass · local |
+| TC-37-23 | 3 | Failure | The venue release throws after `reject()`'s status write already committed (reviewer feedback, PR #60) | Still returns `{ ok: true }`; the equipment release is still attempted; error logged, not thrown | `review.service.test.js` › `[TC-37-23] …` | 2026-10-26 · pass · local |
+| TC-37-24 | — | Failure | A save lands between this request's own read and its write — another tab's save committing in the gap (reviewer question, PR #60) | Refused as `conflict` (409); the row is left exactly as the other save wrote it, not half-overwritten | `eventWorkspace.service.test.js` › `[TC-37-24] …` | 2026-10-26 · pass · local |
+
+**Not independently tested, by design:** atomicity (the single-transaction property of `apply_organiser_event_edit`)
+is structural, not something a JS-level test can exercise without a live-DB suite — none was budgeted for this
+story (conventions.md §3's 1–3-per-epic limit); verifiable by reading the function. Whether the Event Coordinator
+Lead's unconditional cancel/postpone access extends to approve/reject is true by code (`review.controller.js`'s
+`approve`/`reject` take no `isCoordinatorLead`) but has no dedicated test — worth adding if graded on coverage
+specifically, not required for the story to function.
+
+**Test review.** Each case was checked against a plausible wrong implementation:
+
+| Mutation | Test that goes red |
+| --- | --- |
+| Leave `FIELDS` missing a `WRITABLE_COLS` column (the live bug this story found and fixed — `registration_start`/`_end`) | TC-37-21 |
+| Drop any of the four new `TRANSITIONS` edges | the `lifecycle.test.js` `test.each` row for that status |
+| Add an edge not in the agreed table as a side effect | the exhaustive "every other pair stays refused" test |
+| Call the release functions before the status write succeeds, or on a failed decision | the boundary assertions alongside TC-37-13/14/19/20 |
+| Skip the release call entirely on approve, or forget it on reject | TC-37-19, TC-37-13 |
+| Show the warning for a non-significant field, or skip it for a significant one | TC-37-FE-01, TC-37-FE-05, TC-37-FE-06 |
+| Leave the warning up after a further edit changes what's about to save | TC-37-FE-04 |
+| Let a release call's error propagate instead of being caught and logged | TC-37-22, TC-37-23 |
+| Merge a PATCH's stale pre-read values over a concurrent save instead of refusing | TC-37-24 |
+| Show the "status stays the same" note while the significant-edit warning is also showing | TC-37-FE-08 |
+
+**Coverage (2026-10-21):** full backend suite 1181 passed, 51 skipped (live-DB, by design, unrelated to this
+story); full frontend suite 546 passed; lint and build clean on both.
+
+**PR #60 review follow-up (2026-10-26):** three reviewer comments addressed — release-failure handling
+(TC-37-22/23, plus the equipment/venue self-heal sweep extension documented in
+[equipment-integration.md](equipment-integration.md#releasing-reservations-on-event-cancellation-scrum-104-extended-by-scrum-148)
+and [venue-integration.md](venue-integration.md#releasing-bookings-on-event-cancellation-scrum-148)), the
+contradictory card note (TC-37-FE-08), and the lost-update race (TC-37-24, needs `events.updated_at` applied by
+hand — see *Schema reference* in [event-requests.md](event-requests.md#significant-edits-regress-the-event-scrum-37)).
+Verified directly by the agent (not a full suite re-run, since several backend integration files hit the live
+dev Supabase and the agent doesn't use the secret key): `review.service.test.js` 18/18, `eventWorkspace.service.test.js`
+18/18, `EventRequestForm.test.jsx` 11/11, both affected `node:test` equipment files 68/68 and 7/7, the full
+frontend suite 563/563, and `tests/playwright` (`--project=api` plus the browser spec touching this flow) 37/37 —
+all green. User still needs to apply the new SQL and run the full backend suite plus `tests/e2e`.
+
+**Known limitation (documented, not a bug):** rejecting a resubmission ends the whole event — it cannot undo just
+the edit and leave the event exactly as it was before. See [Current limitations](event-requests.md#current-limitations)
+and the task note's own *Known limitation* for the full reasoning and which story (SCRUM-36) would close it.
+
+**SCRUM-150 cross-reference.** This story retires SCRUM-150's own `flagReservationsForReview` and its AC1
+("marks reservations for review") trigger — see
+[equipment-integration.md](equipment-integration.md#reviewing-equipment-on-a-reschedule-scrum-150)'s SCRUM-37
+addendum and `.agent/docs/other/SCRUM-150-equipment-reschedule-review.md`'s own addendum for exactly what stays
+dormant versus what was deleted outright.
+
+## 14. SCRUM-161 — the Lead's coordinator workload overview
 
 The Lead opens **Manage event requests** (`/event-management`) and sees a table of every active event — event,
 status, coordinator — filtered by coordinator and by status. It reads the same `/api/event-workspace/manager` list as
@@ -627,7 +732,7 @@ passing silently; UI-08 and UI-10 count requests, so they cannot pass on a list 
 At review (PR #57) the separate AC3 test was folded into the pre-existing `[ACCESS-001]`, which gained assertions and
 lost none.
 
-## 14. Requirements sources
+## 15. Requirements sources
 
 | Ref | What it says |
 | --- | --- |
@@ -637,5 +742,6 @@ lost none.
 | **SCRUM-139** (backlog US-83) | Submit for the Operational Safety Check, 3 SP. See §9. |
 | **SCRUM-141** (backlog US-85) | Approve or reject the safety arrangement, 2 SP. See §11. Rejection back to `APPROVED` is roadmap decision 4; history is optional in Release 1 (#33) but this story's AC4 requires it. |
 | **SCRUM-144** (backlog US-41) | Confirm an event once essential arrangements are complete, 1 SP. See §12. Discussions #106 (the coordinator decides with Technical Support whether an item is essential) and #80 (essential arrangements are event-specific; non-essential follow-ups may remain). |
-| **SCRUM-161** | View all coordinator assignments. See §13. Placed in *Manage event requests* by the developer, keeping that page's existing status view (SCRUM-148 AC4), so the overview opens on active events and *All statuses* returns the closed ones. |
+| **SCRUM-37** (backlog US-37) | Flag edits that could invalidate existing arrangements, so only changes that matter trigger revalidation. See §13. The release-on-decision mechanism (regress to `SUBMITTED`, release on approve or reject) is a **team design decision**, not a customer clarification — AC3/AC4 don't specify it themselves; recorded word for word in the task note. |
+| **SCRUM-161** | View all coordinator assignments. See §14. Placed in *Manage event requests* by the developer, keeping that page's existing status view (SCRUM-148 AC4), so the overview opens on active events and *All statuses* returns the closed ones. |
 | Discussions #80, #94, #95, #101, #125 | The assigned coordinator decides; the manager only assigns; assignment doesn't start review; `approved_rejected_by` kept apart from `coordinator_id`; who sees the outcome |

@@ -88,6 +88,17 @@ Approving writes `confirmed`, which is where the exclusion constraint from
 rejects the whole statement (SQLSTATE 23P01), nothing changes, and the API
 returns 409 rather than 500.
 
+**Gap found during SCRUM-37 UAT, 2026-10-21, not introduced or closed by that story.** This decision endpoint has
+no availability pre-check at all, unlike equipment's `isRequestAvailableForWindow` (`equipment.controller.js#patchRequestStatus`,
+scoped to `REVIEW_REQUIRED → APPROVED`). `venues.controller.js#patchBookingRequestDecision` calls
+`decideBookingRequest` directly — the exclusion constraint above is the only safety net, and it only catches a
+collision between two *already-`confirmed`* rows. There is nothing checking against other `pending` holds on
+approval, and no friendly pre-check message, just the raw 409 if the constraint itself fires. Pre-existing
+(SCRUM-20/22), confirmed by grep — zero hits for `available_for_window`/`isRequestAvailableForWindow` anywhere in
+this lane. Not built into SCRUM-37: estimated at roughly a SCRUM-150-AC2-sized sub-story, since venues have no
+`REVIEW_REQUIRED`-equivalent status to scope it to, so a fix would have to apply to every decision, not just a
+flagged one. See `.agent/docs/other/SCRUM-37-flag-significant-edits.md`'s *Found, not built*.
+
 ## Blocking a conflicting booking (SCRUM-20)
 
 The block itself is the database constraint described above, not a check in the
@@ -1456,6 +1467,24 @@ exports a thin wrapper, `releaseBookingsForCancelledEvent(eventId)`, called from
 simply skipped. A later story wanting to change or cancel one booking on a multi-venue event without touching the
 others should share the "flip to cancelled" primitive here rather than duplicate it, scoped to one `request_id`
 instead of a whole event.
+
+**SCRUM-37 reuses this same wrapper.** `review.service.js#approve`/`#reject` both call
+`releaseVenueBookingsForCancelledEvent(eventId)` (the Event-Lifecycle-side name for this same function) after a
+successful decision on a resubmission — the event a significant edit sent back to `SUBMITTED` for the
+coordinator's re-approval. The idempotent guard already makes this safe on an ordinary first-time approval or
+rejection too, since there's nothing to release yet at that point. See
+[event-requests.md](event-requests.md#significant-edits-regress-the-event-scrum-37).
+
+**Reviewer feedback on PR #60 added one new Venue-lane function, `releaseBookingsForTerminalEvents`.**
+`approve()`/`reject()` write the event's new status before calling the release above; if that call throws, the
+status change has already committed, so the error is now caught and logged in `review.service.js` rather than
+turned into a misleading 500. A caught failure here needs a safety net, the same way equipment already has one
+for `CANCELLED` (SCRUM-104): `getVenues`/`getVenueAvailability` (`venues.controller.js`) both call
+`releaseBookingsForTerminalEvents()` before computing their response — it lists every `CANCELLED`/`REJECTED`
+event and releases each one's bookings through the wrapper above. Both statuses are terminal, so a venue booking
+can never legitimately survive against either one. `APPROVED` is deliberately not swept this way: plenty of
+`APPROVED` events hold live bookings on purpose, so only the logged synchronous call protects a resubmission's
+`approve()` — a known, accepted gap if that one call fails.
 
 ### Changing or cancelling one booking (SCRUM-154)
 

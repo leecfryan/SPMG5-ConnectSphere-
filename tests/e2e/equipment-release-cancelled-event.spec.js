@@ -4,7 +4,7 @@ const { test, expect } = require("@playwright/test");
 const { setupEquipment, getAccessToken, updateEvent } = require("./support/live-equipment-fixtures");
 
 // SCRUM-104/148: equipment reads self-heal on their own
-// (releaseCancelledEventReservations in equipment.controller.js) regardless
+// (releaseReservationsForTerminalEvents in equipment.controller.js) regardless
 // of how an event reached CANCELLED - this is what a Technical Support Staff
 // member sees if they check the equipment catalogue/availability after any
 // cancellation, including one made through SCRUM-148's real cancel action,

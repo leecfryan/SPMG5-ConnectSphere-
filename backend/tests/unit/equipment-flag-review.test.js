@@ -1,8 +1,8 @@
-// SCRUM-150 AC1/AC3: flagReservationsForReview itself (the function
-// eventWorkspace.service.js#updateOrganiserEvent calls once it detects a real
-// date/time/equipment_needs change - that diff-detection is proven separately
-// in tests/unit/events/eventWorkspace.service.test.js). Doubles only, no live
-// Supabase - same in-memory fake client shape as equipment-release-event.test.js.
+// SCRUM-150 AC2/AC3: the equipment-side machinery that survives SCRUM-37's
+// retirement of flagReservationsForReview (see the comment further down) -
+// isRequestAvailableForWindow and the guarantee that only Technical Support's
+// own decision ever sets APPROVED. Doubles only, no live Supabase - same
+// in-memory fake client shape as equipment-release-event.test.js.
 import { describe, test, expect } from "vitest";
 import { createRequire } from "node:module";
 
@@ -56,70 +56,19 @@ function request(overrides) {
   };
 }
 
-describe("SCRUM-150: flagReservationsForReview", () => {
-  // TC-150-01/02 prove *when* updateOrganiserEvent calls this function (see
-  // eventWorkspace.service.test.js); these two prove what the function itself
-  // then does with PENDING/APPROVED requests once called.
-  test("PENDING and APPROVED requests both move to REVIEW_REQUIRED, borrow window updated when dates changed", async () => {
-    const pending = request({ id: "req-pending", status: "PENDING" });
-    const approved = request({ id: "req-approved", status: "APPROVED" });
-    const service = createEquipmentService(fakeSupabase({ equipment_requests: [pending, approved] }));
-
-    const summary = await service.flagReservationsForReview(EVENT_ID, {
-      startTime: "2026-02-01T09:00:00Z",
-      endTime: "2026-02-01T17:00:00Z",
-      datesChanged: true,
-    });
-
-    expect(summary.flagged.sort()).toEqual(["req-approved", "req-pending"]);
-    const requests = await service.listRequestsByEvent(EVENT_ID);
-    expect(requests.every((r) => r.status === "REVIEW_REQUIRED")).toBe(true);
-    expect(requests.every((r) => r.borrow_start === "2026-02-01T09:00:00Z" && r.borrow_end === "2026-02-01T17:00:00Z")).toBe(true);
-  });
-
-  test("datesChanged false (equipment_needs-only edit) flags status without touching the borrow window", async () => {
-    const approved = request({ id: "req-approved", status: "APPROVED" });
-    const service = createEquipmentService(fakeSupabase({ equipment_requests: [approved] }));
-
-    await service.flagReservationsForReview(EVENT_ID, { datesChanged: false });
-
-    const [updated] = await service.listRequestsByEvent(EVENT_ID);
-    expect(updated.status).toBe("REVIEW_REQUIRED");
-    expect(updated.borrow_start).toBe(approved.borrow_start);
-    expect(updated.borrow_end).toBe(approved.borrow_end);
-  });
-
-  test("[TC-150-04] a second reschedule before review re-flags with the latest window", async () => {
-    const approved = request({ id: "req-approved", status: "APPROVED" });
-    const service = createEquipmentService(fakeSupabase({ equipment_requests: [approved] }));
-
-    await service.flagReservationsForReview(EVENT_ID, {
-      startTime: "2026-02-01T09:00:00Z", endTime: "2026-02-01T17:00:00Z", datesChanged: true,
-    });
-    await service.flagReservationsForReview(EVENT_ID, {
-      startTime: "2026-03-01T09:00:00Z", endTime: "2026-03-01T17:00:00Z", datesChanged: true,
-    });
-
-    const [updated] = await service.listRequestsByEvent(EVENT_ID);
-    expect(updated.status).toBe("REVIEW_REQUIRED");
-    expect(updated.borrow_start).toBe("2026-03-01T09:00:00Z");
-    expect(updated.borrow_end).toBe("2026-03-01T17:00:00Z");
-  });
-
-  test("[TC-150-23] REJECTED and RELEASED requests are never reopened by flagging", async () => {
-    const rejected = request({ id: "req-rejected", status: "REJECTED" });
-    const released = request({ id: "req-released", status: "RELEASED" });
-    const service = createEquipmentService(fakeSupabase({ equipment_requests: [rejected, released] }));
-
-    const summary = await service.flagReservationsForReview(EVENT_ID, {
-      startTime: "2026-02-01T09:00:00Z", endTime: "2026-02-01T17:00:00Z", datesChanged: true,
-    });
-
-    expect(summary.flagged).toEqual([]);
-    expect((await service.findRequestById("req-rejected")).status).toBe("REJECTED");
-    expect((await service.findRequestById("req-released")).status).toBe("RELEASED");
-  });
-});
+// SCRUM-150 AC1's flagReservationsForReview (and the four cases that used to
+// be proven directly against it here - PENDING/APPROVED/REVIEW_REQUIRED
+// requests moving to REVIEW_REQUIRED, the borrow-window update, re-flagging
+// on a second reschedule, REJECTED/RELEASED never reopened) was retired as
+// part of SCRUM-37's team design: a significant edit now regresses the event
+// itself to SUBMITTED for the coordinator's decision, which then releases
+// arrangements outright (review.service.js) rather than holding this same
+// reservation for Technical Support to re-decide. SCRUM-150's AC1 is
+// therefore unreachable via this trigger now, by deliberate decision - see
+// this story's task note and docs/equipment-integration.md's SCRUM-37
+// addendum. apply_organiser_event_edit (SQL) only decides whether to
+// regress; it never writes equipment_requests/venue_bookings, so there is no
+// successor rule to prove here or anywhere else.
 
 // SCRUM-150 AC2: isRequestAvailableForWindow itself. The "no conflict"/
 // "conflicting request" cases and "same answer for both roles" are already
@@ -155,7 +104,12 @@ describe("SCRUM-150: isRequestAvailableForWindow", () => {
 // explicit decision as a positive control to prove the test would actually
 // catch a regression that set APPROVED some other way.
 describe("SCRUM-150 AC3: nothing but the explicit decision sets APPROVED", () => {
-  test("[TC-150-09] re-flagging, an unrelated event's release, and a re-fetch all leave it REVIEW_REQUIRED - only the explicit decision flips it", async () => {
+  // SCRUM-37: the "reschedule the same event again" step this test used to
+  // include (via flagReservationsForReview, retired) is no longer exercisable
+  // here - that re-flagging now happens inside apply_organiser_event_edit
+  // (SQL), which this fake can't run. The remaining steps still hold: nothing
+  // else in equipment.service.js ever sets APPROVED but the explicit decision.
+  test("[TC-150-09] an unrelated event's release and a re-fetch both leave it REVIEW_REQUIRED - only the explicit decision flips it", async () => {
     const OTHER_EVENT_ID = "99999999-9999-9999-9999-999999999999";
     const flagged = request({ id: "req-flagged", status: "REVIEW_REQUIRED" });
     const unrelated = request({ id: "req-unrelated", event_id: OTHER_EVENT_ID, equipment_id: "eq-other", status: "APPROVED" });
@@ -163,10 +117,6 @@ describe("SCRUM-150 AC3: nothing but the explicit decision sets APPROVED", () =>
       equipment_requests: [flagged, unrelated],
       equipment: [{ id: "22222222-2222-2222-2222-222222222222", type: "Projector", status: "AVAILABLE" }, { id: "eq-other", type: "Speaker", status: "AVAILABLE" }],
     }));
-
-    // Reschedule the same event again.
-    await service.flagReservationsForReview(EVENT_ID, { startTime: "2026-04-01T09:00:00Z", endTime: "2026-04-01T17:00:00Z", datesChanged: true });
-    expect((await service.findRequestById("req-flagged")).status).toBe("REVIEW_REQUIRED");
 
     // Postpone/cancel sweep running against a different, unrelated event.
     await service.releaseReservationsForEvent(OTHER_EVENT_ID);

@@ -203,7 +203,7 @@ async function listLiveCancelledEventIds() {
 }
 
 describe("SCRUM-104 AC2: the released quantity is available for new reservations", () => {
-  async function startApp({ listCancelledEventIds = async () => [] } = {}) {
+  async function startApp({ listReleasableEventIds = async () => [] } = {}) {
     const app = createApp({
       authClient: { auth: { getUser: async () => ({ data: { user: { id: technicalUserId, app_metadata: { roles: ["technical_support_staff"] } } }, error: null }) } },
       equipmentDependencies: {
@@ -211,7 +211,7 @@ describe("SCRUM-104 AC2: the released quantity is available for new reservations
         findEventById: async (id) => ({ id, coordinator_id: coordinatorUserId, status: "APPROVED" }),
         findEventsByIds: async (ids) => ids.map((id) => ({ id, coordinator_id: coordinatorUserId, status: "APPROVED" })),
         getUserDisplayName: async () => null,
-        listCancelledEventIds,
+        listReleasableEventIds,
       },
     });
     const server = app.listen(0, "127.0.0.1");
@@ -266,7 +266,7 @@ describe("SCRUM-104 AC2: the released quantity is available for new reservations
     const requestId = await insertRequest({ eventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
     // No call to releaseReservationsForEvent here - that's the point.
-    const { base, server } = await startApp({ listCancelledEventIds: listLiveCancelledEventIds });
+    const { base, server } = await startApp({ listReleasableEventIds: listLiveCancelledEventIds });
     try {
       const params = new URLSearchParams({ start: "2026-01-01T09:00:00Z", end: "2026-01-01T17:00:00Z", type, quantity: "1", location: "Test Room" });
       const availability = await (await fetch(`${base}/api/equipment/availability?${params}`, { headers: { Authorization: "Bearer technical_support_staff" } })).json();
