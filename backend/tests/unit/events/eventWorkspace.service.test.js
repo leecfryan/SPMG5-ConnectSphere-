@@ -253,6 +253,21 @@ test.each(["APPROVED", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED", "CANCELLED",
   },
 );
 
+test("[TC-SCRUM-164-16] race: coordinator starts review between status check and write; edit is rejected", async () => {
+  const { service, client, records } = setup();
+  const from = client.from.getMockImplementation();
+  client.from.mockImplementation(table => {
+    const query = from(table);
+    if (table === "events") {
+      const update = query.update;
+      query.update = fields => { records[0].status = "UNDER_REVIEW"; return update(fields); };
+    }
+    return query;
+  });
+  expect(await service.updateOrganiserEvent("alice", "event-alice", { name: "Too late", reason: "Race" }))
+    .toEqual({ ok: false, reason: "conflict" });
+});
+
 test("[TC-SCRUM-164-04] update without a reason is a 400", async () => {
   const { service, updates } = setup();
   const result = await service.updateOrganiserEvent("alice", "event-alice", { name: "No reason" });

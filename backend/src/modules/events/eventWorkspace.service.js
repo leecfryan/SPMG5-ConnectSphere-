@@ -136,8 +136,10 @@ function createEventWorkspaceService(client, equipmentService) {
       const problems = [...errors, ...validateUpdate(fields, current).errors.filter(problem => !unreadable.has(problem.field))];
       if (problems.length) return { ok: false, reason: "invalid", errors: problems };
       // SCRUM-100: recheck responsibility in the write itself, after the read check.
+      // SCRUM-164 AC2: also recheck status so a coordinator starting review in the
+      // gap between the guard above and this write returns conflict, not a saved edit.
       const event = await unwrap(client.from("events").update(fields)
-        .eq("id", id).eq("organiser_id", userId).select(FIELDS).maybeSingle());
+        .eq("id", id).eq("organiser_id", userId).eq("status", "SUBMITTED").select(FIELDS).maybeSingle());
       if (!event) return { ok: false, reason: "conflict" };
 
       // SCRUM-150 AC1/AC3: a real change to the date, time or equipment needs
@@ -156,7 +158,10 @@ function createEventWorkspaceService(client, equipmentService) {
       }
 
       // SCRUM-164 AC3: record actor, timestamp (db default) and reason.
-      // Best-effort: a log write failure does not undo the edit.
+      // Best-effort: not using unwrap() so Supabase { error } responses are
+      // silently dropped. The try/catch handles true network exceptions.
+      // The edit is already committed; losing the log entry is less harmful
+      // than returning 503 to the organiser.
       try {
         await client.from("event_activity_log").insert({
           event_id: id,
@@ -164,7 +169,7 @@ function createEventWorkspaceService(client, equipmentService) {
           action: "EDIT",
           details: { from_status: null, to_status: null, note: trimmedReason },
         });
-      } catch { /* intentional: edit stands even if log write fails */ }
+      } catch { /* network exception after committed edit; log entry missed */ }
 
       return { ok: true, event };
     },
