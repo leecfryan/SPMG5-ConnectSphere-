@@ -26,7 +26,7 @@ const repository = {
   assignCoordinator: vi.fn(),
   findById: vi.fn(),
 };
-const directory = { listCoordinators: vi.fn() };
+const directory = { listCoordinators: vi.fn(), displayNameOf: vi.fn() };
 
 // The token is the role list, so each case states the identity it is exercising.
 const authClient = { auth: { getUser: async (token) => ({
@@ -47,7 +47,7 @@ beforeAll(async () => {
 afterAll(() => new Promise((resolve) => server.close(resolve)));
 
 beforeEach(() => {
-  for (const fn of [...Object.values(repository), directory.listCoordinators]) fn.mockReset();
+  for (const fn of [...Object.values(repository), ...Object.values(directory)]) fn.mockReset();
   repository.findSubmittedUnassigned.mockResolvedValue(QUEUE);
   repository.findActiveAssignments.mockResolvedValue([
     { coordinator_id: "coord-1", start_time: "2026-11-15T09:00:00+00:00" },
@@ -220,4 +220,55 @@ test("SCRUM-26: without the server data key, assignment reports 503 and sign-in 
   }
   expect((await fetch(url + "/api/health")).status).toBe(200);
   await new Promise((resolve) => unconfigured.close(resolve));
+});
+
+// SCRUM-159: the Lead's unassigned queue shows each request's name, organiser,
+// proposed dates and expected attendance (AC2). Access (AC3) is proven by the
+// SCRUM-26 role tests above; AC1/AC4's filter by the repository query-shape
+// test in tests/unit/events/assignments.service.test.js.
+const OLIVIA = "11111111-0000-0000-0000-000000000001";
+const QUEUED = {
+  id: EVENT_ID, name: "Digital Literacy for Seniors", status: "SUBMITTED", organiser_id: OLIVIA,
+  start_time: "2099-10-02T01:00:00Z", end_time: "2099-10-02T05:00:00Z", expected_attendance: 30,
+};
+
+test("[SCRUM-159] TC-SCRUM-159-01: a submitted, unassigned request reaches the Lead with its name, organiser, proposed dates and attendance", async () => {
+  repository.findSubmittedUnassigned.mockResolvedValue([QUEUED]);
+  directory.displayNameOf.mockResolvedValue("Olivia Ong");
+
+  const response = await send("/events/unassigned");
+
+  expect(response.status).toBe(200);
+  const { events } = await response.json();
+  expect(events).toEqual([expect.objectContaining({
+    name: "Digital Literacy for Seniors", organiser_name: "Olivia Ong",
+    start_time: "2099-10-02T01:00:00Z", end_time: "2099-10-02T05:00:00Z", expected_attendance: 30,
+  })]);
+  expect(directory.displayNameOf).toHaveBeenCalledWith(OLIVIA);
+});
+
+test("[SCRUM-159] TC-SCRUM-159-03/04: an organiser who cannot be named still leaves the request in the queue, and no account id is sent", async () => {
+  repository.findSubmittedUnassigned.mockResolvedValue([QUEUED]);
+  directory.displayNameOf.mockResolvedValue(null);
+
+  const response = await send("/events/unassigned");
+
+  expect(response.status).toBe(200);
+  const { events } = await response.json();
+  expect(events).toHaveLength(1);
+  expect(events[0].organiser_name).toBeNull();
+  expect(JSON.stringify(events)).not.toContain(OLIVIA);
+});
+
+test("[SCRUM-159] TC-SCRUM-159-07: once a request is assigned, the queue the Lead reads no longer contains it", async () => {
+  const waiting = { ...QUEUED, id: "aaaaaaaa-0009-0000-0000-000000000000", name: "Still waiting" };
+  repository.findSubmittedUnassigned.mockResolvedValueOnce([QUEUED, waiting]).mockResolvedValueOnce([waiting]);
+  directory.displayNameOf.mockResolvedValue("Olivia Ong");
+
+  const before = (await (await send("/events/unassigned")).json()).events.map((event) => event.id);
+  expect((await send(`/events/${EVENT_ID}/coordinator`, "event_coordinator_lead", "PUT", { coordinatorId: "coord-1" })).status).toBe(200);
+  const after = (await (await send("/events/unassigned")).json()).events.map((event) => event.id);
+
+  expect(before).toEqual([EVENT_ID, waiting.id]);
+  expect(after).toEqual([waiting.id]);
 });

@@ -23,6 +23,10 @@ export default function EventDetailPanel({ event }) {
           <dd>{shortReference(event.id)}</dd>
         </div>
         <div>
+          <dt>Organiser</dt>
+          <dd>{event.organiser_name || "Organiser unavailable"}</dd>
+        </div>
+        <div>
           <dt>Starts</dt>
           <dd>{formatWhen(event.start_time)}</dd>
         </div>

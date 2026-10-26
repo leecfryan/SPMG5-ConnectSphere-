@@ -199,3 +199,51 @@ test("[SCRUM-26-UI-010] a failure that is the manager's to fix does not offer a 
   // The request stays in the queue: nothing was assigned.
   expect(screen.getByRole("button", { name: /Digital Literacy for Seniors/ })).toBeTruthy();
 });
+
+// SCRUM-159 AC2: every queue row shows the event name, organiser, proposed
+// dates and expected attendance. TZ is Asia/Singapore, so 01:00Z reads 9:00.
+const DETAILED_QUEUE = [
+  { ...QUEUE[0], organiser_name: "Olivia Ong", start_time: "2099-10-02T01:00:00Z", end_time: "2099-10-02T05:00:00Z", expected_attendance: 30 },
+  { ...QUEUE[1], organiser_name: "peter@example.com", start_time: "2099-11-07T01:00:00Z", end_time: "2099-11-07T04:00:00Z", expected_attendance: 24 },
+];
+const queueRow = (name) => screen.findByRole("button", { name: new RegExp(name) });
+
+test("[SCRUM-159-UI-001] AC2: each queue row shows the event name, organiser, proposed dates and expected attendance", async () => {
+  setup(["event_coordinator_lead"], { queue: DETAILED_QUEUE });
+  open();
+
+  const first = await queueRow("Digital Literacy for Seniors");
+  expect(first.textContent).toContain("Olivia Ong");
+  expect(first.textContent).toMatch(/2099.*9:00.*–.*2099.*1:00/);
+  expect(first.textContent).toContain("30 expected");
+  expect(first.textContent).toContain("Ref AAAAAAAA");
+  // The person icon marks the attendance but is decorative: screen readers still hear "30 expected".
+  const attendance = within(first).getByText("30 expected");
+  expect(attendance.querySelector("svg").getAttribute("aria-hidden")).toBe("true");
+  const second = await queueRow("Parent & Child Coding Workshop");
+  expect(second.textContent).toContain("peter@example.com");
+  expect(second.textContent).toContain("24 expected");
+});
+
+test("[SCRUM-159-UI-002] AC2 boundary: a missing organiser, dates or attendance reads as words, never a blank", async () => {
+  setup(["event_coordinator_lead"], { queue: [
+    { ...QUEUE[0], organiser_name: null, start_time: null, end_time: null, expected_attendance: null },
+  ] });
+  open();
+
+  const row = await queueRow("Digital Literacy for Seniors");
+  expect(row.textContent).toContain("Organiser unavailable");
+  expect(row.textContent).toContain("Dates not set");
+  expect(row.textContent).toContain("Attendance not set");
+});
+
+test("[SCRUM-159-UI-003] AC2: the selected request's details name its organiser", async () => {
+  setup(["event_coordinator_lead"], { queue: DETAILED_QUEUE });
+  const user = userEvent.setup();
+  open();
+
+  await user.click(await queueRow("Digital Literacy for Seniors"));
+
+  const panel = (await screen.findByRole("heading", { name: "Digital Literacy for Seniors" })).closest(".assign-detail");
+  expect(within(panel).getByText("Organiser").nextElementSibling.textContent).toBe("Olivia Ong");
+});

@@ -12,6 +12,11 @@ export function formatDay(value) {
   return at.toLocaleDateString(undefined, { dateStyle: "medium" });
 }
 
+export function formatRange(start, end) {
+  if (!start && !end) return "Dates not set";
+  return `${formatWhen(start)} – ${formatWhen(end)}`;
+}
+
 export function shortReference(id) {
   return typeof id === "string" && id.length >= 8 ? id.slice(0, 8).toUpperCase() : "—";
 }
