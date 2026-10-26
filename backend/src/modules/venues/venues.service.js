@@ -371,6 +371,21 @@ async function releaseBookingsForCancelledEvent(eventId) {
   if (error) throw new Error(`Failed to release venue bookings: ${error.message}`);
   return data;
 }
+
+// SCRUM-37 reviewer feedback: a safety net for any CANCELLED or REJECTED
+// event whose synchronous venue release (review.service.js's
+// releaseArrangements, or cancel()'s own call) didn't run or didn't
+// complete. Mirrors equipment's releaseReservationsForTerminalEvents
+// (equipment.controller.js) - both statuses are terminal, so neither can
+// ever legitimately hold a live booking, unlike APPROVED, which is
+// deliberately left alone. Swept before every venue read.
+async function releaseBookingsForTerminalEvents() {
+  const { data, error } = await getSupabase().from("events").select("id").in("status", ["CANCELLED", "REJECTED"]);
+  if (error) throw new Error(`Failed to list releasable events: ${error.message}`);
+  for (const event of data) {
+    await releaseBookingsForCancelledEvent(event.id);
+  }
+}
 // ---------------------------------------------------------------------------
 // SCRUM-146: venue holds
 // ---------------------------------------------------------------------------
@@ -708,6 +723,7 @@ module.exports = {
   changeBookingRequest,
   cancelBookingRequest,
   releaseBookingsForCancelledEvent,
+  releaseBookingsForTerminalEvents,
   createUnavailabilityPeriod,
   listUnavailabilityPeriods,
   getUnavailabilityPeriodById,
