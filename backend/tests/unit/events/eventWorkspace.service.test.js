@@ -13,6 +13,13 @@ const storage = require("../../../../tests/playwright/support/registration-stora
 // re-implemented in JS here, per the house rule against duplicating a rule
 // in two places; what's tested below is that updateOrganiserEvent calls it
 // with the right, fully-merged arguments, and maps its errcode correctly.
+let fakeNow = 0;
+
+// SCRUM-37 reviewer feedback (PR #60): the real function compares
+// p_expected_updated_at against the row it just locked, and bumps
+// updated_at on every write (events_set_updated_at trigger) - replicated
+// here so a stale p_expected_updated_at behaves the same way as the real
+// EVENT_MODIFIED/P0004 the caller needs to handle.
 function fakeApplyOrganiserEventEdit(records) {
   return vi.fn((name, args) => {
     if (name !== "apply_organiser_event_edit") throw new Error(`Unsupported rpc: ${name}`);
@@ -21,6 +28,10 @@ function fakeApplyOrganiserEventEdit(records) {
       async maybeSingle() {
         const record = records.find(r => r.id === args.p_event_id && r.organiser_id === args.p_organiser_id);
         if (!record) return { data: null, error: { code: "P0002", message: "EVENT_NOT_FOUND" } };
+        if (record.updated_at !== args.p_expected_updated_at) {
+          return { data: null, error: { code: "P0004", message: "EVENT_MODIFIED" } };
+        }
+        fakeNow += 1;
         Object.assign(record, {
           name: args.p_name, purpose: args.p_purpose, description: args.p_description,
           start_time: args.p_start_time, end_time: args.p_end_time,
@@ -28,6 +39,7 @@ function fakeApplyOrganiserEventEdit(records) {
           expected_attendance: args.p_expected_attendance, venue_requirements: args.p_venue_requirements,
           accessibility_needs: args.p_accessibility_needs, equipment_needs: args.p_equipment_needs,
           other_comments: args.p_other_comments,
+          updated_at: "2026-10-26T00:00:00." + String(fakeNow).padStart(3, "0") + "Z",
         });
         return { data: { ...record }, error: null };
       },
@@ -37,6 +49,7 @@ function fakeApplyOrganiserEventEdit(records) {
 }
 
 function setup() {
+  fakeNow = 0;
   const users = [
     { id: "alice", app_metadata: { roles: ["event_organiser"], organisation_id: "alpha" }, user_metadata: {} },
     { id: "bob", app_metadata: { roles: ["event_organiser"], organisation_id: "alpha" }, user_metadata: {} },
@@ -56,6 +69,7 @@ function setup() {
     venue_requirements: "A stage", accessibility_needs: "Step-free access",
     equipment_needs: "Projector and a lectern",
     submitted_at: "2026-01-0" + (index + 1) + "T00:00:00Z",
+    updated_at: "2026-01-0" + (index + 1) + "T00:00:00.000Z",
   }));
   const client = storage(new Map([["fixture", { events: records }]]));
   client.auth = { admin: {
@@ -85,8 +99,15 @@ test("[SCRUM-100-UNIT-002] Owner saves normalised partial details while protecte
     name: "  Revised workshop  ", expected_attendance: "1", other_comments: "  ",
   });
   expect(result.ok).toBe(true);
-  expect(result.event).toMatchObject({ ...before[0], name: "Revised workshop", expected_attendance: 1, other_comments: null });
-  expect(records[0]).toMatchObject({ ...before[0], name: "Revised workshop", expected_attendance: 1, other_comments: null });
+  // updated_at is excluded from the spread below - the write bumps it
+  // (events_set_updated_at trigger, replicated by the fake), so it's never
+  // equal to the pre-save snapshot; that's the whole point of SCRUM-37's
+  // optimistic-concurrency fix (PR #60 reviewer feedback).
+  const beforeRest = { ...before[0] };
+  delete beforeRest.updated_at;
+  expect(result.event).toMatchObject({ ...beforeRest, name: "Revised workshop", expected_attendance: 1, other_comments: null });
+  expect(records[0]).toMatchObject({ ...beforeRest, name: "Revised workshop", expected_attendance: 1, other_comments: null });
+  expect(records[0].updated_at).not.toBe(before[0].updated_at);
   expect(records.slice(1)).toEqual(before.slice(1));
   // SCRUM-37: the function always takes every writable column - untouched
   // ones are carried over from the current row, not omitted.
@@ -166,6 +187,26 @@ test("[SCRUM-100-UNIT-007] Changed responsibility prevents the previous owner fr
   expect(records).toEqual([{ ...before[0], organiser_id: "bob" }, ...before.slice(1)]);
 });
 
+// SCRUM-37 reviewer feedback (PR #60): same shape as UNIT-007's reassignment
+// race, but here the row is still this organiser's own - only updated_at
+// moved, because another save (e.g. a second open tab) committed in the gap
+// between this call's own read() above and its RPC call below. Without
+// p_expected_updated_at, `merged` (computed from the now-stale `current`)
+// would silently overwrite whatever that other save changed.
+test("[TC-37-24] a save that lands between this read and the write is refused, not silently merged over", async () => {
+  const { service, client, records } = setup();
+  const before = structuredClone(records[0]);
+  const realRpc = client.rpc;
+  client.rpc = vi.fn((name, args) => { records[0].updated_at = "2026-10-26T00:00:00.999Z"; return realRpc(name, args); });
+
+  const result = await service.updateOrganiserEvent("alice", "event-alice", { name: "Stale change" });
+
+  expect(result).toEqual({ ok: false, reason: "conflict" });
+  // Refused outright - the row is exactly as the other save left it, not
+  // half-overwritten with this call's stale merged values.
+  expect(records[0]).toEqual({ ...before, updated_at: "2026-10-26T00:00:00.999Z" });
+});
+
 test("[SCRUM-100-UNIT-008] Current trusted affiliation replaces old colleague access on the next lookup", async () => {
   const { service, users } = setup();
   expect(await service.find("organiser", "alice", "event-bob")).not.toBeNull();
@@ -239,7 +280,7 @@ test("[TC-37-21] every writable column reaches the function as a real value, nev
   const result = await service.updateOrganiserEvent("alice", "event-alice", { name: "Renamed only" });
   expect(result.ok).toBe(true);
   expect(client.rpc).toHaveBeenCalledExactlyOnceWith("apply_organiser_event_edit", {
-    p_event_id: "event-alice", p_organiser_id: "alice",
+    p_event_id: "event-alice", p_organiser_id: "alice", p_expected_updated_at: before.updated_at,
     p_name: "Renamed only", p_purpose: before.purpose, p_description: before.description,
     p_start_time: before.start_time, p_end_time: before.end_time,
     p_registration_start: before.registration_start, p_registration_end: before.registration_end,

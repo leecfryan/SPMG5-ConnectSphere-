@@ -18,7 +18,7 @@ const FIELDS = [
   "equipment_needs", "other_comments", "status", "organiser_id",
   "coordinator_id", "submitted_at", "approved_rejected_by", "approved_rejected_at", "approval_rejection_remark",
   "cancelled_by", "cancelled_at", "cancellation_reason",
-  "postponed_by", "postponed_at", "postponement_reason",
+  "postponed_by", "postponed_at", "postponement_reason", "updated_at",
 ].join(",");
 
 function isCoordinator(user) {
@@ -143,12 +143,24 @@ function createEventWorkspaceService(client) {
       // it never touches equipment_requests/venue_bookings itself. The
       // function always writes every column, so a partial PATCH is merged
       // onto the current row first.
+      //
+      // Reviewer feedback on PR #60: that merge is computed from `current`,
+      // read a moment ago in a separate round trip - not from inside the
+      // function's own locked read below. If another save for this same
+      // event committed in between, `merged` still carries its pre-that-save
+      // values for every column this PATCH didn't touch, and writing them
+      // would silently revert the other save's change - a lost update, not
+      // just a theoretical stale-tab problem. p_expected_updated_at lets the
+      // function detect that gap: it compares against the row it locks, and
+      // refuses (EVENT_MODIFIED/P0004, mapped to the same conflict below) if
+      // `current` was already out of date by the time this call arrived.
       const merged = Object.fromEntries(
         WRITABLE_COLS.map((column) => [column, Object.hasOwn(fields, column) ? fields[column] : current[column]]),
       );
       const { data: event, error } = await client.rpc("apply_organiser_event_edit", {
         p_event_id: id,
         p_organiser_id: userId,
+        p_expected_updated_at: current.updated_at,
         p_name: merged.name,
         p_purpose: merged.purpose,
         p_description: merged.description,
@@ -169,6 +181,12 @@ function createEventWorkspaceService(client) {
         // read, so this is the same race the plain update used to answer
         // with a 409 for.
         if (error.code === "P0002") return { ok: false, reason: "conflict" };
+        // EVENT_MODIFIED (P0004): the row exists and is still this
+        // organiser's, but its updated_at moved past what `current` read -
+        // another save landed in the gap between that read and this call.
+        // Same conflict response as P0002: re-read and retry rather than
+        // write stale values over whatever that other save changed.
+        if (error.code === "P0004") return { ok: false, reason: "conflict" };
         throw error;
       }
 

@@ -122,3 +122,21 @@ test.each(["SUBMITTED", "UNDER_REVIEW"])(
     expect(fetchMock).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(onSubmitted).toHaveBeenCalled());
   });
+
+// Reviewer feedback on PR #60: the card note below the form always claimed
+// "status stays the same", even while the warning above it was saying the
+// opposite - EventRequestForm.jsx hides it for as long as that warning shows.
+test("[TC-37-FE-08] the warning replaces the contradictory \"status stays the same\" note, which returns once dismissed", async () => {
+  const { user } = setup("CONFIRMED");
+  expect(screen.getByText(/status and assignment stay the same/)).toBeInTheDocument();
+
+  await changeAttendance(user);
+  await user.click(screen.getByRole("button", { name: "Save changes" }));
+  await screen.findByRole("alert", { name: "" });
+
+  expect(screen.queryByText(/status and assignment stay the same/)).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "Never mind" }));
+
+  expect(screen.getByText(/status and assignment stay the same/)).toBeInTheDocument();
+});

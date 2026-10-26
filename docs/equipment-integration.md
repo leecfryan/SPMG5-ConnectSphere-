@@ -160,15 +160,20 @@ technician has deliberately set to `DAMAGED`/`MAINTENANCE`/`UNDER_MAINTENANCE`/`
 
 There are two ways this runs:
 
-- **The real cancel action (SCRUM-148).** `POST /api/internal/events/:eventId/cancel` calls this function
-  synchronously as part of the same request, so it is true the moment cancellation is saved - see
-  `docs/event-requests.md`'s *Cancelling an event* section for the action itself.
-- **Equipment reads self-heal automatically**, for any event cancelled directly in the database rather than
-  through the action (e.g. historical data from before SCRUM-148 existed). `GET /equipment` and
-  `GET /equipment/availability` both call `releaseCancelledEventReservations` (`equipment.controller.js`) before
-  computing their response: it lists every `CANCELLED` event (`listCancelledEventIds`, a dependency alongside
-  `findEventById`/`findEventsByIds`) and releases each one's reservations. Calling this on every read is safe and
-  cheap: once an event's requests are `RELEASED`, re-processing it is a no-op.
+- **The real cancel action (SCRUM-148)**, and **approve/reject on a resubmission (SCRUM-37)**. The cancel action,
+  and `review.service.js`'s `approve()`/`reject()`, call this function synchronously as part of the same request,
+  so it is true the moment the decision is saved - see `docs/event-requests.md`'s *Cancelling an event* and
+  [*Significant edits regress the event*](event-requests.md#significant-edits-regress-the-event-scrum-37) sections
+  for the actions themselves. A release that throws there is logged, not thrown further - the status write
+  already committed, so the caller still sees the decision as having succeeded.
+- **Equipment reads self-heal automatically**, for any event that reached `CANCELLED` or `REJECTED` without that
+  synchronous call completing - historical data from before SCRUM-148 existed, or a release that threw (SCRUM-37).
+  `GET /equipment` and `GET /equipment/availability` both call `releaseReservationsForTerminalEvents`
+  (`equipment.controller.js`) before computing their response: it lists every `CANCELLED`/`REJECTED` event
+  (`listReleasableEventIds`, a dependency alongside `findEventById`/`findEventsByIds`) and releases each one's
+  reservations. Calling this on every read is safe and cheap: once an event's requests are `RELEASED`,
+  re-processing it is a no-op. `APPROVED` is deliberately never swept this way - plenty of `APPROVED` events
+  legitimately hold live reservations, so only the logged synchronous call protects a resubmission's `approve()`.
 
 `backend/scripts/releaseCancelledEvents.js` (SCRUM-104's manual on-demand trigger, for use before any cancel
 action existed) was removed once SCRUM-148 made the first path above the normal route to `CANCELLED` - the

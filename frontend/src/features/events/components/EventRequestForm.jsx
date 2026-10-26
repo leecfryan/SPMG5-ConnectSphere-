@@ -382,11 +382,16 @@ export default function EventRequestForm({ onSubmitted, event: existingEvent, on
       {!existingEvent && <button className="secondary" type="button" disabled={busy} onClick={saveAsDraft}>
         {pending === "draft" ? "Saving draft…" : "Save draft"}
       </button>}
-      <p className="card-note">
-        {existingEvent ? "Saving updates your event details. Your event's status and assignment stay the same." :
-          "Submitting sends your request to ConnectSphere for coordinator assignment and review. " +
-          "A draft needs only the event name and is visible only to you until you submit it."}
-      </p>
+      {/* SCRUM-37 reviewer feedback (PR #60): this note claims the status
+          stays the same, which is false while the significant-edit warning
+          above is telling the user the opposite - hidden for that moment. */}
+      {!confirming && (
+        <p className="card-note">
+          {existingEvent ? "Saving updates your event details. Your event's status and assignment stay the same." :
+            "Submitting sends your request to ConnectSphere for coordinator assignment and review. " +
+            "A draft needs only the event name and is visible only to you until you submit it."}
+        </p>
+      )}
     </form>
   );
 }

@@ -1468,12 +1468,23 @@ simply skipped. A later story wanting to change or cancel one booking on a multi
 others should share the "flip to cancelled" primitive here rather than duplicate it, scoped to one `request_id`
 instead of a whole event.
 
-**SCRUM-37 reuses this same wrapper, unchanged.** `review.service.js#approve`/`#reject` both call
+**SCRUM-37 reuses this same wrapper.** `review.service.js#approve`/`#reject` both call
 `releaseVenueBookingsForCancelledEvent(eventId)` (the Event-Lifecycle-side name for this same function) after a
 successful decision on a resubmission — the event a significant edit sent back to `SUBMITTED` for the
-coordinator's re-approval. No new Venue-lane code: the idempotent guard already makes this safe on an ordinary
-first-time approval or rejection too, since there's nothing to release yet at that point. See
+coordinator's re-approval. The idempotent guard already makes this safe on an ordinary first-time approval or
+rejection too, since there's nothing to release yet at that point. See
 [event-requests.md](event-requests.md#significant-edits-regress-the-event-scrum-37).
+
+**Reviewer feedback on PR #60 added one new Venue-lane function, `releaseBookingsForTerminalEvents`.**
+`approve()`/`reject()` write the event's new status before calling the release above; if that call throws, the
+status change has already committed, so the error is now caught and logged in `review.service.js` rather than
+turned into a misleading 500. A caught failure here needs a safety net, the same way equipment already has one
+for `CANCELLED` (SCRUM-104): `getVenues`/`getVenueAvailability` (`venues.controller.js`) both call
+`releaseBookingsForTerminalEvents()` before computing their response — it lists every `CANCELLED`/`REJECTED`
+event and releases each one's bookings through the wrapper above. Both statuses are terminal, so a venue booking
+can never legitimately survive against either one. `APPROVED` is deliberately not swept this way: plenty of
+`APPROVED` events hold live bookings on purpose, so only the logged synchronous call protects a resubmission's
+`approve()` — a known, accepted gap if that one call fails.
 
 ### Changing or cancelling one booking (SCRUM-154)
 

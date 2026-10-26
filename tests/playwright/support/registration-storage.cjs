@@ -83,6 +83,17 @@ module.exports = function registrationStorage(accounts) {
         return {
           select() { return this; },
           async maybeSingle() {
+            // SCRUM-37 reviewer feedback (PR #60): same optimistic-concurrency
+            // check the real function makes under its row lock - a stale
+            // p_expected_updated_at means another save (e.g. a second open
+            // tab) committed first, so this one is refused rather than
+            // merged over it.
+            const existing = await self.from('events').select('updated_at')
+              .eq('id', args.p_event_id).eq('organiser_id', args.p_organiser_id).maybeSingle();
+            if (!existing.data) return { data: null, error: { code: 'P0002', message: 'EVENT_NOT_FOUND' } };
+            if (existing.data.updated_at !== args.p_expected_updated_at) {
+              return { data: null, error: { code: 'P0004', message: 'EVENT_MODIFIED' } };
+            }
             const result = await self.from('events').update({
               name: args.p_name, purpose: args.p_purpose, description: args.p_description,
               start_time: args.p_start_time, end_time: args.p_end_time,

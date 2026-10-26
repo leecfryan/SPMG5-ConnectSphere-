@@ -20,6 +20,27 @@ function createReviewService({ repository }) {
     return { approved_rejected_by: coordinatorId, approved_rejected_at: new Date().toISOString(), approval_rejection_remark: note };
   }
 
+  // Review feedback on SCRUM-37: move() already committed the APPROVED/REJECTED
+  // write by the time these run, so a release throwing must not surface as a
+  // 500 that implies the decision itself failed. Each release is independent
+  // and logged, not thrown - REJECTED is swept for leftovers by
+  // equipment.controller.js's releaseReservationsForTerminalEvents and its
+  // venues equivalent, same as CANCELLED; APPROVED has no such sweep (plenty
+  // of APPROVED events legitimately hold live arrangements), so a failure
+  // here is a known gap the log is for.
+  async function releaseArrangements(action, eventId, actorId, { equipmentService, releaseVenueBookingsForCancelledEvent } = {}) {
+    try {
+      await equipmentService?.releaseReservationsForEvent?.(eventId, actorId);
+    } catch (error) {
+      console.error(`${action} ${eventId}: equipment release failed:`, error.message);
+    }
+    try {
+      await releaseVenueBookingsForCancelledEvent?.(eventId);
+    } catch (error) {
+      console.error(`${action} ${eventId}: venue release failed:`, error.message);
+    }
+  }
+
   // SCRUM-98 AC2: review begins on the coordinator's own action; assignment
   // alone leaves the event SUBMITTED (discussion #95).
   async function startReview(eventId, coordinatorId) {
@@ -41,8 +62,7 @@ function createReviewService({ repository }) {
     const result = await move(eventId, coordinatorId, "UNDER_REVIEW", "APPROVED", outcome(coordinatorId, parsed.note));
     if (!result.ok) return result;
 
-    await equipmentService?.releaseReservationsForEvent?.(eventId, coordinatorId);
-    await releaseVenueBookingsForCancelledEvent?.(eventId);
+    await releaseArrangements("approve", eventId, coordinatorId, { equipmentService, releaseVenueBookingsForCancelledEvent });
 
     return result;
   }
@@ -60,8 +80,7 @@ function createReviewService({ repository }) {
     const result = await move(eventId, coordinatorId, "UNDER_REVIEW", "REJECTED", outcome(coordinatorId, parsed.note));
     if (!result.ok) return result;
 
-    await equipmentService?.releaseReservationsForEvent?.(eventId, coordinatorId);
-    await releaseVenueBookingsForCancelledEvent?.(eventId);
+    await releaseArrangements("reject", eventId, coordinatorId, { equipmentService, releaseVenueBookingsForCancelledEvent });
 
     return result;
   }

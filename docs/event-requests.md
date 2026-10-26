@@ -636,8 +636,40 @@ leave the field write committed while a later step failed — an unreviewed, alr
 still-`CONFIRMED` event, with nobody asked to look at it. One function body is atomic by construction, so that
 can't happen. The function only *decides* whether to regress — it never writes to `equipment_requests` or
 `venue_bookings` itself (see below); `updateOrganiserEvent` maps the function's own `EVENT_NOT_FOUND` (`P0002`,
-its `WHERE id = ... AND organiser_id = ...` matching nothing) to the same `409 conflict` the plain update used to
-answer with when the event moved or was reassigned mid-edit.
+its `WHERE id = ... AND organiser_id = ...` matching nothing) and `EVENT_MODIFIED` (`P0004`, below) to the same
+`409 conflict` the plain update used to answer with when the event moved or was reassigned mid-edit.
+
+**Reviewer question on PR #60: could two open tabs let one save overwrite the other's changes?** Traced in full:
+the frontend already sends only the fields it changed, not a stale snapshot, and the merge above is built from a
+*fresh* read of the current row at request time, not from either tab's own stale copy — so the "tab left open a
+long time" version of this concern doesn't actually happen. The real, narrower gap: that fresh read and this RPC
+call are two separate round trips, not one atomic step, so another save can commit in the gap between them. If it
+does, the merged parameters this call is about to write are stale for whatever that other save changed, and
+writing them anyway would silently revert it — a genuine, millisecond-scale lost-update race, not a hypothetical
+one. Closed with `events.updated_at` (new column, bumped on every write by the same shared `set_updated_at()`
+trigger [venue-integration.md](venue-integration.md#venues-table-and-the-shared-set_updated_at-trigger) already
+uses) and a new `p_expected_updated_at` parameter: the function compares it against the row it just locked and
+raises `EVENT_MODIFIED`/`P0004` — mapped to the same conflict as a reassignment race — if the row moved since
+`current` was read. A `coalesce(p_field, v_old.field)`-inside-the-function alternative was considered and
+rejected: `registration_start`/`registration_end` are legitimately nullable, so the function could never tell
+"untouched" apart from "cleared to empty" that way.
+
+**Schema reference.** `updated_at` and its trigger are added by hand in the Supabase SQL editor (no migration
+file), applied before the revised `apply_organiser_event_edit` below:
+
+```sql
+alter table public.events
+  add column if not exists updated_at timestamptz not null default now();
+
+drop trigger if exists events_set_updated_at on public.events;
+create trigger events_set_updated_at
+  before update on public.events
+  for each row execute function public.set_updated_at();
+```
+
+The full revised `apply_organiser_event_edit` body (with `p_expected_updated_at` and its check) is in
+`.agent/docs/other/SCRUM-37-flag-significant-edits.md`'s *Schema reference* section, alongside the superseded
+version for comparison.
 
 **Released, not held, on the coordinator's decision.** Earlier in this story's build, a flagged arrangement was
 going to be *held* for Technical Support/Venue Staff to re-decide — the same shape SCRUM-150 built for equipment.
@@ -650,6 +682,16 @@ treats "nothing booked yet" as unresolved, so no new gate was needed for that. A
 (`REJECTED` is terminal) — rejecting a resubmission is a bigger hammer than undoing just the edit; see *Current
 limitations* below. Both release calls are no-ops when nothing is live, so this is safe on an ordinary first-time
 approval or rejection too.
+
+**Reviewer feedback on PR #60: a release failing no longer looks like the decision failed.** `transitionStatus`
+commits the `APPROVED`/`REJECTED` write before either release call runs, so a release throwing used to surface as
+a generic 500 that implied the whole request failed. Both calls are now independently caught and logged inside
+`review.service.js#releaseArrangements`; the decision itself still returns success. `REJECTED` (like `CANCELLED`)
+is swept as a safety net on the next equipment/venue read if a release did fail there — see
+[equipment-integration.md](equipment-integration.md#releasing-reservations-on-event-cancellation-scrum-104-extended-by-scrum-148)
+and [venue-integration.md](venue-integration.md#releasing-bookings-on-event-cancellation-scrum-148).
+`APPROVED` has no equivalent sweep (an `APPROVED` event may legitimately hold a live arrangement), so a release
+failure there is a known, logged-only gap.
 
 **Why not SCRUM-150's own hold-and-review mechanism.** SCRUM-150's AC1 ("marks reservations for review") used
 `REVIEW_REQUIRED`, holding the *same* reservation for Technical Support to re-decide. This story's team design

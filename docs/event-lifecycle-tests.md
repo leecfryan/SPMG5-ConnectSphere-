@@ -608,6 +608,8 @@ Venue Staff to re-decide. See the task note's *Team design decision* for the wor
 | RPC call shape (unit) | `backend/tests/unit/events/eventWorkspace.service.test.js` | `setup()`'s fake `client.rpc` replaced the old `equipmentService`/`updates`-tracking doubles; every `WRITABLE_COLS` field given a real fixture value (not left `undefined`) specifically so a gap in `FIELDS` shows up as a wrong argument, not a silent pass. |
 | Release wiring (integration) | `backend/tests/integration/events.review.test.js` | `approve()`/`reject()` extended with the same `equipmentService`/`releaseVenueBookingsForCancelledEvent` dependencies `cancel`/`postpone` already had; `review.controller.js#approve` became its own dedicated handler (previously routed through the generic `handle` wrapper) so it could thread them through. |
 | Component | `frontend/src/features/events/components/EventRequestForm.test.jsx` | New file: `AuthContext.Provider` + `vi.stubGlobal("fetch", ...)`, same pattern as `EventCancelControl.test.jsx`. |
+| Release error handling (unit, PR #60) | `backend/tests/unit/events/review.service.test.js` | `releaseArrangements`'s two independent try/catches, each throwing one release while the other succeeds. |
+| Optimistic concurrency (unit, PR #60) | `backend/tests/unit/events/eventWorkspace.service.test.js` | Fake RPC now checks `p_expected_updated_at` against the fixture's `updated_at` and bumps it on a real write, same shape as the real `events_set_updated_at` trigger; `tests/playwright/support/registration-storage.cjs`'s fake RPC carries the same check so the Playwright suite doesn't diverge from the real function's behaviour. |
 
 | ID | AC | Type | Scenario | Expected result | Automated test | Latest execution |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -628,6 +630,10 @@ Venue Staff to re-decide. See the task note's *Team design decision* for the wor
 | TC-37-FE-04 | 4 | Boundary | Editing another field while the warning is showing | Warning dismissed — what's about to save changed | `EventRequestForm.test.jsx` | 2026-10-21 · pass · local |
 | TC-37-FE-05 | 2, 4 | Negative | A non-significant edit on a `CONFIRMED` event | Saves in one click, no warning | `EventRequestForm.test.jsx` | 2026-10-21 · pass · local |
 | TC-37-FE-06 | 4 | Negative | A significant edit on a `SUBMITTED`/`UNDER_REVIEW` event (`test.each`, 2 statuses) | Saves in one click — nothing live to protect yet | `EventRequestForm.test.jsx` | 2026-10-21 · pass · local |
+| TC-37-FE-08 | 4 | Boundary | The "status stays the same" card note while the significant-edit warning is showing (reviewer feedback, PR #60) | Note hidden while the warning shows; reappears once dismissed | `EventRequestForm.test.jsx` | 2026-10-26 · pass · local |
+| TC-37-22 | 3 | Failure | The equipment release throws after `approve()`'s status write already committed (reviewer feedback, PR #60) | Still returns `{ ok: true }`; the venue release is still attempted; error logged, not thrown | `review.service.test.js` › `[TC-37-22] …` | 2026-10-26 · pass · local |
+| TC-37-23 | 3 | Failure | The venue release throws after `reject()`'s status write already committed (reviewer feedback, PR #60) | Still returns `{ ok: true }`; the equipment release is still attempted; error logged, not thrown | `review.service.test.js` › `[TC-37-23] …` | 2026-10-26 · pass · local |
+| TC-37-24 | — | Failure | A save lands between this request's own read and its write — another tab's save committing in the gap (reviewer question, PR #60) | Refused as `conflict` (409); the row is left exactly as the other save wrote it, not half-overwritten | `eventWorkspace.service.test.js` › `[TC-37-24] …` | 2026-10-26 · pass · local |
 
 **Not independently tested, by design:** atomicity (the single-transaction property of `apply_organiser_event_edit`)
 is structural, not something a JS-level test can exercise without a live-DB suite — none was budgeted for this
@@ -647,9 +653,24 @@ specifically, not required for the story to function.
 | Skip the release call entirely on approve, or forget it on reject | TC-37-19, TC-37-13 |
 | Show the warning for a non-significant field, or skip it for a significant one | TC-37-FE-01, TC-37-FE-05, TC-37-FE-06 |
 | Leave the warning up after a further edit changes what's about to save | TC-37-FE-04 |
+| Let a release call's error propagate instead of being caught and logged | TC-37-22, TC-37-23 |
+| Merge a PATCH's stale pre-read values over a concurrent save instead of refusing | TC-37-24 |
+| Show the "status stays the same" note while the significant-edit warning is also showing | TC-37-FE-08 |
 
 **Coverage (2026-10-21):** full backend suite 1181 passed, 51 skipped (live-DB, by design, unrelated to this
 story); full frontend suite 546 passed; lint and build clean on both.
+
+**PR #60 review follow-up (2026-10-26):** three reviewer comments addressed — release-failure handling
+(TC-37-22/23, plus the equipment/venue self-heal sweep extension documented in
+[equipment-integration.md](equipment-integration.md#releasing-reservations-on-event-cancellation-scrum-104-extended-by-scrum-148)
+and [venue-integration.md](venue-integration.md#releasing-bookings-on-event-cancellation-scrum-148)), the
+contradictory card note (TC-37-FE-08), and the lost-update race (TC-37-24, needs `events.updated_at` applied by
+hand — see *Schema reference* in [event-requests.md](event-requests.md#significant-edits-regress-the-event-scrum-37)).
+Verified directly by the agent (not a full suite re-run, since several backend integration files hit the live
+dev Supabase and the agent doesn't use the secret key): `review.service.test.js` 18/18, `eventWorkspace.service.test.js`
+18/18, `EventRequestForm.test.jsx` 11/11, both affected `node:test` equipment files 68/68 and 7/7, the full
+frontend suite 563/563, and `tests/playwright` (`--project=api` plus the browser spec touching this flow) 37/37 —
+all green. User still needs to apply the new SQL and run the full backend suite plus `tests/e2e`.
 
 **Known limitation (documented, not a bug):** rejecting a resubmission ends the whole event — it cannot undo just
 the edit and leave the event exactly as it was before. See [Current limitations](event-requests.md#current-limitations)
