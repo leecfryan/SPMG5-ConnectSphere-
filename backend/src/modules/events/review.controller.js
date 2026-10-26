@@ -58,10 +58,39 @@ function createReviewController(repository, cancelDependencies = {}) {
     }
   }
 
+  // SCRUM-37 team design: approving or rejecting a resubmission releases
+  // whatever arrangements it had, same release dependencies cancel/postpone
+  // already take. No isCoordinatorLead for either - both stay
+  // assigned-coordinator-only, same as the original decision (events.decide,
+  // unchanged).
+  async function approve(req, res) {
+    try {
+      const result = await review.approve(req.params.eventId, req.user.id, req.body?.note, cancelDependencies);
+      if (result.ok) return res.json({ event: result.event });
+      const [status, message] = FAILURES[result.reason];
+      return res.status(status).json({ message });
+    } catch (error) {
+      console.error("POST /api/internal/events/:eventId/approve failed:", error.message);
+      return res.status(500).json({ message: "Something went wrong. Please try again." });
+    }
+  }
+
+  async function reject(req, res) {
+    try {
+      const result = await review.reject(req.params.eventId, req.user.id, req.body?.note, cancelDependencies);
+      if (result.ok) return res.json({ event: result.event });
+      const [status, message] = FAILURES[result.reason];
+      return res.status(status).json({ message });
+    } catch (error) {
+      console.error("POST /api/internal/events/:eventId/reject failed:", error.message);
+      return res.status(500).json({ message: "Something went wrong. Please try again." });
+    }
+  }
+
   return {
     startReview: handle("start-review", review.startReview),
-    approve: handle("approve", review.approve),
-    reject: handle("reject", review.reject),
+    approve,
+    reject,
     cancel,
     postpone,
   };

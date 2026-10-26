@@ -17,7 +17,12 @@ module.exports = function registrationStorage(accounts) {
   return {
     registrations,
     activity,
-    async rpc(name, args) {
+    // SCRUM-37: no longer async - apply_organiser_event_edit below returns a
+    // chainable object (select/maybeSingle), matching how the real Supabase
+    // client's .rpc() works for a function that returns a table/row type.
+    // Every other case here still returns a plain {data, error} object, which
+    // `await`ing a non-promise value resolves to unchanged.
+    rpc(name, args) {
       if (name === 'registration_availability_for_events') {
         const availability = args.p_event_ids.map(eventId => {
           const event = events().find(candidate => candidate.id === eventId);
@@ -61,6 +66,46 @@ module.exports = function registrationStorage(accounts) {
         return {
           data: { outcome: 'not_found', server_time: new Date().toISOString() },
           error: null,
+        };
+      }
+      // SCRUM-37: the fixture only simulates the field write (the one thing
+      // every fake Supabase caller in these tests can intercept/fail via
+      // .from('events').update(...)) - the real function's significance
+      // check, flagging and SUBMITTED regression are SQL-only and proven
+      // against the real schema, not re-implemented here. Returns a
+      // chainable object, not a resolved promise, matching how the real
+      // Supabase client's .rpc(...) supports .select().maybeSingle() chained
+      // on afterwards (same shape assign_event_coordinator uses above it in
+      // assignment-notification-storage.cjs) - updateOrganiserEvent relies
+      // on exactly that chain.
+      if (name === 'apply_organiser_event_edit') {
+        const self = this;
+        return {
+          select() { return this; },
+          async maybeSingle() {
+            // SCRUM-37 reviewer feedback (PR #60): same optimistic-concurrency
+            // check the real function makes under its row lock - a stale
+            // p_expected_updated_at means another save (e.g. a second open
+            // tab) committed first, so this one is refused rather than
+            // merged over it.
+            const existing = await self.from('events').select('updated_at')
+              .eq('id', args.p_event_id).eq('organiser_id', args.p_organiser_id).maybeSingle();
+            if (!existing.data) return { data: null, error: { code: 'P0002', message: 'EVENT_NOT_FOUND' } };
+            if (existing.data.updated_at !== args.p_expected_updated_at) {
+              return { data: null, error: { code: 'P0004', message: 'EVENT_MODIFIED' } };
+            }
+            const result = await self.from('events').update({
+              name: args.p_name, purpose: args.p_purpose, description: args.p_description,
+              start_time: args.p_start_time, end_time: args.p_end_time,
+              registration_start: args.p_registration_start, registration_end: args.p_registration_end,
+              expected_attendance: args.p_expected_attendance, venue_requirements: args.p_venue_requirements,
+              accessibility_needs: args.p_accessibility_needs, equipment_needs: args.p_equipment_needs,
+              other_comments: args.p_other_comments,
+            }).eq('id', args.p_event_id).eq('organiser_id', args.p_organiser_id).select('*').maybeSingle();
+            if (result.error) return result;
+            if (!result.data) return { data: null, error: { code: 'P0002', message: 'EVENT_NOT_FOUND' } };
+            return result;
+          },
         };
       }
       throw new Error(`Unsupported registration fixture RPC: ${name}`);

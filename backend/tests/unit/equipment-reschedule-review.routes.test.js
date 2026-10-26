@@ -75,7 +75,7 @@ beforeAll(async () => {
       findEventById: async (id) => (id === EVENT_ID ? { id: EVENT_ID, coordinator_id: COORDINATOR_ID, name: "Test Event", status: "APPROVED" } : null),
       findEventsByIds: async (ids) => ids.map((id) => ({ id, name: "Test Event" })),
       getUserDisplayName: async (id) => "User " + id,
-      listCancelledEventIds: async () => [],
+      listReleasableEventIds: async () => [],
     },
   }).listen(0, "127.0.0.1");
   await once(server, "listening");

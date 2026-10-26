@@ -86,6 +86,7 @@ function createVenuesController(service) {
     searchReplacementVenues,
     markVenueBookingAffected,
     releaseAffectedVenueBooking,
+    releaseBookingsForTerminalEvents,
   } = service;
 
   // SCRUM-18: narrow the catalogue to potential venues.
@@ -144,6 +145,7 @@ function createVenuesController(service) {
         return res.status(400).json({ error: "Validation failed", details: errors });
       }
 
+      await releaseBookingsForTerminalEvents?.();
       const venues = await listVenues(value);
 
       // Nothing matched the stored filters, so there is no day to look at.
@@ -254,6 +256,7 @@ function createVenuesController(service) {
         );
       }
 
+      await releaseBookingsForTerminalEvents?.();
       const venue = await getVenueById(id);
       if (!venue) return res.status(404).json({ error: "Venue not found" });
 
