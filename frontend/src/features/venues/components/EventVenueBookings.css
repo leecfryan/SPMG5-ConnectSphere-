@@ -8,14 +8,14 @@
 
 .event-venue-bookings .event-venues__item {
   padding: 16px;
-  border: 1px solid #dfe8e3;
-  border-radius: 10px;
-  background: #fff;
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-surface);
 }
 
 .event-venue-bookings .event-venues__item--affected {
-  border-color: #d94a3d;
-  background: #fff7f6;
+  border-color: var(--cs-danger);
+  background: var(--cs-danger-soft);
 }
 
 .event-venue-bookings .event-venues__heading {
@@ -26,14 +26,14 @@
 }
 
 .event-venue-bookings .event-venues__status {
-  color: #426e60;
+  color: var(--cs-accent);
   font-size: 12px;
   font-weight: 700;
 }
 
 .event-venue-bookings .event-venues__item--affected .event-venues__status,
 .event-venue-bookings .event-venues__affected-message {
-  color: #b42318;
+  color: var(--cs-danger);
 }
 
 .event-venue-bookings .event-venues__affected-message {
@@ -49,7 +49,7 @@
 }
 
 .event-venue-bookings .event-venues__facts dt {
-  color: #61716f;
+  color: var(--cs-text-muted);
   font-size: 12px;
   font-weight: 700;
 }

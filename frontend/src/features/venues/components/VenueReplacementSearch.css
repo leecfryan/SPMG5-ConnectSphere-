@@ -10,15 +10,15 @@
 .venue-replacement__affected {
   margin: 18px 0 24px;
   padding: 18px;
-  border: 1px solid #d94a3d;
+  border: 1px solid var(--cs-danger);
   border-left-width: 5px;
-  border-radius: 10px;
-  background: #fff7f6;
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-danger-soft);
 }
 
 .venue-replacement__eyebrow {
   margin: 0;
-  color: #b42318;
+  color: var(--cs-danger);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -39,20 +39,20 @@
 }
 
 .venue-replacement__details dt {
-  color: #6b3c38;
+  color: var(--cs-danger);
   font-size: 12px;
   font-weight: 700;
 }
 
 .venue-replacement__details dd {
   margin: 3px 0 0;
-  color: #3e2522;
+  color: var(--cs-danger);
   font-weight: 600;
 }
 
 .venue-replacement__reason {
   margin: 18px 0 0;
-  color: #8d2119;
+  color: var(--cs-danger);
 }
 
 .venue-replacement__intro {
@@ -80,24 +80,24 @@
   justify-content: space-between;
   gap: 18px;
   padding: 18px;
-  border: 1px solid #cfded7;
-  border-radius: 10px;
-  background: #fff;
+  border: 1px solid var(--cs-border-strong);
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-surface);
 }
 
 .venue-replacement__candidate h3 {
   margin: 0;
-  color: #153e2b;
+  color: var(--cs-text);
   font-size: 18px;
 }
 
 .venue-replacement__capacity {
-  color: #263d38;
+  color: var(--cs-text);
   font-weight: 700;
 }
 
 .venue-replacement__match {
-  color: #26734d;
+  color: var(--cs-success);
   font-size: 14px;
   font-weight: 700;
 }
@@ -109,9 +109,9 @@
 .venue-replacement__empty {
   margin-top: 14px;
   padding: 22px;
-  border: 1px solid #d8a25a;
-  border-radius: 10px;
-  background: #fffaf0;
+  border: 1px solid var(--cs-warning);
+  border-radius: var(--cs-radius-sm);
+  background: var(--cs-warning-soft);
 }
 
 .venue-replacement__empty .v-btn {
