@@ -408,3 +408,23 @@ test.each(["APPROVED", "SAFETY_REVIEW", "CONFIRMED"])("[SCRUM-144-UI-013] AC1: a
   expect(await screen.findByRole("heading", { name: "Digital Literacy for Seniors" })).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Confirm event" })).not.toBeInTheDocument();
 });
+
+test("[SCRUM-117-UI-005] organiser reads the saved clarification and keeps owner editing access", async () => {
+  const { user } = setup("organiser", { status: "CHANGES_REQUESTED", activity: [{ id: "cycle", action: "CHANGES_REQUESTED", note: "Clarify room layout.", created_at: "2099-01-01T00:00:00Z" }] }, { userId: "org-1" });
+  expect(await screen.findByRole("region", { name: "Clarification requested" })).toHaveTextContent("Clarify room layout.");
+  await user.click(screen.getByRole("button", { name: "Refresh event" }));
+  expect(await screen.findByRole("region", { name: "Clarification requested" })).toHaveTextContent("Clarify room layout.");
+  expect(screen.getByRole("button", { name: "Edit event" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Return for changes" })).not.toBeInTheDocument();
+});
+
+test.each(["coordinator", "manager"])("[SCRUM-117-UI-006] %s may cancel/postpone but cannot reassign or approve a returned event", async scope => {
+  setup(scope, { status: "CHANGES_REQUESTED", activity: [] });
+  await screen.findByText("Changes requested", { selector: ".status-badge" });
+  expect(screen.getByRole("button", { name: "Cancel event" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Postpone event" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Save coordinator assignment" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Approve", exact: true })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Arrange venue bookings" })).not.toBeInTheDocument();
+  expect(screen.getByText(/clarification message is unavailable/)).toBeVisible();
+});

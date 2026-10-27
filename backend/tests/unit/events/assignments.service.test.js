@@ -19,14 +19,17 @@ const COORDINATORS = [
   { id: "coord-3", fullName: "Cara Ng", email: "cara@example.com" },
 ];
 
-function build({ assignments = [], coordinators = COORDINATORS, assigned = { id: "evt-1" }, existing = null } = {}) {
+function build({ assignments = [], coordinators = COORDINATORS, assigned = { id: "evt-1" }, existing = null, queue = [], organiserNames = {} } = {}) {
   const repository = {
-    findSubmittedUnassigned: vi.fn().mockResolvedValue([]),
+    findSubmittedUnassigned: vi.fn().mockResolvedValue(queue),
     findActiveAssignments: vi.fn().mockResolvedValue(assignments),
     assignCoordinator: vi.fn().mockResolvedValue(assigned),
     findById: vi.fn().mockResolvedValue(existing),
   };
-  const directory = { listCoordinators: vi.fn().mockResolvedValue(coordinators) };
+  const directory = {
+    listCoordinators: vi.fn().mockResolvedValue(coordinators),
+    displayNameOf: vi.fn(async (id) => organiserNames[id] ?? null),
+  };
   return { service: createAssignmentsService({ repository, directory }), repository, directory };
 }
 
@@ -134,6 +137,40 @@ test("SCRUM-26: a fully routed queue is an empty list, not a missing one", async
   expect(await service.listQueue()).toEqual({ ok: true, events: [] });
 });
 
+test("[SCRUM-159] AC2: each queued request carries its organiser's name instead of the organiser's account id", async () => {
+  const { service } = build({
+    queue: [{ id: "evt-1", name: "Digital Literacy for Seniors", organiser_id: "org-1", expected_attendance: 30 }],
+    organiserNames: { "org-1": "Olivia Ong" },
+  });
+
+  expect(await service.listQueue()).toEqual({ ok: true, events: [
+    { id: "evt-1", name: "Digital Literacy for Seniors", expected_attendance: 30, organiser_name: "Olivia Ong" },
+  ] });
+});
+
+test("[SCRUM-159] AC2: an organiser with several queued requests is looked up once", async () => {
+  const { service, directory } = build({
+    queue: [{ id: "evt-1", organiser_id: "org-1" }, { id: "evt-2", organiser_id: "org-1" }, { id: "evt-3", organiser_id: "org-2" }],
+    organiserNames: { "org-1": "Olivia Ong", "org-2": "Peter Pan" },
+  });
+
+  const { events } = await service.listQueue();
+
+  expect(events.map((event) => event.organiser_name)).toEqual(["Olivia Ong", "Olivia Ong", "Peter Pan"]);
+  expect(directory.displayNameOf.mock.calls).toEqual([["org-1"], ["org-2"]]);
+});
+
+test("[SCRUM-159] AC2: a request without an organiser, or whose organiser cannot be named, stays in the queue", async () => {
+  const { service, directory } = build({
+    queue: [{ id: "evt-1", organiser_id: null }, { id: "evt-2", organiser_id: "org-gone" }],
+  });
+
+  const { events } = await service.listQueue();
+
+  expect(events).toEqual([{ id: "evt-1", organiser_name: null }, { id: "evt-2", organiser_name: null }]);
+  expect(directory.displayNameOf.mock.calls).toEqual([["org-gone"]]);
+});
+
 // --- repository query construction -------------------------------------------------
 // The guard that makes "first assignment only" real. Asserted here because it
 // lives in the database filters, where no service-level test can see it.
@@ -191,6 +228,18 @@ test("SCRUM-26: the queue is submitted, unassigned, oldest first, with a created
   expect(calls).toContainEqual(["order", "created_at", { ascending: true }]);
 });
 
+test("[SCRUM-159] AC2: the queue reads an explicit column list with the fields the Lead sees, never every column", async () => {
+  const { calls } = recorder([]);
+  const repository = require("../../../src/modules/events/events.repository");
+
+  await repository.findSubmittedUnassigned();
+
+  const [, columns] = calls.find(([name]) => name === "select");
+  expect(columns).not.toContain("*");
+  expect(columns.split(", ")).toEqual(expect.arrayContaining(
+    ["id", "name", "organiser_id", "start_time", "end_time", "expected_attendance"]));
+});
+
 test("[TC-149-16] SCRUM-26/149: workload counts read only assigned events in an active status (postponed included)", async () => {
   const { calls } = recorder([]);
   const repository = require("../../../src/modules/events/events.repository");
@@ -198,6 +247,6 @@ test("[TC-149-16] SCRUM-26/149: workload counts read only assigned events in an 
   await repository.findActiveAssignments();
 
   expect(calls).toContainEqual(["select", "coordinator_id, start_time"]);
-  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED", "POSTPONED"]]);
+  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "CHANGES_REQUESTED", "APPROVED", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED", "POSTPONED"]]);
   expect(calls).toContainEqual(["not", "coordinator_id", "is", null]);
 });

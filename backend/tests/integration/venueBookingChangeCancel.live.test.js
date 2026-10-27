@@ -95,10 +95,8 @@ async function requestRow(requestId) {
   return data;
 }
 
-async function activityLogRows(eventId, action) {
-  let q = supabase.from("event_activity_log").select("*").eq("event_id", eventId);
-  if (action) q = q.eq("action", action);
-  const { data, error } = await q;
+async function activityLogRows(eventId) {
+  const { data, error } = await supabase.from("event_activity_log").select("*").eq("event_id", eventId).order("id");
   if (error) throw error;
   return data;
 }
@@ -113,6 +111,7 @@ describe("SCRUM-154 AC1/AC3/AC4 (live): cancelling one booking releases it and l
     await insertBooking({ requestId: requestA, venueId: venueA, status: "confirmed", slot: "am" });
     await insertBooking({ requestId: requestB, venueId: venueB, status: "confirmed", slot: "pm" });
 
+    const historyBefore = await activityLogRows(eventId);
     const released = await venuesService.cancelBookingRequest(requestA, technicalUserId);
 
     expect(released).toBe(1);
@@ -121,7 +120,9 @@ describe("SCRUM-154 AC1/AC3/AC4 (live): cancelling one booking releases it and l
     // AC1: the sibling request on a different venue is completely untouched.
     expect(rowsB[0].status).toBe("confirmed");
 
-    const log = await activityLogRows(eventId, "venue_booking.cancelled");
+    const historyAfter = await activityLogRows(eventId);
+    expect(historyAfter).toEqual(expect.arrayContaining(historyBefore));
+    const log = historyAfter.filter(row => !historyBefore.some(previous => previous.id === row.id));
     expect(log).toHaveLength(1);
     expect(log[0].action).toBe("venue_booking.cancelled");
     expect(log[0].user_id).toBe(technicalUserId);
@@ -134,11 +135,12 @@ describe("SCRUM-154 AC1/AC3/AC4 (live): cancelling one booking releases it and l
     const requestId = await insertBookingRequest({ eventId, venueId });
     await insertBooking({ requestId, venueId, status: "cancelled", slot: "am" });
 
+    const historyBefore = await activityLogRows(eventId);
     await expect(
       venuesService.cancelBookingRequest(requestId, technicalUserId)
     ).rejects.toMatchObject({ code: "P0003" });
 
-    expect(await activityLogRows(eventId, "venue_booking.cancelled")).toHaveLength(0);
+    expect(await activityLogRows(eventId)).toEqual(historyBefore);
   });
 
   test("[TC-SCRUM-154-LIVE-03] cancelling a request id that does not exist is refused (REQUEST_NOT_FOUND)", async () => {
@@ -158,6 +160,7 @@ describe("SCRUM-154 AC1/AC2/AC4 (live): changing one booking re-flags it and lea
     await insertBooking({ requestId: requestA, venueId: venueA, status: "confirmed", slot: "am", bookingDate: "2026-02-01" });
     await insertBooking({ requestId: requestB, venueId: venueB, status: "confirmed", slot: "pm", bookingDate: "2026-02-01" });
 
+    const historyBefore = await activityLogRows(eventId);
     await venuesService.changeBookingRequest(requestA, technicalUserId, {
       booking_date: "2026-02-05", expected_attendees: 25, room_layout: "Banquet",
       required_facilities: ["Stage"], accessibility_requirements: [], additional_requirements: "Updated",
@@ -182,7 +185,9 @@ describe("SCRUM-154 AC1/AC2/AC4 (live): changing one booking re-flags it and lea
     expect(rowsB[0].status).toBe("confirmed");
     expect(rowsB[0].booking_date).toBe("2026-02-01");
 
-    const log = await activityLogRows(eventId, "venue_booking.changed");
+    const historyAfter = await activityLogRows(eventId);
+    expect(historyAfter).toEqual(expect.arrayContaining(historyBefore));
+    const log = historyAfter.filter(row => !historyBefore.some(previous => previous.id === row.id));
     expect(log).toHaveLength(1);
     expect(log[0].action).toBe("venue_booking.changed");
     expect(log[0].details.booking_date).toEqual({ from: "2026-02-01", to: "2026-02-05" });

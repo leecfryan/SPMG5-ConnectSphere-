@@ -8,6 +8,7 @@ const AGREED_STATUSES = [
   "DRAFT",
   "SUBMITTED",
   "UNDER_REVIEW",
+  "CHANGES_REQUESTED",
   "APPROVED",
   "SAFETY_REVIEW",
   "PREPARATION",
@@ -23,6 +24,10 @@ const AGREED_TRANSITIONS = [
   ["SUBMITTED", "UNDER_REVIEW"],
   ["SUBMITTED", "CANCELLED"],
   ["SUBMITTED", "POSTPONED"],
+  ["UNDER_REVIEW", "CHANGES_REQUESTED"],
+  ["CHANGES_REQUESTED", "UNDER_REVIEW"],
+  ["CHANGES_REQUESTED", "CANCELLED"],
+  ["CHANGES_REQUESTED", "POSTPONED"],
   ["UNDER_REVIEW", "APPROVED"],
   ["UNDER_REVIEW", "REJECTED"],
   ["UNDER_REVIEW", "CANCELLED"],
@@ -142,16 +147,24 @@ test("SCRUM-141: an event in preparation stays closed to venue and equipment pla
 });
 
 test("SCRUM-98/149/141: active events are those submitted, postponed, and not yet finished, rejected or cancelled", () => {
-  expect([...ACTIVE_STATUSES].sort()).toEqual(["APPROVED", "CONFIRMED", "POSTPONED", "PREPARATION", "SAFETY_REVIEW", "SUBMITTED", "UNDER_REVIEW"]);
+  expect([...ACTIVE_STATUSES].sort()).toEqual(["APPROVED", "CHANGES_REQUESTED", "CONFIRMED", "POSTPONED", "PREPARATION", "SAFETY_REVIEW", "SUBMITTED", "UNDER_REVIEW"]);
   expect(Object.isFrozen(ACTIVE_STATUSES)).toBe(true);
 });
 
 test("SCRUM-149: postponable events are the active statuses minus POSTPONED itself", () => {
-  expect([...POSTPONABLE_STATUSES].sort()).toEqual(["APPROVED", "CONFIRMED", "SAFETY_REVIEW", "SUBMITTED", "UNDER_REVIEW"]);
+  expect([...POSTPONABLE_STATUSES].sort()).toEqual(["APPROVED", "CHANGES_REQUESTED", "CONFIRMED", "SAFETY_REVIEW", "SUBMITTED", "UNDER_REVIEW"]);
   expect(Object.isFrozen(POSTPONABLE_STATUSES)).toBe(true);
 });
 
 test("SCRUM-144 AC1: only an event that passed the safety check (PREPARATION) can be confirmed", () => {
   expect(STATUSES.filter((from) => canTransition(from, "CONFIRMED"))).toEqual(["PREPARATION"]);
   expect(canTransition("APPROVED", "CONFIRMED")).toBe(false);
+});
+
+test("[SCRUM-117-UNIT-001] returned requests retain workload but cannot be reassigned or planned", () => {
+  const { ASSIGNABLE_STATUSES } = require("../../../src/modules/events/lifecycle");
+  expect(ACTIVE_STATUSES).toContain("CHANGES_REQUESTED");
+  expect(ASSIGNABLE_STATUSES).not.toContain("CHANGES_REQUESTED");
+  expect(ASSIGNABLE_STATUSES).toContain("UNDER_REVIEW");
+  expect(PLANNING_STATUSES).not.toContain("CHANGES_REQUESTED");
 });

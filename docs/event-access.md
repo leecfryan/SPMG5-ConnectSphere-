@@ -275,3 +275,14 @@ detail page (`EventActivityHistory.jsx`), labelled "Updated event details" with 
 | Frontend (Vitest) | `pages/EventWorkspaceDetailPage.test.jsx` | TC-SCRUM-164-13, 14, 15 |
 | Playwright API | `tests/playwright/event-workspace.api.spec.cjs` | TC-SCRUM-164-E2E-API-01, 02, 03 |
 | Playwright browser | `tests/playwright/event-workspace.browser.spec.cjs` | E2E-EVENT-100 (updated), E2E-EVENT-101 (updated) |
+
+---
+
+## Returned requests (SCRUM-117)
+
+CHANGES_REQUESTED requests remain in the assigned coordinator and lead workspaces and
+count in workload. They cannot be reassigned. Only their assigned coordinator can return
+an UNDER_REVIEW request, using events.decide and POST /api/internal/events/:eventId/request-changes.
+The owner and existing authorized readers see the clarification message; snapshots stay
+server-side. Cancellation and postponement remain available to the assigned coordinator
+or lead. See event-requests.md for the atomic RPC and Task 2 scope.
