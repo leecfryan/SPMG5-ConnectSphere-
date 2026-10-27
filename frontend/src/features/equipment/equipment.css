@@ -1,15 +1,15 @@
 /* Equipment request page - clean/corporate SaaS card layout: warm off-white
    section background, white cards with soft shadow, 3-column form grid
    collapsing down at narrower widths, pill badges, subtle green focus rings.
-   Reuses the app's existing brand green (#185c4b, see App.css) rather than
+   Reuses the app's existing brand green (var(--cs-primary), see App.css) rather than
    introducing a second primary color. */
 
 .eq-page {
   /* main (App.css) is a 2-column grid sized for the intro/sign-in panels -
      span both so this section isn't squeezed into the 440px account column. */
   grid-column: 1 / -1;
-  background: #f8f9fa;
-  border-radius: 18px;
+  background: var(--cs-surface-muted);
+  border-radius: var(--cs-radius-lg);
   padding: clamp(20px, 4vw, 36px);
   margin-top: 48px;
   display: flex;
@@ -18,7 +18,7 @@
 }
 
 .eq-eyebrow {
-  color: #185c4b;
+  color: var(--cs-primary);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 1.6px;
@@ -30,21 +30,21 @@
   font-size: clamp(24px, 3vw, 30px);
   font-weight: 700;
   letter-spacing: -0.6px;
-  color: #1a202c;
+  color: var(--cs-text);
   margin: 0;
 }
 
 .eq-subheading {
-  color: #4a5568;
+  color: var(--cs-text-muted);
   font-size: 14px;
   line-height: 1.6;
   margin: 0;
 }
 
 .eq-card {
-  background: #ffffff;
-  border: 1px solid #eef1ee;
-  border-radius: 16px;
+  background: var(--cs-surface);
+  border: 1px solid var(--cs-surface-sunken);
+  border-radius: var(--cs-radius-lg);
   box-shadow: 0 10px 30px rgba(21, 44, 55, 0.05);
   padding: clamp(20px, 3vw, 28px);
 }
@@ -64,24 +64,24 @@
 .eq-card-header h2 {
   font-size: 17px;
   font-weight: 600;
-  color: #1a202c;
+  color: var(--cs-text);
   margin: 0;
 }
 
 .eq-badge {
   display: inline-flex;
   align-items: center;
-  background: #e6f4ea;
-  color: #185c4b;
+  background: var(--cs-success-soft);
+  color: var(--cs-primary);
   font-size: 12px;
   font-weight: 700;
   padding: 5px 12px;
-  border-radius: 9999px;
+  border-radius: var(--cs-radius-pill);
   white-space: nowrap;
 }
 
 .eq-hint {
-  color: #718096;
+  color: var(--cs-text-subtle);
   font-size: 13px;
   margin: 4px 0 0;
 }
@@ -101,7 +101,7 @@
   gap: 8px;
   font-size: 13px;
   font-weight: 600;
-  color: #4a5568;
+  color: var(--cs-text-muted);
 }
 
 .eq-field-wide {
@@ -115,10 +115,10 @@
   font: inherit;
   font-weight: 400;
   font-size: 14px;
-  color: #1a202c;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
+  color: var(--cs-text);
+  background: var(--cs-surface);
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-sm);
   padding: 10px 12px;
   min-height: 42px;
 }
@@ -130,15 +130,15 @@
 
 .eq-field input::placeholder,
 .eq-field textarea::placeholder {
-  color: #a0aec0;
+  color: var(--cs-text-subtle);
 }
 
 .eq-field input:focus,
 .eq-field textarea:focus,
 .eq-field select:focus {
   outline: none;
-  border-color: #185c4b;
-  box-shadow: 0 0 0 1px #185c4b;
+  border-color: var(--cs-primary);
+  box-shadow: 0 0 0 1px var(--cs-primary);
 }
 
 .eq-select-wrap {
@@ -155,23 +155,23 @@
   right: 12px;
   top: 50%;
   transform: translateY(-50%);
-  color: #a0aec0;
+  color: var(--cs-text-subtle);
   pointer-events: none;
 }
 
 .eq-primary {
   margin-top: 20px;
-  border: 1px solid #185c4b;
-  background: #185c4b;
-  color: #ffffff;
+  border: 1px solid var(--cs-primary);
+  background: var(--cs-primary);
+  color: var(--cs-surface);
   font-size: 14px;
   font-weight: 600;
   padding: 11px 22px;
-  border-radius: 8px;
+  border-radius: var(--cs-radius-sm);
 }
 
 .eq-primary:hover:not(:disabled) {
-  background: #104a3b;
+  background: var(--cs-primary-hover);
 }
 
 .eq-primary:disabled {
@@ -179,9 +179,9 @@
 }
 
 .eq-error {
-  color: #97372c;
-  background: #fff2ee;
-  border-radius: 8px;
+  color: var(--cs-danger);
+  background: var(--cs-danger-soft);
+  border-radius: var(--cs-radius-sm);
   padding: 10px 12px;
   font-size: 13px;
   line-height: 1.5;
@@ -204,21 +204,21 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid #eef1ee;
-  border-radius: 10px;
+  border: 1px solid var(--cs-surface-sunken);
+  border-radius: var(--cs-radius-sm);
   padding: 12px 14px;
 }
 
 .eq-request-title {
   font-size: 14px;
   font-weight: 600;
-  color: #1a202c;
+  color: var(--cs-text);
   margin: 0;
 }
 
 .eq-request-detail {
   font-size: 13px;
-  color: #718096;
+  color: var(--cs-text-subtle);
   margin: 4px 0 0;
 }
 
@@ -227,27 +227,27 @@
   font-weight: 700;
   letter-spacing: 0.4px;
   padding: 5px 10px;
-  border-radius: 9999px;
+  border-radius: var(--cs-radius-pill);
   white-space: nowrap;
 }
 
-.eq-status-pending { background: #fff7e6; color: #92600a; }
-.eq-status-approved { background: #e6f4ea; color: #185c4b; }
-.eq-status-rejected { background: #fff2ee; color: #97372c; }
+.eq-status-pending { background: var(--cs-warning-soft); color: var(--cs-warning); }
+.eq-status-approved { background: var(--cs-success-soft); color: var(--cs-primary); }
+.eq-status-rejected { background: var(--cs-danger-soft); color: var(--cs-danger); }
 /* SCRUM-150: flagged by a reschedule/postpone, needs Technical Support's attention again. */
-.eq-status-review_required { background: #eef2ff; color: #3730a3; }
+.eq-status-review_required { background: var(--cs-info-soft); color: var(--cs-info); }
 /* SCRUM-150 AC2: "not available for these dates" sub-label, review_required rows only. */
-.eq-status-unavailable { background: #fff2ee; color: #97372c; }
+.eq-status-unavailable { background: var(--cs-danger-soft); color: var(--cs-danger); }
 
 /* --- Scrum-29 follow-up: equipment catalogue status badges (distinct from
    the request-status badges above, hence the "-equipment-" segment) --- */
 
-.eq-status-equipment-available { background: #e6f4ea; color: #185c4b; }
-.eq-status-equipment-in_use { background: #fff7e6; color: #92600a; }
+.eq-status-equipment-available { background: var(--cs-success-soft); color: var(--cs-primary); }
+.eq-status-equipment-in_use { background: var(--cs-warning-soft); color: var(--cs-warning); }
 .eq-status-equipment-maintenance,
-.eq-status-equipment-under_maintenance { background: #fff7e6; color: #92600a; }
+.eq-status-equipment-under_maintenance { background: var(--cs-warning-soft); color: var(--cs-warning); }
 .eq-status-equipment-unavailable,
-.eq-status-equipment-damaged { background: #fff2ee; color: #97372c; }
+.eq-status-equipment-damaged { background: var(--cs-danger-soft); color: var(--cs-danger); }
 
 /* --- Scrum-28: Technical Support dashboard --- */
 
@@ -286,7 +286,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  border-top: 1px solid #eef1ee;
+  border-top: 1px solid var(--cs-surface-sunken);
 }
 
 .eq-line-row {
@@ -294,8 +294,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid #eef1ee;
-  border-radius: 10px;
+  border: 1px solid var(--cs-surface-sunken);
+  border-radius: var(--cs-radius-sm);
   padding: 12px 14px;
   margin-top: 10px;
 }
@@ -321,7 +321,7 @@
 .eq-thread {
   margin-top: 14px;
   padding-top: 14px;
-  border-top: 1px solid #eef1ee;
+  border-top: 1px solid var(--cs-surface-sunken);
 }
 
 .eq-event-card-thread {
@@ -331,7 +331,7 @@
 .eq-thread-heading {
   font-size: 13px;
   font-weight: 700;
-  color: #1a202c;
+  color: var(--cs-text);
   margin: 0 0 10px;
 }
 
@@ -345,8 +345,8 @@
 }
 
 .eq-thread-message {
-  border: 1px solid #eef1ee;
-  border-radius: 10px;
+  border: 1px solid var(--cs-surface-sunken);
+  border-radius: var(--cs-radius-sm);
   padding: 10px 12px;
 }
 
@@ -361,27 +361,27 @@
 .eq-thread-author {
   font-size: 12px;
   font-weight: 700;
-  color: #185c4b;
+  color: var(--cs-primary);
 }
 
 .eq-thread-line-tag {
   font-size: 11px;
   font-weight: 600;
-  color: #4a5568;
-  background: #f8f9fa;
-  border-radius: 9999px;
+  color: var(--cs-text-muted);
+  background: var(--cs-surface-muted);
+  border-radius: var(--cs-radius-pill);
   padding: 2px 8px;
 }
 
 .eq-thread-time {
   font-size: 11px;
-  color: #a0aec0;
+  color: var(--cs-text-subtle);
   margin-left: auto;
 }
 
 .eq-thread-body {
   font-size: 13px;
-  color: #1a202c;
+  color: var(--cs-text);
   margin: 0;
   white-space: pre-wrap;
 }
@@ -389,7 +389,7 @@
 .eq-thread-edit-link {
   background: none;
   border: none;
-  color: #185c4b;
+  color: var(--cs-primary);
   font-size: 12px;
   font-weight: 600;
   padding: 4px 0 0;
@@ -400,8 +400,8 @@
   width: 100%;
   font: inherit;
   font-size: 13px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
+  border: 1px solid var(--cs-border);
+  border-radius: var(--cs-radius-sm);
   padding: 8px 10px;
 }
 
@@ -413,16 +413,16 @@
 }
 
 .eq-secondary {
-  border: 1px solid #cbd7d0;
-  background: #ffffff;
-  color: #185c4b;
+  border: 1px solid var(--cs-border-strong);
+  background: var(--cs-surface);
+  color: var(--cs-primary);
   font-size: 13px;
   font-weight: 600;
   padding: 7px 14px;
-  border-radius: 8px;
+  border-radius: var(--cs-radius-sm);
 }
 
-.eq-secondary:hover:not(:disabled) { background: #f4f7f5; }
+.eq-secondary:hover:not(:disabled) { background: var(--cs-surface-muted); }
 
 .eq-thread-compose {
   display: flex;
@@ -439,10 +439,10 @@
 .eq-reserve-summary {
   font-size: 14px;
   font-weight: 600;
-  color: #185c4b;
-  background: #f4f9f6;
-  border: 1px solid #cbd7d0;
-  border-radius: 8px;
+  color: var(--cs-primary);
+  background: var(--cs-surface-muted);
+  border: 1px solid var(--cs-border-strong);
+  border-radius: var(--cs-radius-sm);
   padding: 10px 12px;
   margin: 0;
 }
@@ -482,14 +482,14 @@
 .eq-retire-confirm {
   margin-top: 10px;
   padding: 12px 14px;
-  background: #fff8f7;
-  border: 1px solid #ecd5d0;
-  border-radius: 9px;
+  background: var(--cs-danger-soft);
+  border: 1px solid var(--cs-danger-border);
+  border-radius: var(--cs-radius-sm);
 }
 
 .eq-retire-confirm p {
   font-size: 13px;
-  color: #4a5568;
+  color: var(--cs-text-muted);
   margin: 0;
   line-height: 1.5;
 }
@@ -514,7 +514,7 @@
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: #4a5568;
+  color: var(--cs-text-muted);
   margin-top: 4px;
 }
 
