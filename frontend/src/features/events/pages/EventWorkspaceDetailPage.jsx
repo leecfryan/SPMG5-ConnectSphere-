@@ -58,8 +58,9 @@ function Detail({ scope, eventId }) {
       </section>}
       {scope === "organiser" && <>
         {event.organiser_id === user.id && hasPermission("events.own.update") ? (
-          // SCRUM-164 AC2: editing is only allowed while the event is still SUBMITTED.
-          event.status === "SUBMITTED" ?
+          // SCRUM-164 AC2: locked past SUBMITTED, except CHANGES_REQUESTED
+          // (SCRUM-117: coordinator returned it for clarification, organiser must edit then resubmit).
+          ["SUBMITTED", "CHANGES_REQUESTED"].includes(event.status) ?
             (editing ? <EventRequestForm key={event.id} event={event} onCancel={() => setEditing(false)} onSubmitted={() => {
               setEditing(false); setSaved(true); reload();
             }} /> : <button type="button" onClick={() => { setSaved(false); setEditing(true); }}>Edit event</button>) :

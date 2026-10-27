@@ -134,8 +134,12 @@ function createEventWorkspaceService(client) {
       const current = await read("organiser", userId, id);
       if (!current) return { ok: false, reason: "not_found" };
       if (current.organiser_id !== userId) return { ok: false, reason: "forbidden" };
-      // SCRUM-164 AC2: edits are locked once the event moves past SUBMITTED.
-      if (current.status !== "SUBMITTED") return { ok: false, reason: "locked" };
+      // SCRUM-164 AC2: edits are locked once past SUBMITTED, except while
+      // the coordinator is reviewing (UNDER_REVIEW) or has returned the event
+      // for clarification (CHANGES_REQUESTED) — SCRUM-117 requires both.
+      if (!["SUBMITTED", "UNDER_REVIEW", "CHANGES_REQUESTED"].includes(current.status)) {
+        return { ok: false, reason: "locked" };
+      }
       // SCRUM-164 AC3: reason is extracted before the WRITABLE_COLS check so it
       // is not treated as an unknown column.
       if (!input || Array.isArray(input) || typeof input !== "object") {
@@ -146,7 +150,9 @@ function createEventWorkspaceService(client) {
         return { ok: false, reason: "invalid", errors: [{ field: "event", message: "Provide only editable event details." }] };
       }
       const trimmedReason = typeof reason === "string" ? reason.trim() : "";
-      if (!trimmedReason) {
+      // Reason is required only for SUBMITTED edits (SCRUM-164 AC3).
+      // UNDER_REVIEW and CHANGES_REQUESTED edits (SCRUM-117) do not require one.
+      if (current.status === "SUBMITTED" && !trimmedReason) {
         return { ok: false, reason: "invalid", errors: [{ field: "reason", message: "required" }] };
       }
       const { fields, errors } = normalise(eventInput);
