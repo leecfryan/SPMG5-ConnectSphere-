@@ -202,18 +202,17 @@ function createEventWorkspaceService(client) {
       }
 
       // SCRUM-164 AC3: record actor, timestamp (db default) and reason.
-      // Best-effort: not using unwrap() so Supabase { error } responses are
-      // silently dropped. The try/catch handles true network exceptions.
-      // The edit is already committed; losing the log entry is less harmful
-      // than returning 503 to the organiser.
-      try {
-        await client.from("event_activity_log").insert({
+      // unwrap() surfaces any insert failure rather than hiding it.
+      // SUBMITTED is the only status that reaches this point (AC2 locks the
+      // rest), but the guard is explicit so the intent is clear.
+      if (current.status === "SUBMITTED") {
+        await unwrap(client.from("event_activity_log").insert({
           event_id: id,
           user_id: userId,
           action: "EDIT",
           details: { from_status: null, to_status: null, note: trimmedReason },
-        });
-      } catch { /* network exception after committed edit; log entry missed */ }
+        }));
+      }
 
       return { ok: true, event };
     },

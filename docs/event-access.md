@@ -213,7 +213,7 @@ only changed fields, retaining original timestamps, including milliseconds,
 when schedule fields are not changed. Failed edits retain input for correction.
 A locked event (status past `SUBMITTED`) returns 409. A missing or blank reason returns 400.
 Each successful PATCH writes one append-only `event_activity_log` row with `action: "EDIT"` and
-the trimmed reason in `details.note` (SCRUM-164 AC3). The log write is best-effort: a failure does not undo the edit.
+the trimmed reason in `details.note` (SCRUM-164 AC3). A log insert failure surfaces as 503.
 
 ### Schema reference and Auth setup (2026-10-05)
 
