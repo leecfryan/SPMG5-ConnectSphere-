@@ -134,10 +134,12 @@ function createEventWorkspaceService(client) {
       const current = await read("organiser", userId, id);
       if (!current) return { ok: false, reason: "not_found" };
       if (current.organiser_id !== userId) return { ok: false, reason: "forbidden" };
-      // SCRUM-164 AC2: edits are locked once past SUBMITTED, except while
-      // the coordinator is reviewing (UNDER_REVIEW) or has returned the event
-      // for clarification (CHANGES_REQUESTED) — SCRUM-117 requires both.
-      if (!["SUBMITTED", "UNDER_REVIEW", "CHANGES_REQUESTED"].includes(current.status)) {
+      // SCRUM-164 AC2: edits are locked once the event reaches UNDER_REVIEW or
+      // beyond. CHANGES_REQUESTED is the exception: the coordinator has
+      // returned the event and the organiser must edit before resubmitting.
+      // NOTE: SCRUM-117 also allows editing at UNDER_REVIEW; that conflicts
+      // with this AC and is raised as a blocker for the team to resolve.
+      if (!["SUBMITTED", "CHANGES_REQUESTED"].includes(current.status)) {
         return { ok: false, reason: "locked" };
       }
       // SCRUM-164 AC3: reason is extracted before the WRITABLE_COLS check so it

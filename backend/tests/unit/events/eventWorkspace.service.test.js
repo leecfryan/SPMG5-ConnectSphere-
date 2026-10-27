@@ -348,10 +348,9 @@ test("[TC-SCRUM-164-01] organiser saves valid changes to their own SUBMITTED eve
   expect(client.activity[0].details).toMatchObject({ note: "Client requested rename" });
 });
 
-test("[TC-SCRUM-164-02] update is refused when event has moved past UNDER_REVIEW / CHANGES_REQUESTED", async () => {
-  // SCRUM-117 allows edits at UNDER_REVIEW and CHANGES_REQUESTED; APPROVED is the first locked status.
+test("[TC-SCRUM-164-02] update is refused when event has moved past SUBMITTED", async () => {
   const { service, records, client } = setup();
-  records[0].status = "APPROVED";
+  records[0].status = "UNDER_REVIEW";
   const result = await service.updateOrganiserEvent("alice", "event-alice", { name: "Denied", reason: "any reason" });
   expect(result).toEqual({ ok: false, reason: "locked" });
   expect(client.rpc).not.toHaveBeenCalled();
