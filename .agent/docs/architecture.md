@@ -298,3 +298,16 @@ and the workflow contract are in docs/notifications.md. Ryan confirmed SQL succe
 on 2026-10-15; equipment-issue is active in Development with one previewed In-App
 step, required payload validation and Critical enabled. Restart/live inbox
 verification remain pending. Tests are deferred at Ryan's request.
+
+### Returned requests (SCRUM-117 Task 2)
+
+CHANGES_REQUESTED is an event status. The assigned coordinator returns UNDER_REVIEW
+requests through POST /api/internal/events/:eventId/request-changes using events.decide.
+The service-role request_event_changes RPC locks the event and saves its status, message
+and editable-field snapshot atomically in events/event_activity_log. ACTIVE_STATUSES keeps
+returned events visible/counted/cancellable; ASSIGNABLE_STATUSES excludes them.
+POSTPONABLE_STATUSES includes them; PLANNING_STATUSES does not. Existing event readers
+receive the activity message, not the snapshot. SQL is in docs/event-requests.md.
+Returned-request notification queueing is documented in docs/notifications.md; the existing worker delivers the saved message and request path through event-changes-requested. The owner resubmits through POST /api/event-workspace/organiser/:id/resubmit with the latest cycleId. The resubmit_event_request RPC checks validated saved fields under a lock, retains assignment, records immutable changes and queues event-request-resubmitted atomically. Only the coordinator workspace exposes changed-field comparisons. Both SQL/workflow setups are user-reported; live resubmission verification remains pending.
+
+SCRUM-117 saved-edit correction (24 October 2026): an events trigger records internal REQUEST_BASELINE_RECORDED snapshots at submission/resubmission in event_activity_log. Organiser PATCH preserves this baseline. The assigned coordinator detail derives request_changes from current saved fields and that baseline; internal snapshots never appear in public activity responses. Resubmission compares against this baseline and advances it transactionally. See docs/notifications.md for the applied SQL.

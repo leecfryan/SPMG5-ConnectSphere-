@@ -153,7 +153,16 @@ function createReviewService({ repository }) {
     return { ok: true, event };
   }
 
-  return { startReview, approve, reject, cancel, postpone };
+  async function requestChanges(eventId, coordinatorId, note) {
+    const parsed = readNote(note);
+    if (!parsed.ok || parsed.note === null) return { ok: false, reason: "clarification_required" };
+    const event = await repository.requestChanges(eventId, coordinatorId, parsed.note);
+    if (event) return { ok: true, event };
+    const existing = await repository.findById(eventId);
+    return { ok: false, reason: existing ? "conflict" : "not_found" };
+  }
+
+  return { startReview, approve, reject, cancel, postpone, requestChanges };
 }
 
 module.exports = { createReviewService, readNote };

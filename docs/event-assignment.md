@@ -253,3 +253,9 @@ Ryan reported successful application of the revised SQL on 2026-10-15. The event
 verification remains pending. See [schema and processing](notifications.md#coordinator-notifications--scrum-155-checkpoint-2-revised).
 Earlier test results are historical; new feature tests are deferred at Ryan's
 request. Compatibility with the revised SQL has not yet been verified.
+
+## Requests awaiting organiser changes (SCRUM-117)
+
+CHANGES_REQUESTED counts towards workload and remains visible, but is excluded from
+ASSIGNABLE_STATUSES. Manager reassignment returns 409 without changing the event.
+The unassigned queue remains SUBMITTED events with no coordinator.

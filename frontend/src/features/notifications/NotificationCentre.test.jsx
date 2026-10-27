@@ -2,6 +2,7 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { MemoryRouter } from "react-router";
 import { AuthContext } from "../auth/useAuth";
 import NotificationCentrePage from "./pages/NotificationCentrePage";
 import NotificationReadButton from "./components/NotificationReadButton";
@@ -31,7 +32,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.resetAllMocks(); });
 
 function view(user = alice, token = "alice-token") {
-  return <AuthContext.Provider value={{ user, token }}><NotificationCentrePage /></AuthContext.Provider>;
+  return <MemoryRouter><AuthContext.Provider value={{ user, token }}><NotificationCentrePage /></AuthContext.Provider></MemoryRouter>;
 }
 function deferred() {
   let resolve, reject;

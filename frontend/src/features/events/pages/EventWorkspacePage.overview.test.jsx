@@ -238,3 +238,13 @@ test("[SCRUM-161-UI-010] AC1/AC2 failure: Refresh events retries a failed direct
   expect(screen.queryByRole("alert")).toBeNull();
   expect(coordinatorOptions()).toContain("Ben Lim");
 });
+
+test("[SCRUM-117-UI-MERGE-001] returned requests remain active and filterable in the Lead workload overview", async () => {
+  const returned = { id: "event-returned", name: "Returned workshop", status: "CHANGES_REQUESTED", coordinator_id: "coord-ada", organiser_id: "organiser-a" };
+  open({ managerList: () => ok({ events: [...overviewEvents, returned] }) });
+  const user = userEvent.setup();
+  expect(await screen.findByRole("link", { name: "Returned workshop" })).toBeInTheDocument();
+  expect(rowFor("Returned workshop")).toHaveTextContent("Changes requested");
+  await user.selectOptions(screen.getByLabelText("Event status"), "CHANGES_REQUESTED");
+  expect(shownEvents()).toEqual(["Returned workshop"]);
+});

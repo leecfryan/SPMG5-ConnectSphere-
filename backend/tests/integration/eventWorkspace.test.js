@@ -1,4 +1,4 @@
-import { test, expect, vi } from "vitest";
+import { test, expect, vi, onTestFinished } from "vitest";
 const { once } = require("node:events");
 const { randomUUID } = require("node:crypto");
 const createApp = require("../../src/app");
@@ -19,6 +19,8 @@ async function setup(t) {
   const accounts = new Map([[users.organiser.id, { events: records }]]);
   const client = storage(accounts);
   require("../../../tests/playwright/support/assignment-notification-storage.cjs")(client, new Map());
+  const pending = new Map();
+  require("../../../tests/playwright/support/resubmission-storage.cjs")(client, pending);
   client.auth = { admin: {
     async listUsers() { return { data: { users: Object.values(users) }, error: null }; },
     async getUserById(id) { return { data: { user: Object.values(users).find(user => user.id === id) }, error: null }; },
@@ -33,7 +35,7 @@ async function setup(t) {
     method, headers: { ...(user ? { Authorization: "Bearer " + user } : {}), "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  return { send, users, records, client };
+  return { send, users, records, client, pending };
 }
 
 // Also the evidence for SCRUM-161 AC3: the other coordinator's event must be
@@ -587,13 +589,140 @@ test("[SCRUM-99] AC3: a colleague in the organiser's company sees the decision; 
   expect(await outsider.text()).not.toContain("Dates clash with exams.");
 });
 
+test("[SCRUM-117-API-008] returned events stay visible but lead reassignment is refused", async t => {
+  const { send, records, users } = await setup(t);
+  records[0].status = "CHANGES_REQUESTED";
+  const before = structuredClone(records);
+  for (const [scope, user] of [["coordinator", "first"], ["manager", "manager"], ["organiser", "organiser"]]) {
+    const response = await send("/event-workspace/" + scope, user);
+    expect((await response.json()).events.map(row => row.id)).toContain(records[0].id);
+  }
+  const response = await send("/event-workspace/" + records[0].id + "/coordinator", "manager", "PATCH", {
+    coordinatorId: users.second.id, expectedCoordinatorId: users.first.id,
+  });
+  expect(response.status).toBe(409);
+  expect(records).toEqual(before);
+});
+
+async function returnedRequest(t) {
+  const f = await setup(t);
+  const event = f.records[0];
+  Object.assign(event, { status: "CHANGES_REQUESTED", purpose: "Workshop", description: "Community workshop",
+    start_time: "2099-01-01T01:00:00Z", end_time: "2099-01-01T03:00:00Z", expected_attendance: 30,
+    registration_start: "2098-12-01T00:00:00Z", registration_end: "2098-12-31T00:00:00Z" });
+  const cycle = { id: randomUUID(), event_id: event.id, action: "CHANGES_REQUESTED", created_at: new Date().toISOString(),
+    details: { coordinator_id: f.users.first.id, before: { ...event }, note: "Clarify layout" } };
+  f.client.recordRequestBaseline(event);
+  f.client.activity.push(cycle);
+  return { ...f, event, cycle, path: `/event-workspace/organiser/${event.id}/resubmit` };
+}
+
+test("[SCRUM-117-R01] Owner saves and resubmits to the same coordinator once with immutable field changes", async t => {
+  const f = await returnedRequest(t);
+  const patch = await f.send(`/event-workspace/organiser/${f.event.id}`, "organiser", "PATCH", { expected_attendance: 45, venue_requirements: "Round tables" });
+  expect(patch.status).toBe(200);
+  expect(f.event.status).toBe("CHANGES_REQUESTED");
+  expect(f.pending.size).toBe(0);
+  const response = await f.send(f.path, "organiser", "POST", { cycleId: f.cycle.id });
+  expect(response.status).toBe(200);
+  expect((await response.json()).event).toMatchObject({ status: "UNDER_REVIEW", coordinator_id: f.users.first.id });
+  expect(f.pending.size).toBe(1);
+  expect([...f.pending.values()][0]).toMatchObject({ recipient_id: f.users.first.id, workflow: "event-request-resubmitted",
+    payload: { cycleId: f.cycle.id, changedFieldCount: 2, requestPath: "/assigned-events/" + f.event.id } });
+  expect((await f.send(f.path, "organiser", "POST", { cycleId: f.cycle.id })).status).toBe(409);
+  expect(f.client.activity.filter(row => row.action === "REQUEST_RESUBMITTED")).toHaveLength(1);
+  expect(f.pending.size).toBe(1);
+  f.event.expected_attendance = 99;
+  const result = await (await f.send(`/event-workspace/coordinator/${f.event.id}`, "first")).json();
+  expect(result.event.activity.find(row => row.action === "REQUEST_RESUBMITTED").changes).toEqual([
+    { field: "expected_attendance", before: 30, after: 45 }, { field: "venue_requirements", before: null, after: "Round tables" },
+  ]);
+  const owner = await (await f.send(`/event-workspace/organiser/${f.event.id}`, "organiser")).json();
+  expect(owner.event.activity.find(row => row.action === "REQUEST_RESUBMITTED")).not.toHaveProperty("changes");
+});
+
+test("[SCRUM-117-R02] Anonymous, wrong roles and other organisers cannot resubmit or mutate the request", async t => {
+  const f = await returnedRequest(t);
+  for (const [role, status] of [[null,401],["first",403],["manager",403],["attendee",403],["venue",403],["technical",403],["otherOrganiser",404]]) {
+    expect((await f.send(f.path, role, "POST", { cycleId: f.cycle.id })).status).toBe(status);
+  }
+  f.users.organiser.app_metadata.organisation_id = "same-company";
+  f.users.otherOrganiser.app_metadata.organisation_id = "same-company";
+  expect((await f.send(f.path,"otherOrganiser","POST",{cycleId:f.cycle.id})).status).toBe(403);
+  expect(f.event.status).toBe("CHANGES_REQUESTED");
+  expect(f.client.activity).toHaveLength(2);
+  expect(f.pending.size).toBe(0);
+});
+
+test("[SCRUM-117-R03] Invalid payload, stale cycle, changed status and invalid saved details leave no resubmission", async t => {
+  const f = await returnedRequest(t);
+  for (const body of [{}, {cycleId:"invalid"}, {cycleId:f.cycle.id,coordinatorId:f.users.second.id}]) {
+    expect((await f.send(f.path,"organiser","POST",body)).status).toBe(400);
+  }
+  expect((await f.send(f.path,"organiser","POST",{cycleId:randomUUID()})).status).toBe(409);
+  f.event.status = "POSTPONED";
+  expect((await f.send(f.path,"organiser","POST",{cycleId:f.cycle.id})).status).toBe(409);
+  f.event.status = "CHANGES_REQUESTED";
+  f.event.description = "";
+  const invalid = await f.send(f.path,"organiser","POST",{cycleId:f.cycle.id});
+  expect(invalid.status).toBe(400);
+  expect((await invalid.json()).errors).toContainEqual({field:"description",message:"required"});
+  expect(f.client.activity).toHaveLength(2);
+  expect(f.pending.size).toBe(0);
+});
+
+test("[SCRUM-117-R04] No-change resubmission is allowed and a partial registration edit validates the saved window", async t => {
+  const f = await returnedRequest(t);
+  expect((await f.send(`/event-workspace/organiser/${f.event.id}`,"organiser","PATCH",{registration_start:"2099-01-02T00:00:00Z"})).status).toBe(400);
+  expect(f.event.registration_start).toBe("2098-12-01T00:00:00Z");
+  expect((await f.send(f.path,"organiser","POST",{cycleId:f.cycle.id})).status).toBe(200);
+  expect(f.client.activity.find(row => row.action === "REQUEST_RESUBMITTED").details.changes).toEqual([]);
+});
+
+test("[SCRUM-117-R05] A database outage or save racing validation cannot partially resubmit", async t => {
+  const f = await returnedRequest(t);
+  const originalRpc = f.client.rpc;
+  f.client.rpc = () => { throw new Error("private database failure"); };
+  const unavailable = await f.send(f.path,"organiser","POST",{cycleId:f.cycle.id});
+  expect(unavailable.status).toBe(503);
+  expect(await unavailable.text()).not.toContain("private database failure");
+  f.client.rpc = (name,args) => { f.event.description = "Saved by another tab"; return originalRpc(name,args); };
+  expect((await f.send(f.path,"organiser","POST",{cycleId:f.cycle.id})).status).toBe(409);
+  expect(f.event.status).toBe("CHANGES_REQUESTED");
+  expect(f.client.activity).toHaveLength(2);
+  expect(f.pending.size).toBe(0);
+});
+
+test("[SCRUM-117-BASE-API-001] organiser saves are visible to the assigned coordinator before a return; internal baselines remain private", async t => {
+  const f = await setup(t), event=f.records[0];
+  Object.assign(event,{status:"UNDER_REVIEW",purpose:"Workshop",description:"Original description",expected_attendance:30});
+  f.client.activity.push({id:randomUUID(),event_id:event.id,action:"REQUEST_BASELINE_RECORDED",created_at:"2026-10-01T00:00:00Z",
+    details:{source:"SUBMITTED",version_at:"2026-10-01T00:00:00Z",snapshot:{...event}}});
+  expect((await f.send(`/event-workspace/organiser/${event.id}`,"organiser","PATCH",{expected_attendance:45})).status).toBe(200);
+  expect(event.status).toBe("UNDER_REVIEW");
+  const detail=await (await f.send(`/event-workspace/coordinator/${event.id}`,"first")).json();
+  expect(detail.event.request_changes).toEqual({source:"SUBMITTED",version_at:"2026-10-01T00:00:00Z",
+    changes:[{field:"expected_attendance",before:30,after:45}]});
+  expect(detail.event.activity).toEqual([]);
+  expect(JSON.stringify(detail)).not.toContain('"snapshot"');
+  f.users.organiser.app_metadata.organisation_id="same-company";
+  f.users.otherOrganiser.app_metadata.organisation_id="same-company";
+  for(const role of ["organiser","otherOrganiser","manager"]){
+    const scope=role==="manager"?"manager":"organiser";
+    const response=await (await f.send(`/event-workspace/${scope}/${event.id}`,role)).json();
+    expect(response.event).not.toHaveProperty("request_changes");
+    expect(response.event.activity).toEqual([]);
+  }
+  expect((await f.send(`/event-workspace/coordinator/${event.id}`,"second")).status).toBe(404);
+});
+
 // SCRUM-161 AC1: the Lead's workload overview is the manager workspace list, so
 // an event in every active status comes back with the coordinator responsible
 // for it. Cancelled events stay in the same list (SCRUM-148 AC4); the browser,
 // not the server, opens the overview on the active ones.
 test("[SCRUM-161] AC1: the Lead's list carries an event in every active status with its coordinator, and keeps cancelled events", async t => {
   const { send, records, users } = await setup(t);
-  const laterStages = ["UNDER_REVIEW", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED", "POSTPONED"].map(status =>
+  const laterStages = ["UNDER_REVIEW", "CHANGES_REQUESTED", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED", "POSTPONED"].map(status =>
     addEvent(records, { name: "Overview " + status, status, coordinator_id: users.second.id, organiser_id: users.organiser.id }));
   const closed = addEvent(records, { status: "CANCELLED", coordinator_id: users.first.id, organiser_id: users.organiser.id,
     cancelled_by: users.first.id, cancelled_at: "2099-09-06T00:00:00.000Z", cancellation_reason: "Venue flooded." });
@@ -606,4 +735,25 @@ test("[SCRUM-161] AC1: the Lead's list carries an event in every active status w
   expect(byId.get(records[2].id)).toMatchObject({ status: "SUBMITTED", coordinator_id: null });
   for (const event of laterStages) expect(byId.get(event.id)).toMatchObject({ status: event.status, coordinator_id: users.second.id });
   expect(byId.get(closed.id)).toMatchObject({ status: "CANCELLED", coordinator_id: users.first.id });
+});
+
+
+test.each([false, true])("[SCRUM-117-BASE-API-002] missing baseline differs from a failed comparison read (outage: %s)", async (outage) => {
+  const { send, records, client } = await setup({ onTestFinished });
+  if (outage) {
+    const from = client.from.bind(client);
+    client.from = table => table === "event_activity_log"
+      ? { select: () => ({ eq: () => ({ order: async () => ({ data: null, error: { message: "Private storage failure" } }) }) }) }
+      : from(table);
+  }
+  const response = await send(`/event-workspace/coordinator/${records[0].id}`, "first");
+  expect(response.status).toBe(200);
+  const { event } = await response.json();
+  expect(event.request_changes).toEqual(outage ? null : { source: "NO_BASELINE", version_at: null, changes: [] });
+  expect(event.activity).toEqual(outage ? null : []);
+  expect(JSON.stringify(event)).not.toContain("Private storage failure");
+  for (const [scope, caller] of [["organiser", "organiser"], ["manager", "manager"]]) {
+    const detail = await (await send(`/event-workspace/${scope}/${records[0].id}`, caller)).json();
+    expect(detail.event).not.toHaveProperty("request_changes");
+  }
 });

@@ -49,6 +49,21 @@ module.exports = function createEventWorkspaceRoutes(client) {
       return res.status(503).json({ message: "Unable to update the event. Please try again." });
     }
   });
+  router.post("/organiser/:id/resubmit", requirePermission("events.own.update"), available, validId, async (req, res) => {
+    if (!validBody(req.body, ["cycleId"]) || !isUuid(req.body.cycleId)) {
+      return res.status(400).json({ message: "Refresh the request before resubmitting." });
+    }
+    try {
+      const result = await service.resubmitOrganiserEvent(req.user.id, req.params.id, req.body.cycleId);
+      if (result.ok) return res.json({ event: result.event });
+      if (result.reason === "not_found") return res.status(404).json({ message: "Event not found." });
+      if (result.reason === "forbidden") return res.status(403).json({ message: "Only the responsible organiser can resubmit this request." });
+      if (result.reason === "invalid") return res.status(400).json({ message: "Edit and save the request details before resubmitting.", errors: result.errors });
+      return res.status(409).json({ message: "The request has changed. Refresh and review the saved details before resubmitting." });
+    } catch {
+      return res.status(503).json({ message: "Unable to resubmit the request. Please try again." });
+    }
+  });
   router.get("/coordinators", requirePermission("events.assign"), available, async (req, res) => {
     res.json({ coordinators: await service.coordinators() });
   });

@@ -105,7 +105,7 @@ test("SCRUM-148/149 AC2: cancel writes CANCELLED, restricted to the active stage
     cancelled_by: "coord-1", cancelled_at: "2026-10-08T00:00:00.000Z", cancellation_reason: "Venue flooded", status: "CANCELLED",
   }]);
   expect(calls).toContainEqual(["eq", "id", "evt-1"]);
-  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED", "POSTPONED"]]);
+  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "CHANGES_REQUESTED", "APPROVED", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED", "POSTPONED"]]);
   expect(event).toEqual({ id: "evt-1", status: "CANCELLED" });
 });
 
@@ -159,7 +159,7 @@ test("SCRUM-149 AC3: postpone writes POSTPONED, restricted to the postponable st
     postponed_by: "coord-1", postponed_at: "2026-10-10T00:00:00.000Z", postponement_reason: "New date not yet known", status: "POSTPONED",
   }]);
   expect(calls).toContainEqual(["eq", "id", "evt-1"]);
-  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED"]]);
+  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "CHANGES_REQUESTED", "APPROVED", "SAFETY_REVIEW", "CONFIRMED"]]);
   expect(event).toEqual({ id: "evt-1", status: "POSTPONED" });
 });
 
