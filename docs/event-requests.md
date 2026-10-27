@@ -125,12 +125,16 @@ stateDiagram-v2
     SAFETY_REVIEW --> POSTPONED
     CONFIRMED --> POSTPONED
     POSTPONED --> CANCELLED
+    APPROVED --> SUBMITTED
+    SAFETY_REVIEW --> SUBMITTED
+    PREPARATION --> SUBMITTED
+    CONFIRMED --> SUBMITTED
 ```
 
 | Status | Badge label | Set by today |
 | --- | --- | --- |
 | `DRAFT` | Draft | `createDraft`, when an organiser saves a draft (SCRUM-147) |
-| `SUBMITTED` | Submitted | `createSubmitted`, at insert; `markSubmitted`, when a draft is submitted (SCRUM-147) |
+| `SUBMITTED` | Submitted | `createSubmitted`, at insert; `markSubmitted`, when a draft is submitted (SCRUM-147); `apply_organiser_event_edit` (SQL), when a significant edit is made to an event already in `APPROVED`/`SAFETY_REVIEW`/`PREPARATION`/`CONFIRMED` with a live arrangement (SCRUM-37 — see below) |
 | `UNDER_REVIEW` | Under review | the assigned coordinator's *Start review* (SCRUM-98) |
 | `APPROVED` | Approved – planning | the assigned coordinator's *Approve* (SCRUM-99), *Withdraw from safety check* (SCRUM-139), or a Safety Officer's *Reject* (SCRUM-141); read by registration and venue |
 | `SAFETY_REVIEW` | Safety review | the assigned coordinator's *Submit for safety check* (SCRUM-139); not open to new venue or equipment requests |
@@ -603,6 +607,110 @@ postponing, the page shows a *Postponement* summary (postponed by, postponed on,
 | 409 | Not in a postponable stage, or reassigned meanwhile | "This event request has changed since you opened it. Refresh to see its current status." |
 | 503 | The access check could not reach storage | "Unable to check access. Please try again." |
 
+### Significant edits regress the event (SCRUM-37)
+
+The organiser's own `PATCH /api/event-workspace/organiser/:id` (`eventWorkspace.service.js#updateOrganiserEvent`,
+SCRUM-100) is the one place an event's details change after submission. A **significant** edit — a real value
+change (`is distinct from`, so `NULL` and timestamptz-instant comparisons are handled correctly) to `start_time`,
+`end_time`, `expected_attendance`, `venue_requirements` or `equipment_needs` — made while the event is `APPROVED`,
+`SAFETY_REVIEW`, `PREPARATION` or `CONFIRMED` sends the event back to `SUBMITTED` for the coordinator's full
+re-approval. **Revised 2026-10-22:** this no longer depends on whether a venue booking or equipment request
+actually exists yet — AC1 treats a change to these fields as significant on its own terms, so the event regresses
+whenever it's in one of those four statuses, regardless of what's actually been arranged. A non-significant edit
+(`name`, `purpose`, `description`, `accessibility_needs`, `other_comments`, registration window), or any edit made
+while `SUBMITTED`/`UNDER_REVIEW` (nothing can be at stake before the first approval), just saves normally with no
+status change.
+
+**Every edit is logged, labelled by significance (towards SCRUM-164 AC3).** `apply_organiser_event_edit` writes
+an `event_activity_log` entry for every edit that actually changes something — `event.significant_edit` (one of
+the five AC1 fields changed, whether or not it also regressed the event) or `event.ordinary_edit` (only
+non-significant fields changed). The note names exactly which fields changed, not a fixed sentence listing every
+possible significant field. `EventActivityHistory.jsx` shows these as "Significant change" / "Normal change".
+
+**One atomic SQL function, not JS.** The whole write — merging the partial PATCH onto the current row, deciding
+significance, and the `SUBMITTED` regression itself — happens inside `apply_organiser_event_edit`, a single
+`plpgsql` function called once via `.rpc(...)`. This codebase's Supabase client is PostgREST-based: sequential
+`.from(table).update(...)` calls are independent HTTP requests with no shared transaction, so a plain JS diff
+(as SCRUM-150's narrower `RESCHEDULE_FIELDS`/`rescheduleFieldChanged` originally did, retired by this story) could
+leave the field write committed while a later step failed — an unreviewed, already-applied change sitting on a
+still-`CONFIRMED` event, with nobody asked to look at it. One function body is atomic by construction, so that
+can't happen. The function only *decides* whether to regress — it never writes to `equipment_requests` or
+`venue_bookings` itself (see below); `updateOrganiserEvent` maps the function's own `EVENT_NOT_FOUND` (`P0002`,
+its `WHERE id = ... AND organiser_id = ...` matching nothing) and `EVENT_MODIFIED` (`P0004`, below) to the same
+`409 conflict` the plain update used to answer with when the event moved or was reassigned mid-edit.
+
+**Reviewer question on PR #60: could two open tabs let one save overwrite the other's changes?** Traced in full:
+the frontend already sends only the fields it changed, not a stale snapshot, and the merge above is built from a
+*fresh* read of the current row at request time, not from either tab's own stale copy — so the "tab left open a
+long time" version of this concern doesn't actually happen. The real, narrower gap: that fresh read and this RPC
+call are two separate round trips, not one atomic step, so another save can commit in the gap between them. If it
+does, the merged parameters this call is about to write are stale for whatever that other save changed, and
+writing them anyway would silently revert it — a genuine, millisecond-scale lost-update race, not a hypothetical
+one. Closed with `events.updated_at` (new column, bumped on every write by the same shared `set_updated_at()`
+trigger [venue-integration.md](venue-integration.md#venues-table-and-the-shared-set_updated_at-trigger) already
+uses) and a new `p_expected_updated_at` parameter: the function compares it against the row it just locked and
+raises `EVENT_MODIFIED`/`P0004` — mapped to the same conflict as a reassignment race — if the row moved since
+`current` was read. A `coalesce(p_field, v_old.field)`-inside-the-function alternative was considered and
+rejected: `registration_start`/`registration_end` are legitimately nullable, so the function could never tell
+"untouched" apart from "cleared to empty" that way.
+
+**Schema reference.** `updated_at` and its trigger are added by hand in the Supabase SQL editor (no migration
+file), applied before the revised `apply_organiser_event_edit` below:
+
+```sql
+alter table public.events
+  add column if not exists updated_at timestamptz not null default now();
+
+drop trigger if exists events_set_updated_at on public.events;
+create trigger events_set_updated_at
+  before update on public.events
+  for each row execute function public.set_updated_at();
+```
+
+The full revised `apply_organiser_event_edit` body (with `p_expected_updated_at` and its check) is in
+`.agent/docs/other/SCRUM-37-flag-significant-edits.md`'s *Schema reference* section, alongside the superseded
+version for comparison.
+
+**Released, not held, on the coordinator's decision.** Earlier in this story's build, a flagged arrangement was
+going to be *held* for Technical Support/Venue Staff to re-decide — the same shape SCRUM-150 built for equipment.
+The team changed this: approving **or** rejecting the resubmission now releases whatever venue booking and
+equipment request it had outright (`review.service.js#approve`/`#reject`, reusing the exact
+`equipmentService.releaseReservationsForEvent`/`releaseVenueBookingsForCancelledEvent` calls `cancel`/`postpone`
+already call). The coordinator re-requests both from scratch after an approval, then goes through Safety Review
+again before the event can reach `CONFIRMED` — `safetyCheck.service.js#submit`'s existing readiness gate already
+treats "nothing booked yet" as unresolved, so no new gate was needed for that. A rejection ends the event outright
+(`REJECTED` is terminal) — rejecting a resubmission is a bigger hammer than undoing just the edit; see *Current
+limitations* below. Both release calls are no-ops when nothing is live, so this is safe on an ordinary first-time
+approval or rejection too.
+
+**Reviewer feedback on PR #60: a release failing no longer looks like the decision failed.** `transitionStatus`
+commits the `APPROVED`/`REJECTED` write before either release call runs, so a release throwing used to surface as
+a generic 500 that implied the whole request failed. Both calls are now independently caught and logged inside
+`review.service.js#releaseArrangements`; the decision itself still returns success. `REJECTED` (like `CANCELLED`)
+is swept as a safety net on the next equipment/venue read if a release did fail there — see
+[equipment-integration.md](equipment-integration.md#releasing-reservations-on-event-cancellation-scrum-104-extended-by-scrum-148)
+and [venue-integration.md](venue-integration.md#releasing-bookings-on-event-cancellation-scrum-148).
+`APPROVED` has no equivalent sweep (an `APPROVED` event may legitimately hold a live arrangement), so a release
+failure there is a known, logged-only gap.
+
+**Why not SCRUM-150's own hold-and-review mechanism.** SCRUM-150's AC1 ("marks reservations for review") used
+`REVIEW_REQUIRED`, holding the *same* reservation for Technical Support to re-decide. This story's team design
+reads "for review" as the event's own regression to `SUBMITTED` — a human decision stage — not as staff
+re-deciding an identical reservation, so `REVIEW_REQUIRED` is never written by this trigger any more; see
+[equipment-integration.md](equipment-integration.md#reviewing-equipment-on-a-reschedule-scrum-150)'s own SCRUM-37
+addendum for exactly what stays dormant versus what's gone. Venue bookings never had an equivalent hold mechanism
+before this story and don't get one now either — the same release-on-decision treatment applies uniformly to
+both.
+
+**Told before saving.** `EventRequestForm.jsx` duplicates the same significant-field list client-side (same
+established pattern as the status lists in `EventCancelControl.jsx`/`EventReviewControls.jsx`) and shows a
+confirmation step before a significant edit to an event in one of the four arrangement-possible statuses actually
+saves — naming coordinator re-approval, that arrangements will be released either way, safety review again where
+the event had already reached it, and that a rejection ends the event rather than just undoing the edit. A second
+click saves; editing any field while the warning is showing dismisses it, since what's about to save changed.
+
+Full design history, every scoping decision and the complete test list: `.agent/docs/other/SCRUM-37-flag-significant-edits.md`.
+
 ### Request
 
 Unknown keys are ignored. Send timestamps as ISO 8601 with a zone — a browser
@@ -825,6 +933,7 @@ several.
 | 98 | The assigned coordinator opens a submitted request and sees everything the organiser supplied; *Start review* moves it to `UNDER_REVIEW`; approve or reject records `approved_rejected_by`, `approved_rejected_at` and the note or reason; any other coordinator or role is refused (403 on actions, 404 on reads) and nothing is written. |
 | 147 | A draft saves with only a name; required fields are enforced only on submit; *Your drafts* lists, reopens and submits the organiser's own drafts; anyone else gets 404 and never sees them in a list. Specs: [event request tests](event-request-tests.md) §10. |
 | 99 | Approval moves `UNDER_REVIEW → APPROVED`, after which venue and equipment arrangements accept the event (`APPROVED`/`CONFIRMED` only); approval writes only the decision columns; the outcome, approver and time are shown to the organiser, the assigned coordinator and the manager. |
+| 37 | Date, time, expected attendance, venue requirements, venue bookings and equipment requirements are significant; other edits are not. A significant edit with a live arrangement sends the event back to `SUBMITTED` for the coordinator's re-approval; the organiser is told this, and that arrangements will be released either way, before saving. See [Significant edits regress the event](#significant-edits-regress-the-event-scrum-37). |
 
 ---
 
@@ -856,6 +965,10 @@ SCRUM-23/25; [event lifecycle tests](event-lifecycle-tests.md) §8 covers SCRUM-
 | Integration | `tests/integration/eventWorkspace.test.js` | Who sees the request and the decision; approver name boundaries; SCRUM-161's Lead and coordinator scopes |
 | Frontend | `features/events/components/EventDecision*.test.jsx`, `pages/EventWorkspaceDetailPage.test.jsx` | Review controls, decision summary and the pages each role sees |
 | Playwright | `tests/playwright/event-workspace.{api,browser}.spec.cjs` (`REVIEW-E2E-*`) | Role × action matrix and the submit → assign → review → decide journey |
+| Unit | `tests/unit/events/lifecycle.test.js` | The four new `TRANSITIONS` edges to `SUBMITTED` (SCRUM-37), and that no other pair became permitted as a side effect |
+| Unit | `tests/unit/events/eventWorkspace.service.test.js` | `apply_organiser_event_edit`'s call shape — every writable column merged and present, never `undefined` (SCRUM-37) |
+| Integration | `tests/integration/events.review.test.js` | Approve/reject release arrangements on a resubmission, are safe no-ops on a first-time decision, and never fire on a failed decision (SCRUM-37) |
+| Frontend | `features/events/components/EventRequestForm.test.jsx` | The confirm-before-save warning, its dismissal and re-trigger rules, and the non-significant/no-arrangement fast paths (SCRUM-37) |
 | Playwright | `tests/playwright/event-workspace.browser.spec.cjs` (`E2E-EVENT-102`) | SCRUM-161 overview in a real browser: coordinator and status filters and *Clear filters* at 375 px, then the detail link |
 
 Test names lead with their Jira key, so the terminal output is the traceability
@@ -933,6 +1046,13 @@ The following paragraph, *Draft Event Requests*, is built by SCRUM-147 (Sprint 3
   open to changes is a PO/team question; the change itself would be in this lane (`lifecycle.js` and
   `EventWorkspaceDetailPage.jsx`).
 - US-13 has no Jira issue, so `US-13` remains the label in code and tests.
+- **SCRUM-37:** rejecting a resubmission (an event a significant edit sent back to `SUBMITTED`) ends the whole
+  event — it cannot undo just the edit and leave the event exactly as it was before, `CONFIRMED`, arrangements
+  untouched. The organiser's PATCH writes directly to the live `events` row with no staging area, so by the time
+  this logic runs the old values are already gone; there is nowhere a revert could read them back from. Closing
+  this gap properly needs a staged "propose, then apply" mechanism for the organiser's edit — out of scope here;
+  see `.agent/docs/other/SCRUM-37-flag-significant-edits.md`'s *Known limitation* for the full reasoning and which
+  neighbouring story (SCRUM-36) would actually close it.
 
 
 ## Returning requests for clarification (SCRUM-117, Task 2)

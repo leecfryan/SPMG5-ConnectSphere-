@@ -4,9 +4,14 @@ const { createEventWorkspaceService } = require("../modules/events/eventWorkspac
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = value => typeof value === "string" && UUID.test(value);
 
-module.exports = function createEventWorkspaceRoutes(client, equipmentService) {
+// SCRUM-37: equipmentService is no longer threaded through here - the
+// significance check it used to receive flags now lives entirely inside
+// apply_organiser_event_edit (SQL), called directly by the service below,
+// which only regresses the event's own status rather than touching
+// equipment_requests at all.
+module.exports = function createEventWorkspaceRoutes(client) {
   const router = express.Router();
-  const service = client && createEventWorkspaceService(client, equipmentService);
+  const service = client && createEventWorkspaceService(client);
   const available = (req, res, next) => service ? next() : res.status(503).json({ message: "Event workspace is not configured." });
   const validId = (req, res, next) => isUuid(req.params.id) ? next() : res.status(400).json({ message: "Invalid event id." });
   function validBody(body, keys) {

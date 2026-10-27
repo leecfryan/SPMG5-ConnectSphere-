@@ -20,15 +20,26 @@ const TRANSITIONS = Object.freeze({
   // SCRUM-117: the owner resubmits to the same assigned coordinator.
   CHANGES_REQUESTED: Object.freeze(["UNDER_REVIEW", "CANCELLED", "POSTPONED"]),
   // SCRUM-144 AC1: no APPROVED -> CONFIRMED; confirming needs the safety pass.
-  APPROVED: Object.freeze(["SAFETY_REVIEW", "CANCELLED", "POSTPONED"]),
+  // SCRUM-37: a significant edit with live arrangements sends an APPROVED
+  // event back to SUBMITTED for coordinator re-approval (team design, not
+  // this story's own SAFETY_REVIEW withdrawal edge below).
+  APPROVED: Object.freeze(["SAFETY_REVIEW", "CANCELLED", "POSTPONED", "SUBMITTED"]),
   // SCRUM-139 AC4: back to APPROVED is the coordinator withdrawing the submission.
   // SCRUM-141 AC3: a Safety Officer's rejection takes the same edge back to
   // planning; only their approval reaches PREPARATION.
-  SAFETY_REVIEW: Object.freeze(["APPROVED", "PREPARATION", "CANCELLED", "POSTPONED"]),
+  // SCRUM-37: a second, different way out - a significant edit regresses all
+  // the way to SUBMITTED instead, since the arrangements that justified
+  // reaching Safety Review may no longer be valid.
+  SAFETY_REVIEW: Object.freeze(["APPROVED", "PREPARATION", "CANCELLED", "POSTPONED", "SUBMITTED"]),
   // SCRUM-144 AC1: the only way to CONFIRMED. Postponing is left out until the
   // PO agrees it (docs/event-requests.md merge checklist).
-  PREPARATION: Object.freeze(["CONFIRMED", "CANCELLED"]),
-  CONFIRMED: Object.freeze(["COMPLETED", "CANCELLED", "POSTPONED"]),
+  // SCRUM-37: a significant edit regresses to SUBMITTED, same reasoning as
+  // the SAFETY_REVIEW edge above.
+  PREPARATION: Object.freeze(["CONFIRMED", "CANCELLED", "SUBMITTED"]),
+  // SCRUM-37: a significant edit on a CONFIRMED event's arrangements regresses
+  // it to SUBMITTED for coordinator re-approval - applied by
+  // apply_organiser_event_edit (SQL), not through this module's canTransition.
+  CONFIRMED: Object.freeze(["COMPLETED", "CANCELLED", "POSTPONED", "SUBMITTED"]),
   COMPLETED: Object.freeze([]),
   CANCELLED: Object.freeze([]),
   REJECTED: Object.freeze([]),

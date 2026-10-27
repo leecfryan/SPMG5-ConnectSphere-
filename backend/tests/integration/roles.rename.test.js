@@ -69,7 +69,8 @@ test.each([
   expect((await send("/api/internal/access")).status).toBe(200);
   const assignment = await send("/api/internal/events/unassigned");
   expect(assignment.status).toBe(200);
-  expect(await assignment.json()).toEqual({ events: [stored] });
+  // SCRUM-159 AC2: queue rows also carry the organiser's name (none on this fixture).
+  expect(await assignment.json()).toEqual({ events: [{ ...stored, organiser_name: null }] });
   for (const path of ["/api/venues", "/api/equipment", `/api/managed-events/${EVENT_ID}/waitlist`, "/api/technical-support/equipment-requests"]) {
     expect((await send(path)).status, path).toBe(403);
   }

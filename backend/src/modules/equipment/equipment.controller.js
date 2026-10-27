@@ -57,7 +57,7 @@ function createEquipmentController({
   findEventById,
   findEventsByIds,
   getUserDisplayName,
-  listCancelledEventIds,
+  listReleasableEventIds,
   equipmentIssueNotifications,
 }) {
   const {
@@ -87,9 +87,13 @@ function createEquipmentController({
   // e.g. historical data from before SCRUM-148 existed, or a release call
   // that threw after the status write already committed. Equipment reads
   // self-heal: before computing a catalogue or availability response, sweep
-  // every CANCELLED event for still-active requests and release them. Safe
-  // to call on every read - releaseReservationsForEvent is a no-op once a
-  // given event's requests are already RELEASED (see its own comment in
+  // every CANCELLED or REJECTED event for still-active requests and release
+  // them. Both statuses are terminal - neither can ever legitimately hold a
+  // live reservation, unlike APPROVED, which this sweep deliberately leaves
+  // alone (SCRUM-37 reviewer feedback: see review.service.js's
+  // releaseArrangements for why APPROVED has no equivalent sweep). Safe to
+  // call on every read - releaseReservationsForEvent is a no-op once a given
+  // event's requests are already RELEASED (see its own comment in
   // equipment.service.js).
   // SCRUM-150 AC2: available_for_window is computed only for REVIEW_REQUIRED
   // rows, never stored - Technical Support and the coordinator both read it
@@ -105,9 +109,9 @@ function createEquipmentController({
     }));
   }
 
-  async function releaseCancelledEventReservations() {
-    const cancelledEventIds = await listCancelledEventIds();
-    for (const eventId of cancelledEventIds) {
+  async function releaseReservationsForTerminalEvents() {
+    const releasableEventIds = await listReleasableEventIds();
+    for (const eventId of releasableEventIds) {
       await releaseReservationsForEvent(eventId);
     }
   }
@@ -161,7 +165,7 @@ function createEquipmentController({
   // can stop offering equipment that would just be rejected on submit.
   async function getEquipmentCatalogue(req, res, next) {
     try {
-      await releaseCancelledEventReservations();
+      await releaseReservationsForTerminalEvents();
       const equipment = await listEquipment();
       if (req.query.start === undefined && req.query.end === undefined) {
         const approvedRequests = await listApprovedRequestsForEquipmentIds(equipment.map((unit) => unit.id));
@@ -281,7 +285,7 @@ function createEquipmentController({
         return res.status(400).json({ error: "Validation failed", details: errors });
       }
 
-      await releaseCancelledEventReservations();
+      await releaseReservationsForTerminalEvents();
       const equipmentUnits = await listEquipmentByType(value.type);
       const requests = await listActiveRequestsForEquipment(equipmentUnits.map((unit) => unit.id));
 

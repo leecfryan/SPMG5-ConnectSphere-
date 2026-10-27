@@ -85,3 +85,31 @@ test("[SCRUM-117-UNIT-005] a request deleted before the atomic return is not fou
   repository.requestChanges = vi.fn(async () => null);
   expect(await review.requestChanges("evt-1", "coord-1", "Clarify attendance.")).toEqual({ ok: false, reason: "not_found" });
 });
+
+// SCRUM-37 reviewer feedback (PR #60): the APPROVED/REJECTED write already
+// committed by the time these release calls run, so a release throwing must
+// not look like the decision itself failed, and one release failing must
+// not stop the other from being attempted.
+test("TC-37-22: approve still reports ok, and still releases the venue, when the equipment release throws", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const releaseVenueBookingsForCancelledEvent = vi.fn(async () => {});
+  const equipmentService = { releaseReservationsForEvent: vi.fn(async () => { throw new Error("db down"); }) };
+
+  const result = await review.approve("evt-1", "coord-1", null, { equipmentService, releaseVenueBookingsForCancelledEvent });
+
+  expect(result.ok).toBe(true);
+  expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledWith("evt-1");
+  expect(console.error).toHaveBeenCalled();
+});
+
+test("TC-37-23: reject still reports ok, and still releases equipment, when the venue release throws", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const releaseVenueBookingsForCancelledEvent = vi.fn(async () => { throw new Error("rpc failed"); });
+  const equipmentService = { releaseReservationsForEvent: vi.fn(async () => {}) };
+
+  const result = await review.reject("evt-1", "coord-1", "Not enough detail", { equipmentService, releaseVenueBookingsForCancelledEvent });
+
+  expect(result.ok).toBe(true);
+  expect(equipmentService.releaseReservationsForEvent).toHaveBeenCalledWith("evt-1", "coord-1");
+  expect(console.error).toHaveBeenCalled();
+});

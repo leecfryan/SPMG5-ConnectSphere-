@@ -236,8 +236,36 @@ auth.patch('/__test/registrations/:id', (req, res) => {
   if (Object.hasOwn(req.body, 'status')) registration.status = req.body.status;
   res.sendStatus(204);
 });
+// SCRUM-26/159: the assignment queue, with the same filters, order and columns as
+// the real queries. The coordinator directory is the production module over the
+// fake Auth admin. Queue assignments write no SCRUM-155 history here.
+const allEvents = () => [...accounts.values()].flatMap(account => account.events);
+const assignmentDependencies = {
+  repository: {
+    findById: findEvent,
+    async findSubmittedUnassigned() {
+      return allEvents().filter(event => event.status === 'SUBMITTED' && !event.coordinator_id)
+        .sort((a, b) => (a.submitted_at ?? '').localeCompare(b.submitted_at ?? ''))
+        .map(({ id, name, status, organiser_id, start_time, end_time, expected_attendance, purpose, description,
+          venue_requirements, accessibility_needs, equipment_needs, other_comments, submitted_at }) => ({ id, name, status,
+          organiser_id, start_time, end_time, expected_attendance, purpose, description, venue_requirements,
+          accessibility_needs, equipment_needs, other_comments, submitted_at }));
+    },
+    async findActiveAssignments() {
+      return allEvents().filter(event => ACTIVE_STATUSES.includes(event.status) && event.coordinator_id)
+        .map(({ coordinator_id, start_time }) => ({ coordinator_id, start_time }));
+    },
+    async assignCoordinator(id, coordinatorId) {
+      const event = findEvent(id);
+      if (event?.status !== 'SUBMITTED' || event.coordinator_id) return null;
+      event.coordinator_id = coordinatorId;
+      return { ...event };
+    },
+  },
+  directory: require('../../../backend/src/modules/events/coordinators.directory')(dataClient),
+};
 const notificationFixture = require('./notification-storage.cjs')({ auth, eventsRepository, dataClient });
-const app = createApp({ notificationsService: notificationFixture.identity, dataClient, authClient: client, eventsRepository, venuesService, equipmentDependencies, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
+const app = createApp({ notificationsService: notificationFixture.identity, dataClient, authClient: client, eventsRepository, assignmentDependencies, venuesService, equipmentDependencies, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
 // Fixture endpoints exercise real middleware; these are NOT production business endpoints.
 const permissions = ['venues.read', 'equipment.read', 'bookings.read', 'technical_requests.read', 'event_planning.read', 'attendees.read', 'clients.read', 'event_organisers.read'];
 for (const permission of permissions) {

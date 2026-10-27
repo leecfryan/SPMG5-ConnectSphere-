@@ -6,6 +6,17 @@ import {
 } from "../registrationWindowFields";
 import { useAuth } from "../../auth/useAuth";
 
+// SCRUM-37 AC4: the same significance rule apply_organiser_event_edit (SQL)
+// decides server-side, duplicated here only to warn the organiser before
+// saving - same already-established duplication pattern as the status lists
+// in EventCancelControl.jsx/EventReviewControls.jsx.
+const SIGNIFICANT_FIELDS = ["start_time", "end_time", "expected_attendance", "venue_requirements", "equipment_needs"];
+// Statuses at which a live venue booking or equipment request could already
+// exist - matches apply_organiser_event_edit's own regression-eligible
+// source statuses in backend/src/modules/events/lifecycle.js.
+const ARRANGEMENT_STATUSES = ["APPROVED", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED"];
+const SAFETY_REVIEWED_STATUSES = ["SAFETY_REVIEW", "PREPARATION", "CONFIRMED"];
+
 // Ownership, assignment and status are server-controlled; the form edits only
 // the existing event-detail fields in WRITABLE_COLS.
 const EMPTY = {
@@ -136,11 +147,17 @@ export default function EventRequestForm({ onSubmitted, event: existingEvent, on
   const [pending, setPending] = useState(false);
   const busy = Boolean(pending);
   const submitting = useRef(false);
+  // SCRUM-37 AC4: set once a significant change on an arrangement-possible
+  // event needs a second click before it saves.
+  const [confirming, setConfirming] = useState(false);
 
   function update(field) {
     return (event) => {
       const { value } = event.target;
       setFields((current) => ({ ...current, [field]: value }));
+      // A further edit means the warning the organiser already saw may no
+      // longer describe what's about to be saved - ask again.
+      setConfirming(false);
     };
   }
 
@@ -186,10 +203,22 @@ export default function EventRequestForm({ onSubmitted, event: existingEvent, on
       return;
     }
     const changes = Object.fromEntries(Object.entries(fields).filter(([field, value]) => value !== initial[field]));
+
+    // SCRUM-37 AC4: a significant change on an event that may already have
+    // arrangements is confirmed before saving - the first submit only shows
+    // the warning; a second click (confirming already true) actually saves.
+    if (existingEvent && !confirming &&
+      ARRANGEMENT_STATUSES.includes(existingEvent.status) &&
+      Object.keys(changes).some((field) => SIGNIFICANT_FIELDS.includes(field))) {
+      setConfirming(true);
+      return;
+    }
+
     const submitted = await send("submit", () => existingEvent
       ? updateEventRequest(existingEvent.id, changes, token)
       : draft ? submitDraft(draft.id, fields, token) : submitEventRequest(fields, token));
     if (!submitted) return;
+    setConfirming(false);
     if (!existingEvent) setFields(EMPTY);
     onSubmitted(submitted);
   }
@@ -329,18 +358,40 @@ export default function EventRequestForm({ onSubmitted, event: existingEvent, on
         )
       )}
 
+      {confirming && (
+        <p className="error" role="alert">
+          This change sends the event back to your coordinator for re-approval. Your venue and
+          equipment arrangements will be released. If approved, your coordinator will need to
+          arrange new venue and equipment, depending on availability
+          {SAFETY_REVIEWED_STATUSES.includes(existingEvent?.status)
+            ? ", and the event will need to go through safety review again before it can be confirmed"
+            : ""}
+          . If the coordinator rejects the resubmission instead, the event is ended.
+        </p>
+      )}
+
       <button className="primary" type="submit" disabled={busy || (existingEvent && Object.keys(fields).every(field => fields[field] === initial[field]))}>
-        {existingEvent ? (busy ? "Saving…" : "Save changes") : (pending === "submit" ? "Submitting…" : "Submit request")}
+        {existingEvent
+          ? (busy ? "Saving…" : confirming ? "Confirm and save changes" : "Save changes")
+          : (pending === "submit" ? "Submitting…" : "Submit request")}
       </button>
-      {existingEvent && <button className="secondary" type="button" disabled={busy} onClick={onCancel}>Cancel editing</button>}
+      {existingEvent && confirming && (
+        <button className="secondary" type="button" disabled={busy} onClick={() => setConfirming(false)}>Never mind</button>
+      )}
+      {existingEvent && !confirming && <button className="secondary" type="button" disabled={busy} onClick={onCancel}>Cancel editing</button>}
       {!existingEvent && <button className="secondary" type="button" disabled={busy} onClick={saveAsDraft}>
         {pending === "draft" ? "Saving draft…" : "Save draft"}
       </button>}
-      <p className="card-note">
-        {existingEvent ? "Saving updates your event details. Your event's status and assignment stay the same." :
-          "Submitting sends your request to ConnectSphere for coordinator assignment and review. " +
-          "A draft needs only the event name and is visible only to you until you submit it."}
-      </p>
+      {/* SCRUM-37 reviewer feedback (PR #60): this note claims the status
+          stays the same, which is false while the significant-edit warning
+          above is telling the user the opposite - hidden for that moment. */}
+      {!confirming && (
+        <p className="card-note">
+          {existingEvent ? "Saving updates your event details. Your event's status and assignment stay the same." :
+            "Submitting sends your request to ConnectSphere for coordinator assignment and review. " +
+            "A draft needs only the event name and is visible only to you until you submit it."}
+        </p>
+      )}
     </form>
   );
 }

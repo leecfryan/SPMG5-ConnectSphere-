@@ -256,3 +256,41 @@ Run from the repository root:
 ```sh
 npm --prefix backend run test:events -- tests/unit/events/assignments.service.test.js tests/integration/events.assign.test.js tests/integration/eventWorkspace.test.js tests/unit/notifications/notificationDelivery.test.js tests/integration/notifications.assignment.test.js tests/integration/notifications.delivery.test.js --pool=threads --maxWorkers=1
 ```
+
+## SCRUM-159 — the unassigned request queue
+
+> **SCRUM-159:** As an Event Coordinator Lead, I want to see submitted event requests that have no coordinator
+> assigned so that no request goes unattended.
+>
+> 1. A submitted event request with no assigned coordinator appears in the unassigned queue.
+> 2. The queue shows the event name, organiser, proposed dates and expected attendance.
+> 3. Only the Event Coordinator Lead can view the unassigned queue.
+> 4. An event leaves the queue once a coordinator is assigned to it.
+
+SCRUM-26 built the queue, so AC1, AC3 and AC4 were already met; this story adds the organiser and shows all four AC2
+fields in every row. AC3's role denials are the SCRUM-26 cases in §3 (every non-Lead role 403, no token 401, a
+coordinator holding `internal.access` still 403), plus the API refusal inside `[E2E-QUEUE-001]`.
+
+| Epic | Scrum-# | AC # | Type | Test Case ID | Test Scenario | Pre-conditions | Test Steps | Test Data | Expected Result | Created By* | Date of Creation* | Actual Result | Pass / Fail / Not Executed / Blocked | Remarks | Executed By | Date of Execution |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Event Lifecycle | SCRUM-159 | 1, 2 | Happy | TC-SCRUM-159-01 | A submitted, unassigned request reaches the Lead with its four fields | Lead signed in; one `SUBMITTED` request, no coordinator | GET `/api/internal/events/unassigned` | Organiser *Olivia Ong*; 2099-10-02 01:00–05:00Z; 30 attendees | 200; the event has `name`, `organiser_name: "Olivia Ong"`, `start_time`, `end_time`, `expected_attendance: 30` | Agent | 2026-10-22 | As expected | Pass | Automated: `backend/tests/integration/events.assign.test.js` `[SCRUM-159] TC-SCRUM-159-01`; `backend/tests/unit/events/assignments.service.test.js` "each queued request carries its organiser's name…" | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 2 | Boundary | TC-SCRUM-159-02 | An organiser without a usable full name is shown by email | Organiser account exists | `displayNameOf(id)` | `full_name` padded; absent; whitespace only | "Olivia Ong" trimmed; otherwise the email | Agent | 2026-10-22 | As expected | Pass | Automated: `backend/tests/unit/events/coordinators.directory.test.js` "an organiser is shown by…" (3 cases) | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 2 | Failure | TC-SCRUM-159-03 | An organiser who can't be named never hides the request | Auth lookup fails / account deleted / no name or email | GET the queue | `getUserById` error; `user: null`; neither field | `organiser_name: null`; 200 with the request still listed | Agent | 2026-10-22 | As expected | Pass | Automated: directory "an organiser is unknown (null)…" (3 cases); service "…cannot be named, stays in the queue"; integration `TC-SCRUM-159-03/04` | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 2 | Cross-cutting | TC-SCRUM-159-04 | The queue sends only what the screen needs | Repository row includes `organiser_id` | Build the query; GET the queue | — | Explicit column list, never `*`; the response contains no `organiser_id` | Agent | 2026-10-22 | As expected | Pass | Automated: service test "the queue reads an explicit column list…"; integration `TC-SCRUM-159-03/04` | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 2 | Happy | TC-SCRUM-159-05 | An organiser with several requests is looked up once | Three requests, two organisers | `listQueue()` | org-1 ×2, org-2 ×1 | Every row named; two lookups, one per organiser | Agent | 2026-10-22 | As expected | Pass | Automated: service "an organiser with several queued requests is looked up once" | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 2 | Negative | TC-SCRUM-159-06 | A request with no organiser | `organiser_id` null | `listQueue()` | — | `organiser_name: null`; no lookup made for it | Agent | 2026-10-22 | As expected | Pass | Automated: service "…without an organiser…" | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 4 | Negative | TC-SCRUM-159-07 | An assigned request is gone on the next read | Two queued requests | GET queue; PUT coordinator on the first; GET queue | coord-1 | First read both; second read only the unassigned one | Agent | 2026-10-22 | As expected | Pass | Automated: integration `TC-SCRUM-159-07` (the filter itself is proven by SCRUM-26's query-shape unit test and by `[E2E-QUEUE-001]` over fake storage) | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 1–4 | Happy | TC-SCRUM-159-08 | The full journey in a real browser at 375 px | Fake storage; organiser *Olivia Ong*, Lead, coordinator | Organiser submits via API; coordinator GETs the queue; Lead opens `/events/assignments`, checks the row, assigns, reloads | 2099 dates, 30 attendees | Coordinator 403; row shows *Olivia Ong*, 2099, *30 expected*; no sideways scroll; after assigning the row is gone, also after reload; stored event `SUBMITTED` with the coordinator | Agent | 2026-10-22 | As expected | Pass | Automated: `tests/playwright/assignment-queue.browser.spec.cjs` `[E2E-QUEUE-001]` | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 2 | Happy | TC-SCRUM-159-UI-01 | Each row shows name, organiser, proposed dates and attendance | Lead; two queued requests | Open `/events/assignments` | *Olivia Ong* / `peter@example.com`; 2099 dates; 30 / 24 | Each row's text has the organiser, "2099 … 9:00 – 2099 … 1:00" (Singapore time), "30 expected" (its person icon is `aria-hidden`), and the "Ref" | Agent | 2026-10-22 | As expected | Pass | Automated: `frontend/src/features/events/AssignmentQueuePage.test.jsx` `[SCRUM-159-UI-001]` | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 2 | Boundary | TC-SCRUM-159-UI-02 | Missing values read as words | One request with no organiser name, dates or attendance | Open the queue | nulls | *Organiser unavailable*, *Dates not set*, *Attendance not set* | Agent | 2026-10-22 | As expected | Pass | Automated: `[SCRUM-159-UI-002]` | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 2 | Happy | TC-SCRUM-159-UI-03 | The details panel names the organiser | Lead; queued request | Select the request | *Olivia Ong* | *Organiser* reads *Olivia Ong* | Agent | 2026-10-22 | As expected | Pass | Automated: `[SCRUM-159-UI-003]` | Agent (local) | 2026-10-22 |
+
+**Live-DB test:** none. The only query change is the column list, and every column in it is already read live by the
+event workspace's `FIELDS`.
+
+**Test review:** expected values come from the AC and the user's display decisions. Dropping the name lookup fails
+TC-01 and UI-01; returning `organiser_id` fails TC-04; letting a lookup error throw fails TC-03; reverting to `select("*")`
+fails TC-04; removing the coordinator filter from the fake queue or the real query fails `[E2E-QUEUE-001]` or SCRUM-26's
+query-shape test. The shared test helpers gained a `displayNameOf` fake. One pre-existing assertion changed because
+AC2 changed the response: `[SCRUM-142-INT-001/002]` (`backend/tests/integration/roles.rename.test.js`) compares the
+Lead's queue response exactly, and now expects the added `organiser_name: null`. It is still an exact comparison.
