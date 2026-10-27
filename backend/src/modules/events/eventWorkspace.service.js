@@ -1,8 +1,9 @@
-const { ACTIVE_STATUSES } = require("./lifecycle");
+const { ACTIVE_STATUSES, ASSIGNABLE_STATUSES } = require("./lifecycle");
 const { assignWithHistory } = require("./assignmentHistory.repository");
 const { WRITABLE_COLS } = require("./events.repository");
+const { compareRequestFields } = require("./requestComparison");
 const { normalise } = require("./events.service");
-const { validateUpdate } = require("./events.validation");
+const { validateUpdate, validateForSubmission } = require("./events.validation");
 
 // SCRUM-37: registration_start/registration_end are in WRITABLE_COLS but were
 // never selected here, harmlessly, until updateOrganiserEvent started
@@ -13,8 +14,7 @@ const { validateUpdate } = require("./events.validation");
 // every edit, not just registration-window ones.
 const FIELDS = [
   "id", "name", "purpose", "description", "start_time", "end_time",
-  "registration_start", "registration_end",
-  "expected_attendance", "venue_requirements", "accessibility_needs",
+  "registration_start", "registration_end", "expected_attendance", "venue_requirements", "accessibility_needs",
   "equipment_needs", "other_comments", "status", "organiser_id",
   "coordinator_id", "submitted_at", "approved_rejected_by", "approved_rejected_at", "approval_rejection_remark",
   "cancelled_by", "cancelled_at", "cancellation_reason",
@@ -90,14 +90,27 @@ function createEventWorkspaceService(client) {
   // may see the event. user_id stays out: the officer pool is not named (#45).
   // Like approverName, a failed read leaves the history unknown (null) instead
   // of hiding the event itself.
-  async function activityFor(eventId) {
+  async function activityFor(event, scope) {
     const { data, error } = await client.from("event_activity_log")
       .select("id, action, details, created_at")
-      .eq("event_id", eventId).order("created_at", { ascending: false });
-    if (error) return null;
-    return data.map(({ id, action, details, created_at }) => ({
+      .eq("event_id", event.id).order("created_at", { ascending: false });
+    if (error) return { activity: null, ...(scope === "coordinator" ? { request_changes: null } : {}) };
+    const baseline = data.find(entry => entry.action === "REQUEST_BASELINE_RECORDED");
+    const requestChanges = scope === "coordinator" ? {
+      request_changes: baseline ? {
+        source: baseline.details.source, version_at: baseline.details.version_at,
+        changes: compareRequestFields(baseline.details.snapshot, event),
+      } : { source: "NO_BASELINE", version_at: null, changes: [] },
+    } : {};
+    const activity = data.filter(entry => entry.action !== "REQUEST_BASELINE_RECORDED").map(({ id, action, details, created_at }) => ({
+      ...(scope === "coordinator" && action === "REQUEST_RESUBMITTED" ? {
+        baseline_source: details.baseline_source ?? null,
+        changes: (details.changes || []).filter(change => WRITABLE_COLS.includes(change.field))
+          .map(({ field, before, after }) => ({ field, before, after })),
+      } : {}),
       id, action, from_status: details.from_status ?? null, to_status: details.to_status ?? null, note: details.note ?? null, created_at,
     }));
+    return { activity, ...requestChanges };
   }
   async function read(scope, userId, id) {
     const organiserIds = scope === "organiser" ? await organiserIdsFor(userId) : undefined;
@@ -114,7 +127,7 @@ function createEventWorkspaceService(client) {
         // SCRUM-148 AC4: same "name, else unknown" treatment as the approve/reject outcome.
         cancelled_by_name: await approverName(event.cancelled_by),
         postponed_by_name: await approverName(event.postponed_by),
-        activity: await activityFor(event.id),
+        ...await activityFor(event, scope),
       };
     },
     async updateOrganiserEvent(userId, id, input) {
@@ -192,6 +205,20 @@ function createEventWorkspaceService(client) {
 
       return { ok: true, event };
     },
+    async resubmitOrganiserEvent(userId, id, cycleId) {
+      const current = await read("organiser", userId, id);
+      if (!current) return { ok: false, reason: "not_found" };
+      if (current.organiser_id !== userId) return { ok: false, reason: "forbidden" };
+      if (current.status !== "CHANGES_REQUESTED" || !current.coordinator_id) return { ok: false, reason: "conflict" };
+      const validation = validateForSubmission(current);
+      if (!validation.ok) return { ok: false, reason: "invalid", errors: validation.errors };
+      // SCRUM-117: the lock rechecks these exact saved values after validation.
+      const expected = Object.fromEntries(WRITABLE_COLS.map(field => [field, current[field] ?? null]));
+      const event = await unwrap(client.rpc("resubmit_event_request", {
+        p_event_id: id, p_organiser_id: userId, p_cycle_id: cycleId, p_expected_fields: expected,
+      }).select(FIELDS).maybeSingle());
+      return event ? { ok: true, event } : { ok: false, reason: "conflict" };
+    },
     async coordinators() {
       const choices = [];
       for (let page = 1; ; page += 1) {
@@ -214,7 +241,7 @@ function createEventWorkspaceService(client) {
     assign(id, coordinatorId, expectedCoordinatorId, actor) {
       return unwrap(assignWithHistory(client, {
         eventId: id, coordinatorId, expectedCoordinatorId,
-        allowedStatuses: ACTIVE_STATUSES, actor,
+        allowedStatuses: ASSIGNABLE_STATUSES, actor,
       }).select(FIELDS).maybeSingle());
     },
   };

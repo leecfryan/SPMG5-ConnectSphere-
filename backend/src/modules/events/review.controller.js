@@ -1,6 +1,7 @@
 const { createReviewService } = require("./review.service");
 
 const FAILURES = Object.freeze({
+  clarification_required: [400, "Explain what the organiser needs to clarify or amend."],
   invalid_note: [400, "The note must be text."],
   note_required: [400, "Give a reason for rejecting this request."],
   reason_required: [400, "Give a reason for cancelling this event."],
@@ -88,6 +89,7 @@ function createReviewController(repository, cancelDependencies = {}) {
   }
 
   return {
+    requestChanges: handle("request-changes", review.requestChanges),
     startReview: handle("start-review", review.startReview),
     approve,
     reject,

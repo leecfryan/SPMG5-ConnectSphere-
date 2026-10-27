@@ -362,3 +362,7 @@ the original role's functions; remove only officer and verify remaining access.
 Existing lead rename UAT and its manual Auth update remain separate pending work.
 The test specifications and genuine automated execution report stay outside the
 repository under Ryan's local reporting preferences.
+
+SCRUM-117 reuses events.decide for POST /api/internal/events/:eventId/request-changes.
+Only the assigned coordinator may return an UNDER_REVIEW request. The lead may cancel
+or postpone a CHANGES_REQUESTED request but may not return or reassign it in that state.
