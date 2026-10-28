@@ -6,12 +6,20 @@ const { validateUpdate } = require("./events.validation");
 
 const FIELDS = [
   "id", "name", "purpose", "description", "start_time", "end_time",
+  "registration_start", "registration_end",
   "expected_attendance", "venue_requirements", "accessibility_needs",
   "equipment_needs", "other_comments", "status", "organiser_id",
   "coordinator_id", "submitted_at", "approved_rejected_by", "approved_rejected_at", "approval_rejection_remark",
   "cancelled_by", "cancelled_at", "cancellation_reason",
   "postponed_by", "postponed_at", "postponement_reason",
+  "pending_change_request",
 ].join(",");
+
+// SCRUM-36: statuses where the organiser may submit a change request.
+// SUBMITTED is excluded: direct editing is available there (SCRUM-164).
+// Later stages (SAFETY_REVIEW and beyond) are excluded to avoid disturbing
+// in-flight arrangements; only one request can be pending at a time.
+const ELIGIBLE_CHANGE_REQUEST_STATUSES = ["UNDER_REVIEW", "APPROVED"];
 
 function isCoordinator(user) {
   return Boolean(user && !user.deleted_at && user.email_confirmed_at &&
@@ -143,6 +151,53 @@ function createEventWorkspaceService(client, equipmentService) {
         });
       }
 
+      return { ok: true, event };
+    },
+    // SCRUM-36: store a proposed change without touching the event itself.
+    // The conditional update (.is/.in) means a concurrent second submission
+    // or a status move returns zero rows without overwriting anything.
+    async submitChangeRequest(userId, eventId, input) {
+      const current = await read("organiser", userId, eventId);
+      if (!current) return { ok: false, reason: "not_found" };
+      if (current.organiser_id !== userId) return { ok: false, reason: "forbidden" };
+      if (!ELIGIBLE_CHANGE_REQUEST_STATUSES.includes(current.status)) return { ok: false, reason: "ineligible" };
+      if (current.pending_change_request) return { ok: false, reason: "already_pending" };
+
+      const { proposed_changes, reason } = input || {};
+      const errors = [];
+      if (!reason || !String(reason).trim()) errors.push({ field: "reason", message: "required" });
+      if (!proposed_changes || Array.isArray(proposed_changes) || typeof proposed_changes !== "object" ||
+        Object.keys(proposed_changes).length === 0) {
+        errors.push({ field: "proposed_changes", message: "Provide at least one field to change." });
+      } else {
+        const bad = Object.keys(proposed_changes).filter(f => !WRITABLE_COLS.includes(f));
+        for (const f of bad) errors.push({ field: f, message: "Not a permitted field." });
+      }
+      if (errors.length) return { ok: false, reason: "invalid", errors };
+
+      const { fields: normFields, errors: normErrors } = normalise(proposed_changes);
+      const unreadable = new Set(normErrors.map(p => p.field));
+      const valErrors = validateUpdate(normFields, current).errors.filter(p => !unreadable.has(p.field));
+      const allErrors = [...normErrors, ...valErrors];
+      if (allErrors.length) return { ok: false, reason: "invalid", errors: allErrors };
+
+      const payload = {
+        proposed_changes: normFields,
+        reason: String(reason).trim(),
+        requested_at: new Date().toISOString(),
+        requested_by: userId,
+      };
+      const event = await unwrap(
+        client.from("events")
+          .update({ pending_change_request: payload })
+          .eq("id", eventId)
+          .eq("organiser_id", userId)
+          .in("status", ELIGIBLE_CHANGE_REQUEST_STATUSES)
+          .is("pending_change_request", null)
+          .select(FIELDS)
+          .maybeSingle(),
+      );
+      if (!event) return { ok: false, reason: "conflict" };
       return { ok: true, event };
     },
     async coordinators() {

@@ -232,3 +232,204 @@ test("[SCRUM-147-UNIT-013] AC4: drafts stay out of the organisation view, a coll
   expect(await service.find("organiser", "alice", "draft-alice")).toBeNull();
   expect(await service.updateOrganiserEvent("alice", "draft-alice", { name: "Renamed" })).toEqual({ ok: false, reason: "not_found" });
 });
+
+// SCRUM-36: submitChangeRequest unit tests
+function setup36() {
+  const users = [
+    { id: "alice", app_metadata: { roles: ["event_organiser"], organisation_id: "alpha" }, user_metadata: {} },
+    { id: "bob",   app_metadata: { roles: ["event_organiser"], organisation_id: "beta"  }, user_metadata: {} },
+  ];
+  const records = [
+    { id: "event-under-review", organiser_id: "alice", name: "Annual Gala",
+      purpose: "Celebration", description: "Year-end gala",
+      start_time: "2099-06-01T10:00:00.000Z", end_time: "2099-06-01T18:00:00.000Z",
+      registration_start: null, registration_end: null,
+      expected_attendance: 100, venue_requirements: "Ballroom",
+      accessibility_needs: null, equipment_needs: null, other_comments: null,
+      status: "UNDER_REVIEW", coordinator_id: "coord-1", submitted_at: "2026-01-01T00:00:00Z",
+      pending_change_request: null },
+    { id: "event-approved", organiser_id: "alice", name: "Tech Summit",
+      purpose: "Networking", description: "Annual tech summit",
+      start_time: "2099-07-01T09:00:00.000Z", end_time: "2099-07-01T17:00:00.000Z",
+      registration_start: null, registration_end: null,
+      expected_attendance: 200, venue_requirements: "Conference hall",
+      accessibility_needs: null, equipment_needs: null, other_comments: null,
+      status: "APPROVED", coordinator_id: "coord-1", submitted_at: "2026-01-02T00:00:00Z",
+      pending_change_request: null },
+    { id: "event-bob", organiser_id: "bob", name: "Bob event",
+      purpose: "Demo", description: "Bob demo",
+      start_time: "2099-08-01T10:00:00.000Z", end_time: "2099-08-01T18:00:00.000Z",
+      registration_start: null, registration_end: null,
+      expected_attendance: 50, venue_requirements: null,
+      accessibility_needs: null, equipment_needs: null, other_comments: null,
+      status: "UNDER_REVIEW", coordinator_id: "coord-2", submitted_at: "2026-01-03T00:00:00Z",
+      pending_change_request: null },
+  ];
+  const client = storage(new Map([["fixture", { events: records }]]));
+  client.auth = { admin: {
+    getUserById: vi.fn(async id => ({ data: { user: users.find(u => u.id === id) }, error: null })),
+    listUsers: vi.fn(async () => ({ data: { users }, error: null })),
+  } };
+  const service = createEventWorkspaceService(client);
+  return { service, records, client };
+}
+
+test("[TC-SCRUM-36-01] organiser submits a valid change request on their UNDER_REVIEW event", async () => {
+  const { service, records } = setup36();
+  const before = structuredClone(records[0]);
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { name: "Revised Gala" },
+    reason: "Venue branding updated",
+  });
+  expect(result.ok).toBe(true);
+  expect(result.event.pending_change_request).toMatchObject({
+    proposed_changes: { name: "Revised Gala" },
+    reason: "Venue branding updated",
+    requested_by: "alice",
+  });
+  expect(result.event.pending_change_request.requested_at).toBeTruthy();
+  // event's own fields are unchanged
+  expect(result.event.name).toBe(before.name);
+  expect(result.event.expected_attendance).toBe(before.expected_attendance);
+});
+
+test("[TC-SCRUM-36-02] change request by a non-owner organiser returns not_found", async () => {
+  const { service, records } = setup36();
+  const before = structuredClone(records);
+  const result = await service.submitChangeRequest("bob", "event-under-review", {
+    proposed_changes: { name: "Hijack" }, reason: "Testing",
+  });
+  expect(result).toEqual({ ok: false, reason: "not_found" });
+  expect(records).toEqual(before);
+});
+
+test("[TC-SCRUM-36-03] change request refused when event is SUBMITTED", async () => {
+  const { service, records } = setup36();
+  records[0].status = "SUBMITTED";
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { name: "New name" }, reason: "Just checking",
+  });
+  expect(result).toEqual({ ok: false, reason: "ineligible" });
+});
+
+test("[TC-SCRUM-36-04] change request accepted for both eligible statuses", async () => {
+  const { service } = setup36();
+  for (const id of ["event-under-review", "event-approved"]) {
+    const result = await service.submitChangeRequest("alice", id, {
+      proposed_changes: { name: "Updated name" }, reason: "Rebranding",
+    });
+    expect(result.ok, id).toBe(true);
+  }
+});
+
+test.each(["SUBMITTED", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED", "CANCELLED", "REJECTED", "POSTPONED"])(
+  "[TC-SCRUM-36-05] change request refused for ineligible status %s",
+  async (status) => {
+    const { service, records } = setup36();
+    records[0].status = status;
+    const result = await service.submitChangeRequest("alice", "event-under-review", {
+      proposed_changes: { name: "New name" }, reason: "Testing",
+    });
+    expect(result).toEqual({ ok: false, reason: "ineligible" });
+  },
+);
+
+test("[TC-SCRUM-36-06] missing reason returns invalid with reason field error", async () => {
+  const { service } = setup36();
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { name: "New name" },
+  });
+  expect(result.ok).toBe(false);
+  expect(result.reason).toBe("invalid");
+  expect(result.errors.some(e => e.field === "reason")).toBe(true);
+});
+
+test.each([undefined, null, "", "   "])(
+  "[TC-SCRUM-36-07] blank/missing reason %s returns invalid",
+  async (reason) => {
+    const { service } = setup36();
+    const result = await service.submitChangeRequest("alice", "event-under-review", {
+      proposed_changes: { name: "New name" }, reason,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errors.some(e => e.field === "reason")).toBe(true);
+  },
+);
+
+test("[TC-SCRUM-36-08] missing proposed_changes returns invalid", async () => {
+  const { service } = setup36();
+  const result = await service.submitChangeRequest("alice", "event-under-review", { reason: "Valid reason" });
+  expect(result.ok).toBe(false);
+  expect(result.errors.some(e => e.field === "proposed_changes")).toBe(true);
+});
+
+test("[TC-SCRUM-36-09] empty proposed_changes object returns invalid", async () => {
+  const { service } = setup36();
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: {}, reason: "Valid reason",
+  });
+  expect(result.ok).toBe(false);
+  expect(result.errors.some(e => e.field === "proposed_changes")).toBe(true);
+});
+
+test("[TC-SCRUM-36-10] non-permitted field in proposed_changes returns invalid", async () => {
+  const { service } = setup36();
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { status: "CONFIRMED" }, reason: "Testing",
+  });
+  expect(result.ok).toBe(false);
+  expect(result.errors.some(e => e.field === "status")).toBe(true);
+});
+
+test("[TC-SCRUM-36-11] invalid proposed value returns 400 with field error", async () => {
+  const { service } = setup36();
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { expected_attendance: -1 }, reason: "Capacity change",
+  });
+  expect(result.ok).toBe(false);
+  expect(result.errors.some(e => e.field === "expected_attendance")).toBe(true);
+});
+
+test("[TC-SCRUM-36-12] end_time before start_time in proposed_changes returns invalid", async () => {
+  const { service } = setup36();
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { start_time: "2099-06-01T18:00:00.000Z", end_time: "2099-06-01T10:00:00.000Z" },
+    reason: "Reschedule",
+  });
+  expect(result.ok).toBe(false);
+  expect(result.errors.some(e => e.field === "end_time")).toBe(true);
+});
+
+test("[TC-SCRUM-36-13] all validation errors are reported together", async () => {
+  const { service } = setup36();
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { expected_attendance: -1, start_time: "not-a-date" },
+    reason: "Testing",
+  });
+  expect(result.ok).toBe(false);
+  expect(result.errors.length).toBeGreaterThanOrEqual(2);
+});
+
+test("[TC-SCRUM-36-14] event fields unchanged after change request submitted", async () => {
+  const { service, records } = setup36();
+  const before = structuredClone(records[0]);
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { name: "Revised Gala" }, reason: "Branding",
+  });
+  expect(result.ok).toBe(true);
+  expect(result.event.name).toBe(before.name);
+  expect(result.event.expected_attendance).toBe(before.expected_attendance);
+  expect(result.event.start_time).toBe(before.start_time);
+});
+
+test("[TC-SCRUM-36-15] second change request refused while one is already pending", async () => {
+  const { service, records } = setup36();
+  records[0].pending_change_request = {
+    proposed_changes: { name: "First request" }, reason: "First",
+    requested_at: "2026-10-26T10:00:00.000Z", requested_by: "alice",
+  };
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { name: "Second request" }, reason: "Second",
+  });
+  expect(result).toEqual({ ok: false, reason: "already_pending" });
+});

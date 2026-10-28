@@ -217,6 +217,7 @@ Module at `backend/src/modules/events/`.
 | GET | /api/internal/safety-reviews/:eventId | same | `{ event, venues[], equipment[] }`; 404 unless the event is `SAFETY_REVIEW` |
 | POST | /api/internal/events/:eventId/cancel | requireAuth + internal.access + events.cancel (assigned coordinator or coordinator lead) | any active status (including `POSTPONED`) `→ CANCELLED`; body `{ "reason": string }` (required) |
 | POST | /api/internal/events/:eventId/postpone | requireAuth + internal.access + events.postpone (assigned coordinator or coordinator lead) | any of the five postponable stages `→ POSTPONED`; body `{ "reason": string }` (required) |
+| POST | /api/event-workspace/organiser/:id/change-request | requireAuth + events.own.update (own event only) | SCRUM-36: submit a change request for an `UNDER_REVIEW` or `APPROVED` event; body `{ "proposed_changes": { ...fields }, "reason": string }`; → 201 `{ event }` with `pending_change_request` set; 409 if already pending or status ineligible |
 
 ### Rules enforced server-side
 
@@ -697,6 +698,46 @@ saved). A draft skips the date ordering and registration-window checks too; a va
 refused.
 Validation reads and never mutates; trimming and coercion for storage are the
 service's job.
+
+### Change request (SCRUM-36)
+
+`eventWorkspace.service.js#submitChangeRequest`, `eventWorkspace.routes.js`. An organiser can submit a proposed
+change to one or more fields while their event is `UNDER_REVIEW` or `APPROVED`; the event itself is not touched
+until the coordinator decides (SCRUM-165).
+
+- `POST /api/event-workspace/organiser/:id/change-request` — body `{ proposed_changes: { ...fields }, reason }`.
+  The caller must own the event. Permitted fields are all `WRITABLE_COLS` (the same twelve that the organiser's
+  `PATCH` accepts). `reason` is required and trimmed; blank passes client-side validation but is caught server-side.
+  Only one request may be outstanding at a time — a second submission returns 409 `already_pending`.
+- The write is a conditional update: `.in("status", ["UNDER_REVIEW","APPROVED"])` + `.is("pending_change_request",
+  null)`. If the event moved between the read and the write, or another concurrent submission won, the update
+  touches no rows → 409 `conflict`.
+- The `GET /api/event-workspace/organiser/:id` workspace detail already includes `pending_change_request` (it is
+  in `FIELDS`); the frontend `ChangeRequestControls` component shows the pending request as a read-only view with
+  "Awaiting review", the reason, and the proposed fields.
+
+**Schema reference.** Added by hand in the Supabase SQL Editor (no migration file), after telling teammates:
+
+```sql
+alter table public.events
+  add column if not exists pending_change_request jsonb;
+```
+
+The column is `NULL` when no request is pending. `pending_change_request` shape:
+
+```json
+{
+  "proposed_changes": { "name": "New name", "expected_attendance": 200 },
+  "reason": "Venue change led to capacity increase",
+  "requested_at": "2026-10-26T10:00:00.000Z",
+  "requested_by": "<organiser-uuid>"
+}
+```
+
+SCRUM-165 (coordinator decision side) nulls this column after a decision is recorded and the accepted changes,
+if any, are applied to the event.
+
+Full design history and test list: `.agent/docs/other/SCRUM-36-requestEventChange.md`.
 
 ### Draft event requests (SCRUM-147)
 
