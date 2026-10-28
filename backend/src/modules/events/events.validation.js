@@ -162,6 +162,9 @@ function validateUpdate(input, current) {
     (!Number.isInteger(input.expected_attendance) || input.expected_attendance <= 0)) {
     errors.push(err("expected_attendance", "must be a whole number greater than zero"));
   }
+  if (Object.hasOwn(input, "registration_start") || Object.hasOwn(input, "registration_end")) {
+    errors.push(...validateRegistrationWindow({ ...current, ...input }).errors);
+  }
   return { ok: errors.length === 0, errors };
 }
 

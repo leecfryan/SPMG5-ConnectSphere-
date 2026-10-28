@@ -9,6 +9,7 @@ Earlier execution results are historical evidence; rename verification is record
 | ID | User story |
 | --- | --- |
 | Scrum-26 | As an Event Operations Manager, I want to assign an Event Coordinator to a submitted event request so that someone is responsible for planning the event. |
+| SCRUM-159 | As an Event Coordinator Lead, I want to see submitted event requests that have no coordinator assigned so that no request goes unattended. |
 
 Subtasks Scrum-52 to Scrum-55 sit under this story on the board.
 
@@ -20,6 +21,16 @@ Subtasks Scrum-52 to Scrum-55 sit under this story on the board.
 - An assigned request leaves the queue.
 - Only the Event Operations Manager can view the queue or assign a coordinator.
 - Two Managers acting at the same time cannot overwrite each other's assignment.
+
+### SCRUM-159 — View the unassigned event request queue
+
+- A submitted event request with no assigned coordinator appears in the unassigned queue.
+- The queue shows the event name, organiser, proposed dates and expected attendance.
+- Only the Event Coordinator Lead can view the unassigned queue.
+- An event leaves the queue once a coordinator is assigned to it.
+
+SCRUM-26 already built the queue; SCRUM-159 adds the organiser and shows all four fields in every row
+(user decision, 2026-10-21). Test cases are in [coordinator assignment tests](event-assignment-tests.md#scrum-159--the-unassigned-request-queue).
 
 Assignment records who is responsible; it does not approve or reject the request, and it does not change the event's status.
 Reviewing, approving and rejecting a request belong to later stories (US-36 to US-39).
@@ -55,7 +66,7 @@ New files in `backend/src/modules/events/` and `backend/src/routes/`.
 
 | File | Description |
 | --- | --- |
-| `modules/events/coordinators.directory.js` | Reads Event Coordinators from Supabase Auth |
+| `modules/events/coordinators.directory.js` | Reads Event Coordinators from Supabase Auth; `displayNameOf(id)` names a queued request's organiser (SCRUM-159) |
 | `modules/events/assignments.service.js` | Queue, workload figures and the assignment rules |
 | `modules/events/assignments.controller.js` | Maps rule outcomes to HTTP status codes |
 | `routes/assignments.routes.js` | The three routes and their permission guard |
@@ -79,7 +90,12 @@ All three are mounted under `/api/internal`, which already requires
 
 - GET unassigned: returns only `status = SUBMITTED` rows with a null
   `coordinator_id`, sorted by `submitted_at` ascending with `created_at` as the
-  tiebreak.
+  tiebreak. SCRUM-159: the query reads an explicit column list (`id`, `name`,
+  `status`, `start_time`, `end_time`, `expected_attendance`, the request's free-text
+  fields and `submitted_at`, plus `organiser_id`). Each row is sent with
+  `organiser_name` (the organiser's full name, else email) and without
+  `organiser_id`; each distinct organiser is looked up once. A deleted account or
+  a failed lookup gives `organiser_name: null` and the request stays in the queue.
 - GET coordinators: returns every account holding the `event_coordinator` role,
   including those with no events, each with `activeEvents` and `nextEventStart`
   counted from events in `SUBMITTED`, `UNDER_REVIEW`, `APPROVED` or `CONFIRMED` status
@@ -134,8 +150,8 @@ New files in `frontend/src/features/events/`.
 
 | File | Used by | Description |
 | --- | --- | --- |
-| `components/EventQueueList.jsx` | AssignmentQueuePage | Submitted requests awaiting a coordinator, oldest first. Shows name, date, reference and status. |
-| `components/EventDetailPanel.jsx` | AssignmentQueuePage | The selected request, read-only. Shows every field stored on the request. |
+| `components/EventQueueList.jsx` | AssignmentQueuePage | Submitted requests awaiting a coordinator, oldest first. Each row shows name, organiser, proposed start–end, expected attendance (behind a decorative person icon), reference and status (SCRUM-159); missing values read *Organiser unavailable*, *Dates not set*, *Attendance not set*. |
+| `components/EventDetailPanel.jsx` | AssignmentQueuePage | The selected request, read-only. Shows its organiser (SCRUM-159) and every field stored on the request. |
 | `components/CoordinatorTable.jsx` | AssignmentQueuePage | Event Coordinators with active event count and next event date. One radio per row, with a single confirm button beneath. |
 
 ### Services
@@ -155,6 +171,7 @@ ranked or pre-selected, because a coordinator may hold several events at once.
 
 | Scrum | Done when |
 | --- | --- |
+| 159 | Every row of `/events/assignments` shows the request's name, organiser, proposed dates and expected attendance; a request whose organiser can't be named still appears; only the Lead can read the queue; an assigned request is gone on the next read. |
 | 26 | The Event Operations Manager can open `/events/assignments` and see all submitted, unassigned requests, oldest first. Each request's full details are readable without being editable. All Event Coordinators are listed with their current active event count and next event date, including coordinators with no events. Selecting a request and a coordinator and confirming assigns that coordinator, and the request leaves the queue. The event's status is unchanged. A request already assigned by another Manager returns a message asking the user to refresh, and the existing assignment is kept. A coordinator id that does not belong to an Event Coordinator is rejected. No other role can reach the page or the API. |
 
 ---
@@ -169,6 +186,11 @@ ranked or pre-selected, because a coordinator may hold several events at once.
 | Service and repository (unit) | `backend/tests/unit/events/assignments.service.test.js` | 19 |
 | API (integration) | `backend/tests/integration/events.assign.test.js` | 22 |
 | Page (frontend) | `frontend/src/features/events/AssignmentQueuePage.test.jsx` | 14 |
+
+SCRUM-159 adds 16 automated tests to these files plus `tests/playwright/assignment-queue.browser.spec.cjs`
+(`[E2E-QUEUE-001]`, the submit → queue → assign journey). The Playwright test server now wires the assignment
+service (`tests/playwright/support/server.cjs`): fake storage behind the same queue filters, and the real
+coordinator directory over the fake Auth admin.
 
 The full case table is in [coordinator assignment tests](event-assignment-tests.md).
 Permission coverage for `event_coordinator_lead` is in
@@ -231,3 +253,9 @@ Ryan reported successful application of the revised SQL on 2026-10-15. The event
 verification remains pending. See [schema and processing](notifications.md#coordinator-notifications--scrum-155-checkpoint-2-revised).
 Earlier test results are historical; new feature tests are deferred at Ryan's
 request. Compatibility with the revised SQL has not yet been verified.
+
+## Requests awaiting organiser changes (SCRUM-117)
+
+CHANGES_REQUESTED counts towards workload and remains visible, but is excluded from
+ASSIGNABLE_STATUSES. Manager reassignment returns 409 without changing the event.
+The unassigned queue remains SUBMITTED events with no coordinator.

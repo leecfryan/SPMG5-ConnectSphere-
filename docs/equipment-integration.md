@@ -160,15 +160,20 @@ technician has deliberately set to `DAMAGED`/`MAINTENANCE`/`UNDER_MAINTENANCE`/`
 
 There are two ways this runs:
 
-- **The real cancel action (SCRUM-148).** `POST /api/internal/events/:eventId/cancel` calls this function
-  synchronously as part of the same request, so it is true the moment cancellation is saved - see
-  `docs/event-requests.md`'s *Cancelling an event* section for the action itself.
-- **Equipment reads self-heal automatically**, for any event cancelled directly in the database rather than
-  through the action (e.g. historical data from before SCRUM-148 existed). `GET /equipment` and
-  `GET /equipment/availability` both call `releaseCancelledEventReservations` (`equipment.controller.js`) before
-  computing their response: it lists every `CANCELLED` event (`listCancelledEventIds`, a dependency alongside
-  `findEventById`/`findEventsByIds`) and releases each one's reservations. Calling this on every read is safe and
-  cheap: once an event's requests are `RELEASED`, re-processing it is a no-op.
+- **The real cancel action (SCRUM-148)**, and **approve/reject on a resubmission (SCRUM-37)**. The cancel action,
+  and `review.service.js`'s `approve()`/`reject()`, call this function synchronously as part of the same request,
+  so it is true the moment the decision is saved - see `docs/event-requests.md`'s *Cancelling an event* and
+  [*Significant edits regress the event*](event-requests.md#significant-edits-regress-the-event-scrum-37) sections
+  for the actions themselves. A release that throws there is logged, not thrown further - the status write
+  already committed, so the caller still sees the decision as having succeeded.
+- **Equipment reads self-heal automatically**, for any event that reached `CANCELLED` or `REJECTED` without that
+  synchronous call completing - historical data from before SCRUM-148 existed, or a release that threw (SCRUM-37).
+  `GET /equipment` and `GET /equipment/availability` both call `releaseReservationsForTerminalEvents`
+  (`equipment.controller.js`) before computing their response: it lists every `CANCELLED`/`REJECTED` event
+  (`listReleasableEventIds`, a dependency alongside `findEventById`/`findEventsByIds`) and releases each one's
+  reservations. Calling this on every read is safe and cheap: once an event's requests are `RELEASED`,
+  re-processing it is a no-op. `APPROVED` is deliberately never swept this way - plenty of `APPROVED` events
+  legitimately hold live reservations, so only the logged synchronous call protects a resubmission's `approve()`.
 
 `backend/scripts/releaseCancelledEvents.js` (SCRUM-104's manual on-demand trigger, for use before any cancel
 action existed) was removed once SCRUM-148 made the first path above the normal route to `CANCELLED` - the
@@ -221,6 +226,25 @@ or `REJECTED` request on the event - deliberately aligned with the Safety Review
 `findMissingArrangements` (`safetyReadiness.js`), which already treats `REJECTED` as blocking for the same reason
 ("Technical Support can revise it"). There is no caller for this yet: no code anywhere actually transitions an
 event to `CONFIRMED`, so this function is dormant until a future story builds that transition and wires it in.
+
+**SCRUM-37 addendum (2026-10-21): this flagging trigger is retired.** The section above describes SCRUM-150 as
+originally built and is kept for history, but `equipmentService#flagReservationsForReview` has been deleted and
+`eventWorkspace.service.js#updateOrganiserEvent` no longer calls anything equipment-specific at all. A
+significant organiser edit (date, time, expected attendance, venue requirements or equipment needs) now regresses
+the event itself to `SUBMITTED` for the coordinator's re-approval (`apply_organiser_event_edit`, SQL - see
+[event-requests.md](event-requests.md#significant-edits-regress-the-event-scrum-37)), rather than flagging the
+same reservation to `REVIEW_REQUIRED` for Technical Support to re-decide. Approving or rejecting that resubmission
+releases the arrangement outright (`review.service.js#approve`/`#reject`), so the coordinator requests fresh
+equipment from scratch instead of Technical Support ever seeing a re-flagged row.
+
+Concretely: `REVIEW_REQUIRED` is never written by anything in this codebase any more - it's a dead status going
+forward. `isRequestAvailableForWindow`, `hasUnresolvedEquipment`, `BLOCKING_REQUEST_STATUSES`'s `REVIEW_REQUIRED`
+entry, the `available_for_window` badge and the `REVIEW_REQUIRED → APPROVED` availability re-check all stay in
+the code exactly as described above - they're still correct for any row that already carries that status, and a
+future story could still want a hold-style mechanism - but nothing can create a new one. SCRUM-150's own AC1
+("marks reservations for review") is therefore unreachable via the reschedule trigger now, by deliberate team
+decision, not an oversight: see `.agent/docs/other/SCRUM-37-flag-significant-edits.md`'s *Decisions* section and
+`.agent/docs/other/SCRUM-150-equipment-reschedule-review.md`'s own addendum.
 
 ## Database and deployment prerequisites
 
@@ -308,7 +332,11 @@ repo-wide change to live testing.
   (`available_for_window` and the approval overlap re-check, over real HTTP via `createApp` with a fake Supabase
   client), `backend/tests/unit/equipment-unresolved.test.js` (`hasUnresolvedEquipment` in isolation - no caller
   exists yet), and `backend/tests/unit/events/eventWorkspace.service.test.js`'s new cases (the reschedule
-  diff-detection in `updateOrganiserEvent`). Frontend: `EventEquipmentCard.test.jsx` and
+  diff-detection in `updateOrganiserEvent`). **SCRUM-37 addendum (2026-10-21):** `flagReservationsForReview` and
+  its direct-call tests are gone - `equipment-flag-review.test.js` now covers only `isRequestAvailableForWindow`
+  and the "nothing but the explicit decision sets APPROVED" guard; `eventWorkspace.service.test.js`'s cases now
+  prove the RPC call shape (`apply_organiser_event_edit`), not a diff decided in JS. See
+  [event-lifecycle-tests.md](event-lifecycle-tests.md) for the current test list. Frontend: `EventEquipmentCard.test.jsx` and
   `EquipmentRequestPage.test.jsx` (new files, scoped to the two new badge lines only - neither component had
   prior test coverage, and building a harness for each one's full existing behaviour was judged disproportionate,
   the same call SCRUM-149 made for its own TC-149-15).

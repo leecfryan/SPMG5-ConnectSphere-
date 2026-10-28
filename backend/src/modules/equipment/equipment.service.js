@@ -250,40 +250,21 @@ function createEquipmentService(client) {
     );
   }
 
-  // SCRUM-150 AC1/AC3: moves every PENDING/APPROVED request on the event to
-  // REVIEW_REQUIRED when the organiser changes its date, time or equipment
-  // needs. Unlike releaseReservationsForEvent, the reservation isn't assumed
-  // gone - REVIEW_REQUIRED stays in BLOCKING_REQUEST_STATUSES, so it keeps
-  // holding the unit until Technical Support explicitly re-approves or
-  // rejects it (AC3: it can never silently read as APPROVED again).
-  // borrow_start/borrow_end are only re-derived from the event's new window
-  // when datesChanged is true - an equipment_needs-only edit has no new
-  // window to re-derive, so the existing one is left as-is. An
-  // already-REVIEW_REQUIRED request is re-flagged too (TC-150-04): a second
-  // reschedule before Technical Support has acted must update the window to
-  // the latest change, not leave it pointing at the first one. REJECTED/
-  // RELEASED requests are never touched - already-closed requests are never
-  // reopened.
-  async function flagReservationsForReview(eventId, { startTime, endTime, datesChanged = false } = {}) {
-    const requests = await listRequestsByEvent(eventId);
-    const flaggable = requests.filter((request) =>
-      request.status === "PENDING" || request.status === "APPROVED" || request.status === "REVIEW_REQUIRED");
-
-    const flagged = [];
-    for (const request of flaggable) {
-      const patch = { status: "REVIEW_REQUIRED" };
-      if (datesChanged) {
-        patch.borrow_start = startTime;
-        patch.borrow_end = endTime;
-      }
-      await unwrap(
-        await client.from(REQUESTS_TABLE).update(patch).eq("id", request.id).select().maybeSingle(),
-        "flagReservationsForReview",
-      );
-      flagged.push(request.id);
-    }
-    return { flagged };
-  }
+  // SCRUM-150 AC1 ("marks reservations for review") used to be implemented
+  // here as flagReservationsForReview, moving every PENDING/APPROVED request
+  // on an event to REVIEW_REQUIRED when the organiser changed its date, time
+  // or equipment needs. SCRUM-37's team design regresses the event itself to
+  // SUBMITTED for the coordinator's decision instead, then releases
+  // arrangements outright on approve or reject (review.service.js) - nothing
+  // is ever held in a flagged state for Technical Support to re-decide, so
+  // this function's job is gone, not moved. SCRUM-150's AC1 is therefore
+  // unreachable via this trigger now, and nothing else in this codebase ever
+  // writes REVIEW_REQUIRED either - it's a dead status going forward. The
+  // rest of this file's SCRUM-150 machinery below (isRequestAvailableForWindow,
+  // hasUnresolvedEquipment, the available_for_window badge) stays in place:
+  // it's still correct for any row that already carries that status, and a
+  // future story could still want a hold-style mechanism. See this story's
+  // task note and docs/equipment-integration.md's SCRUM-37 addendum.
 
   // SCRUM-150 AC2: is this one REVIEW_REQUIRED request's own equipment unit
   // still free for its own borrow window? Checked on demand (read time and
@@ -432,7 +413,6 @@ function createEquipmentService(client) {
     listApprovedRequestsForEquipmentIds,
     createRequest,
     updateStatus,
-    flagReservationsForReview,
     isRequestAvailableForWindow,
     hasUnresolvedEquipment,
     releaseReservationsForEvent,

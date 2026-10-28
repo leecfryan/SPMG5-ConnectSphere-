@@ -4,9 +4,14 @@ const { createEventWorkspaceService } = require("../modules/events/eventWorkspac
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = value => typeof value === "string" && UUID.test(value);
 
-module.exports = function createEventWorkspaceRoutes(client, equipmentService) {
+// SCRUM-37: equipmentService is no longer threaded through here - the
+// significance check it used to receive flags now lives entirely inside
+// apply_organiser_event_edit (SQL), called directly by the service below,
+// which only regresses the event's own status rather than touching
+// equipment_requests at all.
+module.exports = function createEventWorkspaceRoutes(client) {
   const router = express.Router();
-  const service = client && createEventWorkspaceService(client, equipmentService);
+  const service = client && createEventWorkspaceService(client);
   const available = (req, res, next) => service ? next() : res.status(503).json({ message: "Event workspace is not configured." });
   const validId = (req, res, next) => isUuid(req.params.id) ? next() : res.status(400).json({ message: "Invalid event id." });
   function validBody(body, keys) {
@@ -57,6 +62,21 @@ module.exports = function createEventWorkspaceRoutes(client, equipmentService) {
       return res.status(409).json({ message: "The event has changed. Refresh and try again." });
     } catch {
       return res.status(503).json({ message: "Unable to submit the change request. Please try again." });
+    }
+  });
+  router.post("/organiser/:id/resubmit", requirePermission("events.own.update"), available, validId, async (req, res) => {
+    if (!validBody(req.body, ["cycleId"]) || !isUuid(req.body.cycleId)) {
+      return res.status(400).json({ message: "Refresh the request before resubmitting." });
+    }
+    try {
+      const result = await service.resubmitOrganiserEvent(req.user.id, req.params.id, req.body.cycleId);
+      if (result.ok) return res.json({ event: result.event });
+      if (result.reason === "not_found") return res.status(404).json({ message: "Event not found." });
+      if (result.reason === "forbidden") return res.status(403).json({ message: "Only the responsible organiser can resubmit this request." });
+      if (result.reason === "invalid") return res.status(400).json({ message: "Edit and save the request details before resubmitting.", errors: result.errors });
+      return res.status(409).json({ message: "The request has changed. Refresh and review the saved details before resubmitting." });
+    } catch {
+      return res.status(503).json({ message: "Unable to resubmit the request. Please try again." });
     }
   });
   router.get("/coordinators", requirePermission("events.assign"), available, async (req, res) => {

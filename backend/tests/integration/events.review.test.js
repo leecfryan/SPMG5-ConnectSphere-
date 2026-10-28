@@ -21,10 +21,10 @@ const MANAGER = "coordinator-lead-1";
 // SCRUM-149: POSTPONED joins ACTIVE_STATUSES (cancel's own gate), but is
 // excluded from POSTPONABLE_STATUSES (postpone's gate) so it can't be
 // postponed twice.
-const ACTIVE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED", "POSTPONED"];
-const POSTPONABLE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED"];
+const ACTIVE_STATUSES = ["CHANGES_REQUESTED", "SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED", "POSTPONED"];
+const POSTPONABLE_STATUSES = ["CHANGES_REQUESTED", "SUBMITTED", "UNDER_REVIEW", "APPROVED", "SAFETY_REVIEW", "CONFIRMED"];
 
-const repository = { findById: vi.fn(), transitionStatus: vi.fn(), cancel: vi.fn(), postpone: vi.fn() };
+const repository = { requestChanges: vi.fn(), findById: vi.fn(), transitionStatus: vi.fn(), cancel: vi.fn(), postpone: vi.fn() };
 const equipmentService = { releaseReservationsForEvent: vi.fn() };
 const releaseVenueBookingsForCancelledEvent = vi.fn();
 let stored;
@@ -55,6 +55,11 @@ afterAll(() => new Promise((resolve) => server.close(resolve)));
 // A tiny in-memory event that honours the same guards as the real conditional update.
 beforeEach(() => {
   stored = { id: EVENT_ID, name: "Digital Literacy for Seniors", status: "SUBMITTED", coordinator_id: ASSIGNED };
+  repository.requestChanges.mockReset().mockImplementation(async (id, coordinatorId, note) => {
+    if (id !== stored.id || stored.status !== "UNDER_REVIEW" || stored.coordinator_id !== coordinatorId) return null;
+    stored = { ...stored, status: "CHANGES_REQUESTED", clarification: note };
+    return { ...stored };
+  });
   repository.findById.mockReset().mockImplementation(async (id) => (id === EVENT_ID ? { ...stored } : null));
   repository.transitionStatus.mockReset().mockImplementation(async (id, from, to, extra, coordinatorId) => {
     if (id !== EVENT_ID || stored.status !== from || stored.coordinator_id !== coordinatorId) return null;
@@ -151,6 +156,30 @@ test("SCRUM-99 AC1/SCRUM-98 AC3: approving records APPROVED, the approver and th
   expect(Date.parse(event.approved_rejected_at)).toBeGreaterThanOrEqual(before - 1000);
 });
 
+test("[SCRUM-37] TC-37-19: approving a resubmission releases its held arrangements, so the coordinator re-requests fresh ones", async () => {
+  // Simulate a resubmission: a significant edit already changed start_time
+  // and sent the event back for re-approval.
+  stored = { ...stored, start_time: "2099-06-01T00:00:00.000Z" };
+  await post("start-review");
+
+  const response = await post("approve", undefined, { note: "The new date works fine" });
+
+  expect(response.status).toBe(200);
+  expect(stored.status).toBe("APPROVED");
+  expect(equipmentService.releaseReservationsForEvent).toHaveBeenCalledExactlyOnceWith(EVENT_ID, ASSIGNED);
+  expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledExactlyOnceWith(EVENT_ID);
+});
+
+test("[SCRUM-37] TC-37-20: approving a first-time submission that never had arrangements is a safe no-op release", async () => {
+  await post("start-review");
+
+  const response = await post("approve", undefined, { note: "All details supplied" });
+
+  expect(response.status).toBe(200);
+  expect(equipmentService.releaseReservationsForEvent).toHaveBeenCalledExactlyOnceWith(EVENT_ID, ASSIGNED);
+  expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledExactlyOnceWith(EVENT_ID);
+});
+
 test("SCRUM-99 AC1 conflict: an event that is not under review cannot be approved", async () => {
   const response = await post("approve");
 
@@ -178,6 +207,33 @@ test("SCRUM-98 AC3: rejecting with a reason records REJECTED, the reviewer and t
   });
 });
 
+test("[SCRUM-37] TC-37-13: rejecting releases held arrangements and leaves the event's edited fields as-is (known limitation: no partial undo)", async () => {
+  // Simulate a resubmission: a significant edit already changed
+  // venue_requirements and sent the event back for re-approval.
+  stored = { ...stored, venue_requirements: "Need a stage and PA system" };
+  await post("start-review");
+
+  const response = await post("reject", undefined, { note: "The new venue requirements are not feasible" });
+
+  expect(response.status).toBe(200);
+  expect(stored.status).toBe("REJECTED");
+  expect(equipmentService.releaseReservationsForEvent).toHaveBeenCalledExactlyOnceWith(EVENT_ID, ASSIGNED);
+  expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledExactlyOnceWith(EVENT_ID);
+  // The known limitation: nothing restores the pre-edit value. Rejecting
+  // ends the event; it does not undo the organiser's edit.
+  expect(stored.venue_requirements).toBe("Need a stage and PA system");
+});
+
+test("[SCRUM-37] TC-37-14: rejecting a first-time submission that never had arrangements is a safe no-op release", async () => {
+  await post("start-review");
+
+  const response = await post("reject", undefined, { note: "Attendance numbers are missing" });
+
+  expect(response.status).toBe(200);
+  expect(equipmentService.releaseReservationsForEvent).toHaveBeenCalledExactlyOnceWith(EVENT_ID, ASSIGNED);
+  expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledExactlyOnceWith(EVENT_ID);
+});
+
 test.each([{}, { note: "" }, { note: "   " }])(
   "SCRUM-98 boundary: rejecting without a reason (%j) is a 400 and changes nothing", async (body) => {
     await post("start-review");
@@ -187,6 +243,9 @@ test.each([{}, { note: "" }, { note: "   " }])(
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ message: "Give a reason for rejecting this request." });
     expect(stored.status).toBe("UNDER_REVIEW");
+    // [SCRUM-37] a reject that never writes must never release either.
+    expect(equipmentService.releaseReservationsForEvent).not.toHaveBeenCalled();
+    expect(releaseVenueBookingsForCancelledEvent).not.toHaveBeenCalled();
   });
 
 test("SCRUM-99 boundary: an approval note that is not text is a 400", async () => {
@@ -194,6 +253,9 @@ test("SCRUM-99 boundary: an approval note that is not text is a 400", async () =
 
   expect((await post("approve", undefined, { note: 42 })).status).toBe(400);
   expect(stored.status).toBe("UNDER_REVIEW");
+  // [SCRUM-37] an approve that never writes must never release either.
+  expect(equipmentService.releaseReservationsForEvent).not.toHaveBeenCalled();
+  expect(releaseVenueBookingsForCancelledEvent).not.toHaveBeenCalled();
 });
 
 test("SCRUM-98: status, approved_rejected_by and approved_rejected_at in the body are ignored; the server's values win", async () => {
@@ -554,3 +616,73 @@ test("[TC-149-18] characterization: a venue-release failure is a 500, even thoug
   expect(stored.status).toBe("POSTPONED");
   quiet.mockRestore();
 });
+
+test("[SCRUM-117-API-001] assigned coordinator returns a request with a trimmed message and unchanged responsibility", async () => {
+  stored.status = "UNDER_REVIEW";
+  const before = structuredClone(stored);
+  const response = await post("request-changes", undefined, { note: "  Clarify attendance.  ", coordinator_id: OTHER, status: "APPROVED" });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ event: { ...before, status: "CHANGES_REQUESTED", clarification: "Clarify attendance." } });
+  expect(repository.requestChanges).toHaveBeenCalledExactlyOnceWith(EVENT_ID, ASSIGNED, "Clarify attendance.");
+  const saved = structuredClone(stored);
+  expect((await post("request-changes", undefined, { note: "Repeated" })).status).toBe(409);
+  expect(stored).toEqual(saved);
+});
+
+test.each(["", "invalid", OTHER + ":event_coordinator", MANAGER + ":event_coordinator_lead", "org:event_organiser"])(
+  "[SCRUM-117-API-002] caller %s cannot return another responsibility's request", async token => {
+    stored.status = "UNDER_REVIEW";
+    const before = structuredClone(stored);
+    const response = await post("request-changes", token, { note: "Forged" });
+    expect(response.status).toBe(!token || token === "invalid" ? 401 : 403);
+    expect(repository.requestChanges).not.toHaveBeenCalled();
+    expect(stored).toEqual(before);
+  });
+
+test.each([undefined, "", "   ", 4, {}, []])("[SCRUM-117-API-003] invalid message %j writes nothing", async note => {
+  stored.status = "UNDER_REVIEW";
+  const before = structuredClone(stored);
+  expect((await post("request-changes", undefined, { note })).status).toBe(400);
+  expect(repository.requestChanges).not.toHaveBeenCalled();
+  expect(stored).toEqual(before);
+});
+
+test.each(["DRAFT", "SUBMITTED", "APPROVED", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED", "COMPLETED", "CANCELLED", "REJECTED", "POSTPONED"])(
+  "[SCRUM-117-API-004] returning from %s is refused without changing the request", async status => {
+    stored.status = status;
+    const before = structuredClone(stored);
+    expect((await post("request-changes", undefined, { note: "Clarify" })).status).toBe(409);
+    expect(stored).toEqual(before);
+  });
+
+test("[SCRUM-117-API-005] assignment changing between guard and write refuses the return", async () => {
+  stored.status = "UNDER_REVIEW";
+  repository.requestChanges.mockImplementationOnce(async () => { stored.coordinator_id = OTHER; return null; });
+  expect((await post("request-changes", undefined, { note: "Clarify" })).status).toBe(409);
+  expect(stored.status).toBe("UNDER_REVIEW");
+  expect(stored.clarification).toBeUndefined();
+});
+
+test("[SCRUM-117-API-006] RPC failure is safe and records no success", async () => {
+  stored.status = "UNDER_REVIEW";
+  const before = structuredClone(stored);
+  repository.requestChanges.mockRejectedValueOnce(new Error("private storage error"));
+  const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const response = await post("request-changes", undefined, { note: "Clarify" });
+    expect(response.status).toBe(500);
+    expect(await response.text()).not.toContain("private storage");
+    expect(stored).toEqual(before);
+  } finally { quiet.mockRestore(); }
+});
+
+test.each([["cancel", "CANCELLED"], ["postpone", "POSTPONED"]])(
+  "[SCRUM-117-API-007] coordinator and lead may %s a returned request", async (action, status) => {
+    for (const token of [ASSIGNED + ":event_coordinator", MANAGER + ":event_coordinator_lead"]) {
+      stored.status = "CHANGES_REQUESTED";
+      const response = await post(action, token, { reason: "Plans changed" });
+      expect(response.status).toBe(200);
+      expect(stored.status).toBe(status);
+      expect(stored.coordinator_id).toBe(ASSIGNED);
+    }
+  });

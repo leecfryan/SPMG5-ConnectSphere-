@@ -34,13 +34,26 @@ function run() {
   const guide = fs.readFileSync(path.join(root, "docs/notifications.md"), "utf8");
   const blocks = [...guide.matchAll(/```sql\r?\n([\s\S]*?)\r?\n```/g)].map(match => match[1]);
   const readSql = name => fs.readFileSync(path.join(__dirname, name), "utf8");
-  const script = [
+  const parts = [
     readSql("notifications.setup.sql"),
     schemaBlock(blocks, "create table public.notification_outbox ("),
     readSql("notifications.assertions.sql"),
     schemaBlock(blocks, "create table public.event_assignment_history ("),
     readSql("assignmentNotifications.assertions.sql"),
-  ].join("\n");
+  ];
+  if (process.argv.includes("--clarification")) {
+    const eventGuide = fs.readFileSync(path.join(root, "docs/event-requests.md"), "utf8");
+    const eventBlocks = [...eventGuide.matchAll(/```sql\r?\n([\s\S]*?)\r?\n```/g)].map(match => match[1]);
+    parts.push(readSql("clarificationNotifications.setup.sql"),
+      schemaBlock(eventBlocks, "create function public.request_event_changes("),
+      schemaBlock(blocks, "create function public.enqueue_event_changes_requested_notification()"),
+      readSql("clarificationNotifications.assertions.sql"),
+      schemaBlock(blocks, "create function public.resubmit_event_request("),
+      readSql("resubmission.assertions.sql"),
+      schemaBlock(blocks, "create function public.capture_event_request_baseline()"),
+      readSql("requestBaseline.assertions.sql"));
+  }
+  const script = parts.join("\n");
 
   requireSuccess(docker(["info", "--format", "{{.ServerVersion}}"]), "Start Docker and try again.");
   requireSuccess(docker(["image", "inspect", image]), `Prepare the test image first: docker pull ${image}`);
@@ -68,6 +81,11 @@ function run() {
     if (!output.includes("ASSIGNMENT SQL ASSERTIONS PASSED")) {
       throw new Error("The SQL run ended without the assignment test completion marker.");
     }
+    if (process.argv.includes("--clarification") && !output.includes("CLARIFICATION SQL ASSERTIONS PASSED")) {
+      throw new Error("Clarification SQL assertions did not complete.");
+    }
+    if (process.argv.includes("--clarification") && !output.includes("RESUBMISSION SQL ASSERTIONS PASSED")) throw new Error("Resubmission SQL assertions did not complete.");
+    if (process.argv.includes("--clarification") && !output.includes("SAVED EDIT BASELINE ASSERTIONS PASSED")) throw new Error("Saved baseline assertions did not complete.");
     process.stdout.write(output);
     for (const [id, description] of [
       ["S01", "Initial assignment recipient and names"],

@@ -38,34 +38,43 @@ its route. Notifications, like Account, is available to every verified signed-in
 A new list, table, calendar or dashboard page adds its path to the `fullWorkspace` condition in `App.jsx`. A single
 form or detail card stays in the default mode. Everything collapses to one column at **≤ 760px**.
 
-## Palette
+## Design tokens
 
-Colours are literal hex, with no global custom properties. Most live in `index.css` / `App.css`; the success,
-pending and neutral pairs are repeated in feature stylesheets (`events.css`, `registrations.css`). Reuse these values
-exactly; don't introduce a second primary colour.
+Every colour, space, radius and type size is a custom property on `:root` in `index.css`. **Reference the token;
+never repeat a hex code.** Before SCRUM-167 the app had 110 distinct colours and ten corner radii across nine
+stylesheets, including a grey ramp, an indigo and an amber borrowed from other design systems. One value changed
+here now reaches every screen.
 
-| Role | Value |
+| Group | Tokens |
 |---|---|
-| Brand / primary button / links | `#185c4b` (hover `#104a3b`) |
-| Page background | `#f4f6f5` |
-| Card background | `#ffffff`, border `#e0e7e2`, radius 18px, shadow `0 14px 45px #153e2b08` |
-| Text | `#152c37` |
-| Muted text | `#61716f`, `#66756f`, `#748179` |
-| Eyebrow / accent text | `#426e60` |
-| Input border | `#cbd7d0`; dividers `#e7ece8` |
-| Hover tint / selected | `#f9fbfa` / `#f2f8f4` with `#a2bbb0` border |
-| Focus ring | `3px solid #56a993` (global) or `2px solid #185c4b` (nav, list items) |
-| Error | text `#97372c` on `#fff2ee`; invalid input border `#c08279` |
-| Success | text `#0a5c36` on `#e3f4ea` |
-| Pending / warning | text `#7a5800` on `#fef3cd` |
-| Neutral / withdrawn | text `#5e6d65` on `#f0f0f0` |
+| Brand | `--cs-primary` (hover `--cs-primary-hover`), `--cs-primary-soft`, `--cs-primary-border`, `--cs-accent` |
+| Surfaces | `--cs-bg`, `--cs-surface`, `--cs-surface-muted`, `--cs-surface-sunken` |
+| Lines | `--cs-border`, `--cs-border-strong` |
+| Text | `--cs-text`, `--cs-text-muted`, `--cs-text-subtle` |
+| Status | `--cs-success`, `--cs-warning`, `--cs-danger`, `--cs-info`, `--cs-neutral`, each with a `-soft` tint |
+| Spacing | `--cs-space-1` 4px to `--cs-space-8` 64px, on a 4px base |
+| Radius | `--cs-radius-sm` 8px for controls, `--cs-radius-lg` 14px for cards, `--cs-radius-pill` |
+| Elevation | `--cs-shadow-sm`, `--cs-shadow-md`, `--cs-shadow-lg` |
+| Type | `--cs-font`, `--cs-font-mono`, `--cs-text-xs` 12px to `--cs-text-3xl` 34px |
+| Other | `--cs-focus`, `--cs-transition` |
 
-Font: `"Segoe UI", Arial, sans-serif`. Headings are weight 600 with negative letter-spacing. Eyebrows are 10–11px,
-weight 700, uppercase, letter-spacing ~1.6–1.9px.
+Rules for a new screen:
 
-`features/venues/venues.css` defines scoped tokens (`--v-primary`, `--v-danger`, the slot-state colours, …) under
-`.venues`, derived from the same palette. That scoping pattern (tokens on the feature root, resets for the global
-bare-element rules) is the one to copy if a feature needs many colours.
+- **Two radii only.** A control is `--cs-radius-sm`, a card is `--cs-radius-lg`, a badge is a pill. Nothing else.
+- **One primary.** A second green would stop `--cs-primary` meaning "the main action".
+- **Status is a pair.** `--cs-danger` on `--cs-danger-soft`, never a text colour on an unrelated tint.
+- **Spacing comes from the scale.** If a gap wants 18px, use 16px or 24px.
+- **Don't restyle a control that already works.** Inputs, buttons, badges and cards are styled globally in
+  `App.css`; a feature stylesheet adds layout, not a second button.
+
+The font is a system stack via `--cs-font`, so it renders natively everywhere with nothing to download. Focus is one
+treatment for every control, set once by the global `:focus-visible` rule.
+
+The exact values live in `index.css` and are deliberately not repeated here: a second copy would go stale.
+
+`features/venues/venues.css` keeps scoped tokens (`--v-primary`, `--v-danger`, the slot-state colours, …) under
+`.venues`, but each is now defined from a `--cs-` token rather than its own hex. That is the pattern to copy when a
+feature needs many colours of its own: derive from the global tokens, never restate a value.
 
 ## Shared classes (`App.css`)
 
@@ -118,3 +127,9 @@ Confirmations before destructive actions follow `WithdrawButton.jsx`: an inline 
 - **Tables**: `<caption>`, `<thead>` with small uppercase headers, numeric columns right-aligned with tabular
   numbers, selected row tinted.
 - **Mobile**: check at 375px wide. No horizontal page scroll; wide tables scroll inside their own container.
+
+### SCRUM-117 clarification presentation
+
+The Under review decision form uses a scoped event-review-decision card with a larger note field, a separate return action explaining notification and retained assignment, and secondary approve/reject controls. Saving disables the note and actions and announces progress. The Changes requested panel uses the existing warning palette, preserves message line breaks, wraps long text and explains Edit, Save changes, then Resubmit request. Resubmission is a separate owner-only action outside edit mode. The coordinator sees the latest immutable before/after comparison with its timestamp. Both layouts stack at 760px and were visually checked at 375px. Styles stay in features/events/workspace.css.
+
+SCRUM-117 saved-edit correction: status appears immediately after the event title. The assigned coordinator sees Saved organiser changes against the submitted/resubmitted baseline on refresh, with decision controls before the long event details. Last resubmission comparisons stay below history and explain that they describe a past submission. Limited-history baselines have explicit labels; missing comparison data is not reported as no changes.

@@ -7,10 +7,10 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 
 // Storage stays optional at startup and injectable in integration tests.
 module.exports = function equipmentRoutes({ authenticate, equipmentService, messagesService,
-  findEventById, findEventsByIds, getUserDisplayName, listAssignedEvents, listCancelledEventIds, equipmentIssueNotifications }) {
+  findEventById, findEventsByIds, getUserDisplayName, listAssignedEvents, listReleasableEventIds, equipmentIssueNotifications }) {
   const router = express.Router();
   const controller = createEquipmentController({ equipmentService: equipmentService || {},
-    messagesService: messagesService || {}, findEventById, findEventsByIds, getUserDisplayName, listCancelledEventIds, equipmentIssueNotifications });
+    messagesService: messagesService || {}, findEventById, findEventsByIds, getUserDisplayName, listReleasableEventIds, equipmentIssueNotifications });
   const messages = createMessagesController({ messagesService: messagesService || {},
     equipmentService: equipmentService || {}, findEventById, retention });
   const guards = (permission, configured = equipmentService) => [authenticate,

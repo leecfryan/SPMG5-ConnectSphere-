@@ -1,9 +1,17 @@
-const { ACTIVE_STATUSES } = require("./lifecycle");
+const { ACTIVE_STATUSES, ASSIGNABLE_STATUSES } = require("./lifecycle");
 const { assignWithHistory } = require("./assignmentHistory.repository");
 const { WRITABLE_COLS } = require("./events.repository");
+const { compareRequestFields } = require("./requestComparison");
 const { normalise } = require("./events.service");
-const { validateUpdate } = require("./events.validation");
+const { validateUpdate, validateForSubmission } = require("./events.validation");
 
+// SCRUM-37: registration_start/registration_end are in WRITABLE_COLS but were
+// never selected here, harmlessly, until updateOrganiserEvent started
+// merging every writable column onto `current` before calling
+// apply_organiser_event_edit (which always writes all of them). Without
+// these two, current.registration_start/_end read as undefined, so the RPC
+// call silently dropped those two required parameters entirely - breaking
+// every edit, not just registration-window ones.
 const FIELDS = [
   "id", "name", "purpose", "description", "start_time", "end_time",
   "registration_start", "registration_end",
@@ -11,7 +19,7 @@ const FIELDS = [
   "equipment_needs", "other_comments", "status", "organiser_id",
   "coordinator_id", "submitted_at", "approved_rejected_by", "approved_rejected_at", "approval_rejection_remark",
   "cancelled_by", "cancelled_at", "cancellation_reason",
-  "postponed_by", "postponed_at", "postponement_reason",
+  "postponed_by", "postponed_at", "postponement_reason", "updated_at",
   "pending_change_request",
 ].join(",");
 
@@ -27,23 +35,21 @@ function isCoordinator(user) {
     Array.isArray(user.app_metadata?.roles) && user.app_metadata.roles.includes("event_coordinator"));
 }
 
-// SCRUM-150 AC1: the organiser's own PATCH is the only path that changes an
-// event's date, time or equipment needs - no "significant change" heuristic,
-// any actual value change on these three columns counts. start_time/end_time
-// compare by instant (matching events.validation.js#validateUpdate's own
-// "must be in the future" check), not by string, so re-submitting an
-// equivalent timestamp in a different format is still a no-op.
-const RESCHEDULE_FIELDS = ["start_time", "end_time", "equipment_needs"];
-function rescheduleFieldChanged(field, before, after) {
-  if (field === "start_time" || field === "end_time") {
-    const beforeTime = before ? new Date(before).getTime() : null;
-    const afterTime = after ? new Date(after).getTime() : null;
-    return beforeTime !== afterTime;
-  }
-  return (before ?? null) !== (after ?? null);
-}
+// SCRUM-150 AC1 used to live here as RESCHEDULE_FIELDS/rescheduleFieldChanged
+// (any value change on start_time/end_time/equipment_needs flagged the
+// event's equipment_requests for review - a hold-and-recheck model). SCRUM-37
+// widened the same significance rule to cover expected_attendance/
+// venue_requirements too and moved it into apply_organiser_event_edit (SQL),
+// so it runs in the same transaction as the event write it reacts to. Team
+// design, 2026-10-21: "for review" is satisfied by the event itself
+// regressing to SUBMITTED for the coordinator's decision, not by holding the
+// same reservation for Technical Support/Venue Staff to re-decide - approving
+// or rejecting the resubmission releases the arrangements outright
+// (review.service.js), and the coordinator re-requests fresh ones. SCRUM-150's
+// REVIEW_REQUIRED mechanism is therefore unreachable via this trigger now;
+// its own task note and docs/equipment-integration.md record why.
 
-function createEventWorkspaceService(client, equipmentService) {
+function createEventWorkspaceService(client) {
   async function unwrap(query) {
     const { data, error } = await query;
     if (error) throw error;
@@ -92,14 +98,27 @@ function createEventWorkspaceService(client, equipmentService) {
   // may see the event. user_id stays out: the officer pool is not named (#45).
   // Like approverName, a failed read leaves the history unknown (null) instead
   // of hiding the event itself.
-  async function activityFor(eventId) {
+  async function activityFor(event, scope) {
     const { data, error } = await client.from("event_activity_log")
       .select("id, action, details, created_at")
-      .eq("event_id", eventId).order("created_at", { ascending: false });
-    if (error) return null;
-    return data.map(({ id, action, details, created_at }) => ({
+      .eq("event_id", event.id).order("created_at", { ascending: false });
+    if (error) return { activity: null, ...(scope === "coordinator" ? { request_changes: null } : {}) };
+    const baseline = data.find(entry => entry.action === "REQUEST_BASELINE_RECORDED");
+    const requestChanges = scope === "coordinator" ? {
+      request_changes: baseline ? {
+        source: baseline.details.source, version_at: baseline.details.version_at,
+        changes: compareRequestFields(baseline.details.snapshot, event),
+      } : { source: "NO_BASELINE", version_at: null, changes: [] },
+    } : {};
+    const activity = data.filter(entry => entry.action !== "REQUEST_BASELINE_RECORDED").map(({ id, action, details, created_at }) => ({
+      ...(scope === "coordinator" && action === "REQUEST_RESUBMITTED" ? {
+        baseline_source: details.baseline_source ?? null,
+        changes: (details.changes || []).filter(change => WRITABLE_COLS.includes(change.field))
+          .map(({ field, before, after }) => ({ field, before, after })),
+      } : {}),
       id, action, from_status: details.from_status ?? null, to_status: details.to_status ?? null, note: details.note ?? null, created_at,
     }));
+    return { activity, ...requestChanges };
   }
   async function read(scope, userId, id) {
     const organiserIds = scope === "organiser" ? await organiserIdsFor(userId) : undefined;
@@ -116,7 +135,7 @@ function createEventWorkspaceService(client, equipmentService) {
         // SCRUM-148 AC4: same "name, else unknown" treatment as the approve/reject outcome.
         cancelled_by_name: await approverName(event.cancelled_by),
         postponed_by_name: await approverName(event.postponed_by),
-        activity: await activityFor(event.id),
+        ...await activityFor(event, scope),
       };
     },
     async updateOrganiserEvent(userId, id, input) {
@@ -131,24 +150,65 @@ function createEventWorkspaceService(client, equipmentService) {
       const unreadable = new Set(errors.map(problem => problem.field));
       const problems = [...errors, ...validateUpdate(fields, current).errors.filter(problem => !unreadable.has(problem.field))];
       if (problems.length) return { ok: false, reason: "invalid", errors: problems };
-      // SCRUM-100: recheck responsibility in the write itself, after the read check.
-      const event = await unwrap(client.from("events").update(fields)
-        .eq("id", id).eq("organiser_id", userId).select(FIELDS).maybeSingle());
-      if (!event) return { ok: false, reason: "conflict" };
 
-      // SCRUM-150 AC1/AC3: a real change to the date, time or equipment needs
-      // flags this event's PENDING/APPROVED equipment_requests for review,
-      // after the event write itself has succeeded.
-      const changedFields = RESCHEDULE_FIELDS.filter(
-        (field) => Object.hasOwn(fields, field) && rescheduleFieldChanged(field, current[field], fields[field]),
+      // SCRUM-37: apply_organiser_event_edit (SQL) replaces the plain update
+      // this PATCH used to do. It still does everything that update did -
+      // SCRUM-100's recheck of responsibility now happens in the function's
+      // own WHERE id = ... AND organiser_id = ... (same race-guard shape, not
+      // removed, just moved) - and it now also does the significance check
+      // (AC1/AC2, widened from SCRUM-150's narrower RESCHEDULE_FIELDS) and the
+      // SUBMITTED regression (AC3/AC4) as one transaction with the write.
+      // Team design, 2026-10-21: arrangements are released on the
+      // coordinator's decision (review.service.js#approve/#reject), not held
+      // for re-review here - this function only decides whether to regress,
+      // it never touches equipment_requests/venue_bookings itself. The
+      // function always writes every column, so a partial PATCH is merged
+      // onto the current row first.
+      //
+      // Reviewer feedback on PR #60: that merge is computed from `current`,
+      // read a moment ago in a separate round trip - not from inside the
+      // function's own locked read below. If another save for this same
+      // event committed in between, `merged` still carries its pre-that-save
+      // values for every column this PATCH didn't touch, and writing them
+      // would silently revert the other save's change - a lost update, not
+      // just a theoretical stale-tab problem. p_expected_updated_at lets the
+      // function detect that gap: it compares against the row it locks, and
+      // refuses (EVENT_MODIFIED/P0004, mapped to the same conflict below) if
+      // `current` was already out of date by the time this call arrived.
+      const merged = Object.fromEntries(
+        WRITABLE_COLS.map((column) => [column, Object.hasOwn(fields, column) ? fields[column] : current[column]]),
       );
-      if (changedFields.length > 0) {
-        const datesChanged = changedFields.includes("start_time") || changedFields.includes("end_time");
-        await equipmentService?.flagReservationsForReview?.(id, {
-          startTime: event.start_time,
-          endTime: event.end_time,
-          datesChanged,
-        });
+      const { data: event, error } = await client.rpc("apply_organiser_event_edit", {
+        p_event_id: id,
+        p_organiser_id: userId,
+        p_expected_updated_at: current.updated_at,
+        p_name: merged.name,
+        p_purpose: merged.purpose,
+        p_description: merged.description,
+        p_start_time: merged.start_time,
+        p_end_time: merged.end_time,
+        p_registration_start: merged.registration_start,
+        p_registration_end: merged.registration_end,
+        p_expected_attendance: merged.expected_attendance,
+        p_venue_requirements: merged.venue_requirements,
+        p_accessibility_needs: merged.accessibility_needs,
+        p_equipment_needs: merged.equipment_needs,
+        p_other_comments: merged.other_comments,
+      }).select(FIELDS).maybeSingle();
+      if (error) {
+        // EVENT_NOT_FOUND (P0002): the function's own WHERE clause matched
+        // nothing - the event moved or was reassigned between the read above
+        // and this write. not_found/forbidden are already ruled out by that
+        // read, so this is the same race the plain update used to answer
+        // with a 409 for.
+        if (error.code === "P0002") return { ok: false, reason: "conflict" };
+        // EVENT_MODIFIED (P0004): the row exists and is still this
+        // organiser's, but its updated_at moved past what `current` read -
+        // another save landed in the gap between that read and this call.
+        // Same conflict response as P0002: re-read and retry rather than
+        // write stale values over whatever that other save changed.
+        if (error.code === "P0004") return { ok: false, reason: "conflict" };
+        throw error;
       }
 
       return { ok: true, event };
@@ -200,6 +260,20 @@ function createEventWorkspaceService(client, equipmentService) {
       if (!event) return { ok: false, reason: "conflict" };
       return { ok: true, event };
     },
+    async resubmitOrganiserEvent(userId, id, cycleId) {
+      const current = await read("organiser", userId, id);
+      if (!current) return { ok: false, reason: "not_found" };
+      if (current.organiser_id !== userId) return { ok: false, reason: "forbidden" };
+      if (current.status !== "CHANGES_REQUESTED" || !current.coordinator_id) return { ok: false, reason: "conflict" };
+      const validation = validateForSubmission(current);
+      if (!validation.ok) return { ok: false, reason: "invalid", errors: validation.errors };
+      // SCRUM-117: the lock rechecks these exact saved values after validation.
+      const expected = Object.fromEntries(WRITABLE_COLS.map(field => [field, current[field] ?? null]));
+      const event = await unwrap(client.rpc("resubmit_event_request", {
+        p_event_id: id, p_organiser_id: userId, p_cycle_id: cycleId, p_expected_fields: expected,
+      }).select(FIELDS).maybeSingle());
+      return event ? { ok: true, event } : { ok: false, reason: "conflict" };
+    },
     async coordinators() {
       const choices = [];
       for (let page = 1; ; page += 1) {
@@ -222,7 +296,7 @@ function createEventWorkspaceService(client, equipmentService) {
     assign(id, coordinatorId, expectedCoordinatorId, actor) {
       return unwrap(assignWithHistory(client, {
         eventId: id, coordinatorId, expectedCoordinatorId,
-        allowedStatuses: ACTIVE_STATUSES, actor,
+        allowedStatuses: ASSIGNABLE_STATUSES, actor,
       }).select(FIELDS).maybeSingle());
     },
   };

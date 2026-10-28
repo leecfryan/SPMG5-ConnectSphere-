@@ -3,7 +3,7 @@ import { useAuth } from "../../auth/useAuth";
 import { useApiResource } from "../../../hooks/useApiResource";
 import { apiFetch } from "../../../lib/api";
 
-// Matches ACTIVE_STATUSES in backend/src/modules/events/lifecycle.js.
+// Matches ASSIGNABLE_STATUSES in backend/src/modules/events/lifecycle.js.
 // SCRUM-149: POSTPONED joins it there, so it joins here too - a postponed
 // event is still reassignable to a different coordinator.
 const ASSIGNABLE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "APPROVED", "CONFIRMED", "SAFETY_REVIEW", "PREPARATION", "POSTPONED"];
@@ -27,6 +27,7 @@ export default function EventReviewControls({ event, onUpdated }) {
   return <section aria-label="Manager actions">
     <h2>Coordinator assignment</h2>
     {error && <p role="alert">{error}</p>}
+    {event.status === "CHANGES_REQUESTED" && <p>Reassignment is unavailable while the organiser is correcting this request.</p>}
     {event.status === "REJECTED" && <p>This request was rejected, so it cannot be reassigned.</p>}
     {ASSIGNABLE_STATUSES.includes(event.status) && <form onSubmit={e => {
       e.preventDefault();

@@ -196,3 +196,30 @@ test("SCRUM-26: an account with no email is still listed rather than dropped", a
     { id: "coord-1", fullName: "Ada Tan", email: "" },
   ]);
 });
+
+// SCRUM-159 AC2: naming the organiser on the Lead's queue.
+function clientFinding(result) {
+  const getUserById = vi.fn(async () => result);
+  return { client: { auth: { admin: { getUserById } } }, getUserById };
+}
+
+test.each([
+  ["a trimmed full name", { full_name: "  Olivia Ong  " }, "Olivia Ong"],
+  ["the email when there is no full name", {}, "org-1@example.com"],
+  ["the email when the full name is blank", { full_name: "   " }, "org-1@example.com"],
+])("[SCRUM-159] AC2: an organiser is shown by %s", async (_case, metadata, expected) => {
+  const { client, getUserById } = clientFinding({ data: { user: user("org-1", ["event_organiser"], { user_metadata: metadata }) }, error: null });
+
+  expect(await createCoordinatorDirectory(client).displayNameOf("org-1")).toBe(expected);
+  expect(getUserById).toHaveBeenCalledWith("org-1");
+});
+
+test.each([
+  ["the lookup fails", { data: { user: null }, error: { message: "Auth unavailable" } }],
+  ["the account no longer exists", { data: { user: null }, error: null }],
+  ["the account has neither name nor email", { data: { user: user("org-1", ["event_organiser"], { email: undefined, user_metadata: {} }) }, error: null }],
+])("[SCRUM-159] AC2: an organiser is unknown (null), not an error, when %s", async (_case, result) => {
+  const { client } = clientFinding(result);
+
+  expect(await createCoordinatorDirectory(client).displayNameOf("org-1")).toBeNull();
+});
