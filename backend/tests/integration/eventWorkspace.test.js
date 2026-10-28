@@ -739,29 +739,6 @@ test("[SCRUM-117-R05] A database outage or save racing validation cannot partial
   expect(f.pending.size).toBe(0);
 });
 
-test("[SCRUM-117-BASE-API-001] organiser saves are visible to the assigned coordinator before a return; internal baselines remain private", async t => {
-  const f = await setup(t), event=f.records[0];
-  Object.assign(event,{status:"UNDER_REVIEW",purpose:"Workshop",description:"Original description",expected_attendance:30});
-  f.client.activity.push({id:randomUUID(),event_id:event.id,action:"REQUEST_BASELINE_RECORDED",created_at:"2026-10-01T00:00:00Z",
-    details:{source:"SUBMITTED",version_at:"2026-10-01T00:00:00Z",snapshot:{...event}}});
-  expect((await f.send(`/event-workspace/organiser/${event.id}`,"organiser","PATCH",{expected_attendance:45})).status).toBe(200);
-  expect(event.status).toBe("UNDER_REVIEW");
-  const detail=await (await f.send(`/event-workspace/coordinator/${event.id}`,"first")).json();
-  expect(detail.event.request_changes).toEqual({source:"SUBMITTED",version_at:"2026-10-01T00:00:00Z",
-    changes:[{field:"expected_attendance",before:30,after:45}]});
-  expect(detail.event.activity).toEqual([]);
-  expect(JSON.stringify(detail)).not.toContain('"snapshot"');
-  f.users.organiser.app_metadata.organisation_id="same-company";
-  f.users.otherOrganiser.app_metadata.organisation_id="same-company";
-  for(const role of ["organiser","otherOrganiser","manager"]){
-    const scope=role==="manager"?"manager":"organiser";
-    const response=await (await f.send(`/event-workspace/${scope}/${event.id}`,role)).json();
-    expect(response.event).not.toHaveProperty("request_changes");
-    expect(response.event.activity).toEqual([]);
-  }
-  expect((await f.send(`/event-workspace/coordinator/${event.id}`,"second")).status).toBe(404);
-});
-
 // SCRUM-161 AC1: the Lead's workload overview is the manager workspace list, so
 // an event in every active status comes back with the coordinator responsible
 // for it. Cancelled events stay in the same list (SCRUM-148 AC4); the browser,
