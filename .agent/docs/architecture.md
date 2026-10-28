@@ -311,3 +311,10 @@ receive the activity message, not the snapshot. SQL is in docs/event-requests.md
 Returned-request notification queueing is documented in docs/notifications.md; the existing worker delivers the saved message and request path through event-changes-requested. The owner resubmits through POST /api/event-workspace/organiser/:id/resubmit with the latest cycleId. The resubmit_event_request RPC checks validated saved fields under a lock, retains assignment, records immutable changes and queues event-request-resubmitted atomically. Only the coordinator workspace exposes changed-field comparisons. Both SQL/workflow setups are user-reported; live resubmission verification remains pending.
 
 SCRUM-117 saved-edit correction (24 October 2026): an events trigger records internal REQUEST_BASELINE_RECORDED snapshots at submission/resubmission in event_activity_log. Organiser PATCH preserves this baseline. The assigned coordinator detail derives request_changes from current saved fields and that baseline; internal snapshots never appear in public activity responses. Resubmission compares against this baseline and advances it transactionally. See docs/notifications.md for the applied SQL.
+
+
+### SCRUM-43 registration notification extension
+
+The same delivery worker independently prepares assignment history, registration history and due offer reminders before claiming the shared outbox. Registration/waitlist triggers save change history with business writes; sending occurs outside those transactions. Each reminder is validated against the current owned offer immediately before sending. Reuse the current /notifications identity and UI; no new permission or route. Manual schema/workflow setup is documented in docs/notifications.md and must precede live use.
+
+An expired notification claim is retryable, distinct from an obsolete offer. The worker isolates failed retry-storage writes per claimed row so remaining notifications can proceed.

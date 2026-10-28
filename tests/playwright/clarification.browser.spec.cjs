@@ -159,7 +159,7 @@ test('[E2E-CLARIFICATION-003] SCRUM-117: saved edits are visible before a return
   await expect(current).toContainText('45');
   await expect(current).toContainText('50');
   await expect(historical).toContainText('30');
-  await expect(historical).not.toContainText('50');
+  await expect(historical.getByRole('definition')).toHaveText(['30', '45']);
   await page.getByRole('button', { name: 'Approve', exact: true }).click();
   await expect(page.locator('.status-badge')).toHaveText('Approved – planning');
   await expect(page.getByRole('link', { name: 'Arrange venue bookings' })).toBeVisible();
