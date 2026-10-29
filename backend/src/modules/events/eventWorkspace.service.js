@@ -279,11 +279,16 @@ function createEventWorkspaceService(client) {
         requested_at: new Date().toISOString(),
         requested_by: userId,
       };
+      // SCRUM-36: updated_at guards against a concurrent edit between the
+      // validation read above and this write. Without it, proposed values
+      // validated against one version of the event (e.g. registration_end vs
+      // registration_start) could land on a row that has since changed.
       const event = await unwrap(
         client.from("events")
           .update({ pending_change_request: payload })
           .eq("id", eventId)
           .eq("organiser_id", userId)
+          .eq("updated_at", current.updated_at)
           .in("status", ELIGIBLE_CHANGE_REQUEST_STATUSES)
           .is("pending_change_request", null)
           .select(FIELDS)

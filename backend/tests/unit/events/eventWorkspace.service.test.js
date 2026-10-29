@@ -628,6 +628,34 @@ test("[TC-SCRUM-36-15] second change request refused while one is already pendin
   expect(result).toEqual({ ok: false, reason: "already_pending" });
 });
 
+test("[TC-SCRUM-36-21] concurrent edit between validation read and write returns conflict", async () => {
+  const { service, records, client } = setup36();
+  records[0].updated_at = "2026-01-01T00:00:00.000Z";
+  // Intercept the second from("events") call (the write) and bump updated_at
+  // right before execute() runs, simulating a concurrent edit that lands
+  // between the validation read above and the conditional update write.
+  const origFrom = client.from.bind(client);
+  let eventsFromCount = 0;
+  vi.spyOn(client, "from").mockImplementation((table) => {
+    const q = origFrom(table);
+    if (table === "events") {
+      eventsFromCount += 1;
+      if (eventsFromCount === 2) {
+        const origMaybeSingle = q.maybeSingle.bind(q);
+        q.maybeSingle = async () => {
+          records[0].updated_at = "2026-02-01T00:00:00.000Z";
+          return origMaybeSingle();
+        };
+      }
+    }
+    return q;
+  });
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { name: "Revised Gala" }, reason: "Rebranding",
+  });
+  expect(result).toEqual({ ok: false, reason: "conflict" });
+});
+
 test("[SCRUM-117-UNIT-002] organiser sees the saved message without internal snapshot or actor details", async () => {
   const { service, client, records } = setup();
   records[0].status = "CHANGES_REQUESTED";
