@@ -45,9 +45,10 @@ export default function ChangeRequestControls({ event, onSubmitted }) {
   const [errors, setErrors] = useState([]);
   const [message, setMessage] = useState("");
 
-  if (!ELIGIBLE_STATUSES.includes(event.status)) return null;
-
-  // AC6: show the pending request if one exists.
+  // AC6: always show a stored pending request, even if the status has since
+  // moved past ELIGIBLE_STATUSES (e.g. UNDER_REVIEW → SAFETY_REVIEW after
+  // the coordinator started the next stage). Checking this before the gate
+  // means a request submitted while APPROVED remains visible to the organiser.
   if (event.pending_change_request) {
     const { proposed_changes, reason: req_reason, requested_at } = event.pending_change_request;
     const changedDefs = FIELD_DEFS.filter(({ key }) => Object.hasOwn(proposed_changes, key));
@@ -70,6 +71,8 @@ export default function ChangeRequestControls({ event, onSubmitted }) {
       </section>
     );
   }
+
+  if (!ELIGIBLE_STATUSES.includes(event.status)) return null;
 
   if (!open) {
     return (

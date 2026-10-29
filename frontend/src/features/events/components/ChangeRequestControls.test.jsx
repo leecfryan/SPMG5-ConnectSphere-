@@ -105,6 +105,21 @@ test("[TC-SCRUM-36-17f] server reason error is shown against the reason field", 
   await waitFor(() => expect(screen.getByText("required")).toBeInTheDocument());
 });
 
+test("[TC-SCRUM-36-17h] pending request remains visible after status moves past eligible (e.g. SAFETY_REVIEW)", () => {
+  setup({
+    status: "SAFETY_REVIEW",
+    pending_change_request: {
+      proposed_changes: { name: "Revised Gala" },
+      reason: "Venue branding changed",
+      requested_at: "2026-10-26T10:00:00.000Z",
+      requested_by: "alice",
+    },
+  });
+  expect(screen.getByText(/awaiting review/i)).toBeInTheDocument();
+  expect(screen.getByText(/venue branding changed/i)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /request a change/i })).not.toBeInTheDocument();
+});
+
 test("[TC-SCRUM-36-17g] submitting with no changes shows a client-side error without calling the API", async () => {
   const { fetchMock, user } = setup({ status: "APPROVED" });
   await user.click(screen.getByRole("button", { name: /request a change/i }));
