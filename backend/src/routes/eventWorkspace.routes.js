@@ -43,6 +43,8 @@ module.exports = function createEventWorkspaceRoutes(client) {
       if (result.ok) return res.json({ event: result.event });
       if (result.reason === "not_found") return res.status(404).json({ message: "Event not found." });
       if (result.reason === "forbidden") return res.status(403).json({ message: "You can only edit events you are responsible for." });
+      // SCRUM-164 AC2: locked once the event has moved past SUBMITTED.
+      if (result.reason === "locked") return res.status(409).json({ message: "Changes to this event are no longer accepted." });
       if (result.reason === "invalid") return res.status(400).json({ message: "Check the event details and try again.", errors: result.errors });
       return res.status(409).json({ message: "The event responsibility has changed. Refresh and try again." });
     } catch {

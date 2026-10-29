@@ -142,11 +142,30 @@ function createEventWorkspaceService(client) {
       const current = await read("organiser", userId, id);
       if (!current) return { ok: false, reason: "not_found" };
       if (current.organiser_id !== userId) return { ok: false, reason: "forbidden" };
-      if (!input || Array.isArray(input) || typeof input !== "object" ||
-        Object.keys(input).length === 0 || Object.keys(input).some(field => !WRITABLE_COLS.includes(field))) {
+      // SCRUM-164 AC2: edits are locked once the event reaches UNDER_REVIEW or
+      // beyond. CHANGES_REQUESTED is the exception: the coordinator has
+      // returned the event and the organiser must edit before resubmitting.
+      // NOTE: SCRUM-117 also allows editing at UNDER_REVIEW; that conflicts
+      // with this AC and is raised as a blocker for the team to resolve.
+      if (!["SUBMITTED", "CHANGES_REQUESTED"].includes(current.status)) {
+        return { ok: false, reason: "locked" };
+      }
+      // SCRUM-164 AC3: reason is extracted before the WRITABLE_COLS check so it
+      // is not treated as an unknown column.
+      if (!input || Array.isArray(input) || typeof input !== "object") {
         return { ok: false, reason: "invalid", errors: [{ field: "event", message: "Provide only editable event details." }] };
       }
-      const { fields, errors } = normalise(input);
+      const { reason, ...eventInput } = input;
+      if (Object.keys(eventInput).length === 0 || Object.keys(eventInput).some(field => !WRITABLE_COLS.includes(field))) {
+        return { ok: false, reason: "invalid", errors: [{ field: "event", message: "Provide only editable event details." }] };
+      }
+      const trimmedReason = typeof reason === "string" ? reason.trim() : "";
+      // Reason is required only for SUBMITTED edits (SCRUM-164 AC3).
+      // UNDER_REVIEW and CHANGES_REQUESTED edits (SCRUM-117) do not require one.
+      if (current.status === "SUBMITTED" && !trimmedReason) {
+        return { ok: false, reason: "invalid", errors: [{ field: "reason", message: "required" }] };
+      }
+      const { fields, errors } = normalise(eventInput);
       const unreadable = new Set(errors.map(problem => problem.field));
       const problems = [...errors, ...validateUpdate(fields, current).errors.filter(problem => !unreadable.has(problem.field))];
       if (problems.length) return { ok: false, reason: "invalid", errors: problems };
@@ -209,6 +228,19 @@ function createEventWorkspaceService(client) {
         // write stale values over whatever that other save changed.
         if (error.code === "P0004") return { ok: false, reason: "conflict" };
         throw error;
+      }
+
+      // SCRUM-164 AC3: record actor, timestamp (db default) and reason.
+      // unwrap() surfaces any insert failure rather than hiding it.
+      // SUBMITTED is the only status that reaches this point (AC2 locks the
+      // rest), but the guard is explicit so the intent is clear.
+      if (current.status === "SUBMITTED") {
+        await unwrap(client.from("event_activity_log").insert({
+          event_id: id,
+          user_id: userId,
+          action: "EDIT",
+          details: { from_status: null, to_status: null, note: trimmedReason },
+        }));
       }
 
       return { ok: true, event };

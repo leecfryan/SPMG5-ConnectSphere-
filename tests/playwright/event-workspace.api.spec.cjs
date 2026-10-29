@@ -135,7 +135,8 @@ test('[EVENT-API-100] SCRUM-100: Client organiser sees own and same-company requ
   const ownPath = `/api/event-workspace/organiser/${events.organiser.id}`;
   expect((await request.patch(ownPath, { headers: headers.organiser, data: { name: 'Forged change', organiser_id: colleague.id, status: 'APPROVED' } })).status()).toBe(400);
   expect(await accounts.events(organiser)).toEqual(ownBefore);
-  const updated = await request.patch(ownPath, { headers: headers.organiser, data: { name: 'Updated own client request', equipment_needs: 'Two microphones' } });
+  // SCRUM-164 AC3: reason is now required for every PATCH to a SUBMITTED event.
+  const updated = await request.patch(ownPath, { headers: headers.organiser, data: { name: 'Updated own client request', equipment_needs: 'Two microphones', reason: 'Correcting requirements' } });
   expect(updated.status()).toBe(200);
   const saved = (await request.get(ownPath, { headers: headers.organiser })).json();
   expect((await saved).event).toMatchObject({ name: 'Updated own client request', equipment_needs: 'Two microphones', organiser_id: organiser.id, status: 'SUBMITTED' });
@@ -300,3 +301,37 @@ for (const [id, role] of [['001', 'event_coordinator_lead'], ['002', 'event_ops_
     expect((await released.json()).data.find(item => item.id === equipmentId).status).toBe('RELEASED');
   });
 }
+
+// SCRUM-164: update event information during planning.
+test('[TC-SCRUM-164-E2E-API-01] AC2: edit is locked once the event moves past SUBMITTED', async ({ accounts, request }) => {
+  const { organiser, headers, events } = await setupOrganiserAccess(accounts, request);
+  const eventPath = `/api/event-workspace/organiser/${events.organiser.id}`;
+  await accounts.updateEvent(events.organiser.id, { status: 'UNDER_REVIEW' });
+  const locked = await request.patch(eventPath, { headers: headers.organiser, data: { name: 'Must not save', reason: 'Testing lock' } });
+  expect(locked.status()).toBe(409);
+  expect((await locked.json()).message).toMatch(/no longer accepted/i);
+  expect((await accounts.events(organiser))[0].name).not.toBe('Must not save');
+});
+
+test('[TC-SCRUM-164-E2E-API-02] AC3: valid edit with reason creates an activity log entry', async ({ accounts, request }) => {
+  const { organiser, headers, events } = await setupOrganiserAccess(accounts, request);
+  const eventPath = `/api/event-workspace/organiser/${events.organiser.id}`;
+  const res = await request.patch(eventPath, { headers: headers.organiser, data: { name: 'Updated name', reason: 'Correcting a typo' } });
+  expect(res.status()).toBe(200);
+  const detail = await request.get(eventPath, { headers: headers.organiser });
+  const activity = (await detail.json()).event.activity;
+  expect(activity).not.toBeNull();
+  const edit = activity.find(entry => entry.action === 'EDIT');
+  expect(edit).toBeDefined();
+  expect(edit.note).toBe('Correcting a typo');
+});
+
+test('[TC-SCRUM-164-E2E-API-03] AC3: missing reason is rejected with a 400', async ({ accounts, request }) => {
+  const { headers, events } = await setupOrganiserAccess(accounts, request);
+  const locked = await request.patch(`/api/event-workspace/organiser/${events.organiser.id}`, {
+    headers: headers.organiser, data: { name: 'No reason' },
+  });
+  expect(locked.status()).toBe(400);
+  const body = await locked.json();
+  expect(body.errors.some(err => err.field === 'reason')).toBe(true);
+});
