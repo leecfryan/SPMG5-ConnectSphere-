@@ -120,3 +120,41 @@ test.each(["DRAFT", "APPROVED", "CONFIRMED", "REJECTED", "CANCELLED", "COMPLETED
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   },
 );
+
+test("[SCRUM-117-UI-001] return requires a message and sends the authenticated request", async () => {
+  const { fetchMock, onDecided, user } = setup("UNDER_REVIEW", () => ok({ event: { id: EVENT_ID, status: "CHANGES_REQUESTED" } }));
+  await user.click(screen.getByRole("button", { name: "Return for changes" }));
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Decision note")).toHaveAccessibleDescription(/Explain what the organiser/);
+  await user.type(screen.getByLabelText("Decision note"), "Clarify room layout.");
+  await user.click(screen.getByRole("button", { name: "Return for changes" }));
+  await waitFor(() => expect(onDecided).toHaveBeenCalledWith({ id: EVENT_ID, status: "CHANGES_REQUESTED" }));
+  expect(sent(fetchMock)).toEqual({ url: `/api/internal/events/${EVENT_ID}/request-changes`, method: "POST", auth: "Bearer coordinator-token", body: { note: "Clarify room layout." } });
+});
+
+test("[SCRUM-117-UI-002] failed return preserves the message and permits retry", async () => {
+  const { user, onDecided } = setup("UNDER_REVIEW", () => fail(409, "Refresh the request."));
+  await user.type(screen.getByLabelText("Decision note"), "Clarify attendance.");
+  await user.click(screen.getByRole("button", { name: "Return for changes" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Refresh the request.");
+  expect(screen.getByLabelText("Decision note")).toHaveValue("Clarify attendance.");
+  expect(screen.getByRole("button", { name: "Return for changes" })).toBeEnabled();
+  expect(onDecided).not.toHaveBeenCalled();
+});
+
+test.each(["SUBMITTED", "CHANGES_REQUESTED", "APPROVED", "CANCELLED"])("[SCRUM-117-UI-003] %s has no return action", status => {
+  setup(status);
+  expect(screen.queryByRole("button", { name: "Return for changes" })).not.toBeInTheDocument();
+});
+
+test("[SCRUM-117-UI-004] repeated clicks while saving produce one return request", async () => {
+  let resolve;
+  const pending = new Promise(done => { resolve = done; });
+  const { fetchMock, user, onDecided } = setup("UNDER_REVIEW", () => pending);
+  await user.type(screen.getByLabelText("Decision note"), "Clarify attendance.");
+  await user.dblClick(screen.getByRole("button", { name: "Return for changes" }));
+  expect(fetchMock).toHaveBeenCalledOnce();
+  expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+  resolve(ok({ event: { id: EVENT_ID, status: "CHANGES_REQUESTED" } }));
+  await waitFor(() => expect(onDecided).toHaveBeenCalledOnce());
+});

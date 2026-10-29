@@ -119,6 +119,7 @@ const findEvent = (id) => [...accounts.values()].flatMap(account => account.even
 // verified ownership are the production implementations.
 const eventsRepository = {
   async findById(id) { return findEvent(id); },
+  requestChanges: (...args) => require("./clarification-storage.cjs")(findEvent, dataClient)(...args),
   // SCRUM-98/99: same guards as the real write: a permitted move, the expected
   // current status and, when given, the coordinator still holding the event.
   async transitionStatus(id, from, to, extra = {}, coordinatorId) {
