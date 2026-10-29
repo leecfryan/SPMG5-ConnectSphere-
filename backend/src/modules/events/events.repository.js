@@ -269,7 +269,7 @@ async function findArrangements(eventId) {
       .order("booking_date", { ascending: true }),
     supabase
       .from("equipment_requests")
-      .select("id, status, quantity_requested, technical_requirement, is_essential, equipment:equipment!equipment_id(type)")
+      .select("id, status, quantity_requested, technical_requirement, is_essential, equipment_type, equipment:equipment!equipment_id(type)")
       .eq("event_id", eventId)
       .order("created_at", { ascending: true }),
   ]);
