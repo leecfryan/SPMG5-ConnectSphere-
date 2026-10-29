@@ -117,6 +117,10 @@ test.each(["SUBMITTED", "UNDER_REVIEW"])(
   "[TC-37-FE-06] a significant edit on a %s event saves in one click - nothing live to protect yet", async (status) => {
     const { fetchMock, onSubmitted, user } = setup(status);
     await changeAttendance(user);
+    // SCRUM-164 AC3: SUBMITTED edits require a reason; fill it so the button is enabled.
+    if (status === "SUBMITTED") {
+      await user.type(screen.getByLabelText(/Why are you making/), "Correcting attendance estimate");
+    }
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(fetchMock).toHaveBeenCalledOnce();
