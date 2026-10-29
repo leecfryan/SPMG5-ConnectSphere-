@@ -171,9 +171,10 @@ they do not certify live Supabase policies.
 
 Event Organisers are the clients submitting event requests. Responsibility is
 the existing `events.organiser_id`, not the coordinator's internal assignment.
-An organiser may edit event details at any lifecycle status; the supplied AC
-does not impose a status restriction. Saving preserves status, responsibility,
-coordinator assignment and submission time. It does not reopen review or change bookings.
+An organiser may edit event details while the event is `SUBMITTED`; editing is
+locked once the event reaches `UNDER_REVIEW` or beyond (SCRUM-164 AC2).
+Saving preserves status, responsibility, coordinator assignment and submission time.
+It does not reopen review or change bookings.
 
 Each client organiser has one admin-controlled `app_metadata.organisation_id`
 alongside their existing `roles: ["event_organiser"]`. Colleagues receive the
@@ -202,13 +203,17 @@ the UPDATE includes the owner predicate. Validation failures return 400 and
 Auth/storage failures return 503; denied mutations do not alter any event field.
 
 PATCH accepts a nonempty object containing only existing event-detail fields:
-name, purpose, description, start_time, end_time, expected_attendance,
-venue_requirements, accessibility_needs, equipment_needs and other_comments.
+name, purpose, description, start_time, end_time, registration_start, registration_end,
+expected_attendance, venue_requirements, accessibility_needs, equipment_needs and
+other_comments — plus a required `reason` string (SCRUM-164 AC3).
 Protected or unknown fields reject the whole request. Partial edits reuse the
 submission limits; unchanged past schedules do not block other edits. A changed
 start must be future and the resulting end must follow start. The form sends
 only changed fields, retaining original timestamps, including milliseconds,
 when schedule fields are not changed. Failed edits retain input for correction.
+A locked event (status past `SUBMITTED`) returns 409. A missing or blank reason returns 400.
+Each successful PATCH writes one append-only `event_activity_log` row with `action: "EDIT"` and
+the trimmed reason in `details.note` (SCRUM-164 AC3). A log insert failure surfaces as 503.
 
 ### Schema reference and Auth setup (2026-10-05)
 
@@ -232,6 +237,46 @@ for the course app, but larger deployments would need measured follow-up work.
 ### SCRUM-100 test evidence
 
 See the existing [Access test guide](testing/frontend-acceptance.md#scrum-100-organiser-event-scope-2026-10-05) for the agreed cases, unit/integration/API/browser boundaries, standalone commands, full-row denied-write checks, latest regression results and measured coverage gaps. All new automated tests use isolated Auth/storage fixtures; live Supabase/RLS verification remains separate.
+
+---
+
+## SCRUM-164: update event information during planning
+
+An organiser may edit their own event while it is `SUBMITTED`. Once the event
+moves to `UNDER_REVIEW` or beyond the PATCH returns 409 and the browser hides
+the *Edit event* button with an explanatory message.
+
+**Reason requirement (AC3).** Every PATCH must include a non-blank `reason`
+field (trimmed). A missing or blank reason is a 400 before the field values are
+checked. The reason is stored in `event_activity_log.details.note`; it is
+returned as `note` in the activity history read.
+
+The `EDIT` action and reason appear in the event's activity history on every workspace
+detail page (`EventActivityHistory.jsx`), labelled "Updated event details" with a "Reason:" prefix.
+
+| Status | When | Message |
+| --- | --- | --- |
+| 200 | Edit saved | `{ event }`, the updated row |
+| 400 | Missing/blank reason, unknown fields, or invalid values | `{ message, errors: [{ field, message }] }` |
+| 403 | Authenticated user is not the event's `organiser_id` | "You can only edit events you are responsible for." |
+| 404 | Event not found or not in scope | "Event not found." |
+| 409 | Event status is not `SUBMITTED` (locked) | "Changes to this event are no longer accepted." |
+| 409 | Organiser changed between lookup and save (race) | "The event responsibility has changed. Refresh and try again." |
+| 503 | Storage outage | "Unable to update the event. Please try again." |
+
+**No schema change.** Uses the existing `event_activity_log` table (SCRUM-141 *Schema reference* in `docs/event-requests.md`).
+
+### SCRUM-164 test evidence
+
+| Layer | File | Test IDs |
+| --- | --- | --- |
+| Unit (service) | `tests/unit/events/eventWorkspace.service.test.js` | TC-SCRUM-164-01 through 06 |
+| Integration | `tests/integration/eventWorkspace.test.js` | TC-SCRUM-164-10, 11, 12 |
+| Frontend (Vitest) | `pages/EventWorkspaceDetailPage.test.jsx` | TC-SCRUM-164-13, 14, 15 |
+| Playwright API | `tests/playwright/event-workspace.api.spec.cjs` | TC-SCRUM-164-E2E-API-01, 02, 03 |
+| Playwright browser | `tests/playwright/event-workspace.browser.spec.cjs` | E2E-EVENT-100 (updated), E2E-EVENT-101 (updated) |
+
+---
 
 ## Returned requests (SCRUM-117)
 
