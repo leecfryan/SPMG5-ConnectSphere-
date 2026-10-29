@@ -1,31 +1,36 @@
 import { useState } from "react";
 
-// Scrum-30: reserve flow is now two steps - pick a type, then review a
-// single-unit reservation for it. The specific physical unit is picked
-// automatically (the first one available for the window); the requester
-// never sees or chooses between individual units or their locations.
-// Replaces the old single per-unit dropdown + quantity input entirely;
-// quantity_requested is always 1.
+// SCRUM-31: back to asking for a type + a desired quantity - no specific
+// unit is picked here any more (Technical Support's Reserve action assigns
+// real units later, up to however many are actually available). Submitting
+// never checks or blocks on availability (Decision 4): asking for more than
+// is currently free is accepted, and the shortfall is handled by Reserve,
+// not here. The "Essential" checkbox (default off) makes the whole request
+// all-or-nothing at reserve time instead of allowing partial fulfillment -
+// see equipment.validation.js's planReservation.
 //
-// Scrum-29's multi-unit capable availability check (equipment.validation.js's
-// checkAvailability/findAvailableUnits) and quantity_requested column are
-// deliberately left in place and untouched, just unreachable from this form -
-// re-wiring multi-unit selection into the UI is Scrum-31's job.
+// The type list itself still comes from equipmentOptions (units free for
+// this exact window) - a type with zero units free right now won't appear
+// to pick at all, even though an over-request would otherwise be accepted.
+// Showing every catalogue type regardless of current availability, plus a
+// live count next to it, is SCRUM-169's job (see the task note's SCRUM-169
+// interaction section), not reopened here.
 function EquipmentRequestForm({ equipmentOptions, borrowWindow, onWindowChange, onSubmit, isSaving, saveError }) {
   const [selectedType, setSelectedType] = useState("");
+  const [quantity, setQuantity] = useState(1);
+  const [isEssential, setIsEssential] = useState(false);
   const [technicalRequirement, setTechnicalRequirement] = useState("");
   const { start, end } = borrowWindow;
 
   const types = [...new Set(equipmentOptions.map((item) => item.type))].sort();
-  const itemsOfType = equipmentOptions.filter((item) => item.type === selectedType);
-  const assignedItem = itemsOfType[0] || null;
 
   function handleSubmit(event) {
     event.preventDefault();
-    if (!assignedItem) return;
+    if (!selectedType || !Number.isInteger(quantity) || quantity < 1) return;
     onSubmit({
-      equipment_id: assignedItem.id,
-      quantity_requested: 1,
+      equipment_type: selectedType,
+      quantity_requested: quantity,
+      is_essential: isEssential,
       technical_requirement: technicalRequirement.trim() === "" ? undefined : technicalRequirement.trim(),
       borrow_start: new Date(start).toISOString(),
       borrow_end: new Date(end).toISOString(),
@@ -46,6 +51,17 @@ function EquipmentRequestForm({ equipmentOptions, borrowWindow, onWindowChange, 
               <path d="M5 7l5 5 5-5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </span>
+        </label>
+
+        <label className="eq-field">
+          Quantity
+          <input
+            type="number"
+            min="1"
+            value={quantity}
+            onChange={(e) => setQuantity(Number(e.target.value))}
+            required
+          />
         </label>
 
         <label className="eq-field">
@@ -77,17 +93,16 @@ function EquipmentRequestForm({ equipmentOptions, borrowWindow, onWindowChange, 
             placeholder="e.g. Needs HDMI input and a wireless lapel mic."
           />
         </label>
-      </div>
 
-      {selectedType && (
-        <div className="eq-available-items">
-          {assignedItem ? (
-            <p className="eq-reserve-summary">You have requested 1 {selectedType}.</p>
-          ) : (
-            <p className="eq-hint">None available for this type and window.</p>
-          )}
-        </div>
-      )}
+        <label className="eq-field eq-field-wide eq-field-checkbox">
+          <input
+            type="checkbox"
+            checked={isEssential}
+            onChange={(e) => setIsEssential(e.target.checked)}
+          />
+          Essential — the event can't go ahead without the full amount (no partial fulfillment)
+        </label>
+      </div>
 
       {saveError && (
         <p className="eq-error" role="alert">
@@ -95,7 +110,7 @@ function EquipmentRequestForm({ equipmentOptions, borrowWindow, onWindowChange, 
         </p>
       )}
 
-      <button type="submit" className="eq-primary" disabled={isSaving || !assignedItem}>
+      <button type="submit" className="eq-primary" disabled={isSaving || !selectedType || !Number.isInteger(quantity) || quantity < 1}>
         {isSaving ? "Submitting…" : "Submit request"}
       </button>
     </form>

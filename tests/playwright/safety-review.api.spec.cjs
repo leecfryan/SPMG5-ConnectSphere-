@@ -22,13 +22,14 @@ test('[SAFETY-REVIEW-API-001] SCRUM-140 AC1-AC4: the officer lists and reads a s
   const pending = await request.post(`/api/venues/${venueId}/booking-requests`, { headers: headers.first, data: {
     event_id: event.id, booking_date: date, slots: ['night'], expected_attendees: 30, room_layout: 'Theatre', required_facilities: ['Projector'],
   } });
+  // SCRUM-31: equipment_type replaces equipment_id.
   const equipment = await request.post(`/api/events/${event.id}/equipment-requests`, { headers: headers.first, data: {
-    equipment_id: first.id, quantity_requested: 1, technical_requirement: 'Rear of the hall', borrow_start: date + 'T01:00:00Z', borrow_end: date + 'T03:00:00Z',
+    equipment_type: 'Projector ' + first.id, quantity_requested: 1, technical_requirement: 'Rear of the hall', borrow_start: date + 'T01:00:00Z', borrow_end: date + 'T03:00:00Z',
   } });
   for (const response of [booked, pending, equipment]) expect(response.status()).toBe(201);
   expect((await request.patch(`/api/venues/booking-requests/${(await booked.json()).data.id}/decision`, { headers: headers.dual, data: { decision: 'confirmed' } })).status()).toBe(200);
   expect((await request.patch(`/api/venues/booking-requests/${(await pending.json()).data.id}/decision`, { headers: headers.dual, data: { decision: 'rejected', note: 'Night slot is closed for maintenance.' } })).status()).toBe(200);
-  expect((await request.patch(`/api/equipment-requests/${(await equipment.json()).data.id}/status`, { headers: headers.dual, data: { status: 'APPROVED' } })).status()).toBe(200);
+  expect((await request.patch(`/api/equipment-requests/${(await equipment.json()).data[0].id}/status`, { headers: headers.dual, data: { status: 'APPROVED' } })).status()).toBe(200);
 
   // AC1: not in the queue until the coordinator submits it.
   expect(await queued()).toBe(false);
@@ -47,7 +48,7 @@ test('[SAFETY-REVIEW-API-001] SCRUM-140 AC1-AC4: the officer lists and reads a s
     id: (await booked.json()).data.id, name: 'Integration Hall', booking_date: date, slots: ['pm'], expected_attendees: 30, capacity: 200,
     room_layout: 'Theatre', accessibility_requirements: [], accessibility_features: ['Lift'], notes: '',
   }]);
-  expect(body.equipment).toEqual([{ id: (await equipment.json()).data.id, type: `Projector ${first.id}`, quantity_requested: 1, technical_requirement: 'Rear of the hall' }]);
+  expect(body.equipment).toEqual([{ id: (await equipment.json()).data[0].id, type: `Projector ${first.id}`, quantity_requested: 1, technical_requirement: 'Rear of the hall' }]);
 
   // Access: only the Safety Officer reads it.
   for (const role of ['first', 'second', 'organiser', 'manager', 'dual', 'attendee']) {

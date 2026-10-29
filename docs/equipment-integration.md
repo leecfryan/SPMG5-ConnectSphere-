@@ -70,23 +70,28 @@ to a later sprint. Response shape:
 `type` that are both `AVAILABLE` (AC3 - any other status, including future
 values the team's status-constraint update adds, is excluded) and not
 committed to an overlapping `PENDING`/`APPROVED` request (AC2/AC4). There is
-no stock/quantity column on `equipment` - each row is one physical unit, so
-a single request's `quantity_requested` against one `equipment_id` does not
-generalise to a multi-unit-per-type booking yet; this is a known limitation
-the team is aware of and may cover in a follow-up story.
+no stock/quantity column on `equipment` - each row is one physical unit.
+
+**SCRUM-31 resolved the multi-unit-per-type limitation this section used to
+describe.** `POST /events/:eventId/equipment-requests` no longer picks or
+checks one specific unit at submission - it accepts `{ equipment_type,
+quantity_requested, is_essential }` and creates that many sibling rows
+sharing a `group_id`, each `equipment_id` null until Technical Support's
+`PATCH /equipment-requests/groups/:groupId/reserve` assigns real units (see
+`.agent/docs/other/SCRUM-31-equipment-partial-reserve.md` for the full data
+model and decisions). Creation itself never rejects for insufficient stock
+any more - an over-request is accepted, and Reserve resolves the shortfall
+by partially fulfilling (or, for an essential request, refusing to reserve
+anything at all).
 
 **Overlap rule changed for both this check and equipment requests.**
-`equipment.service.js`'s `hasOverlappingRequest` - used by
-`POST /events/:eventId/equipment-requests` - previously allowed back-to-back
-bookings (touching endpoints, timestamp precision). The team decided that
-divergence between the create path and this new availability check was
-unacceptable, so both now share one rule (`isBlockingOverlap` in
-`equipment.validation.js`): day-granularity, touching endpoints blocked
-("Return Day + 1" - AC4). An item that is not equipment-request-ed away
-still has its own status filter: `POST /events/:eventId/equipment-requests`
-now also rejects (409) equipment that is not `AVAILABLE` (AC3), so an item
-shown as unavailable through this check can never be successfully requested
-through that endpoint either. The prior Rule A query is commented out in
+`equipment.service.js`'s `hasOverlappingRequest` - used by the reserve
+action - previously allowed back-to-back bookings (touching endpoints,
+timestamp precision). The team decided that divergence between the
+reservation path and this availability check was unacceptable, so both now
+share one rule (`isBlockingOverlap` in `equipment.validation.js`):
+day-granularity, touching endpoints blocked ("Return Day + 1" - AC4). The
+prior Rule A query is commented out in
 `equipment.service.js` for reference, not deleted, in case the team revisits
 this.
 
@@ -258,14 +263,22 @@ The existing application contracts require:
   treats anything not `AVAILABLE` as excluded, so it works before and after
   that update), `updated_by`, `updated_at` (SCRUM-103 AC4 - set on every
   status-changing write, server-side only).
-- `equipment_requests`: `id`, `event_id`, `equipment_id`, `requested_by`,
-  `quantity_requested`, `technical_requirement`, `borrow_start`, `borrow_end`,
-  `status` (`PENDING`, `APPROVED`, `REJECTED`, `RELEASED` - SCRUM-104, and `REVIEW_REQUIRED` - SCRUM-150, all
-  added to the check constraint by hand), `created_at`; generated IDs/timestamps and appropriate foreign keys.
+- `equipment_requests`: `id`, `event_id`, `equipment_id` (nullable - SCRUM-31, see below), `equipment_type`
+  (SCRUM-31), `group_id` (SCRUM-31), `requested_by`, `quantity_requested`, `technical_requirement`,
+  `borrow_start`, `borrow_end`, `status` (`PENDING`, `APPROVED`, `REJECTED`, `RELEASED` - SCRUM-104,
+  `REVIEW_REQUIRED` - SCRUM-150, and `UNFULFILLED` - SCRUM-31, all added to the check constraint by hand),
+  `created_at`; generated IDs/timestamps and appropriate foreign keys.
   SCRUM-144 (Event Lifecycle lane) added `is_essential boolean not null default true` by hand on 2026-10-19:
   the assigned coordinator marks a request non-essential so it no longer blocks the safety check or
-  confirmation. Equipment code does not read or write it, but `select("*")` responses now include it. SQL and
-  rules in [event-requests.md](event-requests.md#confirm-an-event-scrum-144).
+  confirmation. SCRUM-31 is the first equipment-lane code to read and write it (set once, at submission, from
+  the coordinator's "Essential" checkbox - every sibling in a group gets the same value). SQL and rules in
+  [event-requests.md](event-requests.md#confirm-an-event-scrum-144).
+  **SCRUM-31 (this lane's own schema change, 2026-10-28):** one coordinator submission for N units now creates
+  N sibling rows sharing `group_id`, each with `equipment_type` set and `equipment_id` null until Technical
+  Support's reserve action assigns a real unit (→ `APPROVED`) or gives up on it (→ `UNFULFILLED`, auto-marked,
+  never a client-supplied target). A second check constraint enforces `status <> 'APPROVED' or equipment_id is
+  not null` at the database level. Full SQL and the data model's reasoning: `.agent/docs/other/
+  SCRUM-31-equipment-partial-reserve.md`.
 - `messages`: `id`, `equipment_request_id`, `author_id`, `author_role`, `body`,
   `created_at`, `updated_at`, `deleted_at`; the existing timestamp trigger is used
   for edits. The author-role constraint must accept `tech_support` and

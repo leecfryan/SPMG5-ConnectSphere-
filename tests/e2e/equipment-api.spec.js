@@ -11,9 +11,11 @@ function authHeader(token) {
   return { Authorization: "Bearer " + token };
 }
 
+// SCRUM-31: equipment_type replaces equipment_id - no specific unit is
+// picked at submission any more.
 function requestFields(setup, overrides = {}) {
   return {
-    equipment_id: setup.equipmentId, quantity_requested: 1,
+    equipment_type: setup.equipmentType, quantity_requested: 1,
     borrow_start: "2099-10-10T00:00:00Z", borrow_end: "2099-10-10T03:00:00Z",
     ...overrides,
   };
@@ -38,8 +40,13 @@ test.describe("Equipment API: role-scoped requests, technical review, clarificat
       data: requestFields(setup, { quantity_requested: 2, requested_by: "forged", status: "APPROVED" }),
     });
     expect(created.status(), await created.text()).toBe(201);
-    const { data: row } = await created.json();
-    expect(row).toMatchObject({ requested_by: setup.coordinator.id, status: "PENDING", quantity_requested: 2 });
+    // SCRUM-31: quantity_requested: 2 creates 2 sibling rows sharing a
+    // group_id - each sibling's own quantity_requested is always 1.
+    const { data: rows } = await created.json();
+    expect(rows).toHaveLength(2);
+    const groupIds = new Set(rows.map((row) => row.group_id));
+    expect(groupIds.size).toBe(1);
+    for (const row of rows) expect(row).toMatchObject({ requested_by: setup.coordinator.id, status: "PENDING", quantity_requested: 1 });
 
     expect((await request.get(`/api/events/${setup.eventId}/equipment-requests`, { headers: authHeader(tokens.outsider) })).status()).toBe(403);
     expect((await request.post(`/api/events/${setup.eventId}/equipment-requests`, { headers: authHeader(tokens.outsider), data: requestFields(setup) })).status()).toBe(403);
@@ -47,7 +54,7 @@ test.describe("Equipment API: role-scoped requests, technical review, clarificat
 
   test("technical support reviews and revises arrangements; a coordinator cannot review statuses", async ({ request }) => {
     const created = await request.post(`/api/events/${setup.eventId}/equipment-requests`, { headers: authHeader(tokens.coordinator), data: requestFields(setup) });
-    const { data: row } = await created.json();
+    const { data: [row] } = await created.json();
 
     const dashboard = await request.get("/api/technical-support/equipment-requests", { headers: authHeader(tokens.technical) });
     expect(dashboard.status()).toBe(200);
@@ -58,6 +65,14 @@ test.describe("Equipment API: role-scoped requests, technical review, clarificat
     expect((await request.get("/api/technical-support/equipment-requests", { headers: authHeader(tokens.coordinator) })).status()).toBe(403);
     expect((await request.patch(`/api/equipment-requests/${row.id}/status`, { headers: authHeader(tokens.coordinator), data: { status: "APPROVED" } })).status()).toBe(403);
 
+    // SCRUM-31: the row has no unit yet (equipment_id is null) until
+    // Reserve assigns one - the old status endpoint now refuses APPROVED on
+    // a unit-less row (TC-10). Reserve first, then the APPROVED/REJECTED
+    // toggle below is re-approving an already-reserved row, which still
+    // works through the old endpoint exactly as before.
+    const reserved = await request.patch(`/api/equipment-requests/groups/${row.group_id}/reserve`, { headers: authHeader(tokens.technical) });
+    expect(reserved.status(), await reserved.text()).toBe(200);
+
     for (const status of ["APPROVED", "REJECTED", "APPROVED"]) {
       const changed = await request.patch(`/api/equipment-requests/${row.id}/status`, { headers: authHeader(tokens.technical), data: { status } });
       expect(changed.status()).toBe(200);
@@ -67,7 +82,7 @@ test.describe("Equipment API: role-scoped requests, technical review, clarificat
 
   test("clarification messages enforce event relationships, real author identity, and are editable by their author", async ({ request }) => {
     const created = await request.post(`/api/events/${setup.eventId}/equipment-requests`, { headers: authHeader(tokens.coordinator), data: requestFields(setup) });
-    const { data: row } = await created.json();
+    const { data: [row] } = await created.json();
 
     const posted = await request.post(`/api/events/${setup.eventId}/messages`, {
       headers: authHeader(tokens.technical),
@@ -88,7 +103,7 @@ test.describe("Equipment API: role-scoped requests, technical review, clarificat
 
   test("Scrum-28-Scrum65 (AC3): a clarification thread is hidden 30 days after the event ends", async ({ request }) => {
     const created = await request.post(`/api/events/${setup.eventId}/equipment-requests`, { headers: authHeader(tokens.coordinator), data: requestFields(setup) });
-    const { data: row } = await created.json();
+    const { data: [row] } = await created.json();
     await request.post(`/api/events/${setup.eventId}/messages`, {
       headers: authHeader(tokens.technical), data: { equipment_request_id: row.id, body: "Still within the window" },
     });
@@ -113,12 +128,15 @@ test.describe("Equipment API: role-scoped requests, technical review, clarificat
       headers: authHeader(tokens.coordinator),
       data: requestFields(setup, { borrow_start: today + "T00:00:00Z", borrow_end: today + "T23:59:59Z" }),
     });
-    const { data: row } = await created.json();
+    const { data: [row] } = await created.json();
 
-    const approved = await request.patch(`/api/equipment-requests/${row.id}/status`, {
-      headers: authHeader(tokens.technical), data: { status: "APPROVED" },
+    // SCRUM-31: Reserve is now how a unit-less row gets a real equipment_id
+    // and becomes APPROVED - the old status endpoint refuses APPROVED
+    // before a unit is assigned (TC-10).
+    const approved = await request.patch(`/api/equipment-requests/groups/${row.group_id}/reserve`, {
+      headers: authHeader(tokens.technical),
     });
-    expect(approved.status()).toBe(200);
+    expect(approved.status(), await approved.text()).toBe(200);
 
     const retired = await request.patch(`/api/equipment/${setup.equipmentId}/retire`, { headers: authHeader(tokens.technical) });
     expect(retired.status(), await retired.text()).toBe(200);
