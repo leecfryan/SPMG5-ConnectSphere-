@@ -35,7 +35,7 @@ draft (`DRAFT`) and submit it later; see *Draft event requests (SCRUM-147)* belo
 ## Role-scoped review and planning
 
 Organisers see their own requests and view-only requests from their client organisation
-(SCRUM-100); they can edit only their own event details. Coordinators see only their assigned active
+(SCRUM-100); they can edit only their own event details while the event is `SUBMITTED` (SCRUM-164 AC2). Coordinators see only their assigned active
 events and the requests they rejected. Managers assign and reassign coordinators but do not decide: the assigned
 coordinator approves or rejects (SCRUM-98/99). Venue and equipment arrangements
 need an approved event. Only attendees can browse the registration catalogue.
@@ -221,6 +221,7 @@ Module at `backend/src/modules/events/`.
 | GET | /api/internal/safety-reviews/:eventId | same | `{ event, venues[], equipment[] }`; 404 unless the event is `SAFETY_REVIEW` |
 | POST | /api/internal/events/:eventId/cancel | requireAuth + internal.access + events.cancel (assigned coordinator or coordinator lead) | any active status (including `POSTPONED`) `→ CANCELLED`; body `{ "reason": string }` (required) |
 | POST | /api/internal/events/:eventId/postpone | requireAuth + internal.access + events.postpone (assigned coordinator or coordinator lead) | any of the five postponable stages `→ POSTPONED`; body `{ "reason": string }` (required) |
+| POST | /api/event-workspace/organiser/:id/change-request | requireAuth + events.own.update (own event only) | SCRUM-36: submit a change request for an `UNDER_REVIEW` or `APPROVED` event; body `{ "proposed_changes": { ...fields }, "reason": string }`; → 201 `{ event }` with `pending_change_request` set; 409 if already pending or status ineligible |
 
 ### Rules enforced server-side
 
@@ -806,6 +807,46 @@ refused.
 Validation reads and never mutates; trimming and coercion for storage are the
 service's job.
 
+### Change request (SCRUM-36)
+
+`eventWorkspace.service.js#submitChangeRequest`, `eventWorkspace.routes.js`. An organiser can submit a proposed
+change to one or more fields while their event is `UNDER_REVIEW` or `APPROVED`; the event itself is not touched
+until the coordinator decides (SCRUM-165).
+
+- `POST /api/event-workspace/organiser/:id/change-request` — body `{ proposed_changes: { ...fields }, reason }`.
+  The caller must own the event. Permitted fields are all `WRITABLE_COLS` (the same twelve that the organiser's
+  `PATCH` accepts). `reason` is required and trimmed; blank passes client-side validation but is caught server-side.
+  Only one request may be outstanding at a time — a second submission returns 409 `already_pending`.
+- The write is a conditional update: `.in("status", ["UNDER_REVIEW","APPROVED"])` + `.is("pending_change_request",
+  null)`. If the event moved between the read and the write, or another concurrent submission won, the update
+  touches no rows → 409 `conflict`.
+- The `GET /api/event-workspace/organiser/:id` workspace detail already includes `pending_change_request` (it is
+  in `FIELDS`); the frontend `ChangeRequestControls` component shows the pending request as a read-only view with
+  "Awaiting review", the reason, and the proposed fields.
+
+**Schema reference.** Added by hand in the Supabase SQL Editor (no migration file), after telling teammates:
+
+```sql
+alter table public.events
+  add column if not exists pending_change_request jsonb;
+```
+
+The column is `NULL` when no request is pending. `pending_change_request` shape:
+
+```json
+{
+  "proposed_changes": { "name": "New name", "expected_attendance": 200 },
+  "reason": "Venue change led to capacity increase",
+  "requested_at": "2026-10-26T10:00:00.000Z",
+  "requested_by": "<organiser-uuid>"
+}
+```
+
+SCRUM-165 (coordinator decision side) nulls this column after a decision is recorded and the accepted changes,
+if any, are applied to the event.
+
+Full design history and test list: `.agent/docs/other/SCRUM-36-requestEventChange.md`.
+
 ### Draft event requests (SCRUM-147)
 
 An organiser can save an unfinished request and come back to it (*Week 4 Project Instructions*, *Draft Event
@@ -849,13 +890,13 @@ Feature folder at `frontend/src/features/events/`.
 
 | File | Used by | Description |
 | --- | --- | --- |
-| `components/EventRequestForm.jsx` | EventRequestPage | The request form. Displays every server-side error against its own input. SCRUM-147: *Save draft* on new requests, and submitting an opened draft submits that draft. |
+| `components/EventRequestForm.jsx` | EventRequestPage, EventWorkspaceDetailPage | The request form. Displays every server-side error against its own input. SCRUM-147: *Save draft* on new requests, and submitting an opened draft submits that draft. SCRUM-164: shows a *Reason for change* textarea in edit mode; Save is disabled until a reason is entered and at least one field differs. |
 | `components/CoordinatorWorkloadOverview.jsx` | EventWorkspacePage (manager) | SCRUM-161: the Lead's table of events (event, status, coordinator) from the existing manager list. Opens on *All active statuses*; coordinator filter (each named coordinator, *Awaiting coordinator*, and *No longer active* for assignments held by someone the directory no longer lists) and status filter (lifecycle order, *All statuses* brings back rejected and cancelled events); *Clear filters*; "N of M events shown". Names come from `GET /api/event-workspace/coordinators`: an unknown id reads *No longer active*, and if the directory fails rows keep *Coordinator assigned*. Unassigned and departed coordinators are highlighted. Filters survive *Refresh events*, which also retries a directory that failed to load |
 | `components/DraftList.jsx` | EventWorkspacePage (organiser) | SCRUM-147: *Your drafts*, the organiser's own drafts linking back into the form; loading, empty and error states |
 | `components/StatusBadge.jsx` | Event request, assignment and workspace screens | Displays the stored status value as words ("Approved – planning" for `APPROVED`); the labels themselves live in [`statuses.js`](#services) |
 | `components/EventDecisionControls.jsx` | EventWorkspaceDetailPage (assigned coordinator only) | *Start review* on `SUBMITTED`; note + *Approve* / *Reject* on `UNDER_REVIEW`; nothing otherwise |
 | `components/EventDecisionSummary.jsx` | EventWorkspaceDetailPage (every scope) | Outcome, approver ("Not recorded" when unknown), time, and note or reason; hidden until `approved_rejected_at` is set |
-| `components/EventActivityHistory.jsx` | EventWorkspaceDetailPage (every scope) | SCRUM-141: recorded decisions newest first, with the note or rejection reason; empty and unavailable states |
+| `components/EventActivityHistory.jsx` | EventWorkspaceDetailPage (every scope) | SCRUM-141: recorded decisions newest first, with the note or rejection reason; SCRUM-164: EDIT entries with "Reason:" label; empty and unavailable states |
 | `components/SafetyDecisionControls.jsx` | SafetyReviewDetailPage (`events.safety.decide`) | SCRUM-141: note + *Approve* / *Reject*; reject needs a reason |
 | `components/ArrangementChecklist.jsx` | SafetyCheckControls, ConfirmEventControls | SCRUM-144: missing and non-essential lists, with *Mark as non-essential* / *Mark as essential* per request |
 | `components/ConfirmEventControls.jsx` | EventWorkspaceDetailPage (assigned coordinator, `PREPARATION`) | SCRUM-144: readiness, the checklist and *Confirm event*; loading, error and busy states |
@@ -970,6 +1011,10 @@ SCRUM-23/25; [event lifecycle tests](event-lifecycle-tests.md) §8 covers SCRUM-
 | Integration | `tests/integration/events.review.test.js` | Approve/reject release arrangements on a resubmission, are safe no-ops on a first-time decision, and never fire on a failed decision (SCRUM-37) |
 | Frontend | `features/events/components/EventRequestForm.test.jsx` | The confirm-before-save warning, its dismissal and re-trigger rules, and the non-significant/no-arrangement fast paths (SCRUM-37) |
 | Playwright | `tests/playwright/event-workspace.browser.spec.cjs` (`E2E-EVENT-102`) | SCRUM-161 overview in a real browser: coordinator and status filters and *Clear filters* at 375 px, then the detail link |
+| Unit (service) | `tests/unit/events/eventWorkspace.service.test.js` | SCRUM-164: lock guard, reason validation, activity log write (TC-SCRUM-164-01 through 06) |
+| Integration | `tests/integration/eventWorkspace.test.js` | SCRUM-164: full PATCH with reason, locked status 409, missing reason 400 (TC-SCRUM-164-10 through 12) |
+| Frontend | `pages/EventWorkspaceDetailPage.test.jsx` | SCRUM-164: locked message, reason field, EDIT activity label (TC-SCRUM-164-13 through 15) |
+| Playwright API | `tests/playwright/event-workspace.api.spec.cjs` | SCRUM-164: lock 409, activity log with reason, missing reason 400 (TC-SCRUM-164-E2E-API-01 through 03) |
 
 Test names lead with their Jira key, so the terminal output is the traceability
 record. Cases are grouped by the Week 4 five-step method: happy path,

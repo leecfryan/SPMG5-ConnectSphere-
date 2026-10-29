@@ -127,7 +127,7 @@ module.exports = function registrationStorage(accounts) {
               : registrations;
         let result = rows.filter(row => filters.every(test => test(row)));
         if (insertion) {
-          if (rows.some(row => row.attendee_id === insertion.attendee_id && row.event_id === insertion.event_id)) {
+          if (insertion.attendee_id !== undefined && rows.some(row => row.attendee_id === insertion.attendee_id && row.event_id === insertion.event_id)) {
             return { data: null, error: { code: '23505', message: 'Duplicate registration' } };
           }
           const now = new Date().toISOString();
