@@ -78,10 +78,18 @@ async function insertEquipment({ type, status = "AVAILABLE" }) {
   return id;
 }
 
+// SCRUM-31: equipment_type and group_id are now required columns. This
+// fixture still inserts one row per physical unit (the pre-SCRUM-31 shape),
+// so it's "a group of one" - group_id is its own id, same as the migration
+// backfilled every existing row - and the type is resolved from the unit
+// it's already given, so every call site above is unchanged.
 async function insertRequest({ eventId, equipmentId, status = "APPROVED", borrowStart, borrowEnd }) {
   const id = randomUUID();
+  const { data: unit, error: unitError } = await supabase.from("equipment").select("type").eq("id", equipmentId).single();
+  if (unitError) throw new Error("equipment lookup failed: " + unitError.message);
   const { error } = await supabase.from("equipment_requests").insert({
     id, event_id: eventId, equipment_id: equipmentId, requested_by: coordinatorUserId,
+    equipment_type: unit.type, group_id: id,
     quantity_requested: 1, borrow_start: borrowStart, borrow_end: borrowEnd, status,
   });
   if (error) throw new Error("equipment_requests insert failed: " + error.message);
