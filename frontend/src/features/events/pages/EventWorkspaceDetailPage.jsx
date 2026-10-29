@@ -12,6 +12,7 @@ import EventCancellationSummary from "../components/EventCancellationSummary";
 import EventPostponeControl from "../components/EventPostponeControl";
 import EventPostponeSummary from "../components/EventPostponeSummary";
 import EventRequestForm from "../components/EventRequestForm";
+import ChangeRequestControls from "../components/ChangeRequestControls";
 import SafetyCheckControls from "../components/SafetyCheckControls";
 import ConfirmEventControls from "../components/ConfirmEventControls";
 import EventSavedChanges from "../components/EventSavedChanges";
@@ -66,6 +67,9 @@ function Detail({ scope, eventId }) {
             }} /> : <button type="button" onClick={() => { setSaved(false); setEditing(true); }}>Edit event</button>) :
             <p>Editing is no longer available. The event has moved to review and changes are locked.</p>
         ) : <p>View only. Only the responsible organiser can edit this event.</p>}
+        {/* SCRUM-36: change request for UNDER_REVIEW / APPROVED events */}
+        {event.organiser_id === user.id && hasPermission("events.own.update") &&
+          <ChangeRequestControls event={event} onSubmitted={reload} />}
       </>}
       {scope === "organiser" && event.organiser_id === user.id && hasPermission("events.own.update") &&
         event.status === "CHANGES_REQUESTED" && !editing && !loading && <EventResubmitControl

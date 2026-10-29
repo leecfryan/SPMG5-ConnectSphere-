@@ -89,6 +89,26 @@ export function updateEventRequest(eventId, fields, token) {
   });
 }
 
+// SCRUM-36: body is { proposed_changes: { ... }, reason: "..." }; the caller
+// applies withZonedTimes to proposed_changes before passing in.
+export async function submitChangeRequest(eventId, body, token) {
+  if (!token) return { event: null, errors: [], message: "Please sign in to submit a change request." };
+  try {
+    const payload = await apiFetch(
+      `/api/event-workspace/organiser/${encodeURIComponent(eventId)}/change-request`,
+      token,
+      { method: "POST", body },
+    );
+    if (!payload.event) return { event: null, errors: [], message: "Unable to submit the change request. Please refresh and try again." };
+    return { event: payload.event, errors: [], message: "" };
+  } catch (error) {
+    return {
+      event: null, errors: error.errors || [],
+      message: error.errors?.length ? "" : error.status ? error.message : "Unable to connect. Check your connection and try again.",
+    };
+  }
+}
+
 // SCRUM-147: drafts. The whole form is sent each time, so a field the
 // organiser cleared is cleared on the draft too.
 const DRAFT_MESSAGES = Object.freeze({
