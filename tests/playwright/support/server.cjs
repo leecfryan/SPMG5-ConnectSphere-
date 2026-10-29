@@ -264,7 +264,7 @@ const assignmentDependencies = {
   },
   directory: require('../../../backend/src/modules/events/coordinators.directory')(dataClient),
 };
-const notificationFixture = require('./notification-storage.cjs')({ auth, eventsRepository, dataClient });
+const notificationFixture = require('./notification-storage.cjs')({ auth, eventsRepository, dataClient, venuesService });
 const app = createApp({ notificationsService: notificationFixture.identity, dataClient, authClient: client, eventsRepository, assignmentDependencies, venuesService, equipmentDependencies, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
 // Fixture endpoints exercise real middleware; these are NOT production business endpoints.
 const permissions = ['venues.read', 'equipment.read', 'bookings.read', 'technical_requests.read', 'event_planning.read', 'attendees.read', 'clients.read', 'event_organisers.read'];

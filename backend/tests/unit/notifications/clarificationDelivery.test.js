@@ -8,7 +8,7 @@ function fixture(workflow = "event-changes-requested") {
     payload: { eventId: "saved-event", cycleId: "cycle-one", eventName: "Community <Workshop>",
       message: "Clarify layout & attendance.\nKeep this second line.", requestPath: "/my-event-requests/saved-event" } };
   const pending = new Map([[row.id, row]]);
-  const repository = { prepareAssignments: vi.fn(async () => 0), claim: async () => [...pending.values()],
+  const repository = { prepareVenueHolds: async () => 0, prepareAssignments: vi.fn(async () => 0), claim: async () => [...pending.values()],
     complete: vi.fn(async row => pending.delete(row.id)), retry: vi.fn(async () => {}) };
   const fetchImpl = vi.fn(async (_url, args) => ({ ok: true, json: async () => ({ data: {
     acknowledged: true, status: "processed", transactionId: JSON.parse(args.body).transactionId } }) }));

@@ -9,6 +9,12 @@ function createNotificationOutboxRepository(client) {
   });
   return {
     prepareAssignments: () => rpc("enqueue_assignment_notifications", {}),
+    prepareVenueHolds: () => rpc("enqueue_venue_hold_notifications", {}),
+    venueHoldNotificationIsCurrent: async row => {
+      const valid = await rpc("validate_venue_hold_notification", { delivery_id: row.id, claim_token: row.lease_token });
+      if (typeof valid !== "boolean") throw new Error("Notification queue is unavailable.");
+      return valid;
+    },
     claim: () => rpc("claim_notification_outbox", {}),
     complete: row => finish(row, true),
     retry: row => finish(row, false),

@@ -5,7 +5,7 @@ const { createNotificationDeliveryService } = require("../../../src/modules/noti
 const { createNotificationOutboxRepository } = require("../../../src/modules/notifications/notificationOutbox.repository");
 const row = { id: "delivery-id", recipient_id: "organiser", lease_token: "lease-one", payload: { eventName: "Literacy", outcome: "approved" } };
 function fixture() {
-  const repository = { prepareAssignments: vi.fn(async () => 0), claim: vi.fn(async () => [row]), complete: vi.fn(async () => true), retry: vi.fn(async () => true) };
+  const repository = { prepareVenueHolds: async () => 0, prepareAssignments: vi.fn(async () => 0), claim: vi.fn(async () => [row]), complete: vi.fn(async () => true), retry: vi.fn(async () => true) };
   const fetchImpl = vi.fn(async () => ({ ok: true, json: async () => ({ data: { acknowledged: true, status: "processed", transactionId: row.id } }) }));
   const logger = { warn: vi.fn() };
   return { repository, fetchImpl, logger, service: createNotificationDeliveryService({ repository, fetchImpl, logger, secretKey: "fixture-only-key" }) };
@@ -73,7 +73,9 @@ test("[TC-SCRUM-143-24] Empty queue, start/stop and repeated start do not duplic
 });
 test("[TC-SCRUM-143-24] A slow delivery skips overlapping polls", async () => {
   const f = fixture(); let release; f.repository.claim.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
-  const first = f.service.runOnce(); await f.service.runOnce(); expect(f.repository.claim).toHaveBeenCalledTimes(1);
+  const first = f.service.runOnce();
+  await vi.waitFor(() => expect(f.repository.claim).toHaveBeenCalledTimes(1));
+  await f.service.runOnce(); expect(f.repository.claim).toHaveBeenCalledTimes(1);
   release([row]); await first; await f.service.runOnce(); expect(f.repository.claim).toHaveBeenCalledTimes(2);
 });
 test("[TC-SCRUM-143-25] Repository uses fenced claim/finish RPCs and normalises storage errors", async () => {
