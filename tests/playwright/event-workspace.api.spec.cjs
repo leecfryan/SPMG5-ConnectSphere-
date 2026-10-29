@@ -231,6 +231,40 @@ test('[EVENT-API-110] SCRUM-100: Invalid bodies and malformed references return 
 // behaviour - not a change to anything this test actually verifies (venue
 // release, the lead/ops-manager postpone path itself), just the one fact
 // about postpone that moved under it.
+// SCRUM-36 AC1/AC5: organiser submits a change request for an UNDER_REVIEW event;
+// the event name is unchanged, pending_change_request is set with the right shape.
+test('[SCRUM-36-API-001] SCRUM-36: organiser submits a change request and event content stays unchanged', async ({ accounts, request }) => {
+  const { event, organiser, headers } = await setupWorkflow(accounts, request);
+  await accounts.updateEvent(event.id, { status: 'UNDER_REVIEW' });
+  const before = (await (await request.get(`/api/event-workspace/organiser/${event.id}`, { headers: headers.organiser })).json()).event;
+  const response = await request.post(`/api/event-workspace/organiser/${event.id}/change-request`, {
+    headers: headers.organiser,
+    data: { proposed_changes: { name: 'Updated title for coordinator review' }, reason: 'Coordinator requested a clearer title' },
+  });
+  expect(response.status()).toBe(201);
+  const body = await response.json();
+  expect(body.event.pending_change_request).toMatchObject({
+    proposed_changes: { name: 'Updated title for coordinator review' },
+    reason: 'Coordinator requested a clearer title',
+    requested_by: organiser.id,
+  });
+  expect(body.event.name).toBe(before.name);
+  expect(body.event.status).toBe('UNDER_REVIEW');
+});
+
+// SCRUM-36 AC7: the change-request endpoint lives under /organiser/:id — a
+// coordinator has events.assigned.read, not events.own.update, so the guard returns 403.
+test('[SCRUM-36-API-002] SCRUM-36: coordinator is denied the change-request endpoint with 403', async ({ accounts, request }) => {
+  const { event, first, headers, update } = await setupWorkflow(accounts, request);
+  expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
+  await accounts.updateEvent(event.id, { status: 'UNDER_REVIEW' });
+  const denied = await request.post(`/api/event-workspace/organiser/${event.id}/change-request`, {
+    headers: headers.first,
+    data: { proposed_changes: { name: 'Coordinator attempt' }, reason: 'Should be denied' },
+  });
+  expect(denied.status()).toBe(403);
+});
+
 for (const [id, role] of [['001', 'event_coordinator_lead'], ['002', 'event_ops_manager']]) {
   test(`[SCRUM-142-MERGE-API-${id}] ${role} postpones another coordinator's event and releases its equipment`, async ({ accounts, request }) => {
     const { headers, event, first, date, update } = await setupWorkflow(accounts, request);
