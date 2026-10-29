@@ -305,3 +305,27 @@ test('[E2E-EVENT-102] SCRUM-161: the Lead filters assignments by coordinator and
   await link(event.name).click();
   await expect(page.getByRole('heading', { name: event.name, exact: true })).toBeVisible();
 });
+
+// SCRUM-36 AC5/AC6: submitting a change request stores it without touching the
+// event, and the pending view persists on page refresh.
+test('[SCRUM-36-UI-001] SCRUM-36: organiser submits a change request and sees awaiting-review after refresh', async ({ page, accounts }) => {
+  const { organiser, event } = await setupWorkflow(accounts, page.request);
+  await accounts.updateEvent(event.id, { status: 'UNDER_REVIEW' });
+
+  await page.goto(`/my-event-requests/${event.id}`);
+  await signIn(page, organiser);
+
+  await page.getByRole('button', { name: 'Request a change', exact: true }).click();
+  await page.getByLabel('Event name', { exact: true }).fill('Annual Gala – revised');
+  await page.getByLabel('Reason for change', { exact: true }).fill('Venue requested a name update');
+  await page.getByRole('button', { name: 'Submit change request', exact: true }).click();
+
+  await expect(page.getByText(/awaiting review/i)).toBeVisible();
+  await expect(page.getByText(/venue requested a name update/i)).toBeVisible();
+  // The event's own name is unchanged — the proposal is stored separately.
+  await expect(page.getByRole('heading', { name: event.name, exact: true })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByText(/awaiting review/i)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Request a change' })).toHaveCount(0);
+});
