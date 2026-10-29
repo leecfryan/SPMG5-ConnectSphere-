@@ -6,7 +6,9 @@
 // sets it, and it can only leave that status via the same APPROVED/REJECTED
 // decision. Shared between EventEquipmentCard.jsx (Technical Support) and
 // EquipmentRequestPage.jsx (the coordinator) so both show the same label.
+// SCRUM-31: UNFULFILLED is a sibling Reserve could not cover - terminal,
+// never selectable (only reserveGroup writes it).
 export const STATUS_LABEL = {
   PENDING: "Unattended", APPROVED: "Assigned", REJECTED: "Issues", RELEASED: "Released",
-  REVIEW_REQUIRED: "Needs re-review",
+  REVIEW_REQUIRED: "Needs re-review", UNFULFILLED: "Unfulfilled",
 };
