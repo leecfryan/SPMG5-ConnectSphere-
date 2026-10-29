@@ -1,6 +1,7 @@
 // Field rules for an equipment request. Two gates:
-//   validateCreateRequest  - everything needed to insert a new request row.
-//   validateStatusUpdate   - the review action: PENDING -> APPROVED/REJECTED.
+//   validateCreateRequestGroup - everything needed to insert the N sibling
+//                                 rows one submission creates (SCRUM-31).
+//   validateStatusUpdate       - the review action: PENDING -> APPROVED/REJECTED.
 //
 // Both return { ok: boolean, errors: [{ field, message }], value }. `errors`
 // lists EVERY problem, not just the first - `value` is the normalised
@@ -11,25 +12,22 @@
 // client, so these tests run without SUPABASE_URL / SUPABASE_SECRET_KEY set -
 // same reasoning as events.validation.js.
 //
-// `requested_by` and `status` are deliberately not accepted here: requested_by
-// is never client input (the controller attaches the authenticated caller's
-// id), and status starts at PENDING and only ever changes through
-// validateStatusUpdate.
+// `requested_by`, `status`, `equipment_id` and `group_id` are deliberately not
+// accepted here: requested_by is never client input (the controller attaches
+// the authenticated caller's id), status starts at PENDING and only ever
+// changes through validateStatusUpdate or the reserve action, and
+// equipment_id/group_id are decided server-side once a unit is assigned
+// (SCRUM-31 - see equipment.service.js's createRequestGroup/reserveGroup).
 
 const TECH_REQUIREMENT_MAX = 2000;
 
+// SCRUM-31 AC1: a generous sanity ceiling (same spirit as
+// TECH_REQUIREMENT_MAX), not a real business limit - no realistic single
+// equipment request needs more than this.
+const QUANTITY_CAP = 50;
+
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-// Columns a caller may set when creating a request.
-const WRITABLE_COLS = [
-  "event_id",
-  "equipment_id",
-  "quantity_requested",
-  "technical_requirement",
-  "borrow_start",
-  "borrow_end",
-];
 
 const REVIEW_STATUSES = ["APPROVED", "REJECTED"];
 
@@ -59,15 +57,37 @@ function checkForeignKey(data, field, errors) {
   }
 }
 
-// scrum-27 AC2: required quantity, must be a positive whole number.
+// scrum-27 AC2 + SCRUM-31 AC1: required quantity, a positive whole number up
+// to QUANTITY_CAP. SCRUM-31 Decision 13: the cap is a sanity ceiling, not a
+// business rule - this is how many sibling rows one submission creates.
 function checkQuantity(data, errors) {
   const value = data.quantity_requested;
   if (value === undefined || value === null) {
     errors.push(err("quantity_requested", "required"));
-  } else if (!Number.isInteger(value) || value <= 0) {
+  } else if (!Number.isInteger(value) || value <= 0 || value > QUANTITY_CAP) {
     errors.push(
-      err("quantity_requested", "must be a whole number greater than zero"),
+      err("quantity_requested", `must be a whole number between 1 and ${QUANTITY_CAP}`),
     );
+  }
+}
+
+// SCRUM-31: the type being requested - no specific unit is picked at
+// submission any more (see the task note's Data model decision). Plain text,
+// same convention as equipment.type itself: required, non-blank, trimmed.
+function checkEquipmentType(data, errors) {
+  const value = data.equipment_type;
+  if (typeof value !== "string" || value.trim() === "") {
+    errors.push(err("equipment_type", "required"));
+  }
+}
+
+// SCRUM-31 Decision 7: optional, defaults to false. A coordinator who leaves
+// it off gets partial fulfillment; ticking it makes the whole group
+// all-or-nothing at reserve time (AC5).
+function checkIsEssential(data, errors) {
+  const value = data.is_essential;
+  if (value !== undefined && typeof value !== "boolean") {
+    errors.push(err("is_essential", "must be true or false"));
   }
 }
 
@@ -104,13 +124,19 @@ function checkRequiredTime(data, field, errors) {
   return millis;
 }
 
-function validateCreateRequest(input) {
+// SCRUM-31 AC1: one coordinator submission for `quantity_requested` units of
+// `equipment_type`. No equipment_id is accepted or picked here any more -
+// Decision 4: this never rejects for insufficient stock, so there is nothing
+// about availability to check at this layer; equipment.service.js's
+// createRequestGroup turns this into that many sibling rows.
+function validateCreateRequestGroup(input) {
   const data = asObject(input);
   const errors = [];
 
   checkForeignKey(data, "event_id", errors);
-  checkForeignKey(data, "equipment_id", errors);
+  checkEquipmentType(data, errors);
   checkQuantity(data, errors);
+  checkIsEssential(data, errors);
   checkTechnicalRequirement(data, errors);
 
   const startMillis = checkRequiredTime(data, "borrow_start", errors);
@@ -123,8 +149,9 @@ function validateCreateRequest(input) {
 
   const value = {
     event_id: data.event_id,
-    equipment_id: data.equipment_id,
+    equipment_type: data.equipment_type.trim(),
     quantity_requested: data.quantity_requested,
+    is_essential: data.is_essential === true,
     borrow_start: new Date(data.borrow_start).toISOString(),
     borrow_end: new Date(data.borrow_end).toISOString(),
   };
@@ -334,6 +361,52 @@ function checkAvailability({ equipmentUnits, requestsByEquipmentId, requestedSta
   };
 }
 
+// Shared by every caller that needs "this unit's PENDING/APPROVED requests"
+// grouped for findAvailableUnits: the catalogue/availability endpoints and
+// (SCRUM-31) reserveGroup. Moved here from equipment.controller.js so the
+// reserve action can reuse it without duplicating the loop.
+function groupRequestsByEquipmentId(requests) {
+  const requestsByEquipmentId = new Map();
+  for (const request of requests) {
+    const forUnit = requestsByEquipmentId.get(request.equipment_id) || [];
+    forUnit.push(request);
+    requestsByEquipmentId.set(request.equipment_id, forUnit);
+  }
+  return requestsByEquipmentId;
+}
+
+// SCRUM-31 AC1/AC2/AC5: the pure reservation decision. `pendingRequests` and
+// `availableUnits` are pre-scoped by the caller (reserveGroup) - this just
+// decides who gets what, so it can be tested without any I/O.
+//
+// AC5: an essential group (Decision 2: essential if *any* sibling is) is
+// all-or-nothing - if there isn't enough stock to cover every pending
+// sibling, nothing is reserved at all (Decision 9: checked before any write,
+// so a 409 here always means zero side effects).
+//
+// Otherwise (AC1): assign units to as many pending siblings as there are
+// available units, in order; whatever's left becomes UNFULFILLED
+// (Decision 8: automatic, no manual flag).
+function planReservation({ pendingRequests, availableUnits, isEssential }) {
+  if (isEssential && availableUnits.length < pendingRequests.length) {
+    return {
+      ok: false,
+      reason: "essential_shortfall",
+      availableCount: availableUnits.length,
+      pendingCount: pendingRequests.length,
+    };
+  }
+
+  const reservedCount = Math.min(availableUnits.length, pendingRequests.length);
+  const assignments = pendingRequests.slice(0, reservedCount).map((request, index) => ({
+    requestId: request.id,
+    equipmentId: availableUnits[index].id,
+  }));
+  const unfulfilledRequestIds = pendingRequests.slice(reservedCount).map((request) => request.id);
+
+  return { ok: true, assignments, unfulfilledRequestIds };
+}
+
 // scrum 29 AC1: accepts event start/end date-time, equipment type, requested
 // quantity, and event location. Location is accepted and echoed back but not
 // used for filtering yet - deferred to a later sprint per the story's scope.
@@ -398,9 +471,9 @@ function validateAvailabilityWindow(input) {
 }
 
 module.exports = {
-  validateCreateRequest,
+  validateCreateRequestGroup,
   validateStatusUpdate,
-  WRITABLE_COLS,
+  QUANTITY_CAP,
   REVIEW_STATUSES,
   EQUIPMENT_STATUSES,
   OPERATIONAL_STATUSES,
@@ -413,6 +486,8 @@ module.exports = {
   isStatusAvailable,
   findAvailableUnits,
   checkAvailability,
+  groupRequestsByEquipmentId,
+  planReservation,
   validateAvailabilityQuery,
   validateAvailabilityWindow,
 };

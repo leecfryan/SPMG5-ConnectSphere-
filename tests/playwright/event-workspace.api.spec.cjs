@@ -7,11 +7,13 @@ test('[ACCESS-E2E-API-001] Real assignment, bookings and reassignment preserve r
   expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
   // Stands in for the assigned coordinator's approval (SCRUM-99); bookings need an approved event.
   await accounts.updateEvent(event.id, { status: 'APPROVED' });
-  const equipmentFields = { equipment_id: first.id, quantity_requested: 1, technical_requirement: 'HDMI', borrow_start: date + 'T01:00:00Z', borrow_end: date + 'T03:00:00Z' };
+  // SCRUM-31: equipment_type replaces equipment_id; the response is now an
+  // array of sibling rows (one here, since quantity_requested is 1).
+  const equipmentFields = { equipment_type: 'Projector ' + first.id, quantity_requested: 1, technical_requirement: 'HDMI', borrow_start: date + 'T01:00:00Z', borrow_end: date + 'T03:00:00Z' };
   const equipmentPath = `/api/events/${event.id}/equipment-requests`;
   const equipment = await request.post(equipmentPath, { headers: headers.first, data: equipmentFields });
   expect(equipment.status()).toBe(201);
-  const equipmentId = (await equipment.json()).data.id;
+  const equipmentId = (await equipment.json()).data[0].id;
   const venueFields = { event_id: event.id, booking_date: date, slots: ['pm'], expected_attendees: 30, room_layout: 'Theatre', required_facilities: ['Projector'] };
   const venue = await request.post(`/api/venues/${venueId}/booking-requests`, { headers: headers.first, data: venueFields });
   expect(venue.status()).toBe(201);
@@ -270,11 +272,11 @@ for (const [id, role] of [['001', 'event_coordinator_lead'], ['002', 'event_ops_
     await accounts.updateEvent(event.id, { status: 'APPROVED' });
     const equipmentPath = `/api/events/${event.id}/equipment-requests`;
     const equipmentResponse = await request.post(equipmentPath, { headers: headers.first, data: {
-      equipment_id: first.id, quantity_requested: 1, technical_requirement: 'HDMI',
+      equipment_type: 'Projector ' + first.id, quantity_requested: 1, technical_requirement: 'HDMI',
       borrow_start: date + 'T01:00:00Z', borrow_end: date + 'T03:00:00Z',
     } });
     expect(equipmentResponse.status()).toBe(201);
-    const equipmentId = (await equipmentResponse.json()).data.id;
+    const equipmentId = (await equipmentResponse.json()).data[0].id;
     const bookingResponse = await request.post(`/api/venues/${venueId}/booking-requests`, { headers: headers.first, data: {
       event_id: event.id, booking_date: date, slots: ['pm'], expected_attendees: 30,
       room_layout: 'Theatre', required_facilities: ['Projector'],

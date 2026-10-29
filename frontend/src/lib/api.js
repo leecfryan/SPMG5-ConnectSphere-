@@ -246,6 +246,15 @@ export function updateEquipmentRequestStatus(id, status, token) {
   });
 }
 
+// SCRUM-31: reserve as many of a group's still-PENDING siblings as real
+// stock allows (auto-marking the rest UNFULFILLED), unless the group is
+// essential and short - then nothing changes and this rejects (409).
+export function reserveEquipmentRequestGroup(groupId, token) {
+  return request(`/api/equipment-requests/groups/${groupId}/reserve`, token, {
+    method: "PATCH",
+  });
+}
+
 // Scrum-28-Scrum65/66 (AC3/AC4): the clarification thread for one event,
 // aggregated server-side across all of its equipment lines.
 export function fetchEventMessages(eventId, token) {

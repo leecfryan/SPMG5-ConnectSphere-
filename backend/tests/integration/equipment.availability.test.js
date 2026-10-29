@@ -74,10 +74,18 @@ async function insertEquipment({ type, status = "AVAILABLE", location = "Test Ro
   return id;
 }
 
+// SCRUM-31: equipment_type and group_id are now required columns. This
+// fixture still inserts one row per physical unit (the pre-SCRUM-31 shape),
+// so it's "a group of one" - group_id is its own id, same as the migration
+// backfilled every existing row - and the type is resolved from the unit
+// it's already given, so every call site above is unchanged.
 async function insertRequest({ equipmentId, status = "PENDING", borrowStart, borrowEnd }) {
   const id = randomUUID();
+  const { data: unit, error: unitError } = await supabase.from("equipment").select("type").eq("id", equipmentId).single();
+  if (unitError) throw new Error("equipment lookup failed: " + unitError.message);
   const { error } = await supabase.from("equipment_requests").insert({
     id, event_id: anchorEventId, equipment_id: equipmentId, requested_by: anchorUserId,
+    equipment_type: unit.type, group_id: id,
     quantity_requested: 1, borrow_start: borrowStart, borrow_end: borrowEnd, status,
   });
   if (error) throw new Error("equipment_requests insert failed: " + error.message);
@@ -317,34 +325,16 @@ describe("role gating and consistency with the create-request path", () => {
     expect((await send(base, availabilityQuery(type), undefined)).status).toBe(401);
   });
 
-  // Team requirement: an item the availability check reports as 0 available
-  // must never be successfully bookable through the create-request endpoint.
-  test("equipment excluded by status (AC3) cannot be successfully requested", async () => {
-    const type = freshType();
-    const unit = await insertEquipment({ type, status: "DAMAGED" });
-    const base = await startApp();
-
-    const start = new Date(Date.now() + 86400000).toISOString();
-    const end = new Date(Date.now() + 2 * 86400000).toISOString();
-    const response = await send(base, `/events/${anchorEventId}/equipment-requests`, "event_coordinator", {
-      method: "POST",
-      body: { equipment_id: unit, quantity_requested: 1, borrow_start: start, borrow_end: end },
-    });
-    expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({ error: "This equipment is not available for booking." });
-  });
-
-  test("equipment excluded by Return Day + 1 (scrum-29 AC4) cannot be successfully requested on the return day itself", async () => {
-    const type = freshType();
-    const unit = await insertEquipment({ type });
-    await insertRequest({ equipmentId: unit, status: "APPROVED", borrowStart: "2026-09-09T08:00:00Z", borrowEnd: "2026-09-10T12:00:00Z" });
-    const base = await startApp();
-
-    const response = await send(base, `/events/${anchorEventId}/equipment-requests`, "event_coordinator", {
-      method: "POST",
-      body: { equipment_id: unit, quantity_requested: 1, borrow_start: "2026-09-10T14:00:00Z", borrow_end: "2026-09-10T18:00:00Z" },
-    });
-    expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({ error: "This equipment is already requested for an overlapping period" });
-  });
+  // SCRUM-31 Decision 4: retired. The two tests that lived here asserted
+  // that an unavailable/overlapping unit could not be successfully requested
+  // - that was true only because creation used to pick one specific unit and
+  // check it right there. Creation no longer picks a unit at all (it's a
+  // type + quantity ask, resolved later by Reserve - see the task note's
+  // Data model decision), so there is nothing about a specific unit's
+  // availability left to check at this endpoint; an over-request is accepted
+  // by design (TC-SCRUM-31-15) and the shortfall is handled by Reserve, not
+  // creation. The guarantee these tests protected - "excluded here is never
+  // assigned by reserve" - still holds, just one layer further in: it's
+  // exactly what AC2/AC3 above already prove about findAvailableUnits, and
+  // what SCRUM-31's own reserveGroup tests prove for the new reserve action.
 });

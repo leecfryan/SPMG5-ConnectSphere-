@@ -54,7 +54,10 @@ function checkArrangements({ venueRequests, equipmentRequests }) {
 
   for (const request of equipmentRequests) {
     const reason = EQUIPMENT_REASONS[request.status];
-    if (reason) outstanding(request, { kind: "equipment", label: request.equipment.type, reason });
+    // SCRUM-31: equipment_id is now nullable (a request can exist before a
+    // unit is assigned), so the embedded equipment join can be null - read
+    // the request's own equipment_type first, same value either way.
+    if (reason) outstanding(request, { kind: "equipment", label: request.equipment_type ?? request.equipment?.type ?? null, reason });
   }
   return { missing, optional };
 }

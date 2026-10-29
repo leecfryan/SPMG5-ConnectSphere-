@@ -19,18 +19,26 @@ test.describe("SCRUM-144 confirm an event (live Supabase)", () => {
   test.afterEach(async () => { await setup.teardown(); });
 
   test("non-essential flags are stored on the real request rows and let the event be confirmed", async ({ request }) => {
+    // SCRUM-31: equipment_type replaces equipment_id; the response is now an
+    // array of sibling rows (one here, since quantity_requested is 1).
+    // is_essential now defaults to false at submission (Decision 7 - a
+    // coordinator opts in via the "Essential?" checkbox), not the column's
+    // own default of true, so it's passed explicitly here to keep this
+    // test's "both pending items block" premise true for equipment too.
     const created = await request.post(`/api/events/${setup.eventId}/equipment-requests`, { headers, data: {
-      equipment_id: setup.equipmentId, quantity_requested: 1, borrow_start: "2099-10-10T00:00:00Z", borrow_end: "2099-10-10T03:00:00Z",
+      equipment_type: setup.equipmentType, quantity_requested: 1, is_essential: true,
+      borrow_start: "2099-10-10T00:00:00Z", borrow_end: "2099-10-10T03:00:00Z",
     } });
     expect(created.status(), await created.text()).toBe(201);
-    const equipmentRequestId = (await created.json()).data.id;
+    const equipmentRequestId = (await created.json()).data[0].id;
     const readiness = async () => {
       const response = await request.get(`/api/internal/events/${setup.eventId}/safety-readiness`, { headers });
       expect(response.status(), await response.text()).toBe(200);
       return response.json();
     };
 
-    // New rows take the column default: both pending items block.
+    // The venue row still takes the venue_booking_requests column default
+    // (true); the equipment row above was created essential explicitly.
     expect(await readEssential("venue_booking_requests", setup.pendingRequestId)).toBe(true);
     expect(await readEssential("equipment_requests", equipmentRequestId)).toBe(true);
     expect((await readiness()).missing.map((item) => item.id)).toEqual([setup.pendingRequestId, equipmentRequestId]);
