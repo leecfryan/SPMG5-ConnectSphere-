@@ -136,10 +136,14 @@ const eventsRepository = {
         is_essential: essentialFlags.get('venue:' + r.id) ?? true,
         accessibility_requirements: r.accessibility_requirements ?? [], slots: r.slots,
         venue: { name: r.venue.name, capacity: r.venue.capacity, accessibility_features: r.venue.accessibility_features, notes: r.venue.notes } }));
+    // SCRUM-31: equipment_id is null until Reserve assigns a unit, so the
+    // row's own equipment_type (always set at creation) is the primary
+    // source now, same fix as equipment.controller.js's getTechSupportDashboard -
+    // the old lookup-by-equipment_id crashed on any unreserved row.
     const equipmentRequests = await Promise.all((await equipmentService.listRequestsByEvent(id))
       .map(async r => ({ id: r.id, status: r.status, quantity_requested: r.quantity_requested, technical_requirement: r.technical_requirement,
         is_essential: essentialFlags.get('equipment:' + r.id) ?? true,
-        equipment: { type: (await equipmentService.findEquipmentById(r.equipment_id)).type } })));
+        equipment: { type: r.equipment_type ?? (await equipmentService.findEquipmentById(r.equipment_id))?.type ?? null } })));
     return { venueRequests, equipmentRequests };
   },
   // SCRUM-140: same filter and columns as the real queries.

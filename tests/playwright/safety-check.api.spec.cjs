@@ -17,8 +17,9 @@ test('[SAFETY-E2E-API-001] SCRUM-139 AC1-AC4: submit only when arranged; arrange
   const path = (action) => `/api/internal/events/${event.id}/${action}`;
   const act = (action, as) => action === 'safety-readiness' ? request.get(path(action), { headers: as }) : request.post(path(action), { headers: as });
   const status = async () => (await (await request.get(`/api/event-workspace/manager/${event.id}`, { headers: headers.manager })).json()).event.status;
+  // SCRUM-31: equipment_type replaces equipment_id.
   const requestEquipment = (equipmentId) => request.post(`/api/events/${event.id}/equipment-requests`, { headers: headers.first, data: {
-    equipment_id: equipmentId, quantity_requested: 1, technical_requirement: 'HDMI', borrow_start: date + 'T01:00:00Z', borrow_end: date + 'T03:00:00Z',
+    equipment_type: 'Projector ' + equipmentId, quantity_requested: 1, technical_requirement: 'HDMI', borrow_start: date + 'T01:00:00Z', borrow_end: date + 'T03:00:00Z',
   } });
   const requestVenue = (slot) => request.post(`/api/venues/${venueId}/booking-requests`, { headers: headers.first, data: {
     event_id: event.id, booking_date: date, slots: [slot], expected_attendees: 30, room_layout: 'Theatre', required_facilities: ['Projector'],
@@ -47,11 +48,11 @@ test('[SAFETY-E2E-API-001] SCRUM-139 AC1-AC4: submit only when arranged; arrange
   expect((await (await act('safety-readiness', headers.first)).json()).missing).toEqual([
     // SCRUM-144: each outstanding item carries its request id, for the essential flag.
     { kind: 'venue', id: (await venue.json()).data.id, label: `Integration Hall · ${date}`, reason: 'Waiting for Venue Staff to decide.' },
-    { kind: 'equipment', id: (await equipment.json()).data.id, label: `Projector ${first.id}`, reason: 'Waiting for Technical Support Staff to reserve it.' },
+    { kind: 'equipment', id: (await equipment.json()).data[0].id, label: `Projector ${first.id}`, reason: 'Waiting for Technical Support Staff to reserve it.' },
   ]);
 
   expect((await request.patch(`/api/venues/booking-requests/${(await venue.json()).data.id}/decision`, { headers: headers.venue_staff, data: { decision: 'confirmed' } })).status()).toBe(200);
-  expect((await request.patch(`/api/equipment-requests/${(await equipment.json()).data.id}/status`, { headers: headers.technical_support_staff, data: { status: 'APPROVED' } })).status()).toBe(200);
+  expect((await request.patch(`/api/equipment-requests/${(await equipment.json()).data[0].id}/status`, { headers: headers.technical_support_staff, data: { status: 'APPROVED' } })).status()).toBe(200);
   expect(await (await act('safety-readiness', headers.first)).json()).toEqual({ ready: true, missing: [], optional: [] });
 
   // AC3
