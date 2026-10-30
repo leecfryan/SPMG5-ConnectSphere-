@@ -306,6 +306,71 @@ test('[E2E-EVENT-102] SCRUM-161: the Lead filters assignments by coordinator and
   await expect(page.getByRole('heading', { name: event.name, exact: true })).toBeVisible();
 });
 
+// SCRUM-165 TC-SCRUM-165-16/17: coordinator sees a pending change request and can approve or reject it.
+// Helper: create an event with a pending change request by having the organiser submit one via the UI.
+async function submitChangeRequest(page, accounts, organiser, event, proposedName, requestReason) {
+  await accounts.updateEvent(event.id, { status: 'UNDER_REVIEW' });
+  await page.goto(`/my-event-requests/${event.id}`);
+  await signIn(page, organiser);
+  await page.getByRole('button', { name: 'Request a change', exact: true }).click();
+  await page.getByLabel('Event name', { exact: true }).fill(proposedName);
+  await page.getByLabel('Reason for change', { exact: true }).fill(requestReason);
+  await page.getByRole('button', { name: 'Submit change request', exact: true }).click();
+  await expect(page.getByText(/awaiting review/i)).toBeVisible();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+}
+
+// TC-SCRUM-165-16: coordinator approves a change request; proposed name is applied.
+test('[TC-SCRUM-165-16] SCRUM-165: coordinator approves change request; proposed changes applied and history records decision', async ({ page, accounts }) => {
+  const { organiser, first, event } = await setupWorkflow(accounts, page.request);
+  await accounts.assignEvent(event.id, first.id);
+  await submitChangeRequest(page, accounts, organiser, event, 'Annual Gala – revised', 'Venue requested a name update');
+
+  await signIn(page, first);
+  await page.getByRole('link', { name: 'My assigned events', exact: true }).click();
+  await page.getByRole('link', { name: event.name, exact: true }).click();
+
+  await expect(page.getByRole('heading', { name: 'Change request from organiser', exact: true })).toBeVisible();
+  await expect(page.getByText(/venue requested a name update/i)).toBeVisible();
+  await page.getByLabel('Decision reason', { exact: true }).fill('Approved – name update looks fine.');
+  await page.getByRole('button', { name: 'Approve change', exact: true }).click();
+
+  // After reload: proposed name applied, change request gone, decision in history.
+  await expect(page.getByRole('heading', { name: 'Annual Gala – revised', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Change request from organiser' })).toHaveCount(0);
+  await expect(page.getByText('Change request approved')).toBeVisible();
+  await expect(page.getByText(/approved.*name update looks fine/i)).toBeVisible();
+});
+
+// TC-SCRUM-165-17: coordinator rejects a change request; organiser sees the rejection reason in history.
+test('[TC-SCRUM-165-17] SCRUM-165: coordinator rejects change request; organiser sees reason in activity history', async ({ page, accounts }) => {
+  const { organiser, first, event } = await setupWorkflow(accounts, page.request);
+  await accounts.assignEvent(event.id, first.id);
+  await submitChangeRequest(page, accounts, organiser, event, 'Annual Gala – renamed', 'Want a shorter name');
+
+  await signIn(page, first);
+  await page.getByRole('link', { name: 'My assigned events', exact: true }).click();
+  await page.getByRole('link', { name: event.name, exact: true }).click();
+
+  await page.getByLabel('Decision reason', { exact: true }).fill('Name change is out of scope at this stage.');
+  await page.getByRole('button', { name: 'Reject change', exact: true }).click();
+
+  await expect(page.getByRole('heading', { name: 'Change request from organiser' })).toHaveCount(0);
+  // Event name unchanged after rejection.
+  await expect(page.getByRole('heading', { name: event.name, exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+
+  // Organiser sees the rejection and the coordinator's reason in activity history.
+  await signIn(page, organiser);
+  // Wait for auth before navigating — same pattern as ACCESS-E2E-UI-001.
+  await page.getByRole('link', { name: 'My event requests', exact: true }).click();
+  await page.getByRole('link', { name: event.name, exact: true }).click();
+  // Reason appears in both the inline rejection banner (ChangeRequestControls) and
+  // the activity history (EventActivityHistory); either presence satisfies AC3.
+  await expect(page.getByText(/coordinator.*reason/i)).toBeVisible();
+  await expect(page.getByText('Change request rejected')).toBeVisible();
+});
+
 // SCRUM-36 AC5/AC6: submitting a change request stores it without touching the
 // event, and the pending view persists on page refresh.
 test('[SCRUM-36-UI-001] SCRUM-36: organiser submits a change request and sees awaiting-review after refresh', async ({ page, accounts }) => {

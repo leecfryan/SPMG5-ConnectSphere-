@@ -5,6 +5,8 @@ module.exports = function registrationStorage(accounts) {
   const waitlistEntries = [];
   // SCRUM-141: event activity history, written by the events fixture in server.cjs.
   const activity = [];
+  // SCRUM-165: notification queue; separate from registrations so tests can inspect it.
+  const notificationOutbox = [];
   const events = () => [...accounts.values()].flatMap(account => account.events);
   function project(row, selection) {
     if (!selection || selection === '*') return { ...row };
@@ -17,6 +19,7 @@ module.exports = function registrationStorage(accounts) {
   return {
     registrations,
     activity,
+    notificationOutbox,
     // SCRUM-37: no longer async - apply_organiser_event_edit below returns a
     // chainable object (select/maybeSingle), matching how the real Supabase
     // client's .rpc() works for a function that returns a table/row type.
@@ -120,7 +123,9 @@ module.exports = function registrationStorage(accounts) {
             ? waitlistEntries
             : table === 'event_activity_log'
               ? activity
-              : registrations;
+              : table === 'notification_outbox'
+                ? notificationOutbox
+                : registrations;
         let result = rows.filter(row => filters.every(test => test(row)));
         if (insertion) {
           if (insertion.attendee_id !== undefined && rows.some(row => row.attendee_id === insertion.attendee_id && row.event_id === insertion.event_id)) {
