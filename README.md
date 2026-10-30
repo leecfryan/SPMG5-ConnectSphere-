@@ -241,3 +241,6 @@ Coordinators use `/equipment/requests`; technical support uses `/technical-suppo
 Signed-in users can browse approved events at `/events` and manage their own registrations at `/registrations/me`. Staff permissions and existing feature routes are unchanged. See [Registration integration](docs/registration-integration.md) for integration details, tests and database requirements.
 
 SCRUM-117: coordinators return requests with a message; organisers save and resubmit to the same coordinator. In-app notifications link both roles to the request, and coordinators see the changed fields. See [event request workflow](docs/event-requests.md#resubmission-and-coordinator-changes-scrum-117) for setup and the applied SQL reference.
+
+
+SCRUM-43 attendee notifications reuse the existing Notifications inbox and background worker for confirmed registrations, waitlist joins, place offers and expiry reminders. Local code requires the additive manual database setup and two Novu workflows in [docs/notifications.md](docs/notifications.md#attendee-registration-notifications--scrum-43); live setup/UAT is pending.

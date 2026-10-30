@@ -46,7 +46,7 @@ auth.patch('/__test/accounts/:id', (req, res) => {
 auth.patch('/__test/events/:id', (req, res) => {
   const event = [...accounts.values()].flatMap(account => account.events).find(event => event.id === req.params.id);
   if (!event) return res.sendStatus(404);
-  for (const key of ['start_time', 'end_time', 'coordinator_id', 'status', 'registration_fields']) if (Object.hasOwn(req.body, key)) event[key] = req.body[key];
+  for (const key of ['start_time', 'end_time', 'coordinator_id', 'status', 'registration_fields', 'enrolled_attendees', 'expected_attendance', 'cancelled_at']) if (Object.hasOwn(req.body, key)) event[key] = req.body[key];
   res.sendStatus(204);
 });
 auth.post('/__test/events/:id/assignment', (req, res) => {
@@ -237,7 +237,9 @@ dataClient.auth = { admin: {
 auth.patch('/__test/registrations/:id', (req, res) => {
   const registration = dataClient.registrations.find(row => row.id === req.params.id);
   if (!registration) return res.sendStatus(404);
+  const previous = { ...registration };
   if (Object.hasOwn(req.body, 'status')) registration.status = req.body.status;
+  dataClient.recordRegistrationChange('registrations', registration, previous);
   res.sendStatus(204);
 });
 // SCRUM-26/159: the assignment queue, with the same filters, order and columns as

@@ -169,3 +169,37 @@ were run unedited.
 
 - `WaitlistPanel.jsx` still needs dedicated loading, retry/load-error and per-action failure tests.
 - The waitlist live suites remain opt-in in backend CI; the CI backend gate runs deterministic tests only.
+
+## SCRUM-43 attendee notification checks
+
+The existing notification worker now prepares saved registration transitions and due waitlist-offer reminders independently of assignment notifications. The exact additive history/trigger/preparation SQL and two Novu workflow configurations are documented in [notifications.md](notifications.md#attendee-registration-notifications--scrum-43).
+
+Focused tests use `backend/tests/integration/notifications.registration.test.js`, the existing `backend/tests/unit/notifications/notificationDelivery.test.js`, `tests/playwright/registration-notifications.browser.spec.cjs`, and the disposable SQL fixtures `tests/sql/registrationNotifications.*.sql`. Run `node tests/sql/run-assignment-notifications.cjs --registration` from the root for transition/rollback/ownership/boundary/state/access checks plus two real concurrent preparation transactions. Following Ryan's 2026-10-27 schema export, the SQL fixture executes his exact promote_waitlist_entry, accept_waitlist_offer and decline_waitlist_offer bodies with explicit ancillary helper/reconciliation stubs. It enforces the supplied active/promoted and null/offered constraints, preserves the existing timestamp trigger, checks cancellation/missing-start eligibility, and adds S17-S20 for the actual RPC write order and row deletion. The automatic FIFO helper and actual Novu delivery remain outside these local fixtures; shared application/UAT still require Ryan's manual verification.
+
+The browser cases exercise real registration/waitlist handlers, middleware, UI, inbox SDK and delivery worker against test storage. An external database offer transition is represented by a protected test-only control; the fixture is not a proof of live FIFO/coordinator promotion logic. E01 covers joining, offered promotion, accepted confirmation, recipient isolation and notification navigation. E02 covers due-reminder deduplication, spoofed recipients, unauthenticated/denied-role operations and unchanged stored offer state. Both render notification links at 375 px. E03 verifies that a cancelled_at marker or missing start_time suppresses reminders, using a valid active offer as the positive control.
+
+Execution evidence and the four pending manual UAT cases remain outside the application repository under Ryan's local reporting preferences. Existing live test results above are historical; no shared Supabase suite was run for SCRUM-43.
+
+
+### SCRUM-43 boundary/duplication audit
+
+U05 proves a failed retry write cannot strand later claimed rows. SQL S21 retains an unsent reminder after lease expiry; S22 checks two owners in one event, stable correlation and independent reminder message/deadline values; S23 checks exact expiry and +/-1 ms, while S08/S11 cover the one-hour boundary and +/-1 ms; S24 checks the function-only repair and preserved service-only grants. SQL outcome/payload comparisons are null-safe. Browser E02 distinguishes a promoted notice's deadline from an offer-expiring reminder and checks expected text and source identity explicitly. Existing privacy, refusal and routing assertions are retained.
+
+External audit mutation probes deliberately remove a required change type, randomise delivery identity, remove reminder text, collapse per-offer uniqueness to the event, send early, send after expiry or discard an expired lease; each must fail a specific SQL assertion. These are local one-off audit controls, not an additional application harness or package. Current execution evidence remains outside the repository. See the notification guide's audit correction for the reviewed manual function update if the earlier setup was applied.
+
+S25 extends the audit with 101 status changes and 101 offers across the 100-row preparation boundary, asserting that no queued work is lost or recreated after successful outbox removal. All validity/outcome comparisons in the SQL assertions are null-safe. These are supporting implementation-risk checks, not new acceptance criteria.
+
+
+### SCRUM-43 test-double and refactoring audit — 2026-10-28
+
+The backend integration suite exercises the real worker and repository against a local HTTP provider and an in-memory RPC double. It proves transport, recipient selection and recovery; it does not execute Supabase transactions. Its provider now validates the configured registration payload fields, correlation IDs, nullable status deadline and application redirect path. I06 deliberately supplies five invalid payloads and requires unsent work to remain pending. I07 checks that a mismatched completion token returns false and cannot remove another claim. Claim timing, backoff and transactional guarantees remain the responsibility of the real SQL harness.
+
+The browser storage double is independently checked in backend/tests/unit/notifications/registrationNotificationStorage.test.js. D01 checks saved event-name snapshots and status correlation; D02 checks changed-deadline retirement and one replacement; D03 uses a fixed clock for the exact reminder-window boundaries; D04 checks concurrent preparations for two simultaneous owners and refused recipient substitution. These cases correspond to the existing SQL S04/S12/S22/S08/S23 checks. They do not substitute for executing the actual SQL. The provider and storage negative controls failed against the earlier doubles before they were corrected.
+
+Browser sign-in now waits for the authenticated account route before navigating to the event or inbox. Tests use observable readiness rather than fixed sleeps. Each browser context is closed in finally; local provider servers are closed on test completion. Boundary assertions use fake time or a fixed PostgreSQL transaction timestamp. SQL's short sleep intentionally advances beyond an already-established expiry; it is not used as an assumption that asynchronous work has completed.
+
+The production preparation loop replaces three identical try/catch blocks while preserving their sequence, per-preparer error isolation, warning text, and claim/delivery behaviour. This is behaviour-preserving refactoring. The story's new notifications/triggers/reminder checks are feature changes; the earlier retry/lease corrections are bug fixes. Neither is described as refactoring.
+
+Audit execution evidence stays outside the repository. Three shuffled backend runs (seeds 143, 430, 155) passed all 91 notification tests; five repetitions of E01-E03 passed 15 browser executions with three workers and retries disabled; three disposable PostgreSQL runs passed the existing assertions, repair and concurrent preparation checks. A separate before/after oracle compared 32 dependency traces. These observations provide repeatability evidence, not a guarantee against all future flakiness or a live-provider UAT pass.
+
+The first complete audit regression run found an existing SCRUM-117 E2E-CLARIFICATION-003 assertion rejecting the substring 50 in a whole comparison panel. It failed on the timestamp 10:50 AM despite correct attendance values. The one-line correction asserts the exact definition values [30, 45], preserving the saved-baseline rule while excluding timestamp text. The original failure evidence is retained outside the repository. This is a test reliability correction, not application refactoring.

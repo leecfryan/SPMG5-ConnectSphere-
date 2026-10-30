@@ -5,6 +5,11 @@ function createNotificationDeliveryService({ repository, secretKey, fetchImpl = 
   const warn = () => logger.warn("Notification delivery is pending. Check the queue and Novu workflow configuration.");
 
   async function deliver(row) {
+    // SCRUM-43: retries must not send an offer reminder after its offer becomes obsolete.
+    if (row.workflow === "waitlist-offer-expiring" && !await repository.reminderIsCurrent(row)) {
+      await repository.complete(row);
+      return;
+    }
     const response = await fetchImpl("https://api.novu.co/v1/events/trigger", {
       method: "POST",
       headers: { Authorization: "ApiKey " + secretKey, "Content-Type": "application/json", "Idempotency-Key": row.id },
@@ -25,15 +30,18 @@ function createNotificationDeliveryService({ repository, secretKey, fetchImpl = 
     running = true;
     try {
       // SCRUM-155: assignment queueing failure must not stop existing decision deliveries.
-      try { await repository.prepareAssignments(); }
-      catch { warn(); }
+      for (const prepare of ["prepareAssignments", "prepareRegistrations", "prepareReminders"]) {
+        try { await repository[prepare](); }
+        catch { warn(); }
+      }
       const rows = await repository.claim();
       for (const row of rows) {
         try { await deliver(row); }
         catch {
           warn();
           // SCRUM-143: a failed acknowledgement keeps the same durable ID for safe replay.
-          await repository.retry(row);
+          try { await repository.retry(row); }
+          catch { warn(); }
         }
       }
     } catch { warn(); }
