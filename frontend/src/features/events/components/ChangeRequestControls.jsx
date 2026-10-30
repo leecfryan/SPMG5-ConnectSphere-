@@ -82,7 +82,7 @@ export default function ChangeRequestControls({ event, onSubmitted }) {
 
   if (!open) {
     return (
-      <section aria-labelledby="cr-heading">
+      <section aria-labelledby={recentRejection ? "cr-heading" : undefined}>
         {recentRejection && <>
           <h2 id="cr-heading">Change request</h2>
           <p>Your last change request was not accepted.</p>
