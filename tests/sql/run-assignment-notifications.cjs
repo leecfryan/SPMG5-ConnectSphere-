@@ -40,6 +40,11 @@ function run() {
     readSql("notifications.assertions.sql"),
     schemaBlock(blocks, "create table public.event_assignment_history ("),
     readSql("assignmentNotifications.assertions.sql"),
+    // SCRUM-41: the venue tables the decision trigger reads, then the
+    // documented trigger, then its scenarios.
+    readSql("venueDecisionNotifications.setup.sql"),
+    schemaBlock(blocks, "create function public.enqueue_venue_booking_decision_notification()"),
+    readSql("venueDecisionNotifications.assertions.sql"),
   ].join("\n");
 
   requireSuccess(docker(["info", "--format", "{{.ServerVersion}}"]), "Start Docker and try again.");
@@ -68,6 +73,9 @@ function run() {
     if (!output.includes("ASSIGNMENT SQL ASSERTIONS PASSED")) {
       throw new Error("The SQL run ended without the assignment test completion marker.");
     }
+    if (!output.includes("VENUE DECISION SQL ASSERTIONS PASSED")) {
+      throw new Error("The SQL run ended without the venue decision test completion marker.");
+    }
     process.stdout.write(output);
     for (const [id, description] of [
       ["S01", "Initial assignment recipient and names"],
@@ -79,6 +87,18 @@ function run() {
       process.stdout.write(`PASS TC-SCRUM-155-${id}: ${description}\n`);
     }
     process.stdout.write("5/5 assignment notification SQL scenarios passed.\n");
+    for (const [id, description] of [
+      ["S01", "Confirmation reaches coordinator, requester and organiser with full detail"],
+      ["S02", "Rejection reaches coordinator and requester only, with its reason"],
+      ["S03", "A coordinator who made the request is notified once, with an empty note"],
+      ["S04", "Every slot's final state is listed, including one cancelled earlier"],
+      ["S05", "Cancelling a booking queues nothing"],
+      ["S06", "Deciding twice queues no duplicate"],
+      ["S07", "The authenticated role cannot read the queue"],
+    ]) {
+      process.stdout.write(`PASS TC-SCRUM-41-${id}: ${description}\n`);
+    }
+    process.stdout.write("7/7 venue decision notification SQL scenarios passed.\n");
   } finally {
     if (started) {
       requireSuccess(docker(["stop", "--time=1", name]), `Could not remove test container ${name}.`);
