@@ -144,7 +144,8 @@ and managed events under `/api/managed-events`. Inside any router, declare stati
 | Assignment | `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` | `internal.access` + `events.assign_coordinator` |
 | Review | `POST /api/internal/events/:eventId/{start-review,approve,reject}` | `internal.access` + `events.decide`; assigned coordinator only |
 | Confirmation | `POST /api/internal/events/:eventId/confirm`, `PATCH /api/internal/events/:eventId/arrangements/:kind/:requestId` | `internal.access` + `events.decide`; assigned coordinator only; confirm only from `PREPARATION` (SCRUM-144) |
-| Cancellation, postponement | `POST /api/internal/events/:eventId/cancel`, `POST /api/internal/events/:eventId/postpone` | `internal.access` + `events.cancel` / `events.postpone`; assigned coordinator or Event Coordinator Lead |
+| Cancellation | `POST /api/internal/events/:eventId/cancel` | `internal.access` + `events.cancel`; assigned coordinator only (SCRUM-171 removed the lead's unconditional access) |
+| Postponement | `POST /api/internal/events/:eventId/postpone` | `internal.access` + `events.postpone`; assigned coordinator or Event Coordinator Lead |
 | Safety check | `GET /api/internal/events/:eventId/safety-readiness`, `POST /api/internal/events/:eventId/{submit-safety-check,withdraw-safety-check}` | `internal.access` + `events.safety.submit`, assigned coordinator only |
 | Safety review | `GET /api/internal/safety-reviews`, `GET /api/internal/safety-reviews/:eventId` | `internal.access` + `events.safety.read` (Safety Officer); `SAFETY_REVIEW` events only |
 | Safety decision | `POST /api/internal/safety-reviews/:eventId/{approve,reject}` | `internal.access` + `events.safety.decide` (Safety Officer); `SAFETY_REVIEW` events only; writes `event_activity_log` |
