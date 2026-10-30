@@ -28,13 +28,12 @@ function createReviewController(repository, cancelDependencies = {}) {
     };
   }
 
-  // SCRUM-148: a cancel caller may be the assigned coordinator or the coordinator
-  // lead (req.user.roles carries the verified role claims); isCoordinatorLead
-  // is derived here rather than trusted from the body.
+  // SCRUM-171: a cancel caller is always the assigned coordinator now - the
+  // coordinator-lead bypass from SCRUM-148 was removed, so there is no
+  // isCoordinatorLead to derive here any more (postpone below still has its own).
   async function cancel(req, res) {
     try {
-      const isCoordinatorLead = req.user.roles.includes("event_coordinator_lead");
-      const result = await review.cancel(req.params.eventId, req.user.id, req.body?.reason, { isCoordinatorLead, ...cancelDependencies });
+      const result = await review.cancel(req.params.eventId, req.user.id, req.body?.reason, cancelDependencies);
       if (result.ok) return res.json({ event: result.event });
       const [status, message] = FAILURES[result.reason];
       return res.status(status).json({ message });
