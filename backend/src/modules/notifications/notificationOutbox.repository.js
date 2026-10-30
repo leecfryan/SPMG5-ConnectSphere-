@@ -9,6 +9,15 @@ function createNotificationOutboxRepository(client) {
   });
   return {
     prepareAssignments: () => rpc("enqueue_assignment_notifications", {}),
+    prepareRegistrations: () => rpc("enqueue_registration_notifications", {}),
+    prepareReminders: () => rpc("enqueue_waitlist_offer_reminders", {}),
+    reminderIsCurrent: async row => {
+      const current = await rpc("validate_waitlist_offer_reminder", {
+        delivery_id: row.id, claim_token: row.lease_token,
+      });
+      if (typeof current !== "boolean") throw new Error("Notification queue is unavailable.");
+      return current;
+    },
     claim: () => rpc("claim_notification_outbox", {}),
     complete: row => finish(row, true),
     retry: row => finish(row, false),

@@ -397,3 +397,10 @@ and opt-in live tests, and
 [the SCRUM-151 task note](../.agent/docs/other/SCRUM-151-join-waitlist.md).
 The offer story's Jira key was not provided; its task note is
 [waitlist-offers.md](../.agent/docs/other/waitlist-offers.md).
+
+
+## Attendee notifications — SCRUM-43
+
+Registration confirmation, waitlist joining and new place offers are captured by additive database history triggers. The existing notification worker queues and delivers notices to the saved attendee only. A place offer still needs acceptance; pending registration is not confirmation. Direct confirmed promotion produces one confirmed notice.
+
+The worker prepares one reminder per active offer in its final hour, using the earlier of offer expiry and event start. It rechecks the live offer before every reminder delivery, including retries. Registration history is saved atomically with each change; provider/preparation failures occur independently and retry. The shared schema and Novu workflows require manual setup before this feature works. See [notification setup and schema reference](notifications.md#attendee-registration-notifications--scrum-43).
