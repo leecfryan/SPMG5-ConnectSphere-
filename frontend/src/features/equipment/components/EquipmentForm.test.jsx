@@ -37,6 +37,25 @@ describe("Scrum-30 AC1: EquipmentForm create mode", () => {
     await user.type(screen.getByLabelText("Location"), "Store A");
     expect(screen.getByRole("button", { name: /add equipment/i })).toBeEnabled();
   });
+
+  it("offers existing types as suggestions on the Type field", () => {
+    render(<EquipmentForm mode="create" existingTypes={["Microphone", "Projector"]} onSubmit={vi.fn()} onCancel={vi.fn()} />);
+    const input = screen.getByLabelText("Type");
+    expect(input).toHaveAttribute("list");
+    const datalist = document.getElementById(input.getAttribute("list"));
+    expect(datalist.querySelectorAll("option")).toHaveLength(2);
+    expect(datalist.querySelector('option[value="Microphone"]')).toBeInTheDocument();
+  });
+
+  it("still accepts a brand-new type not in the existing list", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(<EquipmentForm mode="create" existingTypes={["Projector"]} onSubmit={onSubmit} onCancel={vi.fn()} />);
+    await user.type(screen.getByLabelText("Type"), "Fog Machine");
+    await user.type(screen.getByLabelText("Location"), "Store A");
+    await user.click(screen.getByRole("button", { name: /add equipment/i }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ type: "Fog Machine" }));
+  });
 });
 
 describe("Scrum-30 AC1: EquipmentForm edit mode", () => {
