@@ -4,8 +4,10 @@ const { test, expect } = require("@playwright/test");
 const supabase = require("../../backend/src/supabase");
 const { createAccount, deleteAccount, getAccessToken } = require("./support/live-equipment-fixtures");
 
-// SCRUM-117: user-run only; proves installed PostgREST RPCs and queue triggers.
-test("[LIVE-CLARIFICATION-001] SCRUM-117: returned request resubmits to its coordinator with stored changes and both queued notices", async ({ request }) => {
+// SCRUM-117: user-run only; proves installed RPCs and durable request history.
+// Pending outbox rows can be consumed by any backend on the shared project.
+// Exact enqueue contracts are checked in the disposable PostgreSQL suite.
+test("[LIVE-CLARIFICATION-001] SCRUM-117: returned request resubmits to its coordinator with durable saved changes and history", async ({ request }) => {
   const accounts = [];
   let eventId;
   try {
@@ -25,21 +27,31 @@ test("[LIVE-CLARIFICATION-001] SCRUM-117: returned request resubmits to its coor
     expect(returned.status(), await returned.text()).toBe(200);
     const detail = await request.get(`/api/event-workspace/organiser/${eventId}`,{headers:ownerHeaders});
     expect(detail.status()).toBe(200);
-    const cycleId = (await detail.json()).event.activity.find(row=>row.action==="CHANGES_REQUESTED").id;
+    const returnedEvent = (await detail.json()).event;
+    expect(returnedEvent).toMatchObject({ status: "CHANGES_REQUESTED", coordinator_id: coordinator.id });
+    const returnedCycle = returnedEvent.activity.find(row => row.action === "CHANGES_REQUESTED");
+    expect(returnedCycle).toMatchObject({
+      action: "CHANGES_REQUESTED", from_status: "UNDER_REVIEW", to_status: "CHANGES_REQUESTED",
+      note: "Please clarify attendance.",
+    });
+    const cycleId = returnedCycle.id;
     expect((await request.patch(`/api/event-workspace/organiser/${eventId}`,{headers:ownerHeaders,data:{expected_attendance:45}})).status()).toBe(200);
     const resubmitted = await request.post(`/api/event-workspace/organiser/${eventId}/resubmit`,{headers:ownerHeaders,data:{cycleId}});
     expect(resubmitted.status(),await resubmitted.text()).toBe(200);
     expect((await resubmitted.json()).event).toMatchObject({status:"UNDER_REVIEW",coordinator_id:coordinator.id});
     const reviewed = await request.get(`/api/event-workspace/coordinator/${eventId}`,{headers:coordinatorHeaders});
     expect(reviewed.status()).toBe(200);
-    expect((await reviewed.json()).event.activity.find(row=>row.action==="REQUEST_RESUBMITTED").changes)
-      .toEqual([{field:"expected_attendance",before:30,after:45}]);
-    const {data:queued,error} = await supabase.from("notification_outbox").select("workflow,recipient_id,payload").eq("event_id",eventId);
-    expect(error).toBeNull();
-    expect(queued).toEqual(expect.arrayContaining([
-      expect.objectContaining({workflow:"event-changes-requested",recipient_id:organiser.id,payload:expect.objectContaining({message:"Please clarify attendance.",requestPath:"/my-event-requests/"+eventId})}),
-      expect.objectContaining({workflow:"event-request-resubmitted",recipient_id:coordinator.id,payload:expect.objectContaining({changedFieldCount:1,requestPath:"/assigned-events/"+eventId})}),
-    ]));
+    const reviewedEvent = (await reviewed.json()).event;
+    expect(reviewedEvent).toMatchObject({
+      status: "UNDER_REVIEW", coordinator_id: coordinator.id, expected_attendance: 45,
+    });
+    expect(reviewedEvent.activity.find(row => row.id === cycleId)).toEqual(returnedCycle);
+    const resubmissions = reviewedEvent.activity.filter(row => row.action === "REQUEST_RESUBMITTED");
+    expect(resubmissions).toHaveLength(1);
+    expect(resubmissions[0]).toMatchObject({
+      from_status: "CHANGES_REQUESTED", to_status: "UNDER_REVIEW",
+      changes: [{ field: "expected_attendance", before: 30, after: 45 }],
+    });
   } finally {
     if(eventId) {
       for(const table of ["notification_outbox","event_activity_log"]) {
