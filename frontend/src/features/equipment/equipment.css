@@ -86,6 +86,23 @@
   margin: 4px 0 0;
 }
 
+/* SCRUM-169: live count / shortfall / Out-of-Stock message under the form
+   grid, keyed off the selected type - a warning only, never gates Submit. */
+.eq-availability {
+  margin-top: 12px;
+}
+
+.eq-availability .eq-hint {
+  margin-top: 6px;
+}
+
+/* SCRUM-169: the essential all-or-nothing consequence, stacked under
+   whichever shortfall/Out-of-Stock line applies - same tone as the request
+   list's essential badge (eq-essential-badge), not an error. */
+.eq-essential-warning {
+  color: var(--cs-info);
+}
+
 /* --- form --- */
 
 .eq-form-grid {
