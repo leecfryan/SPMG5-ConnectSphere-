@@ -1829,3 +1829,186 @@ from (values
 ) as u(venue_name, weekday_offset, slot, reason)
 join public.venues v on v.name = u.venue_name;
 ```
+
+
+## Coordinator venue hold expiry notifications — SCRUM-163
+
+Local implementation. Shared SQL and the Novu workflow require Ryan's manual setup; live UAT is not yet executed.
+
+The saved hold coordinator receives a warning in the last hour and an expiry/release notice when that reservation ends. Both name the canonical venue and event and label the expiry in UTC. The existing inbox and 15-second worker are reused; no new page, package or scheduler is added. Notifications are feature behaviour, not refactoring.
+
+Slots sharing venue, event, coordinator, booking date, creation timestamp and expiry form one notification cohort. The creation timestamp is stable across the existing atomic multi-slot insert. Private per-generation state and an advisory transaction lock keep concurrent preparation from splitting that cohort into duplicate notices. Markers survive successful outbox removal. Existing expired rows are not enrolled during setup; active holds are enrolled.
+
+The capture trigger records when a hold generation ends. Conversion before expiry suppresses an expiry notice; conversion after natural expiry preserves the historical expiry fact. Pending conversion does not end the hold. The actual decide_venue_booking_request function, booking status enum, constraints, timestamp trigger and availability release rules are preserved. Notification history shares each write transaction: capture failure rolls back that business write. Provider delivery is background work.
+
+Warnings are revalidated before every attempt. A partially converted cohort can still warn about remaining active reservations; messages do not claim all slots remain held. An expired reservation being released does not assert that the venue has no other bookings. Historical expiry notices remain retryable. Missing/expired leases raise retryable errors rather than silently deleting unsent work. There remains a small interval between validation and provider acceptance; this is not an exactly-once external-delivery guarantee.
+
+### Schema reference — SCRUM-163 (Ryan applies manually)
+
+Tell teammates before and after applying this single transactional block. It preserves the complete current outbox workflow check, including installed SCRUM-43 values. Copy from begin through commit into Supabase SQL Editor. Expected: Success/no error. A busy or incompatible schema fails the transaction; share the error before rerunning. The script is a one-time installation, not a rerunnable update.
+
+```sql
+begin;
+set local lock_timeout = '3s';
+
+do $$ declare prior_check text; begin
+  perform b.id,b.venue_id,b.event_id,b.coordinator_id,b.booking_date,b.created_at,b.expires_at,b.status from public.venue_bookings b limit 0;
+  perform v.id,v.name from public.venues v limit 0;
+  perform e.id,e.name,e.status,e.cancelled_at from public.events e limit 0;
+  select pg_get_expr(conbin,conrelid) into strict prior_check from pg_constraint
+    where conrelid='public.notification_outbox'::regclass and conname='notification_outbox_workflow_check' and contype='c';
+  alter table public.notification_outbox drop constraint notification_outbox_workflow_check;
+  execute format('alter table public.notification_outbox add constraint notification_outbox_workflow_check check ((%s) or workflow=%L)',prior_check,'venue-hold-expiry');
+end $$;
+
+create table public.venue_hold_notification_state (
+  id uuid primary key default gen_random_uuid(),
+  hold_id uuid not null,
+  venue_id uuid not null references public.venues(id) on delete cascade,
+  event_id uuid not null references public.events(id) on delete cascade,
+  coordinator_id uuid not null references auth.users(id) on delete cascade,
+  venue_name text not null,
+  event_name text not null,
+  booking_date date not null,
+  held_at timestamptz not null,
+  expires_at timestamptz not null,
+  ended_at timestamptz,
+  warning_id uuid,
+  expired_id uuid
+);
+create index venue_hold_notification_open on public.venue_hold_notification_state(hold_id) where ended_at is null;
+create index venue_hold_warning_pending on public.venue_hold_notification_state(expires_at,id) where warning_id is null and ended_at is null;
+create index venue_hold_expired_pending on public.venue_hold_notification_state(expires_at,id)
+  where expired_id is null and (ended_at is null or ended_at>=expires_at);
+create index venue_hold_notification_cohort on public.venue_hold_notification_state(venue_id,event_id,coordinator_id,booking_date,held_at,expires_at);
+alter table public.venue_hold_notification_state enable row level security;
+revoke all on public.venue_hold_notification_state from public,anon,authenticated;
+grant all on public.venue_hold_notification_state to service_role;
+
+create function public.capture_venue_hold_notification() returns trigger
+language plpgsql security definer set search_path='' as $$
+begin
+  if tg_op='DELETE' then
+    if old.status='hold' and old.event_id is not null and old.coordinator_id is not null and old.expires_at is not null then
+      update public.venue_hold_notification_state set ended_at=clock_timestamp() where hold_id=old.id and ended_at is null;
+    end if;
+    return old;
+  end if;
+  if tg_op='UPDATE' then
+    if (old.status,old.venue_id,old.event_id,old.coordinator_id,old.booking_date,old.created_at,old.expires_at)
+      is not distinct from (new.status,new.venue_id,new.event_id,new.coordinator_id,new.booking_date,new.created_at,new.expires_at) then return new; end if;
+    if old.status='hold' and old.event_id is not null and old.coordinator_id is not null and old.expires_at is not null then
+      update public.venue_hold_notification_state set ended_at=clock_timestamp() where hold_id=old.id and ended_at is null;
+    end if;
+  end if;
+  if new.status='hold' and new.expires_at is not null and new.coordinator_id is not null and new.event_id is not null then
+    insert into public.venue_hold_notification_state(hold_id,venue_id,event_id,coordinator_id,venue_name,event_name,booking_date,held_at,expires_at)
+      select new.id,new.venue_id,new.event_id,new.coordinator_id,v.name,e.name,new.booking_date,new.created_at,new.expires_at
+      from public.venues v join public.events e on e.id=new.event_id
+      join auth.users u on u.id=new.coordinator_id where v.id=new.venue_id;
+  end if;
+  return new;
+end $$;
+revoke all on function public.capture_venue_hold_notification() from public,anon,authenticated;
+create trigger capture_venue_hold_notification
+  after insert or delete or update of status,venue_id,event_id,coordinator_id,booking_date,created_at,expires_at on public.venue_bookings
+  for each row execute function public.capture_venue_hold_notification();
+
+-- SCRUM-163: enroll current holds without replaying historical expiries.
+insert into public.venue_hold_notification_state(hold_id,venue_id,event_id,coordinator_id,venue_name,event_name,booking_date,held_at,expires_at)
+select b.id,b.venue_id,b.event_id,b.coordinator_id,v.name,e.name,b.booking_date,b.created_at,b.expires_at
+from public.venue_bookings b join public.venues v on v.id=b.venue_id
+join public.events e on e.id=b.event_id join auth.users u on u.id=b.coordinator_id
+where b.status='hold' and b.expires_at>now();
+
+create function public.enqueue_venue_hold_notifications() returns integer
+language plpgsql security definer set search_path='' as $$
+declare cohort record; phase text; state_ids uuid[]; delivery_id uuid;
+  venue_label text; event_label text; message text; total integer:=0; checked_at timestamptz:=now();
+begin
+  foreach phase in array array['expiring','expired'] loop
+    for cohort in
+      select s.venue_id,s.event_id,s.coordinator_id,s.booking_date,s.held_at,s.expires_at
+      from public.venue_hold_notification_state s join public.events e on e.id=s.event_id
+      where e.status in ('APPROVED','CONFIRMED') and e.cancelled_at is null and
+        ((phase='expiring' and s.warning_id is null and s.ended_at is null and s.expires_at>checked_at and s.expires_at<=checked_at+interval '1 hour')
+          or (phase='expired' and s.expired_id is null and s.expires_at<=checked_at and (s.ended_at is null or s.ended_at>=s.expires_at)))
+      group by s.venue_id,s.event_id,s.coordinator_id,s.booking_date,s.held_at,s.expires_at
+      order by s.expires_at,s.venue_id,s.event_id,s.coordinator_id,s.booking_date,s.held_at limit 100
+    loop
+      -- SCRUM-163: lock the whole slot cohort, not independently skipped rows that could split one notice.
+      if not pg_try_advisory_xact_lock(hashtextextended(jsonb_build_array(cohort.venue_id,cohort.event_id,cohort.coordinator_id,
+        cohort.booking_date,extract(epoch from cohort.held_at),extract(epoch from cohort.expires_at))::text,163)) then continue; end if;
+      select array_agg(p.id order by p.id),min(p.venue_name),min(p.event_name) into state_ids,venue_label,event_label
+      from (
+        select s.id,s.venue_name,s.event_name from public.venue_hold_notification_state s
+        join public.events e on e.id=s.event_id
+        where s.venue_id=cohort.venue_id and s.event_id=cohort.event_id and s.coordinator_id=cohort.coordinator_id
+          and s.booking_date=cohort.booking_date and s.held_at=cohort.held_at and s.expires_at=cohort.expires_at
+          and e.status in ('APPROVED','CONFIRMED') and e.cancelled_at is null and
+          ((phase='expiring' and s.warning_id is null and s.ended_at is null and s.expires_at>checked_at and s.expires_at<=checked_at+interval '1 hour')
+            or (phase='expired' and s.expired_id is null and s.expires_at<=checked_at and (s.ended_at is null or s.ended_at>=s.expires_at)))
+        for update of s
+      ) p;
+      if state_ids is null then continue; end if;
+      delivery_id:=gen_random_uuid();
+      message:='Your tentative hold at '||venue_label||' for '||event_label||' on '||cohort.booking_date::text||
+        case when phase='expiring' then ' expires at ' else ' expired at ' end||
+        to_char(cohort.expires_at at time zone 'UTC','YYYY-MM-DD HH24:MI:SS')||' UTC.'||
+        case when phase='expiring' then ' Open venue availability to review it.' else ' The expired reservation has been released.' end;
+      insert into public.notification_outbox(id,event_id,recipient_id,workflow,payload)
+        values(delivery_id,cohort.event_id,cohort.coordinator_id,'venue-hold-expiry',jsonb_build_object(
+          'venueId',cohort.venue_id,'venueName',venue_label,'eventId',cohort.event_id,'eventName',event_label,
+          'bookingDate',cohort.booking_date,'expiresAt',cohort.expires_at,'changeType',phase,
+          'message',message,'requestPath','/venues/'||cohort.venue_id::text||'/availability','stateIds',state_ids));
+      if phase='expiring' then update public.venue_hold_notification_state set warning_id=delivery_id where id=any(state_ids);
+      else update public.venue_hold_notification_state set expired_id=delivery_id where id=any(state_ids); end if;
+      total:=total+1;
+    end loop;
+  end loop;
+  return total;
+end $$;
+
+create function public.validate_venue_hold_notification(delivery_id uuid,claim_token uuid) returns boolean
+language plpgsql security definer set search_path='' as $$
+declare q public.notification_outbox%rowtype; checked_at timestamptz;
+begin
+  select * into q from public.notification_outbox where id=delivery_id and lease_token=claim_token
+    and workflow='venue-hold-expiry' for update;
+  if not found then return false; end if;
+  checked_at:=clock_timestamp();
+  if q.locked_until is null or q.locked_until<=checked_at then
+    raise exception using errcode='55000',message='Notification lease expired.';
+  end if;
+  return exists(
+    select 1 from public.venue_hold_notification_state s join public.events e on e.id=s.event_id
+    where s.id in (select value::uuid from jsonb_array_elements_text(q.payload->'stateIds'))
+      and s.coordinator_id=q.recipient_id and s.event_id=q.event_id
+      and s.event_id=(q.payload->>'eventId')::uuid and s.venue_id=(q.payload->>'venueId')::uuid
+      and s.venue_name=q.payload->>'venueName' and s.event_name=q.payload->>'eventName'
+      and s.booking_date=(q.payload->>'bookingDate')::date and s.expires_at=(q.payload->>'expiresAt')::timestamptz
+      and q.payload->>'requestPath'='/venues/'||s.venue_id::text||'/availability'
+      and e.status in ('APPROVED','CONFIRMED') and e.cancelled_at is null and (
+        (q.payload->>'changeType'='expiring' and s.warning_id=q.id and s.ended_at is null
+          and s.expires_at>checked_at and s.expires_at<=checked_at+interval '1 hour'
+          and exists(select 1 from public.venue_bookings b where b.id=s.hold_id and b.status='hold'
+            and b.venue_id=s.venue_id and b.event_id=s.event_id and b.coordinator_id=s.coordinator_id and b.expires_at=s.expires_at))
+        or (q.payload->>'changeType'='expired' and s.expired_id=q.id and s.expires_at<=checked_at
+          and (s.ended_at is null or s.ended_at>=s.expires_at))
+      )
+  );
+end $$;
+revoke all on function public.enqueue_venue_hold_notifications() from public,anon,authenticated;
+revoke all on function public.validate_venue_hold_notification(uuid,uuid) from public,anon,authenticated;
+grant execute on function public.enqueue_venue_hold_notifications() to service_role;
+grant execute on function public.validate_venue_hold_notification(uuid,uuid) to service_role;
+commit;
+```
+
+### Novu configuration
+
+In the same environment as the existing US inbox, create venue-hold-expiry with one active In-App step. Subject: Venue hold update: {{payload.venueName}}. Body: {{payload.message}}. Same-tab redirect: {{payload.requestPath}}. Required string fields: venueId, venueName, eventId, eventName, bookingDate, expiresAt, changeType, message, requestPath. changeType is expiring or expired; stateIds is an additional UUID-array correlation field. Keep extra fields allowed and existing HMAC security enabled. No Delay step is needed; the backend prepares notifications when due. Restart the backend after setup and run the three manual cases. Dashboard previews do not establish live delivery or ownership.
+
+### Local tests
+
+Run from the application root: npm --prefix backend run test:events -- tests/unit/notifications tests/integration/notifications; node tests/sql/run-assignment-notifications.cjs --venue-holds; npm run test:e2e -- tests/playwright/venue-hold-notifications.browser.spec.cjs --retries=0. The SQL harness uses a disposable network-isolated PostgreSQL container and the exact supplied decision-function body. No shared database is contacted. Manual test specifications/evidence remain outside the repository.
