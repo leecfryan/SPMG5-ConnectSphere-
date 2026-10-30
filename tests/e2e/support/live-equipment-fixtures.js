@@ -100,13 +100,16 @@ async function setupEquipment() {
     createAccount(["technical_support_staff"]),
     createAccount(["event_coordinator"]),
   ]);
-  const eventId = await createEvent({ organiserId: organiser.id, coordinatorId: coordinator.id });
   const equipmentType = freshType();
-  const equipmentId = await createEquipmentUnit({ type: equipmentType });
+  const [eventId, equipmentId] = await Promise.all([
+    createEvent({ organiserId: organiser.id, coordinatorId: coordinator.id }),
+    createEquipmentUnit({ type: equipmentType }),
+  ]);
 
   async function teardown() {
-    await deleteEvent(eventId);
-    await deleteEquipmentUnit(equipmentId);
+    // Accounts are deleted after, not alongside - events/equipment_requests
+    // reference them and must be gone first to avoid a foreign-key failure.
+    await Promise.all([deleteEvent(eventId), deleteEquipmentUnit(equipmentId)]);
     await Promise.all([organiser, coordinator, technical, outsider].map((a) => deleteAccount(a.id)));
   }
 
