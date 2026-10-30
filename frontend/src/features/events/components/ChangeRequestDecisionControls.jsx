@@ -1,28 +1,13 @@
 import { useRef, useState } from "react";
 import { useAuth } from "../../auth/useAuth";
 import { decideChangeRequest } from "../reviewService";
+import { formatWhen } from "../eventFormat";
+import EventFieldChanges from "./EventFieldChanges";
 
 // SCRUM-165: displayed to the assigned coordinator when a pending change request exists.
-// Shows what the organiser proposes (current vs proposed), their stated reason, and
-// the coordinator's own reason textarea, with Approve / Reject buttons.
 // Mirrors eventWorkspace.service.js SIGNIFICANT_FIELDS: if any of these change on an
 // APPROVED event, approving regresses it to SUBMITTED.
 const SIGNIFICANT_FIELDS = new Set(["start_time", "end_time", "venue_requirements", "expected_attendance"]);
-
-const FIELD_LABELS = {
-  name: "Event name",
-  purpose: "Purpose",
-  description: "Description",
-  start_time: "Start",
-  end_time: "End",
-  registration_start: "Registration opens",
-  registration_end: "Registration closes",
-  expected_attendance: "Expected attendance",
-  venue_requirements: "Venue requirements",
-  accessibility_needs: "Accessibility needs",
-  equipment_needs: "Equipment needs",
-  other_comments: "Other comments",
-};
 
 export default function ChangeRequestDecisionControls({ event, onDecided }) {
   const { token } = useAuth();
@@ -35,7 +20,8 @@ export default function ChangeRequestDecisionControls({ event, onDecided }) {
   if (!event.pending_change_request) return null;
 
   const { proposed_changes, reason: orgReason, requested_at } = event.pending_change_request;
-  const changedKeys = Object.keys(proposed_changes).filter(k => Object.hasOwn(FIELD_LABELS, k));
+  const changedKeys = Object.keys(proposed_changes);
+  const fieldChanges = changedKeys.map(key => ({ field: key, before: event[key], after: proposed_changes[key] }));
   const willRegress = event.status === "APPROVED" &&
     changedKeys.some(f => SIGNIFICANT_FIELDS.has(f) && proposed_changes[f] !== event[f]);
 
@@ -60,22 +46,9 @@ export default function ChangeRequestDecisionControls({ event, onDecided }) {
     <section className="event-review-decision" aria-labelledby="decide-cr-heading">
       <p className="eyebrow">Pending change request</p>
       <h2 id="decide-cr-heading">Change request from organiser</h2>
-      <p>Submitted: {new Date(requested_at).toLocaleString()}</p>
+      <p>Submitted: {formatWhen(requested_at)}</p>
       <p>Organiser&apos;s reason: {orgReason}</p>
-      {changedKeys.length > 0 && (
-        <dl>
-          {changedKeys.map(key => (
-            <div key={key}>
-              <dt>{FIELD_LABELS[key]}</dt>
-              <dd>
-                <span>Current: {event[key] ?? "Not provided"}</span>
-                {" / "}
-                <span>Proposed: {proposed_changes[key] ?? "Not provided"}</span>
-              </dd>
-            </div>
-          ))}
-        </dl>
-      )}
+      {fieldChanges.length > 0 && <EventFieldChanges changes={fieldChanges} />}
       {willRegress && (
         <p role="note">Approving this change will return the event to Submitted for re-review, because it affects significant details (dates, expected attendance, or venue requirements). Arrangements stay in place until the coordinator re-approves.</p>
       )}
