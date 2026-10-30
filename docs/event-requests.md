@@ -222,6 +222,7 @@ Module at `backend/src/modules/events/`.
 | POST | /api/internal/events/:eventId/cancel | requireAuth + internal.access + events.cancel (assigned coordinator or coordinator lead) | any active status (including `POSTPONED`) `→ CANCELLED`; body `{ "reason": string }` (required) |
 | POST | /api/internal/events/:eventId/postpone | requireAuth + internal.access + events.postpone (assigned coordinator or coordinator lead) | any of the five postponable stages `→ POSTPONED`; body `{ "reason": string }` (required) |
 | POST | /api/event-workspace/organiser/:id/change-request | requireAuth + events.own.update (own event only) | SCRUM-36: submit a change request for an `UNDER_REVIEW` or `APPROVED` event; body `{ "proposed_changes": { ...fields }, "reason": string }`; → 201 `{ event }` with `pending_change_request` set; 409 if already pending or status ineligible |
+| POST | /api/internal/events/:eventId/decide-change-request | requireAuth + internal.access + events.decide (assigned coordinator) | SCRUM-165: approve or reject a pending change request; body `{ "decision": "approve"\|"reject", "reason": string }` (reason required for both); → 200 `{ event }` with `pending_change_request` cleared; if approving an APPROVED event with a significant field change (`start_time`, `end_time`, `venue_requirements`, `expected_attendance`) → status regressed to `SUBMITTED`; 409 if no pending request or concurrent modification |
 
 ### Rules enforced server-side
 
@@ -845,7 +846,36 @@ The column is `NULL` when no request is pending. `pending_change_request` shape:
 SCRUM-165 (coordinator decision side) nulls this column after a decision is recorded and the accepted changes,
 if any, are applied to the event.
 
-Full design history and test list: `.agent/docs/other/SCRUM-36-requestEventChange.md`.
+### Change request decision (SCRUM-165)
+
+`eventWorkspace.service.js#decideChangeRequest`, `routes/review.routes.js`. The assigned coordinator approves or
+rejects a pending change request through the same `events.decide` + `assignedToCaller` guard used for the main
+review flow.
+
+- `POST /api/internal/events/:eventId/decide-change-request` — body `{ decision: "approve" | "reject", reason }`.
+  `reason` is required for both decisions. A blank or whitespace-only reason returns 400. An unknown `decision`
+  value returns 400 (must be exactly `"approve"` or `"reject"`).
+- **Approve:** proposed changes from `pending_change_request.proposed_changes` are merged onto the event atomically.
+  If the event was `APPROVED` and any significant field changed (`start_time`, `end_time`, `venue_requirements`,
+  `expected_attendance`), the event regresses to `SUBMITTED` so the coordinator can review it again.
+  `UNDER_REVIEW` events stay `UNDER_REVIEW` regardless of significance (no arrangements to release).
+- **Reject:** all event fields remain unchanged; only `pending_change_request` is cleared.
+- Both paths: an `event_activity_log` row is inserted (`CHANGE_REQUEST_APPROVED` or `CHANGE_REQUEST_REJECTED`)
+  with `details = { note: reason, proposed_changes: snapshot }` so the history retains what was proposed even after
+  the column is cleared. A notification is enqueued in `notification_outbox` (best-effort; a failed enqueue logs
+  an error but does not fail the decision).
+- The write uses two concurrent-edit guards: `.eq("updated_at", current.updated_at)` and
+  `.not("pending_change_request", "is", null)`. If either fails (concurrent edit or a second coordinator already
+  cleared the request), the update returns no rows → 409 conflict.
+- Notifications: inserts into `notification_outbox` with `workflow` defaulting to `'event-decision'` and a random
+  UUID as `event_id` (not the actual event UUID) so the row never conflicts with the partial unique index on
+  `(event_id) WHERE workflow = 'event-decision'`. The payload carries `{ eventId, eventName, outcome, remark }`.
+- **Frontend:** `ChangeRequestDecisionControls.jsx` renders the decision panel for the coordinator when
+  `event.pending_change_request` is set; `EventActivityHistory.jsx` displays `CHANGE_REQUEST_APPROVED` /
+  `CHANGE_REQUEST_REJECTED` with "Reason:" prefix so the organiser sees the coordinator's note.
+
+Full design history and test list: `.agent/docs/other/SCRUM-36-requestEventChange.md` and
+`.agent/docs/other/SCRUM-165-decideChangeRequest.md`.
 
 ### Draft event requests (SCRUM-147)
 
