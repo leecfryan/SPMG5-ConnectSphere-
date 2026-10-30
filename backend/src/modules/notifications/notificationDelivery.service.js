@@ -10,6 +10,11 @@ function createNotificationDeliveryService({ repository, secretKey, fetchImpl = 
       await repository.complete(row);
       return;
     }
+    // SCRUM-163: warnings and expiry facts must still match their saved hold generation.
+    if (row.workflow === "venue-hold-expiry" && !await repository.venueHoldNotificationIsCurrent(row)) {
+      await repository.complete(row);
+      return;
+    }
     const response = await fetchImpl("https://api.novu.co/v1/events/trigger", {
       method: "POST",
       headers: { Authorization: "ApiKey " + secretKey, "Content-Type": "application/json", "Idempotency-Key": row.id },
@@ -30,7 +35,7 @@ function createNotificationDeliveryService({ repository, secretKey, fetchImpl = 
     running = true;
     try {
       // SCRUM-155: assignment queueing failure must not stop existing decision deliveries.
-      for (const prepare of ["prepareAssignments", "prepareRegistrations", "prepareReminders"]) {
+      for (const prepare of ["prepareAssignments", "prepareRegistrations", "prepareReminders", "prepareVenueHolds"]) {
         try { await repository[prepare](); }
         catch { warn(); }
       }

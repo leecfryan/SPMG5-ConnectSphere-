@@ -1334,6 +1334,10 @@ commit;
 ```
 
 
+## Venue hold warnings and expiry — SCRUM-163
+
+The existing worker prepares venue-hold-expiry deliveries independently of assignment work. It validates the persisted coordinator, reservation generation, venue/event/deadline and current lifecycle before sending. The one-hour warning and historical expiry/release notice share one Novu In-App workflow. The exact additive schema, safety tradeoff, setup and payload contract are in [Venue integration](venue-integration.md#coordinator-venue-hold-expiry-notifications--scrum-163). Shared setup and manual UAT remain pending.
+
 ## Attendee registration notifications — SCRUM-43
 
 **Local implementation; Ryan reports the shared SQL applied and both Novu dashboard workflow tests successful. Application-to-inbox manual UAT remains pending.**
