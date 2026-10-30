@@ -113,4 +113,3 @@ test('[E2E-CLARIFICATION-002] SCRUM-117: owner receives the worker notice and fo
   await expect(comparison.getByRole('heading', { level: 3 })).toHaveCount(2);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
-

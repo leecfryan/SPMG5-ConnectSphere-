@@ -25,12 +25,19 @@ test.describe("SCRUM-104: equipment reservations are released when an event is c
   test.afterEach(async () => { await setup.teardown(); });
 
   test("[TC-SCRUM-104-11] cancelling an event in the database alone is enough - checking availability afterwards is all it takes", async ({ request }) => {
+    // SCRUM-31: equipment_type replaces equipment_id; the response is now an
+    // array of sibling rows (one here, since quantity_requested is 1).
     const created = await request.post(`/api/events/${setup.eventId}/equipment-requests`, {
       headers: authHeader(tokens.coordinator),
-      data: { equipment_id: setup.equipmentId, quantity_requested: 1, borrow_start: "2099-11-11T00:00:00Z", borrow_end: "2099-11-11T03:00:00Z" },
+      data: { equipment_type: setup.equipmentType, quantity_requested: 1, borrow_start: "2099-11-11T00:00:00Z", borrow_end: "2099-11-11T03:00:00Z" },
     });
-    const { data: requestRow } = await created.json();
-    await request.patch(`/api/equipment-requests/${requestRow.id}/status`, { headers: authHeader(tokens.technical), data: { status: "APPROVED" } });
+    const { data: [requestRow] } = await created.json();
+    // SCRUM-31: Reserve assigns the real unit and sets APPROVED - the old
+    // status endpoint refuses APPROVED before a unit is assigned (TC-10),
+    // and without it the request stays PENDING, which the release sweep
+    // below never looks at.
+    const reserved = await request.patch(`/api/equipment-requests/groups/${requestRow.group_id}/reserve`, { headers: authHeader(tokens.technical) });
+    expect(reserved.status(), await reserved.text()).toBe(200);
     await request.patch(`/api/equipment/${setup.equipmentId}/status`, { headers: authHeader(tokens.technical), data: { status: "IN_USE" } });
 
     await updateEvent(setup.eventId, { status: "CANCELLED" });

@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
-// Scrum-30: the reserve flow's two-step form - pick a type, then review a
-// single-unit reservation (the specific unit is auto-assigned, never shown
-// or chosen by the requester).
+// SCRUM-31: the form reopens the quantity input and adds the "Essential"
+// checkbox that SCRUM-30 deliberately removed - that story's own code
+// comment flagged this exact reversal as "Scrum-31's job" (no specific unit
+// is picked at submission any more; Technical Support's Reserve action
+// assigns real units later). The type-dropdown tests below that are still
+// true (one option per type, no location shown) are kept; the ones that
+// asserted SCRUM-30's single-unit/no-quantity constraint are replaced with
+// their SCRUM-31 opposite, not just deleted.
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
@@ -31,7 +36,7 @@ function setup(overrides = {}) {
   );
 }
 
-describe("Scrum-30: two-step reserve flow", () => {
+describe("SCRUM-31: type + quantity request flow", () => {
   it("the type dropdown shows each type once, not one option per unit", () => {
     setup();
     expect(screen.getByRole("option", { name: "Projector" })).toBeInTheDocument();
@@ -44,27 +49,17 @@ describe("Scrum-30: two-step reserve flow", () => {
     expect(screen.queryByRole("option", { name: /Projector.*Store/i })).not.toBeInTheDocument();
   });
 
-  it("no review summary is shown until a type is picked", () => {
+  it("a quantity field exists, defaulting to 1", () => {
     setup();
-    expect(screen.queryByText(/you have requested/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/quantity/i)).toHaveValue(1);
   });
 
-  it("picking a type with available units shows a simple review line, no per-unit list or location", async () => {
-    const user = userEvent.setup();
+  it("an Essential checkbox exists, unticked by default (Decision 7)", () => {
     setup();
-    await user.selectOptions(screen.getByLabelText("Equipment type"), "Projector");
-    expect(screen.getByText("You have requested 1 Projector.")).toBeInTheDocument();
-    expect(screen.queryByText("Store A")).not.toBeInTheDocument();
-    expect(screen.queryByText("Store B")).not.toBeInTheDocument();
-    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /essential/i })).not.toBeChecked();
   });
 
-  it("there is no quantity field anywhere in this form", () => {
-    setup();
-    expect(screen.queryByLabelText(/quantity/i)).not.toBeInTheDocument();
-  });
-
-  it("submit is disabled until a type with an available unit is picked", async () => {
+  it("submit is disabled until a type is picked; quantity 1 alone is enough", async () => {
     const user = userEvent.setup();
     setup();
     expect(screen.getByRole("button", { name: /submit request/i })).toBeDisabled();
@@ -72,14 +67,45 @@ describe("Scrum-30: two-step reserve flow", () => {
     expect(screen.getByRole("button", { name: /submit request/i })).toBeEnabled();
   });
 
-  it("submits the first available unit's id with quantity_requested always 1", async () => {
+  it("submits equipment_type, the chosen quantity, and is_essential - no equipment_id", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
     setup({ onSubmit });
     await user.selectOptions(screen.getByLabelText("Equipment type"), "Microphone");
+    await user.clear(screen.getByLabelText(/quantity/i));
+    await user.type(screen.getByLabelText(/quantity/i), "5");
     await user.click(screen.getByRole("button", { name: /submit request/i }));
 
-    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ equipment_id: "m1", quantity_requested: 1 }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      equipment_type: "Microphone",
+      quantity_requested: 5,
+      is_essential: false,
+    }));
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("equipment_id");
   });
 
+  it("TC-SCRUM-31-21: ticking Essential submits is_essential: true", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    setup({ onSubmit });
+    await user.selectOptions(screen.getByLabelText("Equipment type"), "Projector");
+    await user.click(screen.getByRole("checkbox", { name: /essential/i }));
+    await user.click(screen.getByRole("button", { name: /submit request/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ is_essential: true }));
+  });
+
+  // SCRUM-31 Decision 4: this never rejects for insufficient stock - over-
+  // requesting more than is currently shown as available is accepted.
+  it("a quantity greater than the available units for the type is still submittable", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    setup({ onSubmit });
+    await user.selectOptions(screen.getByLabelText("Equipment type"), "Microphone");
+    await user.clear(screen.getByLabelText(/quantity/i));
+    await user.type(screen.getByLabelText(/quantity/i), "10");
+    expect(screen.getByRole("button", { name: /submit request/i })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: /submit request/i }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ quantity_requested: 10 }));
+  });
 });
