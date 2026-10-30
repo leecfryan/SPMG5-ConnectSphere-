@@ -40,8 +40,8 @@ async function setup(t, rows) {
   // This fixture stores already-prepared payloads; real SQL recipient selection is tested in tests/sql.
   const client = { rpc: vi.fn((name, args) => ({
     abortSignal: async () => {
-      if (name === "enqueue_venue_hold_notifications") return { data: 0, error: null };
-    if (name === "enqueue_assignment_notifications") { prepared = true; return { data: 0, error: null }; }
+      if (["enqueue_registration_notifications", "enqueue_waitlist_offer_reminders", "enqueue_venue_hold_notifications"].includes(name)) return { data: 0, error: null };
+      if (name === "enqueue_assignment_notifications") { prepared = true; return { data: 0, error: null }; }
       if (name === "claim_notification_outbox") return { data: prepared ? structuredClone(pending) : [], error: null };
       if (name === "finish_notification_outbox") {
         if (args.succeeded) pending = pending.filter(row => !(row.id === args.delivery_id && row.lease_token === args.claim_token));

@@ -1,5 +1,5 @@
 const {
-  validateCreateRequest,
+  validateCreateRequestGroup,
   validateStatusUpdate,
   validateAvailabilityQuery,
   validateAvailabilityWindow,
@@ -8,25 +8,13 @@ const {
   validateUpdateEquipment,
   checkAvailability,
   findAvailableUnits,
-  isStatusAvailable,
   isBlockingOverlap,
+  groupRequestsByEquipmentId,
 } = require("./equipment.validation");
 const { PLANNING_STATUSES } = require("../events/lifecycle");
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-// Shared by getEquipmentCatalogue's optional window filter and
-// getEquipmentAvailability: equipment_id -> that unit's PENDING/APPROVED requests.
-function groupRequestsByEquipmentId(requests) {
-  const requestsByEquipmentId = new Map();
-  for (const request of requests) {
-    const forUnit = requestsByEquipmentId.get(request.equipment_id) || [];
-    forUnit.push(request);
-    requestsByEquipmentId.set(request.equipment_id, forUnit);
-  }
-  return requestsByEquipmentId;
-}
 
 // SCRUM-103 (added scope): display-only - never written to the equipment row
 // (see equipment.service.js's listApprovedRequestsForEquipmentIds). An
@@ -62,7 +50,6 @@ function createEquipmentController({
 }) {
   const {
     listEquipment,
-    findEquipmentById,
     updateEquipmentStatus,
     createEquipment,
     updateEquipment,
@@ -70,12 +57,12 @@ function createEquipmentController({
     listRequestsByEvent,
     findRequestById,
     listAllRequests,
-    hasOverlappingRequest,
     listEquipmentByType,
     listActiveRequestsForEquipment,
     listApprovedRequestsForEquipment,
     listApprovedRequestsForEquipmentIds,
-    createRequest,
+    createRequestGroup,
+    reserveGroup,
     updateStatus,
     releaseReservationsForEvent,
     isRequestAvailableForWindow,
@@ -348,7 +335,11 @@ function createEquipmentController({
       const enriched = requests.map((r) => ({
         ...r,
         event_name: eventById.get(r.event_id)?.name ?? null,
-        equipment_type: equipmentById.get(r.equipment_id)?.type ?? null,
+        // SCRUM-31: equipment_id is null until Reserve assigns a unit, so the
+        // row's own equipment_type (always set at creation) is the primary
+        // source now; the catalogue lookup is only a fallback for any row
+        // that somehow lacks it.
+        equipment_type: r.equipment_type ?? equipmentById.get(r.equipment_id)?.type ?? null,
         requested_by_name: nameById.get(r.requested_by) ?? null,
       }));
 
@@ -358,6 +349,14 @@ function createEquipmentController({
     }
   }
 
+  // SCRUM-31 AC1/Decision 4: creates `quantity_requested` sibling rows for a
+  // type, no specific unit picked and no availability check here any more -
+  // this never rejects for insufficient stock (an over-request is accepted;
+  // Reserve and SCRUM-169's warning handle the shortfall later, not this
+  // endpoint). The old equipment_id/isStatusAvailable/hasOverlappingRequest
+  // checks are gone with it - they answered "is this one specific unit free
+  // right now", which no longer makes sense once no unit is chosen at
+  // submission time.
   async function postEquipmentRequest(req, res, next) {
     try {
       const { eventId } = req.params;
@@ -368,7 +367,7 @@ function createEquipmentController({
       // event_id comes from the URL, not the body - a requester cannot
       // redirect their own request onto a different event via the body.
       const payload = { ...req.body, event_id: eventId };
-      const { ok, errors, value } = validateCreateRequest(payload);
+      const { ok, errors, value } = validateCreateRequestGroup(payload);
       if (!ok) {
         return res.status(400).json({ error: "Validation failed", details: errors });
       }
@@ -378,33 +377,37 @@ function createEquipmentController({
       if (event.coordinator_id !== req.user.id) return res.status(403).json({ error: "You can only request equipment for events assigned to you." });
       if (!PLANNING_STATUSES.includes(event.status)) return res.status(409).json({ error: "The event must be approved before requesting equipment." });
 
-      const equipment = await findEquipmentById(value.equipment_id);
-      if (!equipment) return res.status(404).json({ error: "Equipment not found" });
-
-      // Scrum-29 AC3: equipment that is not AVAILABLE (IN_USE, MAINTENANCE,
-      // and after the team's status-constraint update, UNAVAILABLE, DAMAGED,
-      // UNDER_MAINTENANCE) cannot be requested - matches the availability
-      // check's exclusion, so an item shown as unavailable there can never
-      // be successfully requested here.
-      if (!isStatusAvailable(equipment)) {
-        return res.status(409).json({ error: "This equipment is not available for booking." });
-      }
-
-      const overlapping = await hasOverlappingRequest(
-        value.equipment_id,
-        value.borrow_start,
-        value.borrow_end,
-      );
-      if (overlapping) {
-        return res.status(409).json({
-          error: "This equipment is already requested for an overlapping period",
-        });
-      }
-
       // requireAuth has already verified this identity against Supabase.
       // Never take requested_by from the request body.
-      const request = await createRequest(value, req.user.id);
-      res.status(201).json({ data: request });
+      const requests = await createRequestGroup(value, req.user.id);
+      res.status(201).json({ data: requests });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // SCRUM-31: Technical Support reserves as many of a group's still-PENDING
+  // siblings as real stock allows (AC1), auto-marking the rest UNFULFILLED
+  // (AC2/Decision 8) - unless the group is essential and short, in which
+  // case nothing changes (AC5/Decision 2, a 409). `result` is null only when
+  // no row has this group_id at all.
+  async function patchReserveGroup(req, res, next) {
+    try {
+      const { groupId } = req.params;
+      if (!UUID_PATTERN.test(groupId)) {
+        return res.status(400).json({ error: "Invalid group id" });
+      }
+
+      const result = await reserveGroup(groupId);
+      if (result === null) {
+        return res.status(404).json({ error: "Equipment request not found" });
+      }
+      if (result.ok === false) {
+        return res.status(409).json({
+          error: `Not enough units available to fully reserve this essential item (needs ${result.pendingCount}, ${result.availableCount} available).`,
+        });
+      }
+      res.status(200).json({ data: { reserved: result.reserved, unfulfilled: result.unfulfilled } });
     } catch (err) {
       next(err);
     }
@@ -425,6 +428,16 @@ function createEquipmentController({
       const existing = await findRequestById(id);
       if (!existing) {
         return res.status(404).json({ error: "Equipment request not found" });
+      }
+
+      // SCRUM-31 TC-10: this older single-row endpoint predates the reserve
+      // action and still allows APPROVED/REJECTED either way - but a sibling
+      // with no equipment_id yet (PENDING, never reserved) must never reach
+      // APPROVED through it, since that would skip the availability check
+      // reserveGroup does. Backed by the equipment_requests_approved_has_unit
+      // DB constraint too, so a bug here still can't write an invalid row.
+      if (value.status === "APPROVED" && existing.equipment_id === null) {
+        return res.status(409).json({ error: "This request has no unit assigned; use Reserve instead." });
       }
 
       // Scrum-28-Scrum64 (AC2): unlike Scrum-27's one-way review, status can
@@ -464,6 +477,7 @@ function createEquipmentController({
     getTechSupportDashboard,
     postEquipmentRequest,
     patchRequestStatus,
+    patchReserveGroup,
   };
 }
 

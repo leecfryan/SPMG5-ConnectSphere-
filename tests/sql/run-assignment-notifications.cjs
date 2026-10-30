@@ -31,6 +31,10 @@ function schemaBlock(blocks, marker) {
 }
 
 async function run() {
+  // SCRUM-43/SCRUM-163: these exported fixtures each own the disposable events/helper schema.
+  if (process.argv.includes("--registration") && process.argv.includes("--venue-holds")) {
+    throw new Error("Run --registration and --venue-holds in separate invocations so each owns its disposable database.");
+  }
   const guide = fs.readFileSync(path.join(root, "docs/notifications.md"), "utf8");
   const blocks = [...guide.matchAll(/```sql\r?\n([\s\S]*?)\r?\n```/g)].map(match => match[1]);
   const readSql = name => fs.readFileSync(path.join(__dirname, name), "utf8");
@@ -59,6 +63,13 @@ async function run() {
     parts.push(readSql("venueHoldNotifications.setup.sql"),
       schemaBlock(venueBlocks, "create table public.venue_hold_notification_state ("),
       readSql("venueHoldNotifications.assertions.sql"));
+  }
+  if (process.argv.includes("--registration")) {
+    parts.push(readSql("registrationNotifications.setup.sql"),
+      schemaBlock(blocks, "create table public.registration_notification_history ("),
+      readSql("registrationNotifications.assertions.sql"),
+      schemaBlock(blocks, "-- SCRUM-43: expired-lease repair for an existing installation."),
+      "\ndo $$ declare q public.notification_outbox%rowtype; begin\n  if not has_function_privilege('service_role','public.validate_waitlist_offer_reminder(uuid,uuid)','EXECUTE')\n    or has_function_privilege('authenticated','public.validate_waitlist_offer_reminder(uuid,uuid)','EXECUTE') then\n    raise exception '[TC-SCRUM-43-S24] repair changed execute privileges'; end if;\n  perform public.enqueue_registration_notifications();\n  delete from public.notification_outbox;\n  perform public.enqueue_waitlist_offer_reminders();\n  select * into strict q from public.claim_notification_outbox();\n  update public.notification_outbox set locked_until=clock_timestamp()-interval '1 second' where id=q.id;\n  begin\n    perform public.validate_waitlist_offer_reminder(q.id,q.lease_token);\n    raise exception '[TC-SCRUM-43-S24] existing-installation repair did not reject expired lease';\n  exception when sqlstate '55000' then null; end;\nend $$;\nselect 'REGISTRATION REPAIR ASSERTIONS PASSED';");
   }
   const script = parts.join("\n");
 
@@ -120,6 +131,28 @@ async function run() {
       const verified = requireSuccess(docker(psql, "do $$ begin if (select count(*) from public.notification_outbox) is distinct from 1 or (select count(distinct warning_id) from public.venue_hold_notification_state) is distinct from 1 or (select count(*) from public.venue_hold_notification_state where warning_id is not null) is distinct from 3 or public.enqueue_venue_hold_notifications() is distinct from 0 then raise exception '[TC-SCRUM-163-S18] concurrent cohort lost or duplicated';end if;end $$;select 'VENUE HOLD CONCURRENCY ASSERTIONS PASSED';"), "Concurrent venue assertions failed.");
       process.stdout.write(verified);
     }
+    if (process.argv.includes("--registration") && !output.includes("REGISTRATION SQL ASSERTIONS PASSED")) throw new Error("Registration SQL assertions did not complete.");
+
+    if (process.argv.includes("--registration")) {
+      const psql = ["exec", "-i", name, "psql", "-h", "127.0.0.1", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-U", "postgres"];
+      requireSuccess(docker(psql, "delete from public.notification_outbox; delete from public.registration_notification_history; update public.events set status='APPROVED',start_time=now()+interval '1 day'; update public.event_waitlist_entries set offer_state='offered',offered_at=now(),offer_expires_at=now()+interval '30 minutes' where status='active';"), "Could not prepare concurrent notification fixture.");
+      const prepare = () => new Promise((resolve, reject) => {
+        const child = spawn("docker", psql, { windowsHide: true, timeout: 30000 });
+        let stderr = "";
+        child.stdout.resume();
+        child.stderr.on("data", chunk => { stderr += chunk; });
+        child.on("error", reject);
+        child.on("close", code => code === 0 ? resolve() : reject(new Error("Concurrent preparation failed: " + stderr)));
+        child.stdin.on("error", reject);
+        child.stdin.end("begin; select public.enqueue_registration_notifications(); select pg_sleep(0.3); select public.enqueue_waitlist_offer_reminders(); commit;");
+      });
+      const results = await Promise.allSettled([prepare(), prepare()]);
+      for (const result of results) if (result.status === "rejected") throw result.reason;
+      const result = requireSuccess(docker(psql, "do $$ begin if (select count(*) from public.notification_outbox) <> 2 or public.enqueue_registration_notifications() <> 0 or public.enqueue_waitlist_offer_reminders() <> 0 then raise exception '[TC-SCRUM-43-S16] concurrent workers lost or duplicated deliveries'; end if; end $$; select 'REGISTRATION CONCURRENT ASSERTIONS PASSED';"), "Concurrent notification assertions failed.");
+      if (!result.includes("REGISTRATION CONCURRENT ASSERTIONS PASSED")) throw new Error("Concurrent assertions did not finish.");
+      process.stdout.write(result);
+    }
+
     process.stdout.write(output);
     for (const [id, description] of [
       ["S01", "Initial assignment recipient and names"],

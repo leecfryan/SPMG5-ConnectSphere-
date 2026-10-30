@@ -314,3 +314,11 @@ SCRUM-117 saved-edit correction (24 October 2026): an events trigger records int
 
 
 SCRUM-163 reuses the notification worker/inbox for venue-hold warnings and expiry facts. Private venue_hold_notification_state tracks immutable hold generations and per-cohort delivery IDs; existing venue release/approval logic remains intact. The exact one-time manual SQL and workflow contract are in docs/venue-integration.md. Local tests never contact shared Supabase.
+
+### SCRUM-43 registration notification extension
+
+The same delivery worker independently prepares assignment history, registration history and due offer reminders before claiming the shared outbox. Registration/waitlist triggers save change history with business writes; sending occurs outside those transactions. Each reminder is validated against the current owned offer immediately before sending. Reuse the current /notifications identity and UI; no new permission or route. Manual schema/workflow setup is documented in docs/notifications.md and must precede live use.
+
+An expired notification claim is retryable, distinct from an obsolete offer. The worker isolates failed retry-storage writes per claimed row so remaining notifications can proceed.
+
+PR #68 integration: the shared notification worker retains both waitlist-offer and venue-hold validation, prepares all four work sources independently, and keeps per-row retry-storage failure isolation. Local fixtures model both families together; the two exported PostgreSQL fixture families run in separate disposable databases.

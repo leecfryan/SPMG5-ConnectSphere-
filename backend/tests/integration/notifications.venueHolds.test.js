@@ -40,7 +40,7 @@ async function setup(t, rows) {
       if (prepared) return { data: 0, error: null };
       prepared = true; pending = structuredClone(rows); return { data: rows.length, error: null };
     }
-    if (name === "enqueue_assignment_notifications") return { data: 0, error: null };
+    if (["enqueue_assignment_notifications", "enqueue_registration_notifications", "enqueue_waitlist_offer_reminders"].includes(name)) return { data: 0, error: null };
     if (name === "claim_notification_outbox") return { data: structuredClone(pending), error: null };
     if (name === "validate_venue_hold_notification") return validityOutage ? { data: null, error: { message: "private storage" } } : { data: validity, error: null };
     if (name === "finish_notification_outbox") {

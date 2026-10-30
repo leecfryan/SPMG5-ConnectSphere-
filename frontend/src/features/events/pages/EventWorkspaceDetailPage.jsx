@@ -12,6 +12,7 @@ import EventCancellationSummary from "../components/EventCancellationSummary";
 import EventPostponeControl from "../components/EventPostponeControl";
 import EventPostponeSummary from "../components/EventPostponeSummary";
 import EventRequestForm from "../components/EventRequestForm";
+import ChangeRequestControls from "../components/ChangeRequestControls";
 import SafetyCheckControls from "../components/SafetyCheckControls";
 import ConfirmEventControls from "../components/ConfirmEventControls";
 import EventSavedChanges from "../components/EventSavedChanges";
@@ -57,11 +58,18 @@ function Detail({ scope, eventId }) {
         </p>
       </section>}
       {scope === "organiser" && <>
-        {event.organiser_id === user.id && hasPermission("events.own.update") ?
-          (editing ? <EventRequestForm key={event.id} event={event} onCancel={() => setEditing(false)} onSubmitted={() => {
-            setEditing(false); setSaved(true); reload();
-          }} /> : <button type="button" onClick={() => { setSaved(false); setEditing(true); }}>Edit event</button>) :
-          <p>View only. Only the responsible organiser can edit this event.</p>}
+        {event.organiser_id === user.id && hasPermission("events.own.update") ? (
+          // SCRUM-164 AC2: locked past SUBMITTED, except CHANGES_REQUESTED
+          // (SCRUM-117: coordinator returned it for clarification, organiser must edit then resubmit).
+          ["SUBMITTED", "CHANGES_REQUESTED"].includes(event.status) ?
+            (editing ? <EventRequestForm key={event.id} event={event} onCancel={() => setEditing(false)} onSubmitted={() => {
+              setEditing(false); setSaved(true); reload();
+            }} /> : <button type="button" onClick={() => { setSaved(false); setEditing(true); }}>Edit event</button>) :
+            <p>Editing is no longer available. The event has moved to review and changes are locked.</p>
+        ) : <p>View only. Only the responsible organiser can edit this event.</p>}
+        {/* SCRUM-36: change request for UNDER_REVIEW / APPROVED events */}
+        {event.organiser_id === user.id && hasPermission("events.own.update") &&
+          <ChangeRequestControls event={event} onSubmitted={reload} />}
       </>}
       {scope === "organiser" && event.organiser_id === user.id && hasPermission("events.own.update") &&
         event.status === "CHANGES_REQUESTED" && !editing && !loading && <EventResubmitControl

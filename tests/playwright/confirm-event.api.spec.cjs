@@ -19,11 +19,13 @@ test('[CONFIRM-API-001] SCRUM-144 AC1-AC4: confirm only after the safety pass, e
   } })).json()).data.id;
   const hallOne = await bookVenue(dayOne);
   const hallTwo = await bookVenue(dayTwo);
+  // SCRUM-31: equipment_type replaces equipment_id; the response is now an
+  // array of sibling rows (one here, since quantity_requested is 1).
   const equipment = await request.post(`/api/events/${event.id}/equipment-requests`, { headers: headers.first, data: {
-    equipment_id: first.id, quantity_requested: 1, technical_requirement: 'Spare, rear of hall', borrow_start: dayOne + 'T01:00:00Z', borrow_end: dayOne + 'T03:00:00Z',
+    equipment_type: 'Projector ' + first.id, quantity_requested: 1, technical_requirement: 'Spare, rear of hall', borrow_start: dayOne + 'T01:00:00Z', borrow_end: dayOne + 'T03:00:00Z',
   } });
   expect(equipment.status()).toBe(201);
-  const spare = (await equipment.json()).data.id;
+  const spare = (await equipment.json()).data[0].id;
   expect((await request.patch(`/api/venues/booking-requests/${hallOne}/decision`, { headers: headers.dual, data: { decision: 'confirmed' } })).status()).toBe(200);
 
   const confirm = (as = headers.first) => request.post(`/api/internal/events/${event.id}/confirm`, { headers: as });

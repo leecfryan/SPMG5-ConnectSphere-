@@ -54,6 +54,10 @@ module.exports = function equipmentRoutes({ authenticate, equipmentService, mess
     assignedCoordinator, controller.postEquipmentRequest);
   router.get("/technical-support/equipment-requests", ...guards("equipment.review"), controller.getTechSupportDashboard);
   router.patch("/equipment-requests/:id/status", ...guards("equipment.review"), controller.patchRequestStatus);
+  // SCRUM-31: reserve as many of a group's still-PENDING siblings as real
+  // stock allows - same guard as the single-row status action above, since
+  // both are Technical Support's review/arrangement work.
+  router.patch("/equipment-requests/groups/:groupId/reserve", ...guards("equipment.review"), controller.patchReserveGroup);
   // Controllers scope threads and require authorship before editing a message.
   router.get("/events/:eventId/messages", ...guards("equipment.messages", (messagesService && equipmentService) || null), messages.getEventMessages);
   router.post("/events/:eventId/messages", ...guards("equipment.messages", (messagesService && equipmentService) || null), messages.postEventMessage);

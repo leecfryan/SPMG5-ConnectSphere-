@@ -6,6 +6,7 @@ module.exports = function notificationStorage({ auth, eventsRepository, dataClie
   const pending = new Map(), inbox = new Map();
   const venueWork = require('./venue-hold-notification-storage.cjs')(venuesService, dataClient, pending, auth);
   const prepareAssignments = require('./assignment-notification-storage.cjs')(dataClient, pending);
+  const registrationWork = require('./registration-notification-storage.cjs')(dataClient, pending, auth);
   require('./request-baseline-storage.cjs')(dataClient, eventsRepository);
   require('./resubmission-storage.cjs')(dataClient, pending);
   const transition = eventsRepository.transitionStatus.bind(eventsRepository);
@@ -33,7 +34,7 @@ module.exports = function notificationStorage({ auth, eventsRepository, dataClie
   auth.post('/__test/notification-deliveries/:id', async (req, res) => {
     const worker = createNotificationDeliveryService({
       repository: {
-        prepareAssignments, ...venueWork,
+        prepareAssignments, ...registrationWork, ...venueWork,
         claim: async () => [...pending.values()].filter(row => row.recipient_id === req.params.id),
         complete: async row => pending.delete(row.id), retry: async () => {},
       },
@@ -41,14 +42,15 @@ module.exports = function notificationStorage({ auth, eventsRepository, dataClie
       fetchImpl: async (_url, args) => {
         const { name, transactionId, to, payload } = JSON.parse(args.body);
         const venueHold = name === 'venue-hold-expiry';
+        const registration = ['registration-status', 'waitlist-offer-expiring'].includes(name);
         const assignment = name === 'event-assignment';
         const resubmitted = name === 'event-request-resubmitted';
         const clarification = name === 'event-changes-requested';
         const action = { assigned: 'assigned to you', reassigned: 'reassigned to you', 'reassigned-away': 'reassigned from you' }[payload.assignmentType];
         inbox.set(transactionId, {
-          id: transactionId, transactionId, to, subject: venueHold ? 'Venue hold update: ' + payload.venueName : resubmitted ? 'Request resubmitted' : clarification ? 'Changes requested: ' + payload.eventName : assignment ? 'Event assignment' : 'Event ' + payload.outcome,
-          redirect: (venueHold || clarification || resubmitted) ? { url: payload.requestPath, target: '_self' } : undefined,
-          body: venueHold ? payload.message : resubmitted ? 'The organiser has resubmitted ' + payload.eventName + '. Open the request to review the updated details.' : clarification ? payload.message : assignment ? 'Event “' + payload.eventName + '” was ' + action + ' by ' + payload.assignedByName + '.' : 'Your event “' + payload.eventName + '” was ' + payload.outcome + '. Note: ' + payload.remark,
+          id: transactionId, transactionId, to, subject: venueHold ? 'Venue hold update: ' + payload.venueName : registration ? 'Registration update: ' + payload.eventName : resubmitted ? 'Request resubmitted' : clarification ? 'Changes requested: ' + payload.eventName : assignment ? 'Event assignment' : 'Event ' + payload.outcome,
+          redirect: (venueHold || registration || clarification || resubmitted) ? { url: payload.requestPath, target: '_self' } : undefined,
+          body: (venueHold || registration) ? payload.message : resubmitted ? 'The organiser has resubmitted ' + payload.eventName + '. Open the request to review the updated details.' : clarification ? payload.message : assignment ? 'Event “' + payload.eventName + '” was ' + action + ' by ' + payload.assignedByName + '.' : 'Your event “' + payload.eventName + '” was ' + payload.outcome + '. Note: ' + payload.remark,
           isRead: false, isSeen: false, isArchived: false, isSnoozed: false,
           channelType: 'in_app', severity: 'none', createdAt: new Date().toISOString(), tags: [], data: payload,
         });

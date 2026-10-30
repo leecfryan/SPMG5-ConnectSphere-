@@ -5,7 +5,12 @@ function createNotificationDeliveryService({ repository, secretKey, fetchImpl = 
   const warn = () => logger.warn("Notification delivery is pending. Check the queue and Novu workflow configuration.");
 
   async function deliver(row) {
-    // SCRUM-163: validate the current reservation before sending a warning or an expiry fact.
+    // SCRUM-43: retries must not send an offer reminder after its offer becomes obsolete.
+    if (row.workflow === "waitlist-offer-expiring" && !await repository.reminderIsCurrent(row)) {
+      await repository.complete(row);
+      return;
+    }
+    // SCRUM-163: warnings and expiry facts must still match their saved hold generation.
     if (row.workflow === "venue-hold-expiry" && !await repository.venueHoldNotificationIsCurrent(row)) {
       await repository.complete(row);
       return;
@@ -30,10 +35,10 @@ function createNotificationDeliveryService({ repository, secretKey, fetchImpl = 
     running = true;
     try {
       // SCRUM-155: assignment queueing failure must not stop existing decision deliveries.
-      try { await repository.prepareAssignments(); }
-      catch { warn(); }
-      try { await repository.prepareVenueHolds(); }
-      catch { warn(); }
+      for (const prepare of ["prepareAssignments", "prepareRegistrations", "prepareReminders", "prepareVenueHolds"]) {
+        try { await repository[prepare](); }
+        catch { warn(); }
+      }
       const rows = await repository.claim();
       for (const row of rows) {
         try { await deliver(row); }

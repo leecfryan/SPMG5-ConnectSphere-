@@ -73,7 +73,8 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
 
       - run: docker pull postgres:17-alpine
-      - run: node tests/sql/run-assignment-notifications.cjs --venue-holds
+      - run: node tests/sql/run-assignment-notifications.cjs --registration
+      - run: node tests/sql/run-assignment-notifications.cjs --venue-holds --clarification
 
   docker:
     name: Docker Checks

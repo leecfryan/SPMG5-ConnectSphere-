@@ -4,7 +4,15 @@
 // production, and equipment.functional.test.js binds it to an in-memory fake
 // so role gating, overlap rejection, and event scoping can be exercised
 // without touching the live database (see that test file's header for why).
-const { WRITABLE_COLS, BLOCKING_REQUEST_STATUSES, isBlockingOverlap, isStatusAvailable } = require("./equipment.validation");
+const { randomUUID } = require("node:crypto");
+const {
+  BLOCKING_REQUEST_STATUSES,
+  isBlockingOverlap,
+  isStatusAvailable,
+  findAvailableUnits,
+  groupRequestsByEquipmentId,
+  planReservation,
+} = require("./equipment.validation");
 
 const REQUESTS_TABLE = "equipment_requests";
 const EQUIPMENT_TABLE = "equipment";
@@ -214,18 +222,102 @@ function createEquipmentService(client) {
     );
   }
 
-  // requestedBy is passed as its own argument, never taken from `fields` -
-  // same pattern as organiser_id in events.repository.js.
-  async function createRequest(fields, requestedBy) {
+  // SCRUM-31 AC1: one coordinator submission for `quantity_requested` units
+  // becomes that many sibling rows - same event/type/window/is_essential,
+  // each with no equipment_id yet (a unit is assigned later, by
+  // reserveGroup). requestedBy is passed as its own argument, never taken
+  // from `fields` - same pattern as organiser_id in events.repository.js.
+  async function createRequestGroup(fields, requestedBy) {
+    const groupId = randomUUID();
     const row = {
-      ...pickCol(fields, WRITABLE_COLS),
+      event_id: fields.event_id,
+      equipment_type: fields.equipment_type,
+      quantity_requested: 1,
+      is_essential: fields.is_essential,
+      borrow_start: fields.borrow_start,
+      borrow_end: fields.borrow_end,
       requested_by: requestedBy,
       status: "PENDING",
+      group_id: groupId,
     };
+    if (fields.technical_requirement !== undefined) row.technical_requirement = fields.technical_requirement;
+
+    const rows = Array.from({ length: fields.quantity_requested }, () => ({ ...row }));
     return unwrap(
-      await client.from(REQUESTS_TABLE).insert(row).select().single(),
-      "createRequest",
+      await client.from(REQUESTS_TABLE).insert(rows).select(),
+      "createRequestGroup",
     );
+  }
+
+  // SCRUM-31: every sibling from one coordinator submission.
+  async function listRequestsByGroupId(groupId) {
+    return unwrap(
+      await client.from(REQUESTS_TABLE).select("*").eq("group_id", groupId),
+      "listRequestsByGroupId",
+    );
+  }
+
+  // SCRUM-31 AC1/AC4: assigns a specific unit to one sibling in a single
+  // write - the moment this commits, the unit is APPROVED with a real
+  // equipment_id, so it immediately enters BLOCKING_REQUEST_STATUSES for the
+  // next availability read (AC4 - no separate counter to decrement).
+  async function assignUnitToRequest(id, equipmentId) {
+    return unwrap(
+      await client
+        .from(REQUESTS_TABLE)
+        .update({ equipment_id: equipmentId, status: "APPROVED" })
+        .eq("id", id)
+        .select()
+        .maybeSingle(),
+      "assignUnitToRequest",
+    );
+  }
+
+  // SCRUM-31: Technical Support's reserve action. Loads the group's still-
+  // PENDING siblings (Decision 8/12: an already-APPROVED or UNFULFILLED
+  // sibling is never touched again, so a re-run only finishes what's left -
+  // TC-04, TC-18), finds the real available units with the exact same
+  // SCRUM-29 logic the catalogue/availability endpoints use, and hands the
+  // decision to the pure planReservation (AC1/AC2/AC5). Returns null when the
+  // group doesn't exist at all (controller maps that to 404); when there is
+  // nothing left to reserve, returns an explicit no-op (Decision 12, TC-17)
+  // rather than re-deriving availability for nothing.
+  async function reserveGroup(groupId) {
+    const siblings = await listRequestsByGroupId(groupId);
+    if (siblings.length === 0) return null;
+
+    const pendingRequests = siblings.filter((request) => request.status === "PENDING");
+    if (pendingRequests.length === 0) {
+      return { ok: true, reserved: [], unfulfilled: [] };
+    }
+
+    const { equipment_type: type, borrow_start: requestedStart, borrow_end: requestedEnd } = siblings[0];
+    const isEssential = siblings.some((request) => request.is_essential === true);
+
+    const equipmentUnits = await listEquipmentByType(type);
+    const activeRequests = await listActiveRequestsForEquipment(equipmentUnits.map((unit) => unit.id));
+    const availableUnits = findAvailableUnits({
+      equipmentUnits,
+      requestsByEquipmentId: groupRequestsByEquipmentId(activeRequests),
+      requestedStart,
+      requestedEnd,
+    });
+
+    const plan = planReservation({ pendingRequests, availableUnits, isEssential });
+    if (!plan.ok) {
+      return { ok: false, reason: plan.reason, availableCount: plan.availableCount, pendingCount: plan.pendingCount };
+    }
+
+    const reserved = [];
+    for (const { requestId, equipmentId } of plan.assignments) {
+      reserved.push(await assignUnitToRequest(requestId, equipmentId));
+    }
+    const unfulfilled = [];
+    for (const requestId of plan.unfulfilledRequestIds) {
+      unfulfilled.push(await updateStatus(requestId, "UNFULFILLED"));
+    }
+
+    return { ok: true, reserved, unfulfilled };
   }
 
   // Scrum-28-Scrum64 (AC2): Technical Support Staff update this request's
@@ -411,7 +503,10 @@ function createEquipmentService(client) {
     listActiveRequestsForEquipment,
     listApprovedRequestsForEquipment,
     listApprovedRequestsForEquipmentIds,
-    createRequest,
+    createRequestGroup,
+    listRequestsByGroupId,
+    assignUnitToRequest,
+    reserveGroup,
     updateStatus,
     isRequestAvailableForWindow,
     hasUnresolvedEquipment,
@@ -419,4 +514,4 @@ function createEquipmentService(client) {
   };
 }
 
-module.exports = { createEquipmentService, WRITABLE_COLS };
+module.exports = { createEquipmentService };

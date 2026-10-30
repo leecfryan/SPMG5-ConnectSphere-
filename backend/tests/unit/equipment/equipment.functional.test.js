@@ -8,13 +8,14 @@ const equipmentRoutes = require("../../../src/routes/equipment.routes");
 
 const VALID_EVENT_ID = "11111111-1111-1111-1111-111111111111";
 const VALID_EQUIPMENT_ID = "22222222-2222-2222-2222-222222222222";
-const OTHER_EQUIPMENT_ID = "33333333-3333-3333-3333-333333333333";
 
+// SCRUM-31: creation asks for a type + quantity, no specific unit any more -
+// see equipment.validation.js's validateCreateRequestGroup.
 function validCreatePayload(overrides = {}) {
   const start = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const end = new Date(start.getTime() + 3 * 60 * 60 * 1000);
   return {
-    equipment_id: VALID_EQUIPMENT_ID,
+    equipment_type: "PROJECTOR",
     quantity_requested: 2,
     technical_requirement: "Needs HDMI",
     borrow_start: start.toISOString(),
@@ -23,8 +24,8 @@ function validCreatePayload(overrides = {}) {
   };
 }
 
-function fakeEquipmentService({ equipmentById = {}, requestsByEvent = {}, requestById = {}, allRequests = [], overlapping = false } = {}) {
-  const calls = { createRequest: [], updateStatus: [], hasOverlappingRequest: [] };
+function fakeEquipmentService({ equipmentById = {}, requestsByEvent = {}, requestById = {}, allRequests = [] } = {}) {
+  const calls = { createRequestGroup: [], updateStatus: [] };
   return {
     calls,
     async listEquipment() {
@@ -49,13 +50,23 @@ function fakeEquipmentService({ equipmentById = {}, requestsByEvent = {}, reques
     async listApprovedRequestsForEquipmentIds(equipmentIds) {
       return allRequests.filter((request) => equipmentIds.includes(request.equipment_id) && request.status === "APPROVED");
     },
-    async hasOverlappingRequest(equipmentId, borrowStart, borrowEnd) {
-      calls.hasOverlappingRequest.push({ equipmentId, borrowStart, borrowEnd });
-      return overlapping;
-    },
-    async createRequest(fields, requestedBy) {
-      calls.createRequest.push({ fields, requestedBy });
-      return { id: "new-request-id", status: "PENDING", requested_by: requestedBy, ...fields };
+    // SCRUM-31: creation no longer checks a specific unit's availability or
+    // overlap (Decision 4 - that moved to the reserve action, tested against
+    // the real service in tests/unit/equipment-group-reserve.service.test.js),
+    // so this fake has nothing left to fake for that - it just creates
+    // `quantity_requested` sibling rows, same shape as the real
+    // createRequestGroup.
+    async createRequestGroup(fields, requestedBy) {
+      calls.createRequestGroup.push({ fields, requestedBy });
+      const groupId = "fake-group-id";
+      return Array.from({ length: fields.quantity_requested }, (_, index) => ({
+        id: `new-request-id-${index}`,
+        group_id: groupId,
+        status: "PENDING",
+        requested_by: requestedBy,
+        ...fields,
+        quantity_requested: 1,
+      }));
     },
     // Scrum-28-Scrum64 (AC2): unconditional, matching the real service - no
     // PENDING-only precondition (see equipment.service.js's updateStatus).
@@ -98,9 +109,12 @@ async function setup(t, {
   return "http://127.0.0.1:" + server.address().port;
 }
 
-// --- Scrum-27 AC1: equipment type can be recorded (equipment_id link resolves) ---
+// --- Scrum-27 AC1: equipment type can be recorded (SCRUM-31: directly, as
+// equipment_type - no specific unit is resolved or checked at creation any
+// more; see this file's updated fakeEquipmentService and the task note's
+// Data model decision) ---
 
-test("Scrum-27 AC1: a request created with a valid equipment_id resolves to that equipment", async (t) => {
+test("Scrum-27 AC1: a request created with a valid equipment_type creates that many PENDING sibling rows", async (t) => {
   const equipmentService = fakeEquipmentService({
     equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID, type: "PROJECTOR", status: "AVAILABLE" } },
   });
@@ -109,12 +123,13 @@ test("Scrum-27 AC1: a request created with a valid equipment_id resolves to that
   const response = await fetch(base + `/api/events/${VALID_EVENT_ID}/equipment-requests`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-test-user-id": "coord-1" },
-    body: JSON.stringify(validCreatePayload()),
+    body: JSON.stringify(validCreatePayload({ quantity_requested: 2 })),
   });
   assert.equal(response.status, 201);
   const { data } = await response.json();
-  assert.equal(data.equipment_id, VALID_EQUIPMENT_ID);
-  assert.equal(equipmentService.calls.createRequest.length, 1);
+  assert.equal(data.length, 2);
+  assert.ok(data.every((row) => row.equipment_type === "PROJECTOR" && row.status === "PENDING"));
+  assert.equal(equipmentService.calls.createRequestGroup.length, 1);
 });
 
 for (const status of ["SUBMITTED", "UNDER_REVIEW", "SAFETY_REVIEW", "REJECTED"]) {
@@ -134,22 +149,15 @@ for (const status of ["SUBMITTED", "UNDER_REVIEW", "SAFETY_REVIEW", "REJECTED"])
     });
     assert.equal(response.status, 409);
     assert.deepEqual(await response.json(), { error: "The event must be approved before requesting equipment." });
-    assert.equal(equipmentService.calls.createRequest.length, 0);
+    assert.equal(equipmentService.calls.createRequestGroup.length, 0);
   });
 }
 
-test("Scrum-27 AC1: an equipment_id that does not exist is rejected", async (t) => {
-  const equipmentService = fakeEquipmentService({ equipmentById: {} });
-  const base = await setup(t, { roleAssignments: { "coord-1": ["event_coordinator"] }, equipmentService });
-
-  const response = await fetch(base + `/api/events/${VALID_EVENT_ID}/equipment-requests`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-test-user-id": "coord-1" },
-    body: JSON.stringify(validCreatePayload()),
-  });
-  assert.equal(response.status, 404);
-  assert.equal(equipmentService.calls.createRequest.length, 0);
-});
+// SCRUM-31 Decision 4: retired. Creation no longer resolves or checks a
+// specific equipment_id at all (there is none in the payload any more), so
+// "an id that doesn't exist" has no equivalent failure mode left at this
+// endpoint - any equipment_type string is accepted, the same way
+// validateAvailabilityQuery's own `type` field is freeform text today.
 
 test("the equipment catalogue is listed for authenticated technical staff", async (t) => {
   const equipmentService = fakeEquipmentService({
@@ -167,7 +175,10 @@ test("the equipment catalogue is listed for authenticated technical staff", asyn
 
 // --- Scrum-27 AC2: required quantity can be recorded ---
 
-test("Scrum-27 AC2: a valid quantity is persisted on the created request", async (t) => {
+// SCRUM-31: "the quantity" is now how many sibling rows get created, not a
+// field persisted on one row (each sibling's own quantity_requested is
+// always 1 - see createRequestGroup).
+test("Scrum-27 AC2: a valid quantity creates that many sibling rows", async (t) => {
   const equipmentService = fakeEquipmentService({
     equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID, status: "AVAILABLE" } },
   });
@@ -179,7 +190,7 @@ test("Scrum-27 AC2: a valid quantity is persisted on the created request", async
     body: JSON.stringify(validCreatePayload({ quantity_requested: 5 })),
   });
   assert.equal(response.status, 201);
-  assert.equal((await response.json()).data.quantity_requested, 5);
+  assert.equal((await response.json()).data.length, 5);
 });
 
 test("Scrum-27 AC2: quantity <= 0 is rejected before reaching the data layer", async (t) => {
@@ -194,7 +205,7 @@ test("Scrum-27 AC2: quantity <= 0 is rejected before reaching the data layer", a
     body: JSON.stringify(validCreatePayload({ quantity_requested: 0 })),
   });
   assert.equal(response.status, 400);
-  assert.equal(equipmentService.calls.createRequest.length, 0);
+  assert.equal(equipmentService.calls.createRequestGroup.length, 0);
 });
 
 // --- Scrum-27 AC3: relevant technical requirements can be recorded ---
@@ -211,7 +222,8 @@ test("Scrum-27 AC3: technical_requirement is persisted on the created request", 
     body: JSON.stringify(validCreatePayload({ technical_requirement: "Needs a wireless lapel mic." })),
   });
   assert.equal(response.status, 201);
-  assert.equal((await response.json()).data.technical_requirement, "Needs a wireless lapel mic.");
+  const { data } = await response.json();
+  assert.ok(data.every((row) => row.technical_requirement === "Needs a wireless lapel mic."));
 });
 
 // --- Scrum-27 AC4: the request remains associated with the relevant event ---
@@ -255,13 +267,13 @@ test("a Coordinator can create a request; a Technical Support Staff member canno
     body: JSON.stringify(validCreatePayload()),
   });
   assert.equal(asTechSupport.status, 403);
-  assert.equal(equipmentService.calls.createRequest.length, 1, "only the coordinator's request should reach the data layer");
+  assert.equal(equipmentService.calls.createRequestGroup.length, 1, "only the coordinator's request should reach the data layer");
 });
 
 // --- role gating: status update is tech_support-only ---
 
 test("Technical Support Staff can update status; a Coordinator cannot (403)", async (t) => {
-  const requestById = { "44444444-4444-4444-4444-444444444444": { id: "44444444-4444-4444-4444-444444444444", status: "PENDING" } };
+  const requestById = { "44444444-4444-4444-4444-444444444444": { id: "44444444-4444-4444-4444-444444444444", status: "PENDING", equipment_id: VALID_EQUIPMENT_ID } };
   const equipmentService = fakeEquipmentService({ requestById });
   const base = await setup(t, {
     roleAssignments: { "coord-1": ["event_coordinator"], "tech-1": ["technical_support_staff"] },
@@ -285,38 +297,32 @@ test("Technical Support Staff can update status; a Coordinator cannot (403)", as
   assert.equal((await asTechSupport.json()).data.status, "APPROVED");
 });
 
-// --- overlap guard ---
+// SCRUM-31 TC-10: a sibling with no unit assigned yet (equipment_id null,
+// still PENDING - the normal state before Reserve runs) must never reach
+// APPROVED through this older single-row endpoint, since that would skip
+// the availability check reserveGroup does.
+test("SCRUM-31 TC-10: a request with no equipment_id assigned cannot be APPROVED through the old status endpoint", async (t) => {
+  const requestById = { "44444444-4444-4444-4444-444444444444": { id: "44444444-4444-4444-4444-444444444444", status: "PENDING", equipment_id: null } };
+  const equipmentService = fakeEquipmentService({ requestById });
+  const base = await setup(t, { roleAssignments: { "tech-1": ["technical_support_staff"] }, equipmentService });
 
-test("an overlapping borrow window for the same equipment is rejected", async (t) => {
-  const equipmentService = fakeEquipmentService({
-    equipmentById: { [VALID_EQUIPMENT_ID]: { id: VALID_EQUIPMENT_ID, status: "AVAILABLE" } },
-    overlapping: true,
-  });
-  const base = await setup(t, { roleAssignments: { "coord-1": ["event_coordinator"] }, equipmentService });
-
-  const response = await fetch(base + `/api/events/${VALID_EVENT_ID}/equipment-requests`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-test-user-id": "coord-1" },
-    body: JSON.stringify(validCreatePayload()),
+  const response = await fetch(base + "/api/equipment-requests/44444444-4444-4444-4444-444444444444/status", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "x-test-user-id": "tech-1" },
+    body: JSON.stringify({ status: "APPROVED" }),
   });
   assert.equal(response.status, 409);
-  assert.equal(equipmentService.calls.createRequest.length, 0);
+  assert.deepEqual(await response.json(), { error: "This request has no unit assigned; use Reserve instead." });
+  assert.equal(equipmentService.calls.updateStatus.length, 0);
 });
 
-test("a non-overlapping borrow window for the same equipment is accepted", async (t) => {
-  const equipmentService = fakeEquipmentService({
-    equipmentById: { [OTHER_EQUIPMENT_ID]: { id: OTHER_EQUIPMENT_ID, status: "AVAILABLE" } },
-    overlapping: false,
-  });
-  const base = await setup(t, { roleAssignments: { "coord-1": ["event_coordinator"] }, equipmentService });
-
-  const response = await fetch(base + `/api/events/${VALID_EVENT_ID}/equipment-requests`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-test-user-id": "coord-1" },
-    body: JSON.stringify(validCreatePayload({ equipment_id: OTHER_EQUIPMENT_ID })),
-  });
-  assert.equal(response.status, 201);
-});
+// SCRUM-31 Decision 4: retired. Creation no longer checks a specific unit's
+// overlap at all - there is no unit to check an overlap against until
+// Reserve runs. The guarantee these two tests protected ("an item already
+// committed elsewhere can't be double-booked") still holds, one layer in:
+// it's exactly what equipment-group-reserve.service.test.js's TC-01/TC-02
+// prove for the real reserveGroup, built on the same isBlockingOverlap this
+// file's fake used to stand in for.
 
 // --- authentication ---
 
@@ -332,7 +338,7 @@ test("unauthenticated requests are rejected before any role or data check", asyn
     body: JSON.stringify(validCreatePayload()),
   });
   assert.equal(response.status, 401);
-  assert.equal(equipmentService.calls.createRequest.length, 0);
+  assert.equal(equipmentService.calls.createRequestGroup.length, 0);
 });
 
 // --- Scrum-28-Scrum64 (AC2): status updates as arrangements progress ---

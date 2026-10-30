@@ -2,6 +2,7 @@
 const { randomUUID } = require('node:crypto');
 module.exports = function registrationStorage(accounts) {
   const registrations = [];
+  const listeners = [];
   const waitlistEntries = [];
   // SCRUM-141: event activity history, written by the events fixture in server.cjs.
   const activity = [];
@@ -16,6 +17,9 @@ module.exports = function registrationStorage(accounts) {
   }
   return {
     registrations,
+    waitlistEntries,
+    onRegistrationChange: listener => listeners.push(listener),
+    recordRegistrationChange: (table, row, previous) => listeners.forEach(listener => listener(table, row, previous)),
     activity,
     // SCRUM-37: no longer async - apply_organiser_event_edit below returns a
     // chainable object (select/maybeSingle), matching how the real Supabase
@@ -123,14 +127,19 @@ module.exports = function registrationStorage(accounts) {
               : registrations;
         let result = rows.filter(row => filters.every(test => test(row)));
         if (insertion) {
-          if (rows.some(row => row.attendee_id === insertion.attendee_id && row.event_id === insertion.event_id)) {
+          if (insertion.attendee_id !== undefined && rows.some(row => row.attendee_id === insertion.attendee_id && row.event_id === insertion.event_id)) {
             return { data: null, error: { code: '23505', message: 'Duplicate registration' } };
           }
           const now = new Date().toISOString();
           const row = { ...insertion, id: randomUUID(), created_at: now, updated_at: now };
           rows.push(row); result = [row];
+          for (const listener of listeners) listener(table, row);
         }
-        if (update) result.forEach(row => Object.assign(row, update, { updated_at: new Date().toISOString() }));
+        if (update) result.forEach(row => {
+          const previous = { ...row };
+          Object.assign(row, update, { updated_at: new Date().toISOString() });
+          for (const listener of listeners) listener(table, row, previous);
+        });
         if (ordering) result.sort((a, b) => String(a[ordering.key]).localeCompare(String(b[ordering.key])) * (ordering.ascending ? 1 : -1));
         const data = result.map(row => project(row, selection));
         return { data: single ? data[0] || null : data, error: null };

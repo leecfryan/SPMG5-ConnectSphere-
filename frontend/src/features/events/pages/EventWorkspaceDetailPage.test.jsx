@@ -175,9 +175,10 @@ const eventId = "10000000-0000-0000-0000-000000000001";
 const endpoint = `/api/event-workspace/organiser/${eventId}`;
 const response = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body });
 
-function setupOrganiserEdit({ owner = "organiser-a", patchResponse } = {}) {
+function setupOrganiserEdit({ owner = "organiser-a", patchResponse, status = "SUBMITTED" } = {}) {
   const event = {
-    id: eventId, organiser_id: owner, coordinator_id: null, status: "APPROVED", name: "Own event",
+    // SCRUM-164: editing is locked past SUBMITTED; fixture must be SUBMITTED for edit tests to render the button.
+    id: eventId, organiser_id: owner, coordinator_id: null, status, name: "Own event",
     purpose: "Workshop", description: "An accessible workshop", expected_attendance: 20,
     start_time: "2099-01-01T01:00:12.345Z", end_time: "2099-01-01T03:00:12.345Z",
     venue_requirements: "One room", equipment_needs: "Projector",
@@ -223,13 +224,17 @@ test("[SCRUM-100-UI-001] The responsible organiser saves only changed fields and
   const input = screen.getByLabelText(/Event name/);
   await user.clear(input);
   await user.type(input, "Revised event");
+  // SCRUM-164: Save stays disabled until reason is filled.
+  expect(screen.getByRole("button", { name: "Save changes" }).disabled).toBe(true);
+  await user.type(screen.getByLabelText(/Why are you making these changes/), "Correcting name");
   await user.click(screen.getByRole("button", { name: "Save changes" }));
   await screen.findByRole("heading", { name: "Revised event" });
   expect(screen.getByText("Event changes saved.")).toBeTruthy();
   const calls = fetchMock.mock.calls.filter(([, options]) => options?.method === "PATCH");
   expect(calls).toHaveLength(1);
-  expect(JSON.parse(calls[0][1].body)).toEqual({ name: "Revised event" });
-  expect(event).toEqual({ ...before, name: "Revised event" });
+  // SCRUM-164: reason is included alongside the changed event field.
+  expect(JSON.parse(calls[0][1].body)).toEqual({ name: "Revised event", reason: "Correcting name" });
+  expect(event).toEqual({ ...before, name: "Revised event", reason: "Correcting name" });
 });
 
 test("[SCRUM-100-UI-002] A colleague's event has a view-only explanation and no edit controls", async () => {
@@ -256,6 +261,8 @@ test("[SCRUM-100-UI-004] API validation errors retain entered values and allow c
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "Edit event" }));
   await user.clear(screen.getByLabelText(/Event name/));
+  // SCRUM-164: reason is required to enable Save.
+  await user.type(screen.getByLabelText(/Why are you making these changes/), "Clearing the name to test validation");
   await user.click(screen.getByRole("button", { name: "Save changes" }));
   expect(await screen.findByText("required")).toBeTruthy();
   expect(screen.getByLabelText(/Event name/).value).toBe("");
@@ -268,10 +275,32 @@ test("[SCRUM-100-UI-005] A server denial of an already open edit retains input a
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "Edit event" }));
   await user.type(screen.getByLabelText(/Event name/), "Denied change");
+  // SCRUM-164: reason is required to enable Save.
+  await user.type(screen.getByLabelText(/Why are you making these changes/), "Testing denial");
   await user.click(screen.getByRole("button", { name: "Save changes" }));
   await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("You can only edit events you are responsible for."));
   expect(event).toEqual(before);
   expect(screen.getByLabelText(/Event name/).value).toBe("Own eventDenied change");
+});
+
+test("[TC-SCRUM-164-13] An event past SUBMITTED shows the locked message and no edit controls", async () => {
+  setupOrganiserEdit({ status: "UNDER_REVIEW" });
+  await screen.findByRole("heading", { name: "Own event" });
+  expect(screen.getByText(/Editing is no longer available/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Edit event" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
+});
+
+test("[TC-SCRUM-164-14] The reason field appears in edit mode and a server reason error is shown", async () => {
+  setupOrganiserEdit({ patchResponse: response(400, { errors: [{ field: "reason", message: "required" }], message: "Check the highlighted fields and try again." }) });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Edit event" }));
+  expect(screen.getByLabelText(/Why are you making these changes/)).toBeTruthy();
+  await user.type(screen.getByLabelText(/Event name/), "Change");
+  await user.type(screen.getByLabelText(/Why are you making these changes/), "A reason");
+  await user.click(screen.getByRole("button", { name: "Save changes" }));
+  expect(await screen.findByText("required")).toBeTruthy();
+  expect(screen.getByLabelText(/Why are you making these changes/).getAttribute("aria-invalid")).toBe("true");
 });
 
 test("[SCRUM-100-UI-006] Late event data cannot restore a previous account's records after an account switch", async () => {
@@ -342,6 +371,15 @@ test("[SCRUM-141-UI-009] AC4: an approval note is labelled Note, and an action t
   const entries = within(await screen.findByRole("region", { name: "Activity history" })).getAllByRole("listitem").map((item) => item.textContent);
   expect(entries[0]).toContain("Note: Second exit opened");
   expect(entries[1]).toMatch(/^SOMETHING_NEW · /);
+});
+
+// SCRUM-164 AC3: EDIT entries appear with a readable label and the organiser's reason.
+test("[TC-SCRUM-164-15] EDIT entries show a readable label and the reason", async () => {
+  const EDIT_ENTRY = { id: "act-3", action: "EDIT", note: "Correcting the venue requirements", created_at: "2099-11-01T09:00:00Z" };
+  setup("organiser", { status: "SUBMITTED", activity: [EDIT_ENTRY] }, { userId: "org-1" });
+  const entries = within(await screen.findByRole("region", { name: "Activity history" })).getAllByRole("listitem").map(item => item.textContent);
+  expect(entries[0]).toMatch(/^Updated event details · /);
+  expect(entries[0]).toContain("Reason: Correcting the venue requirements");
 });
 
 // SCRUM-144: confirming from the coordinator's event page.

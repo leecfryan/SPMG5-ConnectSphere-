@@ -7,11 +7,13 @@ test('[ACCESS-E2E-API-001] Real assignment, bookings and reassignment preserve r
   expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
   // Stands in for the assigned coordinator's approval (SCRUM-99); bookings need an approved event.
   await accounts.updateEvent(event.id, { status: 'APPROVED' });
-  const equipmentFields = { equipment_id: first.id, quantity_requested: 1, technical_requirement: 'HDMI', borrow_start: date + 'T01:00:00Z', borrow_end: date + 'T03:00:00Z' };
+  // SCRUM-31: equipment_type replaces equipment_id; the response is now an
+  // array of sibling rows (one here, since quantity_requested is 1).
+  const equipmentFields = { equipment_type: 'Projector ' + first.id, quantity_requested: 1, technical_requirement: 'HDMI', borrow_start: date + 'T01:00:00Z', borrow_end: date + 'T03:00:00Z' };
   const equipmentPath = `/api/events/${event.id}/equipment-requests`;
   const equipment = await request.post(equipmentPath, { headers: headers.first, data: equipmentFields });
   expect(equipment.status()).toBe(201);
-  const equipmentId = (await equipment.json()).data.id;
+  const equipmentId = (await equipment.json()).data[0].id;
   const venueFields = { event_id: event.id, booking_date: date, slots: ['pm'], expected_attendees: 30, room_layout: 'Theatre', required_facilities: ['Projector'] };
   const venue = await request.post(`/api/venues/${venueId}/booking-requests`, { headers: headers.first, data: venueFields });
   expect(venue.status()).toBe(201);
@@ -135,7 +137,8 @@ test('[EVENT-API-100] SCRUM-100: Client organiser sees own and same-company requ
   const ownPath = `/api/event-workspace/organiser/${events.organiser.id}`;
   expect((await request.patch(ownPath, { headers: headers.organiser, data: { name: 'Forged change', organiser_id: colleague.id, status: 'APPROVED' } })).status()).toBe(400);
   expect(await accounts.events(organiser)).toEqual(ownBefore);
-  const updated = await request.patch(ownPath, { headers: headers.organiser, data: { name: 'Updated own client request', equipment_needs: 'Two microphones' } });
+  // SCRUM-164 AC3: reason is now required for every PATCH to a SUBMITTED event.
+  const updated = await request.patch(ownPath, { headers: headers.organiser, data: { name: 'Updated own client request', equipment_needs: 'Two microphones', reason: 'Correcting requirements' } });
   expect(updated.status()).toBe(200);
   const saved = (await request.get(ownPath, { headers: headers.organiser })).json();
   expect((await saved).event).toMatchObject({ name: 'Updated own client request', equipment_needs: 'Two microphones', organiser_id: organiser.id, status: 'SUBMITTED' });
@@ -228,6 +231,40 @@ test('[EVENT-API-110] SCRUM-100: Invalid bodies and malformed references return 
 // behaviour - not a change to anything this test actually verifies (venue
 // release, the lead/ops-manager postpone path itself), just the one fact
 // about postpone that moved under it.
+// SCRUM-36 AC1/AC5: organiser submits a change request for an UNDER_REVIEW event;
+// the event name is unchanged, pending_change_request is set with the right shape.
+test('[SCRUM-36-API-001] SCRUM-36: organiser submits a change request and event content stays unchanged', async ({ accounts, request }) => {
+  const { event, organiser, headers } = await setupWorkflow(accounts, request);
+  await accounts.updateEvent(event.id, { status: 'UNDER_REVIEW' });
+  const before = (await (await request.get(`/api/event-workspace/organiser/${event.id}`, { headers: headers.organiser })).json()).event;
+  const response = await request.post(`/api/event-workspace/organiser/${event.id}/change-request`, {
+    headers: headers.organiser,
+    data: { proposed_changes: { name: 'Updated title for coordinator review' }, reason: 'Coordinator requested a clearer title' },
+  });
+  expect(response.status()).toBe(201);
+  const body = await response.json();
+  expect(body.event.pending_change_request).toMatchObject({
+    proposed_changes: { name: 'Updated title for coordinator review' },
+    reason: 'Coordinator requested a clearer title',
+    requested_by: organiser.id,
+  });
+  expect(body.event.name).toBe(before.name);
+  expect(body.event.status).toBe('UNDER_REVIEW');
+});
+
+// SCRUM-36 AC7: the change-request endpoint lives under /organiser/:id — a
+// coordinator has events.assigned.read, not events.own.update, so the guard returns 403.
+test('[SCRUM-36-API-002] SCRUM-36: coordinator is denied the change-request endpoint with 403', async ({ accounts, request }) => {
+  const { event, first, headers, update } = await setupWorkflow(accounts, request);
+  expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
+  await accounts.updateEvent(event.id, { status: 'UNDER_REVIEW' });
+  const denied = await request.post(`/api/event-workspace/organiser/${event.id}/change-request`, {
+    headers: headers.first,
+    data: { proposed_changes: { name: 'Coordinator attempt' }, reason: 'Should be denied' },
+  });
+  expect(denied.status()).toBe(403);
+});
+
 for (const [id, role] of [['001', 'event_coordinator_lead'], ['002', 'event_ops_manager']]) {
   test(`[SCRUM-142-MERGE-API-${id}] ${role} postpones another coordinator's event and releases its equipment`, async ({ accounts, request }) => {
     const { headers, event, first, date, update } = await setupWorkflow(accounts, request);
@@ -235,11 +272,11 @@ for (const [id, role] of [['001', 'event_coordinator_lead'], ['002', 'event_ops_
     await accounts.updateEvent(event.id, { status: 'APPROVED' });
     const equipmentPath = `/api/events/${event.id}/equipment-requests`;
     const equipmentResponse = await request.post(equipmentPath, { headers: headers.first, data: {
-      equipment_id: first.id, quantity_requested: 1, technical_requirement: 'HDMI',
+      equipment_type: 'Projector ' + first.id, quantity_requested: 1, technical_requirement: 'HDMI',
       borrow_start: date + 'T01:00:00Z', borrow_end: date + 'T03:00:00Z',
     } });
     expect(equipmentResponse.status()).toBe(201);
-    const equipmentId = (await equipmentResponse.json()).data.id;
+    const equipmentId = (await equipmentResponse.json()).data[0].id;
     const bookingResponse = await request.post(`/api/venues/${venueId}/booking-requests`, { headers: headers.first, data: {
       event_id: event.id, booking_date: date, slots: ['pm'], expected_attendees: 30,
       room_layout: 'Theatre', required_facilities: ['Projector'],
@@ -266,3 +303,37 @@ for (const [id, role] of [['001', 'event_coordinator_lead'], ['002', 'event_ops_
     expect((await released.json()).data.find(item => item.id === equipmentId).status).toBe('RELEASED');
   });
 }
+
+// SCRUM-164: update event information during planning.
+test('[TC-SCRUM-164-E2E-API-01] AC2: edit is locked once the event moves past SUBMITTED', async ({ accounts, request }) => {
+  const { organiser, headers, events } = await setupOrganiserAccess(accounts, request);
+  const eventPath = `/api/event-workspace/organiser/${events.organiser.id}`;
+  await accounts.updateEvent(events.organiser.id, { status: 'UNDER_REVIEW' });
+  const locked = await request.patch(eventPath, { headers: headers.organiser, data: { name: 'Must not save', reason: 'Testing lock' } });
+  expect(locked.status()).toBe(409);
+  expect((await locked.json()).message).toMatch(/no longer accepted/i);
+  expect((await accounts.events(organiser))[0].name).not.toBe('Must not save');
+});
+
+test('[TC-SCRUM-164-E2E-API-02] AC3: valid edit with reason creates an activity log entry', async ({ accounts, request }) => {
+  const { organiser, headers, events } = await setupOrganiserAccess(accounts, request);
+  const eventPath = `/api/event-workspace/organiser/${events.organiser.id}`;
+  const res = await request.patch(eventPath, { headers: headers.organiser, data: { name: 'Updated name', reason: 'Correcting a typo' } });
+  expect(res.status()).toBe(200);
+  const detail = await request.get(eventPath, { headers: headers.organiser });
+  const activity = (await detail.json()).event.activity;
+  expect(activity).not.toBeNull();
+  const edit = activity.find(entry => entry.action === 'EDIT');
+  expect(edit).toBeDefined();
+  expect(edit.note).toBe('Correcting a typo');
+});
+
+test('[TC-SCRUM-164-E2E-API-03] AC3: missing reason is rejected with a 400', async ({ accounts, request }) => {
+  const { headers, events } = await setupOrganiserAccess(accounts, request);
+  const locked = await request.patch(`/api/event-workspace/organiser/${events.organiser.id}`, {
+    headers: headers.organiser, data: { name: 'No reason' },
+  });
+  expect(locked.status()).toBe(400);
+  const body = await locked.json();
+  expect(body.errors.some(err => err.field === 'reason')).toBe(true);
+});

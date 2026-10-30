@@ -25,10 +25,11 @@ test.describe("Scrum-27 AC1-4: equipment request page", () => {
   test.beforeEach(async () => { setup = await setupEquipment(); });
   test.afterEach(async () => { await setup.teardown(); });
 
-  // Scrum-30: rewritten for the two-step reserve flow - pick a type, review
-  // the auto-assigned single unit, submit. No quantity field and no
-  // per-unit picker exist in this form any more.
-  test("Scrum-30: a coordinator reserves one unit of a type by picking the type and reviewing, not a specific unit", async ({ page }) => {
+  // SCRUM-31: rewritten - the form reopened the quantity field SCRUM-30 had
+  // removed (its own comment anticipated exactly this reversal). No unit is
+  // picked at submission any more; Technical Support's Reserve action
+  // assigns real units later.
+  test("SCRUM-31: a coordinator requests a type and quantity, no unit picked at submission", async ({ page }) => {
     await signIn(page, setup.coordinator);
     await Promise.all([
       page.waitForResponse((res) => res.url().includes("/api/equipment/events")),
@@ -39,8 +40,7 @@ test.describe("Scrum-27 AC1-4: equipment request page", () => {
       page.getByLabel("Assigned event").selectOption(setup.eventId),
     ]);
     await page.getByLabel("Equipment type").selectOption(setup.equipmentType);
-    await expect(page.getByText(`You have requested 1 ${setup.equipmentType}.`)).toBeVisible();
-    await expect(page.getByLabel("Quantity required")).toHaveCount(0);
+    await page.getByLabel("Quantity").fill("1");
     const requirementText = `E2E check ${Date.now()}`;
     await page.getByLabel("Technical requirement").fill(requirementText);
 
@@ -49,15 +49,14 @@ test.describe("Scrum-27 AC1-4: equipment request page", () => {
       page.getByRole("button", { name: "Submit request", exact: true }).click(),
     ]);
     expect(response.status(), await response.text()).toBe(201);
-    expect((await response.json()).data).toMatchObject({ equipment_id: setup.equipmentId, quantity_requested: 1 });
+    const created = (await response.json()).data;
+    expect(created).toHaveLength(1);
+    expect(created[0]).toMatchObject({ equipment_type: setup.equipmentType, quantity_requested: 1, equipment_id: null, is_essential: false });
 
     const row = page.locator(".eq-request-row", { hasText: requirementText });
     await expect(row).toBeVisible({ timeout: 10000 });
     await expect(row).toContainText("× 1");
-    // SCRUM-150: the coordinator's page now shows the same friendly status
-    // label Technical Support's own view already used, not the raw PENDING
-    // status value.
-    await expect(row).toContainText("Unattended");
+    await expect(row).toContainText("0 reserved, 0 unfulfilled, 1 pending");
   });
 
   test("AC4: an unrelated coordinator has no assigned events and cannot read this event's requests", async ({ page }) => {
