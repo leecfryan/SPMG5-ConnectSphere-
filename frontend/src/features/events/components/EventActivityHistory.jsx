@@ -4,8 +4,12 @@ import { formatWhen } from "../eventFormat";
 // SCRUM-141 AC4: the event's recorded decisions, newest first, for whoever may
 // see the event. null (or absent) means the server could not read the history.
 const ACTIONS = Object.freeze({
+  REQUEST_RESUBMITTED: "Request resubmitted",
+  CHANGES_REQUESTED: "Changes requested",
   SAFETY_APPROVED: "Safety arrangement approved",
   SAFETY_REJECTED: "Safety arrangement rejected",
+  // SCRUM-164 AC3: organiser edits during planning (SUBMITTED status).
+  EDIT: "Updated event details",
   // SCRUM-37: apply_organiser_event_edit (SQL) names the fields that actually
   // changed in its own note, so this label stays generic rather than
   // repeating "significant change" twice. event.ordinary_edit is every other
@@ -33,7 +37,7 @@ export default function EventActivityHistory({ activity }) {
       <ol className="event-workspace-list">
         {visible.map(entry => <li key={entry.id}>
           <span>{ACTIONS[entry.action] ?? entry.action} · {formatWhen(entry.created_at)}</span>
-          {entry.note && <span>{entry.action === "SAFETY_REJECTED" ? "Reason" : "Note"}: {entry.note}</span>}
+          {entry.note && <span>{["SAFETY_REJECTED", "EDIT", "event.significant_edit", "event.ordinary_edit"].includes(entry.action) ? "Reason" : "Note"}: {entry.note}</span>}
         </li>)}
       </ol>
       {hiddenCount > 0 && (

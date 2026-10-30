@@ -10,6 +10,7 @@ import {
 import EquipmentRequestForm from "../components/EquipmentRequestForm";
 import ClarificationThread from "../components/ClarificationThread";
 import { STATUS_LABEL } from "../equipmentStatusLabels";
+import { groupRequestsByGroupId } from "../groupRequests";
 import ErrorModal from "../../../components/ui/ErrorModal";
 import "../equipment.css";
 
@@ -205,51 +206,72 @@ function EquipmentRequestPage() {
         )}
       </div>
 
-      {eventId && (
+      {eventId && (() => {
+        // SCRUM-31: one submission is now N sibling rows sharing a group_id -
+        // the coordinator sees one line per group ("Projector ×5 — 3
+        // reserved, 2 unfulfilled"), TC-26, not one line per sibling.
+        const groups = groupRequestsByGroupId(requests);
+        return (
         <div className="eq-card">
           <div className="eq-card-header">
             <h2>Requests for this event</h2>
-            <span className="eq-badge">{requests.length} requests</span>
+            <span className="eq-badge">{groups.length} requests</span>
           </div>
 
           {loadError && <p className="eq-error">Could not load: {loadError}</p>}
           {isLoadingRequests && <p className="eq-hint">Loading requests…</p>}
 
-          {!isLoadingRequests && requests.length === 0 && !loadError && (
+          {!isLoadingRequests && groups.length === 0 && !loadError && (
             <p className="eq-hint">No equipment requests yet for this event.</p>
           )}
 
           <ul className="eq-request-list">
-            {requests.map((r) => (
-              <li key={r.id} className="eq-request-row">
+            {groups.map((group) => {
+              const label = group.equipmentType || equipmentLabel(group.siblings[0].equipment_id);
+              return (
+              <li key={group.threadRequestId} className="eq-request-row">
                 <div>
                   <p className="eq-request-title">
-                    {equipmentLabel(r.equipment_id)} × {r.quantity_requested}
+                    {label} × {group.total}
+                    {group.isEssential && <span className="eq-status eq-essential-badge">Essential</span>}
                   </p>
-                  {r.technical_requirement && (
-                    <p className="eq-request-detail">{r.technical_requirement}</p>
+                  {group.technicalRequirement && (
+                    <p className="eq-request-detail">{group.technicalRequirement}</p>
                   )}
+                  <p className="eq-request-detail">
+                    {group.reservedCount} reserved, {group.unfulfilledCount} unfulfilled
+                    {group.pendingCount > 0 && `, ${group.pendingCount} pending`}
+                  </p>
                 </div>
-                <span className={`eq-status eq-status-${r.status.toLowerCase()}`}>
-                  {STATUS_LABEL[r.status] || r.status}
-                </span>
-                {/* SCRUM-150 AC2: same computed, read-only flag Technical Support sees. */}
-                {r.status === "REVIEW_REQUIRED" && r.available_for_window === false && (
-                  <span className="eq-status eq-status-unavailable">Not available for these dates</span>
-                )}
+                {group.otherStatusSiblings.map((sibling) => (
+                  <span key={sibling.id}>
+                    <span className={`eq-status eq-status-${sibling.status.toLowerCase()}`}>
+                      {STATUS_LABEL[sibling.status] || sibling.status}
+                    </span>
+                    {/* SCRUM-150 AC2: same computed, read-only flag Technical Support sees. */}
+                    {sibling.status === "REVIEW_REQUIRED" && sibling.available_for_window === false && (
+                      <span className="eq-status eq-status-unavailable">Not available for these dates</span>
+                    )}
+                  </span>
+                ))}
               </li>
-            ))}
+              );
+            })}
           </ul>
 
           <ClarificationThread
             key={eventId}
             eventId={eventId}
-            lines={requests.map((r) => ({ id: r.id, label: equipmentLabel(r.equipment_id) }))}
+            lines={groups.map((group) => ({
+              id: group.threadRequestId,
+              label: group.equipmentType || equipmentLabel(group.siblings[0].equipment_id),
+            }))}
             token={token}
             currentUserId={currentUserId}
           />
         </div>
-      )}
+        );
+      })()}
 
       <ErrorModal
         open={forbiddenMessage !== null}

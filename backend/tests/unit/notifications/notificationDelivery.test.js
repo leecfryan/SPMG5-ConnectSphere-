@@ -5,7 +5,7 @@ const { createNotificationDeliveryService } = require("../../../src/modules/noti
 const { createNotificationOutboxRepository } = require("../../../src/modules/notifications/notificationOutbox.repository");
 const row = { id: "delivery-id", recipient_id: "organiser", lease_token: "lease-one", payload: { eventName: "Literacy", outcome: "approved" } };
 function fixture() {
-  const repository = { prepareAssignments: vi.fn(async () => 0), claim: vi.fn(async () => [row]), complete: vi.fn(async () => true), retry: vi.fn(async () => true) };
+  const repository = { prepareVenueHolds: async () => 0, prepareRegistrations: async () => 0, prepareReminders: async () => 0, prepareAssignments: vi.fn(async () => 0), claim: vi.fn(async () => [row]), complete: vi.fn(async () => true), retry: vi.fn(async () => true) };
   const fetchImpl = vi.fn(async () => ({ ok: true, json: async () => ({ data: { acknowledged: true, status: "processed", transactionId: row.id } }) }));
   const logger = { warn: vi.fn() };
   return { repository, fetchImpl, logger, service: createNotificationDeliveryService({ repository, fetchImpl, logger, secretKey: "fixture-only-key" }) };
@@ -73,7 +73,9 @@ test("[TC-SCRUM-143-24] Empty queue, start/stop and repeated start do not duplic
 });
 test("[TC-SCRUM-143-24] A slow delivery skips overlapping polls", async () => {
   const f = fixture(); let release; f.repository.claim.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
-  const first = f.service.runOnce(); await f.service.runOnce(); expect(f.repository.claim).toHaveBeenCalledTimes(1);
+  const first = f.service.runOnce();
+  await vi.waitFor(() => expect(f.repository.claim).toHaveBeenCalledTimes(1));
+  await f.service.runOnce(); expect(f.repository.claim).toHaveBeenCalledTimes(1);
   release([row]); await first; await f.service.runOnce(); expect(f.repository.claim).toHaveBeenCalledTimes(2);
 });
 test("[TC-SCRUM-143-25] Repository uses fenced claim/finish RPCs and normalises storage errors", async () => {
@@ -136,4 +138,72 @@ test("[TC-SCRUM-155-U05] One failed reassignment recipient retries with the same
   expect(f.fetchImpl.mock.calls[0][1].body).toBe(f.fetchImpl.mock.calls[2][1].body);
   expect(f.fetchImpl.mock.calls[0][1].headers["Idempotency-Key"]).toBe("incoming");
   expect(f.fetchImpl.mock.calls[2][1].headers["Idempotency-Key"]).toBe("incoming");
+});
+
+test("[TC-SCRUM-43-U01] Registration and reminder preparation are independent of each other and existing delivery", async () => {
+  const f = fixture();
+  f.repository.prepareRegistrations = vi.fn().mockRejectedValueOnce(new Error("private history"));
+  f.repository.prepareReminders = vi.fn().mockRejectedValueOnce(new Error("private reminders"));
+  await f.service.runOnce();
+  expect(f.repository.prepareRegistrations).toHaveBeenCalledTimes(1);
+  expect(f.repository.prepareReminders).toHaveBeenCalledTimes(1);
+  expect(f.repository.complete).toHaveBeenCalledWith(row);
+  expect(f.logger.warn).toHaveBeenCalledTimes(2);
+});
+
+test.each([true, false])("[TC-SCRUM-43-U02] Reminder sends only when its current offer validates as %s", async current => {
+  const f = fixture();
+  const reminder = { ...row, workflow: "waitlist-offer-expiring" };
+  f.repository.claim.mockResolvedValue([reminder]);
+  f.repository.reminderIsCurrent = vi.fn(async () => current);
+  await f.service.runOnce();
+  expect(f.repository.reminderIsCurrent).toHaveBeenCalledExactlyOnceWith(reminder);
+  expect(f.fetchImpl).toHaveBeenCalledTimes(current ? 1 : 0);
+  expect(f.repository.complete).toHaveBeenCalledWith(reminder);
+  expect(f.repository.retry).not.toHaveBeenCalled();
+});
+
+test("[TC-SCRUM-43-U03] Validation failure retains a reminder for retry without sending it", async () => {
+  const f = fixture();
+  const reminder = { ...row, workflow: "waitlist-offer-expiring" };
+  f.repository.claim.mockResolvedValue([reminder]);
+  f.repository.reminderIsCurrent = vi.fn().mockRejectedValueOnce(new Error("private storage failure"));
+  await f.service.runOnce();
+  expect(f.fetchImpl).not.toHaveBeenCalled();
+  expect(f.repository.complete).not.toHaveBeenCalled();
+  expect(f.repository.retry).toHaveBeenCalledWith(reminder);
+});
+
+test("[TC-SCRUM-43-U04] Registration RPCs use the delivery lease and reject malformed validity responses", async () => {
+  const abortSignal = vi.fn(async () => ({ data: true, error: null }));
+  const client = { rpc: vi.fn(() => ({ abortSignal })) };
+  const repository = createNotificationOutboxRepository(client);
+  await repository.prepareRegistrations();
+  await repository.prepareReminders();
+  expect(await repository.reminderIsCurrent(row)).toBe(true);
+  expect(client.rpc.mock.calls).toEqual([
+    ["enqueue_registration_notifications", {}],
+    ["enqueue_waitlist_offer_reminders", {}],
+    ["validate_waitlist_offer_reminder", { delivery_id: row.id, claim_token: row.lease_token }],
+  ]);
+  abortSignal.mockResolvedValue({ data: null, error: null });
+  await expect(repository.reminderIsCurrent(row)).rejects.toThrow("Notification queue is unavailable.");
+});
+
+test("[TC-SCRUM-43-U05] A failed retry write does not strand other claimed notifications", async () => {
+  const f = fixture();
+  const failed = { ...row, id: "provider-down", workflow: "registration-status" };
+  const healthy = { ...row, id: "healthy-reminder", workflow: "waitlist-offer-expiring" };
+  f.repository.claim.mockResolvedValue([failed, healthy]);
+  f.repository.retry.mockRejectedValueOnce(new Error("private retry storage failure"));
+  f.repository.reminderIsCurrent = vi.fn(async () => true);
+  f.fetchImpl.mockImplementationOnce(async () => ({ ok: false, status: 503 }))
+    .mockImplementation(async (_url, args) => ({ ok: true, json: async () => ({
+      acknowledged: true, status: "processed", transactionId: JSON.parse(args.body).transactionId,
+    }) }));
+  await f.service.runOnce();
+  expect(f.fetchImpl).toHaveBeenCalledTimes(2);
+  expect(f.repository.retry).toHaveBeenCalledExactlyOnceWith(failed);
+  expect(f.repository.complete).toHaveBeenCalledExactlyOnceWith(healthy);
+  expect(f.repository.reminderIsCurrent).toHaveBeenCalledExactlyOnceWith(healthy);
 });

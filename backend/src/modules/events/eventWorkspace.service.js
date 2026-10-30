@@ -1,8 +1,9 @@
-const { ACTIVE_STATUSES } = require("./lifecycle");
+const { ACTIVE_STATUSES, ASSIGNABLE_STATUSES } = require("./lifecycle");
 const { assignWithHistory } = require("./assignmentHistory.repository");
 const { WRITABLE_COLS } = require("./events.repository");
+const { compareRequestFields } = require("./requestComparison");
 const { normalise } = require("./events.service");
-const { validateUpdate } = require("./events.validation");
+const { validateUpdate, validateForSubmission } = require("./events.validation");
 
 // SCRUM-37: registration_start/registration_end are in WRITABLE_COLS but were
 // never selected here, harmlessly, until updateOrganiserEvent started
@@ -19,7 +20,14 @@ const FIELDS = [
   "coordinator_id", "submitted_at", "approved_rejected_by", "approved_rejected_at", "approval_rejection_remark",
   "cancelled_by", "cancelled_at", "cancellation_reason",
   "postponed_by", "postponed_at", "postponement_reason", "updated_at",
+  "pending_change_request",
 ].join(",");
+
+// SCRUM-36: statuses where the organiser may submit a change request.
+// SUBMITTED is excluded: direct editing is available there (SCRUM-164).
+// Later stages (SAFETY_REVIEW and beyond) are excluded to avoid disturbing
+// in-flight arrangements; only one request can be pending at a time.
+const ELIGIBLE_CHANGE_REQUEST_STATUSES = ["UNDER_REVIEW", "APPROVED"];
 
 function isCoordinator(user) {
   return Boolean(user && !user.deleted_at && user.email_confirmed_at &&
@@ -90,14 +98,27 @@ function createEventWorkspaceService(client) {
   // may see the event. user_id stays out: the officer pool is not named (#45).
   // Like approverName, a failed read leaves the history unknown (null) instead
   // of hiding the event itself.
-  async function activityFor(eventId) {
+  async function activityFor(event, scope) {
     const { data, error } = await client.from("event_activity_log")
       .select("id, action, details, created_at")
-      .eq("event_id", eventId).order("created_at", { ascending: false });
-    if (error) return null;
-    return data.map(({ id, action, details, created_at }) => ({
+      .eq("event_id", event.id).order("created_at", { ascending: false });
+    if (error) return { activity: null, ...(scope === "coordinator" ? { request_changes: null } : {}) };
+    const baseline = data.find(entry => entry.action === "REQUEST_BASELINE_RECORDED");
+    const requestChanges = scope === "coordinator" ? {
+      request_changes: baseline ? {
+        source: baseline.details.source, version_at: baseline.details.version_at,
+        changes: compareRequestFields(baseline.details.snapshot, event),
+      } : { source: "NO_BASELINE", version_at: null, changes: [] },
+    } : {};
+    const activity = data.filter(entry => entry.action !== "REQUEST_BASELINE_RECORDED").map(({ id, action, details, created_at }) => ({
+      ...(scope === "coordinator" && action === "REQUEST_RESUBMITTED" ? {
+        baseline_source: details.baseline_source ?? null,
+        changes: (details.changes || []).filter(change => WRITABLE_COLS.includes(change.field))
+          .map(({ field, before, after }) => ({ field, before, after })),
+      } : {}),
       id, action, from_status: details.from_status ?? null, to_status: details.to_status ?? null, note: details.note ?? null, created_at,
     }));
+    return { activity, ...requestChanges };
   }
   async function read(scope, userId, id) {
     const organiserIds = scope === "organiser" ? await organiserIdsFor(userId) : undefined;
@@ -114,18 +135,37 @@ function createEventWorkspaceService(client) {
         // SCRUM-148 AC4: same "name, else unknown" treatment as the approve/reject outcome.
         cancelled_by_name: await approverName(event.cancelled_by),
         postponed_by_name: await approverName(event.postponed_by),
-        activity: await activityFor(event.id),
+        ...await activityFor(event, scope),
       };
     },
     async updateOrganiserEvent(userId, id, input) {
       const current = await read("organiser", userId, id);
       if (!current) return { ok: false, reason: "not_found" };
       if (current.organiser_id !== userId) return { ok: false, reason: "forbidden" };
-      if (!input || Array.isArray(input) || typeof input !== "object" ||
-        Object.keys(input).length === 0 || Object.keys(input).some(field => !WRITABLE_COLS.includes(field))) {
+      // SCRUM-164 AC2: edits are locked once the event reaches UNDER_REVIEW or
+      // beyond. CHANGES_REQUESTED is the exception: the coordinator has
+      // returned the event and the organiser must edit before resubmitting.
+      // NOTE: SCRUM-117 also allows editing at UNDER_REVIEW; that conflicts
+      // with this AC and is raised as a blocker for the team to resolve.
+      if (!["SUBMITTED", "CHANGES_REQUESTED"].includes(current.status)) {
+        return { ok: false, reason: "locked" };
+      }
+      // SCRUM-164 AC3: reason is extracted before the WRITABLE_COLS check so it
+      // is not treated as an unknown column.
+      if (!input || Array.isArray(input) || typeof input !== "object") {
         return { ok: false, reason: "invalid", errors: [{ field: "event", message: "Provide only editable event details." }] };
       }
-      const { fields, errors } = normalise(input);
+      const { reason, ...eventInput } = input;
+      if (Object.keys(eventInput).length === 0 || Object.keys(eventInput).some(field => !WRITABLE_COLS.includes(field))) {
+        return { ok: false, reason: "invalid", errors: [{ field: "event", message: "Provide only editable event details." }] };
+      }
+      const trimmedReason = typeof reason === "string" ? reason.trim() : "";
+      // Reason is required only for SUBMITTED edits (SCRUM-164 AC3).
+      // UNDER_REVIEW and CHANGES_REQUESTED edits (SCRUM-117) do not require one.
+      if (current.status === "SUBMITTED" && !trimmedReason) {
+        return { ok: false, reason: "invalid", errors: [{ field: "reason", message: "required" }] };
+      }
+      const { fields, errors } = normalise(eventInput);
       const unreadable = new Set(errors.map(problem => problem.field));
       const problems = [...errors, ...validateUpdate(fields, current).errors.filter(problem => !unreadable.has(problem.field))];
       if (problems.length) return { ok: false, reason: "invalid", errors: problems };
@@ -190,7 +230,86 @@ function createEventWorkspaceService(client) {
         throw error;
       }
 
+      // SCRUM-164 AC3: record actor, timestamp (db default) and reason.
+      // unwrap() surfaces any insert failure rather than hiding it.
+      // SUBMITTED is the only status that reaches this point (AC2 locks the
+      // rest), but the guard is explicit so the intent is clear.
+      if (current.status === "SUBMITTED") {
+        await unwrap(client.from("event_activity_log").insert({
+          event_id: id,
+          user_id: userId,
+          action: "EDIT",
+          details: { from_status: null, to_status: null, note: trimmedReason },
+        }));
+      }
+
       return { ok: true, event };
+    },
+    // SCRUM-36: store a proposed change without touching the event itself.
+    // The conditional update (.is/.in) means a concurrent second submission
+    // or a status move returns zero rows without overwriting anything.
+    async submitChangeRequest(userId, eventId, input) {
+      const current = await read("organiser", userId, eventId);
+      if (!current) return { ok: false, reason: "not_found" };
+      if (current.organiser_id !== userId) return { ok: false, reason: "forbidden" };
+      if (!ELIGIBLE_CHANGE_REQUEST_STATUSES.includes(current.status)) return { ok: false, reason: "ineligible" };
+      if (current.pending_change_request) return { ok: false, reason: "already_pending" };
+
+      const { proposed_changes, reason } = input || {};
+      const errors = [];
+      if (!reason || !String(reason).trim()) errors.push({ field: "reason", message: "required" });
+      if (!proposed_changes || Array.isArray(proposed_changes) || typeof proposed_changes !== "object" ||
+        Object.keys(proposed_changes).length === 0) {
+        errors.push({ field: "proposed_changes", message: "Provide at least one field to change." });
+      } else {
+        const bad = Object.keys(proposed_changes).filter(f => !WRITABLE_COLS.includes(f));
+        for (const f of bad) errors.push({ field: f, message: "Not a permitted field." });
+      }
+      if (errors.length) return { ok: false, reason: "invalid", errors };
+
+      const { fields: normFields, errors: normErrors } = normalise(proposed_changes);
+      const unreadable = new Set(normErrors.map(p => p.field));
+      const valErrors = validateUpdate(normFields, current).errors.filter(p => !unreadable.has(p.field));
+      const allErrors = [...normErrors, ...valErrors];
+      if (allErrors.length) return { ok: false, reason: "invalid", errors: allErrors };
+
+      const payload = {
+        proposed_changes: normFields,
+        reason: String(reason).trim(),
+        requested_at: new Date().toISOString(),
+        requested_by: userId,
+      };
+      // SCRUM-36: updated_at guards against a concurrent edit between the
+      // validation read above and this write. Without it, proposed values
+      // validated against one version of the event (e.g. registration_end vs
+      // registration_start) could land on a row that has since changed.
+      const event = await unwrap(
+        client.from("events")
+          .update({ pending_change_request: payload })
+          .eq("id", eventId)
+          .eq("organiser_id", userId)
+          .eq("updated_at", current.updated_at)
+          .in("status", ELIGIBLE_CHANGE_REQUEST_STATUSES)
+          .is("pending_change_request", null)
+          .select(FIELDS)
+          .maybeSingle(),
+      );
+      if (!event) return { ok: false, reason: "conflict" };
+      return { ok: true, event };
+    },
+    async resubmitOrganiserEvent(userId, id, cycleId) {
+      const current = await read("organiser", userId, id);
+      if (!current) return { ok: false, reason: "not_found" };
+      if (current.organiser_id !== userId) return { ok: false, reason: "forbidden" };
+      if (current.status !== "CHANGES_REQUESTED" || !current.coordinator_id) return { ok: false, reason: "conflict" };
+      const validation = validateForSubmission(current);
+      if (!validation.ok) return { ok: false, reason: "invalid", errors: validation.errors };
+      // SCRUM-117: the lock rechecks these exact saved values after validation.
+      const expected = Object.fromEntries(WRITABLE_COLS.map(field => [field, current[field] ?? null]));
+      const event = await unwrap(client.rpc("resubmit_event_request", {
+        p_event_id: id, p_organiser_id: userId, p_cycle_id: cycleId, p_expected_fields: expected,
+      }).select(FIELDS).maybeSingle());
+      return event ? { ok: true, event } : { ok: false, reason: "conflict" };
     },
     async coordinators() {
       const choices = [];
@@ -214,7 +333,7 @@ function createEventWorkspaceService(client) {
     assign(id, coordinatorId, expectedCoordinatorId, actor) {
       return unwrap(assignWithHistory(client, {
         eventId: id, coordinatorId, expectedCoordinatorId,
-        allowedStatuses: ACTIVE_STATUSES, actor,
+        allowedStatuses: ASSIGNABLE_STATUSES, actor,
       }).select(FIELDS).maybeSingle());
     },
   };

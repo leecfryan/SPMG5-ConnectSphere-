@@ -108,6 +108,16 @@
   grid-column: 1 / -1;
 }
 
+/* SCRUM-31: the "Essential" checkbox reads as one line, label after the box,
+   not stacked like the text/select fields above. */
+.eq-field-checkbox {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  font-weight: 400;
+  color: var(--cs-text);
+}
+
 .eq-field input,
 .eq-field textarea,
 .eq-field select {
@@ -126,6 +136,21 @@
 .eq-field textarea {
   min-height: 84px;
   resize: vertical;
+}
+
+/* Overrides .eq-field input above: a checkbox isn't a text input, so the
+   42px min-height / 10-12px padding / full-width box doesn't apply. */
+.eq-field-checkbox input {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 1px solid var(--cs-border);
+  border-radius: 4px;
+  background: var(--cs-surface);
+  flex-shrink: 0;
+  accent-color: var(--cs-primary);
 }
 
 .eq-field input::placeholder,
@@ -238,6 +263,10 @@
 .eq-status-review_required { background: var(--cs-info-soft); color: var(--cs-info); }
 /* SCRUM-150 AC2: "not available for these dates" sub-label, review_required rows only. */
 .eq-status-unavailable { background: var(--cs-danger-soft); color: var(--cs-danger); }
+/* SCRUM-31: Reserve could not cover this sibling - terminal, same treatment as rejected/unavailable. */
+.eq-status-unfulfilled { background: var(--cs-danger-soft); color: var(--cs-danger); }
+/* SCRUM-31: marks a group all-or-nothing at reserve time. */
+.eq-essential-badge { background: var(--cs-info-soft); color: var(--cs-info); }
 
 /* --- Scrum-29 follow-up: equipment catalogue status badges (distinct from
    the request-status badges above, hence the "-equipment-" segment) --- */
@@ -279,14 +308,43 @@
   font: inherit;
 }
 
+/* SCRUM-31: one group per coordinator submission (N sibling rows sharing a
+   group_id), summarised with a Reserve button; .eq-line-list below still
+   lists each sibling individually underneath, unchanged from before. */
+.eq-group-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--cs-surface-sunken);
+}
+
+.eq-group {
+  padding: 14px 18px 4px;
+  border-bottom: 1px solid var(--cs-surface-sunken);
+}
+
+.eq-group:last-child {
+  border-bottom: none;
+}
+
+.eq-group-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.eq-group-header .eq-essential-badge {
+  margin-left: 8px;
+}
+
 .eq-line-list {
   list-style: none;
   margin: 0;
-  padding: 0 18px 16px;
+  padding: 0 0 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  border-top: 1px solid var(--cs-surface-sunken);
 }
 
 .eq-line-row {

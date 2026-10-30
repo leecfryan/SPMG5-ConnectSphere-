@@ -43,10 +43,42 @@ module.exports = function createEventWorkspaceRoutes(client) {
       if (result.ok) return res.json({ event: result.event });
       if (result.reason === "not_found") return res.status(404).json({ message: "Event not found." });
       if (result.reason === "forbidden") return res.status(403).json({ message: "You can only edit events you are responsible for." });
+      // SCRUM-164 AC2: locked once the event has moved past SUBMITTED.
+      if (result.reason === "locked") return res.status(409).json({ message: "Changes to this event are no longer accepted." });
       if (result.reason === "invalid") return res.status(400).json({ message: "Check the event details and try again.", errors: result.errors });
       return res.status(409).json({ message: "The event responsibility has changed. Refresh and try again." });
     } catch {
       return res.status(503).json({ message: "Unable to update the event. Please try again." });
+    }
+  });
+  // SCRUM-36: organiser submits a change request for an UNDER_REVIEW or APPROVED event.
+  router.post("/organiser/:id/change-request", requirePermission("events.own.update"), available, validId, async (req, res) => {
+    try {
+      const result = await service.submitChangeRequest(req.user.id, req.params.id, req.body);
+      if (result.ok) return res.status(201).json({ event: result.event });
+      if (result.reason === "not_found") return res.status(404).json({ message: "Event not found." });
+      if (result.reason === "forbidden") return res.status(403).json({ message: "You can only submit change requests for events you are responsible for." });
+      if (result.reason === "invalid") return res.status(400).json({ message: "Check the change request details and try again.", errors: result.errors });
+      if (result.reason === "ineligible") return res.status(409).json({ message: "Change requests are only accepted for events under review or approved." });
+      if (result.reason === "already_pending") return res.status(409).json({ message: "A change request is already pending for this event." });
+      return res.status(409).json({ message: "The event has changed. Refresh and try again." });
+    } catch {
+      return res.status(503).json({ message: "Unable to submit the change request. Please try again." });
+    }
+  });
+  router.post("/organiser/:id/resubmit", requirePermission("events.own.update"), available, validId, async (req, res) => {
+    if (!validBody(req.body, ["cycleId"]) || !isUuid(req.body.cycleId)) {
+      return res.status(400).json({ message: "Refresh the request before resubmitting." });
+    }
+    try {
+      const result = await service.resubmitOrganiserEvent(req.user.id, req.params.id, req.body.cycleId);
+      if (result.ok) return res.json({ event: result.event });
+      if (result.reason === "not_found") return res.status(404).json({ message: "Event not found." });
+      if (result.reason === "forbidden") return res.status(403).json({ message: "Only the responsible organiser can resubmit this request." });
+      if (result.reason === "invalid") return res.status(400).json({ message: "Edit and save the request details before resubmitting.", errors: result.errors });
+      return res.status(409).json({ message: "The request has changed. Refresh and review the saved details before resubmitting." });
+    } catch {
+      return res.status(503).json({ message: "Unable to resubmit the request. Please try again." });
     }
   });
   router.get("/coordinators", requirePermission("events.assign"), available, async (req, res) => {

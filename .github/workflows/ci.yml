@@ -73,7 +73,8 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
 
       - run: docker pull postgres:17-alpine
-      - run: node tests/sql/run-assignment-notifications.cjs
+      - run: node tests/sql/run-assignment-notifications.cjs --registration
+      - run: node tests/sql/run-assignment-notifications.cjs --venue-holds --clarification
 
   docker:
     name: Docker Checks
@@ -95,6 +96,7 @@ jobs:
   playwright:
     name: Browser and API Acceptance Tests
     runs-on: ubuntu-latest
+    container: mcr.microsoft.com/playwright:v1.63.0-noble
     timeout-minutes: 15
     steps:
       - name: Checkout repository
@@ -113,8 +115,6 @@ jobs:
           npm ci
           npm --prefix frontend ci
           npm --prefix backend ci
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
       - name: Run browser and direct API acceptance tests
         run: npm run test:playwright
       - name: Save Playwright report and failure traces
@@ -130,6 +130,7 @@ jobs:
   playwright-live:
     name: Live-DB E2E Tests
     runs-on: ubuntu-latest
+    container: mcr.microsoft.com/playwright:v1.63.0-noble
     timeout-minutes: 15
     # tests/e2e hits the real shared dev Supabase project (not a fake/mocked
     # backend). Two of these jobs running at once - e.g. two PRs open at the
@@ -158,9 +159,6 @@ jobs:
           npm --prefix tests/e2e ci
           npm --prefix frontend ci
           npm --prefix backend ci
-      - name: Install Chromium
-        working-directory: tests/e2e
-        run: npx playwright install --with-deps chromium
       - name: Run live-DB E2E tests
         working-directory: tests/e2e
         # backend/src/server.js throws at startup without SUPABASE_PUBLISHABLE_KEY

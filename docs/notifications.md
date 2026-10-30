@@ -201,7 +201,7 @@ Feed and the real inbox for actual in-app delivery.
 2. Create a dashboard workflow named Event decision with identifier exactly
    **event-decision**. Add one **In-App** step; no bridge endpoint is required.
 3. Subject: `Event {{payload.outcome}}`.
-4. Body: `Your event “{{payload.eventName | escape}}” was {{payload.outcome}}. {% if payload.remark != "" %}Note: {{payload.remark | escape}}{% endif %}`.
+4. Body: `Your event “{{payload.eventName | escape}}” was {{payload.outcome}}. {% if payload.remark != '' %}Note: {{payload.remark | escape}}{% endif %}`.
    Use the escape filter for organiser/coordinator text. Keep all recipients
    subscribed to this transactional workflow (set Critical if offered).
 5. Save and activate the workflow and its In-App step; confirm the Novu In-App
@@ -976,6 +976,698 @@ executions. The complete backend/CI pipeline was not run by this correction.
 
 The command and repository-test mapping are in
 [the assignment test guide](event-assignment-tests.md#scrum-155-compatibility-verification--17-oct-2026).
+
+
+## Returned-request notifications — SCRUM-117 Task 3
+
+Ryan reports applying the following SQL and creating the Novu workflow on 22 Oct 2026. Live delivery has not been verified by the agent.
+
+Each new CHANGES_REQUESTED activity record queues an organiser notification in the same return transaction. If queue insertion fails, the return and history roll back together. Provider outages after commit leave durable pending work for the existing worker. The activity UUID is the delivery UUID: retries keep it, later return cycles receive another UUID. No existing activity is backfilled. The current worker already selects row.workflow, so no production worker change is needed.
+
+### Schema reference — return notification (reported applied)
+
+This is a one-time change, not a reset. Preserve any additional workflow values if the shared schema has evolved.
+
+```sql
+begin;
+
+alter table public.notification_outbox
+  drop constraint notification_outbox_workflow_check;
+alter table public.notification_outbox
+  add constraint notification_outbox_workflow_check
+  check (workflow in (
+    'event-decision', 'event-assignment', 'equipment-issue',
+    'event-changes-requested'
+  ));
+
+create function public.enqueue_event_changes_requested_notification()
+returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  insert into public.notification_outbox
+    (id, event_id, recipient_id, workflow, payload)
+  values (
+    new.id,
+    new.event_id,
+    (new.details ->> 'organiser_id')::uuid,
+    'event-changes-requested',
+    jsonb_build_object(
+      'eventId', new.event_id,
+      'cycleId', new.id,
+      'eventName', new.details -> 'before' ->> 'name',
+      'message', new.details ->> 'note',
+      'requestPath', '/my-event-requests/' || new.event_id::text
+    )
+  );
+  return new;
+end;
+$$;
+
+revoke all on function public.enqueue_event_changes_requested_notification()
+  from public, anon, authenticated;
+
+create trigger enqueue_event_changes_requested_notification
+  after insert on public.event_activity_log
+  for each row when (new.action = 'CHANGES_REQUESTED')
+  execute function public.enqueue_event_changes_requested_notification();
+
+commit;
+```
+
+### Novu configuration
+
+Use the same environment as the app. Workflow identifier: `event-changes-requested`; one active In-App step. Payload strings: `eventId`, `cycleId`, `eventName`, `message`, `requestPath`. Subject: `Changes requested: {{payload.eventName | escape}}`. Body: `Your event coordinator has requested changes to your event request. {{payload.message | escape}} Open your request to review the clarification.` Redirect URL: `{{payload.requestPath}}`, same tab. The server constructs the relative path from the saved event UUID; the request page still enforces authentication and visibility.
+
+Novu editor correction: the Event Decision optional-note condition must use single quotes: `{% if payload.remark != '' %}Note: {{payload.remark | escape}}{% endif %}`. Ryan confirmed that this resolves the editor error.
+
+Manual UAT (Not Executed): return a fresh agreed test request as its assigned coordinator, open Notifications as the owner, confirm the exact message and follow the link. Another organiser must receive no notice. Historical returns before the trigger was installed do not enqueue notices. Dashboard preview alone does not prove application delivery.
+
+The inbox supplies React Router navigate as Novu routerPush. Without this integration the SDK can change browser history while React still renders the inbox. E2E-CLARIFICATION-002 verifies that the destination actually renders, not just that the URL changes.
+
+## SCRUM-117 resubmission schema reference
+
+Applied manually by Ryan on 22 October 2026. Install once after the clarification SQL above. The existing worker delivers `event-request-resubmitted` to the retained coordinator; its requestPath opens the assigned request.
+
+```sql
+begin;
+
+alter table public.notification_outbox
+  drop constraint notification_outbox_workflow_check;
+alter table public.notification_outbox
+  add constraint notification_outbox_workflow_check
+  check (workflow in ('event-decision', 'event-assignment', 'equipment-issue',
+    'event-changes-requested', 'event-request-resubmitted'));
+
+create function public.resubmit_event_request(
+  p_event_id uuid,
+  p_organiser_id uuid,
+  p_cycle_id uuid,
+  p_expected_fields jsonb
+) returns setof public.events
+language plpgsql security invoker set search_path = public as $$
+declare
+  v_event public.events%rowtype;
+  v_expected public.events%rowtype;
+  v_before public.events%rowtype;
+  v_cycle public.event_activity_log%rowtype;
+  v_current_fields jsonb;
+  v_expected_fields jsonb;
+  v_before_fields jsonb;
+  v_changes jsonb := '[]'::jsonb;
+  v_field text;
+  v_old text;
+  v_new text;
+  v_activity_id uuid := gen_random_uuid();
+  v_fields text[] := array['name', 'purpose', 'description', 'start_time', 'end_time',
+    'registration_start', 'registration_end', 'expected_attendance', 'venue_requirements',
+    'accessibility_needs', 'equipment_needs', 'other_comments'];
+begin
+  if p_expected_fields is null or jsonb_typeof(p_expected_fields) <> 'object' then
+    raise exception 'Expected saved request fields are required.' using errcode = '22023';
+  end if;
+  if not (p_expected_fields ?& v_fields)
+     or (select count(*) from jsonb_object_keys(p_expected_fields)) <> cardinality(v_fields) then
+    raise exception 'Provide exactly the editable request fields.' using errcode = '22023';
+  end if;
+
+  select * into v_event from public.events where id = p_event_id for update;
+  if not found then return; end if;
+  if p_organiser_id is null or v_event.organiser_id is distinct from p_organiser_id
+     or v_event.status <> 'CHANGES_REQUESTED' or v_event.coordinator_id is null then return; end if;
+
+  select * into v_cycle from public.event_activity_log
+  where event_id = p_event_id and action = 'CHANGES_REQUESTED'
+  order by created_at desc, id desc limit 1;
+  if not found then return; end if;
+  if p_cycle_id is null or v_cycle.id is distinct from p_cycle_id
+     or (v_cycle.details ->> 'coordinator_id')::uuid is distinct from v_event.coordinator_id then return; end if;
+  if exists(select 1 from public.event_activity_log
+    where event_id = p_event_id and action = 'REQUEST_RESUBMITTED'
+      and details ->> 'cycle_id' = p_cycle_id::text) then return; end if;
+
+  select * into v_expected from jsonb_populate_record(null::public.events, p_expected_fields);
+  select * into v_before from jsonb_populate_record(null::public.events, v_cycle.details -> 'before');
+  select jsonb_object_agg(key,value) into v_current_fields
+    from jsonb_each(to_jsonb(v_event)) where key = any(v_fields);
+  select jsonb_object_agg(key,value) into v_expected_fields
+    from jsonb_each(to_jsonb(v_expected)) where key = any(v_fields);
+  select jsonb_object_agg(key,value) into v_before_fields
+    from jsonb_each(to_jsonb(v_before)) where key = any(v_fields);
+
+  -- Recheck the same saved values validated by the server while holding the event lock.
+  if v_current_fields is distinct from v_expected_fields then return; end if;
+
+  foreach v_field in array v_fields loop
+    v_old := nullif(v_before_fields ->> v_field, '');
+    v_new := nullif(v_current_fields ->> v_field, '');
+    if v_old is distinct from v_new then
+      v_changes := v_changes || jsonb_build_array(jsonb_build_object(
+        'field', v_field, 'before', v_before_fields -> v_field,
+        'after', v_current_fields -> v_field));
+    end if;
+  end loop;
+
+  insert into public.event_activity_log(id,event_id,user_id,action,details)
+  values(v_activity_id,p_event_id,p_organiser_id,'REQUEST_RESUBMITTED',jsonb_build_object(
+    'cycle_id',p_cycle_id,'from_status','CHANGES_REQUESTED','to_status','UNDER_REVIEW',
+    'organiser_id',p_organiser_id,'coordinator_id',v_event.coordinator_id,
+    'before',v_before_fields,'after',v_current_fields,'changes',v_changes));
+
+  return query update public.events set status = 'UNDER_REVIEW'
+    where id = p_event_id returning *;
+end;
+$$;
+revoke all on function public.resubmit_event_request(uuid,uuid,uuid,jsonb)
+  from public, anon, authenticated;
+grant execute on function public.resubmit_event_request(uuid,uuid,uuid,jsonb) to service_role;
+
+create function public.enqueue_event_request_resubmitted_notification()
+returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  insert into public.notification_outbox(id,event_id,recipient_id,workflow,payload)
+  values(new.id,new.event_id,(new.details ->> 'coordinator_id')::uuid,
+    'event-request-resubmitted',jsonb_build_object(
+      'eventId',new.event_id,'cycleId',new.details ->> 'cycle_id',
+      'eventName',new.details -> 'after' ->> 'name',
+      'changedFieldCount',jsonb_array_length(new.details -> 'changes'),
+      'requestPath','/assigned-events/' || new.event_id::text));
+  return new;
+end;
+$$;
+revoke all on function public.enqueue_event_request_resubmitted_notification()
+  from public, anon, authenticated;
+create trigger enqueue_event_request_resubmitted_notification
+  after insert on public.event_activity_log
+  for each row when (new.action = 'REQUEST_RESUBMITTED')
+  execute function public.enqueue_event_request_resubmitted_notification();
+
+commit;
+```
+
+### Novu configuration for resubmission
+
+Workflow identifier: event-request-resubmitted. One In-App step; subject: Request resubmitted. Body: The organiser has resubmitted {{payload.eventName | escape}}. Open the request to review the updated details. Same-tab redirect: {{payload.requestPath}}. Required payload properties: eventId, cycleId, eventName, requestPath (strings) and changedFieldCount (number). Ryan reports creating the workflow on 22 October 2026. No additional worker deployment change is needed; the existing worker dispatches the queued workflow identifier.
+
+## SCRUM-117 saved-edit version baseline schema reference
+
+Ryan reported applying this correction on 24 October 2026. Apply once after the previous clarification/resubmission setup. No new table, column, status or Novu field. This replaces the comparison baseline; ordinary saves do not advance it.
+
+```sql
+begin;
+
+-- SCRUM-117: preserve a submitted version independently of ordinary edits and returns.
+create function public.capture_event_request_baseline()
+returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_snapshot jsonb;
+  v_source text;
+begin
+  if tg_op = 'INSERT' then
+    if new.status = 'DRAFT' then return new; end if;
+    v_source := case when new.status = 'SUBMITTED' then 'SUBMITTED' else 'TRACKING_STARTED' end;
+  elsif old.status = 'DRAFT' and new.status = 'SUBMITTED' then
+    v_source := 'SUBMITTED';
+  elsif old.status = 'CHANGES_REQUESTED' and new.status = 'UNDER_REVIEW' then
+    v_source := 'RESUBMITTED';
+  else
+    return new;
+  end if;
+
+  select jsonb_object_agg(key,value) into v_snapshot
+  from jsonb_each(to_jsonb(new)) where key = any(array['name','purpose','description','start_time','end_time','registration_start','registration_end','expected_attendance','venue_requirements','accessibility_needs','equipment_needs','other_comments']);
+  insert into public.event_activity_log(id,event_id,user_id,action,details,created_at)
+  values(gen_random_uuid(),new.id,null,'REQUEST_BASELINE_RECORDED',
+    jsonb_build_object('source',v_source,'version_at',clock_timestamp(),'snapshot',v_snapshot),
+    clock_timestamp());
+  return new;
+end;
+$$;
+revoke all on function public.capture_event_request_baseline() from public, anon, authenticated;
+create trigger capture_event_request_baseline
+  after insert or update of status on public.events
+  for each row execute function public.capture_event_request_baseline();
+
+-- SCRUM-117: retain the best available historical version without inventing old values.
+insert into public.event_activity_log(id,event_id,user_id,action,details,created_at)
+select gen_random_uuid(),e.id,null,'REQUEST_BASELINE_RECORDED',jsonb_build_object(
+  'source',case when submitted.id is not null then 'RESUBMITTED'
+    when returned.id is not null then 'RECOVERED_RETURN' else 'TRACKING_STARTED' end,
+  'version_at',coalesce(submitted.created_at,returned.created_at,clock_timestamp()),
+  'snapshot',coalesce(submitted.details -> 'after',returned.details -> 'before',current_fields.snapshot)
+),clock_timestamp()
+from public.events e
+cross join lateral (
+  select jsonb_object_agg(key,value) as snapshot from jsonb_each(to_jsonb(e))
+  where key = any(array['name','purpose','description','start_time','end_time','registration_start','registration_end','expected_attendance','venue_requirements','accessibility_needs','equipment_needs','other_comments'])
+) current_fields
+left join lateral (
+  select h.id,h.details,h.created_at from public.event_activity_log h
+  where h.event_id=e.id and h.action='REQUEST_RESUBMITTED'
+    and jsonb_typeof(h.details -> 'after')='object'
+  order by h.created_at desc,h.id desc limit 1
+) submitted on true
+left join lateral (
+  select h.id,h.details,h.created_at from public.event_activity_log h
+  where h.event_id=e.id and h.action='CHANGES_REQUESTED'
+    and jsonb_typeof(h.details -> 'before')='object'
+  order by h.created_at asc,h.id asc limit 1
+) returned on true
+where e.status <> 'DRAFT' and not exists(
+  select 1 from public.event_activity_log h
+  where h.event_id=e.id and h.action='REQUEST_BASELINE_RECORDED'
+);
+
+create or replace function public.resubmit_event_request(
+  p_event_id uuid,
+  p_organiser_id uuid,
+  p_cycle_id uuid,
+  p_expected_fields jsonb
+) returns setof public.events
+language plpgsql security invoker set search_path = public as $$
+declare
+  v_event public.events%rowtype;
+  v_expected public.events%rowtype;
+  v_before public.events%rowtype;
+  v_cycle public.event_activity_log%rowtype;
+  v_baseline public.event_activity_log%rowtype;
+  v_current_fields jsonb;
+  v_expected_fields jsonb;
+  v_before_fields jsonb;
+  v_changes jsonb := '[]'::jsonb;
+  v_field text;
+  v_old text;
+  v_new text;
+  v_activity_id uuid := gen_random_uuid();
+  v_fields text[] := array['name', 'purpose', 'description', 'start_time', 'end_time',
+    'registration_start', 'registration_end', 'expected_attendance', 'venue_requirements',
+    'accessibility_needs', 'equipment_needs', 'other_comments'];
+begin
+  if p_expected_fields is null or jsonb_typeof(p_expected_fields) <> 'object' then
+    raise exception 'Expected saved request fields are required.' using errcode = '22023';
+  end if;
+  if not (p_expected_fields ?& v_fields)
+     or (select count(*) from jsonb_object_keys(p_expected_fields)) <> cardinality(v_fields) then
+    raise exception 'Provide exactly the editable request fields.' using errcode = '22023';
+  end if;
+
+  select * into v_event from public.events where id = p_event_id for update;
+  if not found then return; end if;
+  if p_organiser_id is null or v_event.organiser_id is distinct from p_organiser_id
+     or v_event.status <> 'CHANGES_REQUESTED' or v_event.coordinator_id is null then return; end if;
+
+  select * into v_cycle from public.event_activity_log
+  where event_id = p_event_id and action = 'CHANGES_REQUESTED'
+  order by created_at desc, id desc limit 1;
+  if not found then return; end if;
+  if p_cycle_id is null or v_cycle.id is distinct from p_cycle_id
+     or (v_cycle.details ->> 'coordinator_id')::uuid is distinct from v_event.coordinator_id then return; end if;
+  if exists(select 1 from public.event_activity_log
+    where event_id = p_event_id and action = 'REQUEST_RESUBMITTED'
+      and details ->> 'cycle_id' = p_cycle_id::text) then return; end if;
+
+  select * into v_baseline from public.event_activity_log
+  where event_id = p_event_id and action = 'REQUEST_BASELINE_RECORDED'
+  order by created_at desc, id desc limit 1;
+  if not found then return; end if;
+
+  select * into v_expected from jsonb_populate_record(null::public.events, p_expected_fields);
+  select * into v_before from jsonb_populate_record(null::public.events, v_baseline.details -> 'snapshot');
+  select jsonb_object_agg(key,value) into v_current_fields
+    from jsonb_each(to_jsonb(v_event)) where key = any(v_fields);
+  select jsonb_object_agg(key,value) into v_expected_fields
+    from jsonb_each(to_jsonb(v_expected)) where key = any(v_fields);
+  select jsonb_object_agg(key,value) into v_before_fields
+    from jsonb_each(to_jsonb(v_before)) where key = any(v_fields);
+
+  -- Recheck the same saved values validated by the server while holding the event lock.
+  if v_current_fields is distinct from v_expected_fields then return; end if;
+
+  foreach v_field in array v_fields loop
+    v_old := nullif(v_before_fields ->> v_field, '');
+    v_new := nullif(v_current_fields ->> v_field, '');
+    if v_old is distinct from v_new then
+      v_changes := v_changes || jsonb_build_array(jsonb_build_object(
+        'field', v_field, 'before', v_before_fields -> v_field,
+        'after', v_current_fields -> v_field));
+    end if;
+  end loop;
+
+  insert into public.event_activity_log(id,event_id,user_id,action,details)
+  values(v_activity_id,p_event_id,p_organiser_id,'REQUEST_RESUBMITTED',jsonb_build_object(
+    'cycle_id',p_cycle_id,'from_status','CHANGES_REQUESTED','to_status','UNDER_REVIEW',
+    'organiser_id',p_organiser_id,'coordinator_id',v_event.coordinator_id,
+    'before',v_before_fields,'after',v_current_fields,'changes',v_changes,
+    'baseline_id',v_baseline.id,'baseline_source',v_baseline.details ->> 'source',
+    'baseline_version_at',v_baseline.details -> 'version_at'));
+
+  return query update public.events set status = 'UNDER_REVIEW'
+    where id = p_event_id returning *;
+end;
+$$;
+revoke all on function public.resubmit_event_request(uuid,uuid,uuid,jsonb)
+  from public, anon, authenticated;
+grant execute on function public.resubmit_event_request(uuid,uuid,uuid,jsonb) to service_role;
+
+commit;
+```
+
+
+## Venue hold warnings and expiry — SCRUM-163
+
+The existing worker prepares venue-hold-expiry deliveries independently of assignment work. It validates the persisted coordinator, reservation generation, venue/event/deadline and current lifecycle before sending. The one-hour warning and historical expiry/release notice share one Novu In-App workflow. The exact additive schema, safety tradeoff, setup and payload contract are in [Venue integration](venue-integration.md#coordinator-venue-hold-expiry-notifications--scrum-163). Shared setup and manual UAT remain pending.
+
+## Attendee registration notifications — SCRUM-43
+
+**Local implementation; Ryan reports the shared SQL applied and both Novu dashboard workflow tests successful. Application-to-inbox manual UAT remains pending.**
+Ryan approved trigger-based history capture and then requested implementation.
+Use the existing in-app inbox. The implementation uses the plan's one-hour reminder.
+
+The database captures confirmed registration inserts/transitions, successful active
+waitlist joins, and transitions into a new place offer. Automatic/coordinator offers
+say **promoted**, with an instruction to accept; direct confirmed promotion and
+offer acceptance produce a **confirmed** notice. There is no new registration
+status or confirmation screen. An unchanged write creates no history. The existing
+registration/waitlist RPCs are not replaced. A trigger saves a snapshot of the
+event, owning attendee and outcome in the same transaction. History-write failure
+rolls back the business write, as agreed. Provider and preparation failures occur
+afterward and do not undo registration.
+
+The existing worker independently prepares assignment, registration and reminder
+work every 15 seconds. Each preparation failure is isolated. Registration history
+is queued and marked processed in one transaction, using its UUID as the delivery
+UUID. The existing claim/finish leases, retry delays and provider limitations apply.
+Successful outbox rows disappear, while history markers prevent repeated queueing.
+Deleted recipient accounts are skipped; browser roles cannot read history or invoke
+preparation/validation functions. No request supplies a notification recipient.
+
+An offer history record is its reminder identity. One reminder is queued during
+the final hour before `least(offer_expires_at, start_time)`, including a newly
+created offer already inside that window. Existing active offers are tracked at
+setup for future reminders, without backfilling their original status notices.
+Accepted/declined/withdrawn/expired offers and ineligible events do not qualify.
+Before every send, the worker validates the current offer generation, owner and
+deadline. A validation outage retries rather than assuming the offer is current.
+A changed deadline retires the pending reminder and permits preparation of a fresh
+one at the new deadline. There remains a short race between validation and provider
+acceptance; delivery and business writes are not a distributed transaction.
+
+### Schema reference — SCRUM-43 (installation reported by Ryan)
+
+Ryan supplied the live column/constraint/trigger exports and eight RPC definitions on
+2026-10-27. They confirm nullable offer_state, active/promoted waitlist rows, deletion
+on acceptance/decline, and registration-before-waitlist-update direct promotion.
+Reminder checks also honour cancelled_at and require a start_time. The reviewed
+addon preserves registrations_updated_at and all five existing workflow values.
+The isolated tests use the supplied promotion/acceptance/decline bodies verbatim;
+reconciliation and ancillary helper functions are explicit fixture stubs. Shared
+application and actual provider verification remain manual. Tell teammates before and after the
+change. Ryan runs this additive block once in Supabase SQL Editor, before using the
+changed backend. A three-second lock timeout avoids waiting indefinitely on busy
+tables. A failure rolls back the entire block; stop and inspect its cause. This
+does not replace existing business functions or change existing registration rows.
+It extends the outbox's existing workflow constraint while preserving its predicate.
+
+```sql
+begin;
+set local lock_timeout = '3s';
+
+do $$ declare existing_check text; begin
+  -- SCRUM-43: reject incompatible table contracts before installing any trigger.
+  perform r.id, r.event_id, r.attendee_id, r.status from public.registrations r limit 0;
+  perform w.id, w.event_id, w.attendee_id, w.status, w.offer_state, w.offered_at, w.offer_expires_at
+    from public.event_waitlist_entries w limit 0;
+  perform e.id, e.name, e.status, e.start_time, e.cancelled_at from public.events e limit 0;
+  -- SCRUM-43: preserve other lanes' accepted workflow values.
+  select pg_get_expr(conbin, conrelid) into strict existing_check
+  from pg_constraint
+  where conrelid = 'public.notification_outbox'::regclass
+    and conname = 'notification_outbox_workflow_check' and contype = 'c';
+  execute 'alter table public.notification_outbox drop constraint notification_outbox_workflow_check';
+  execute format('alter table public.notification_outbox add constraint notification_outbox_workflow_check check ((%s) or workflow in (%L, %L))',
+    existing_check, 'registration-status', 'waitlist-offer-expiring');
+end $$;
+
+create table public.registration_notification_history (
+  id uuid primary key default gen_random_uuid(),
+  event_id uuid not null,
+  event_name text not null,
+  attendee_id uuid not null,
+  source_id uuid not null,
+  change_type text not null check (change_type in ('confirmed', 'waitlisted', 'promoted')),
+  offer_started_at timestamptz,
+  offer_deadline timestamptz,
+  created_at timestamptz not null default now(),
+  notifications_queued_at timestamptz,
+  reminder_id uuid not null unique default gen_random_uuid(),
+  reminder_queued_at timestamptz,
+  check (change_type <> 'promoted' or (offer_started_at is not null and offer_deadline is not null))
+);
+create index registration_notifications_pending
+  on public.registration_notification_history(created_at, id)
+  where notifications_queued_at is null;
+create index registration_reminders_pending
+  on public.registration_notification_history(source_id, offer_started_at)
+  where change_type = 'promoted' and reminder_queued_at is null;
+alter table public.registration_notification_history enable row level security;
+revoke all on public.registration_notification_history from public, anon, authenticated;
+grant all on public.registration_notification_history to service_role;
+
+create function public.capture_registration_notification() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare kind text; event_name text; event_start timestamptz;
+  offer_start timestamptz; deadline timestamptz; begin
+  if tg_table_name = 'registrations' then
+    if new.status <> 'confirmed' then return new; end if;
+    if tg_op = 'UPDATE' then
+      if old.status is not distinct from new.status then return new; end if;
+    end if;
+    kind := 'confirmed';
+  else
+    if new.status <> 'active' then return new; end if;
+    if new.offer_state = 'offered' then
+      if tg_op = 'UPDATE' then
+        if old.status = 'active' and old.offer_state = 'offered'
+          and old.offered_at is not distinct from new.offered_at then return new; end if;
+      end if;
+      kind := 'promoted';
+    else
+      if tg_op = 'UPDATE' then
+        if old.status = 'active' then return new; end if;
+      end if;
+      kind := 'waitlisted';
+    end if;
+  end if;
+  select e.name, e.start_time into event_name, event_start
+    from public.events e where e.id = new.event_id;
+  if kind = 'promoted' then
+    offer_start := new.offered_at;
+    deadline := least(event_start, new.offer_expires_at);
+  end if;
+  insert into public.registration_notification_history
+    (event_id, event_name, attendee_id, source_id, change_type, offer_started_at, offer_deadline)
+  values (new.event_id, event_name, new.attendee_id, new.id, kind,
+    offer_start, deadline);
+  return new;
+end $$;
+revoke all on function public.capture_registration_notification() from public, anon, authenticated;
+
+create trigger capture_confirmed_registration_notification
+after insert or update of status on public.registrations
+for each row execute function public.capture_registration_notification();
+create trigger capture_waitlist_registration_notification
+after insert or update of status, offer_state, offered_at on public.event_waitlist_entries
+for each row execute function public.capture_registration_notification();
+
+-- SCRUM-43: track current offers for reminders without sending historical status notices.
+insert into public.registration_notification_history
+  (event_id, event_name, attendee_id, source_id, change_type, offer_started_at, offer_deadline, notifications_queued_at)
+select w.event_id, e.name, w.attendee_id, w.id, 'promoted', w.offered_at,
+  least(w.offer_expires_at, e.start_time), now()
+from public.event_waitlist_entries w join public.events e on e.id = w.event_id
+where w.status = 'active' and w.offer_state = 'offered'
+  and e.status = 'APPROVED' and e.cancelled_at is null and e.start_time is not null
+  and least(w.offer_expires_at, e.start_time) > now();
+
+create function public.enqueue_registration_notifications() returns integer
+language plpgsql security definer set search_path = '' as $$
+declare h public.registration_notification_history%rowtype; total integer := 0; message text; begin
+  for h in select * from public.registration_notification_history
+    where notifications_queued_at is null order by created_at, id
+    limit 100 for update skip locked
+  loop
+    if exists(select 1 from auth.users u where u.id = h.attendee_id) then
+      message := case h.change_type
+        when 'confirmed' then 'Your registration for ' || h.event_name || ' is confirmed.'
+        when 'waitlisted' then 'You have joined the waitlist for ' || h.event_name || '.'
+        when 'promoted' then 'A place is available for you at ' || h.event_name ||
+          '. Accept your offer by ' || to_char(h.offer_deadline at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS') || ' UTC.' end;
+      insert into public.notification_outbox(id, event_id, recipient_id, workflow, payload)
+      values(h.id, h.event_id, h.attendee_id, 'registration-status', jsonb_build_object(
+        'changeId', h.id, 'eventId', h.event_id, 'eventName', h.event_name,
+        'changeType', h.change_type, 'message', message, 'requestPath', '/registrations/me',
+        'effectiveDeadline', h.offer_deadline));
+      total := total + 1;
+    end if;
+    update public.registration_notification_history set notifications_queued_at = now() where id = h.id;
+  end loop;
+  return total;
+end $$;
+
+create function public.enqueue_waitlist_offer_reminders() returns integer
+language plpgsql security definer set search_path = '' as $$
+declare offer record; total integer := 0; begin
+  for offer in
+    select h.id, h.reminder_id, h.event_id, h.attendee_id, e.name as event_name,
+      least(w.offer_expires_at, e.start_time) as deadline
+    from public.registration_notification_history h
+    join public.event_waitlist_entries w on w.id = h.source_id
+      and w.event_id = h.event_id and w.attendee_id = h.attendee_id
+      and w.offered_at = h.offer_started_at
+    join public.events e on e.id = h.event_id
+    join auth.users u on u.id = h.attendee_id
+    where h.change_type = 'promoted' and h.reminder_queued_at is null
+      and w.status = 'active' and w.offer_state = 'offered' and e.status = 'APPROVED'
+      and e.cancelled_at is null and e.start_time is not null
+      and least(w.offer_expires_at, e.start_time) > now()
+      and least(w.offer_expires_at, e.start_time) <= now() + interval '1 hour'
+    order by least(w.offer_expires_at, e.start_time), h.id
+    limit 100 for update of h skip locked
+  loop
+    insert into public.notification_outbox(id, event_id, recipient_id, workflow, payload)
+    values(offer.reminder_id, offer.event_id, offer.attendee_id, 'waitlist-offer-expiring', jsonb_build_object(
+      'offerChangeId', offer.id, 'eventId', offer.event_id, 'eventName', offer.event_name,
+      'changeType', 'offer-expiring', 'effectiveDeadline', offer.deadline,
+      'message', 'Your place offer for ' || offer.event_name || ' expires at ' ||
+        to_char(offer.deadline at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS') ||
+        ' UTC. Open My Registrations to accept or decline.', 'requestPath', '/registrations/me'));
+    update public.registration_notification_history set reminder_queued_at = now() where id = offer.id;
+    total := total + 1;
+  end loop;
+  return total;
+end $$;
+
+create function public.validate_waitlist_offer_reminder(delivery_id uuid, claim_token uuid) returns boolean
+language plpgsql security definer set search_path = '' as $$
+declare q public.notification_outbox%rowtype; offer record; checked_at timestamptz; begin
+  select * into q from public.notification_outbox
+    where id = delivery_id and lease_token = claim_token
+      and workflow = 'waitlist-offer-expiring' for update;
+  if not found then return false; end if;
+  checked_at := clock_timestamp();
+  -- SCRUM-43: a lost lease is retryable; false means the business offer is obsolete.
+  if q.locked_until is null or q.locked_until <= checked_at then
+    raise exception using errcode = '55000', message = 'Notification lease expired.';
+  end if;
+  select h.id, least(w.offer_expires_at, e.start_time) as deadline into offer
+  from public.registration_notification_history h
+  join public.event_waitlist_entries w on w.id = h.source_id
+    and w.event_id = h.event_id and w.attendee_id = h.attendee_id
+    and w.offered_at = h.offer_started_at
+  join public.events e on e.id = h.event_id
+  where h.id = (q.payload ->> 'offerChangeId')::uuid and h.reminder_id = q.id
+    and h.attendee_id = q.recipient_id and h.event_id = q.event_id
+    and w.status = 'active' and w.offer_state = 'offered' and e.status = 'APPROVED'
+      and e.cancelled_at is null and e.start_time is not null;
+  if not found then return false; end if;
+  if offer.deadline is distinct from (q.payload ->> 'effectiveDeadline')::timestamptz then
+    update public.registration_notification_history
+      set reminder_id = gen_random_uuid(), reminder_queued_at = null where id = offer.id;
+    return false;
+  end if;
+  return offer.deadline > checked_at and offer.deadline <= checked_at + interval '1 hour';
+end $$;
+
+revoke all on function public.enqueue_registration_notifications() from public, anon, authenticated;
+revoke all on function public.enqueue_waitlist_offer_reminders() from public, anon, authenticated;
+revoke all on function public.validate_waitlist_offer_reminder(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.enqueue_registration_notifications() to service_role;
+grant execute on function public.enqueue_waitlist_offer_reminders() to service_role;
+grant execute on function public.validate_waitlist_offer_reminder(uuid, uuid) to service_role;
+commit;
+```
+
+### Novu workflows — configuration reported by Ryan
+
+In the same environment as the current inbox, add two workflows with one active
+In-App step each: `registration-status` and `waitlist-offer-expiring`. Both use
+subject `Registration update: {{payload.eventName | escape}}`, body
+`{{payload.message | escape}}`, redirect `{{payload.requestPath}}` in the same tab.
+Required strings: eventId, eventName, changeType, message, requestPath. Status
+payloads also have changeId; reminders have offerChangeId. effectiveDeadline is a
+UTC timestamp for offers/reminders and null for other status changes. Keep the
+existing HMAC-protected own-inbox configuration. Ryan reported successful dashboard
+tests for both workflows after correcting a generated requestPath example. Actual
+application-triggered inbox arrival and live HMAC enforcement still require human
+UAT; local provider substitutes do not establish those outcomes.
+
+### Local verification and handoff
+
+From the application root:
+
+- `npm --prefix backend run test:events -- tests/unit/notifications/notificationDelivery.test.js tests/integration/notifications.registration.test.js --pool=threads --maxWorkers=1`
+- `node tests/sql/run-assignment-notifications.cjs --registration`
+- `npm run test:e2e -- tests/playwright/registration-notifications.browser.spec.cjs`
+
+The SQL runner uses the existing Docker harness with a disposable, network-isolated
+PostgreSQL fixture and executes the schema block above verbatim. It does not
+connect to Supabase or require keys. CI's existing SQL step includes registration
+assertions. New fixture files are test setup/assertions, not migrations.
+Manual UAT and execution reports stay outside the repository under Ryan's local
+reporting preferences. Ryan reports shared SQL/workflow setup completed; application
+UAT remains pending. No historical automated result is a new pass.
+
+
+### Audit correction — expired leases and retry isolation
+
+The audit found that returning false for an expired claim could delete an unsent
+reminder: the worker interpreted false as an obsolete offer. Validation now locks
+the queued delivery, checks its lease and raises a retryable error on an expired
+lease. It evaluates the deadline against one captured clock value. A failed retry
+write is isolated per row so remaining claimed deliveries can continue.
+
+The full SCRUM-43 setup block above includes this correction. If that block has
+already been applied, Ryan applies this smaller function-only repair instead of
+rerunning setup. Inform teammates before and after applying. The worker source
+change also requires restarting the backend. No shared SQL has been run by the agent.
+
+```sql
+-- SCRUM-43: expired-lease repair for an existing installation.
+begin;
+set local lock_timeout = '3s';
+create or replace function public.validate_waitlist_offer_reminder(delivery_id uuid, claim_token uuid) returns boolean
+language plpgsql security definer set search_path = '' as $$
+declare q public.notification_outbox%rowtype; offer record; checked_at timestamptz; begin
+  select * into q from public.notification_outbox
+    where id = delivery_id and lease_token = claim_token
+      and workflow = 'waitlist-offer-expiring' for update;
+  if not found then return false; end if;
+  checked_at := clock_timestamp();
+  -- SCRUM-43: a lost lease is retryable; false means the business offer is obsolete.
+  if q.locked_until is null or q.locked_until <= checked_at then
+    raise exception using errcode = '55000', message = 'Notification lease expired.';
+  end if;
+  select h.id, least(w.offer_expires_at, e.start_time) as deadline into offer
+  from public.registration_notification_history h
+  join public.event_waitlist_entries w on w.id = h.source_id
+    and w.event_id = h.event_id and w.attendee_id = h.attendee_id
+    and w.offered_at = h.offer_started_at
+  join public.events e on e.id = h.event_id
+  where h.id = (q.payload ->> 'offerChangeId')::uuid and h.reminder_id = q.id
+    and h.attendee_id = q.recipient_id and h.event_id = q.event_id
+    and w.status = 'active' and w.offer_state = 'offered' and e.status = 'APPROVED'
+      and e.cancelled_at is null and e.start_time is not null;
+  if not found then return false; end if;
+  if offer.deadline is distinct from (q.payload ->> 'effectiveDeadline')::timestamptz then
+    update public.registration_notification_history
+      set reminder_id = gen_random_uuid(), reminder_queued_at = null where id = offer.id;
+    return false;
+  end if;
+  return offer.deadline > checked_at and offer.deadline <= checked_at + interval '1 hour';
+end $$;
+commit;
+```
 
 ## Venue booking decision notifications — SCRUM-41
 

@@ -298,3 +298,27 @@ and the workflow contract are in docs/notifications.md. Ryan confirmed SQL succe
 on 2026-10-15; equipment-issue is active in Development with one previewed In-App
 step, required payload validation and Critical enabled. Restart/live inbox
 verification remain pending. Tests are deferred at Ryan's request.
+
+### Returned requests (SCRUM-117 Task 2)
+
+CHANGES_REQUESTED is an event status. The assigned coordinator returns UNDER_REVIEW
+requests through POST /api/internal/events/:eventId/request-changes using events.decide.
+The service-role request_event_changes RPC locks the event and saves its status, message
+and editable-field snapshot atomically in events/event_activity_log. ACTIVE_STATUSES keeps
+returned events visible/counted/cancellable; ASSIGNABLE_STATUSES excludes them.
+POSTPONABLE_STATUSES includes them; PLANNING_STATUSES does not. Existing event readers
+receive the activity message, not the snapshot. SQL is in docs/event-requests.md.
+Returned-request notification queueing is documented in docs/notifications.md; the existing worker delivers the saved message and request path through event-changes-requested. The owner resubmits through POST /api/event-workspace/organiser/:id/resubmit with the latest cycleId. The resubmit_event_request RPC checks validated saved fields under a lock, retains assignment, records immutable changes and queues event-request-resubmitted atomically. Only the coordinator workspace exposes changed-field comparisons. Both SQL/workflow setups are user-reported; live resubmission verification remains pending.
+
+SCRUM-117 saved-edit correction (24 October 2026): an events trigger records internal REQUEST_BASELINE_RECORDED snapshots at submission/resubmission in event_activity_log. Organiser PATCH preserves this baseline. The assigned coordinator detail derives request_changes from current saved fields and that baseline; internal snapshots never appear in public activity responses. Resubmission compares against this baseline and advances it transactionally. See docs/notifications.md for the applied SQL.
+
+
+SCRUM-163 reuses the notification worker/inbox for venue-hold warnings and expiry facts. Private venue_hold_notification_state tracks immutable hold generations and per-cohort delivery IDs; existing venue release/approval logic remains intact. The exact one-time manual SQL and workflow contract are in docs/venue-integration.md. Local tests never contact shared Supabase.
+
+### SCRUM-43 registration notification extension
+
+The same delivery worker independently prepares assignment history, registration history and due offer reminders before claiming the shared outbox. Registration/waitlist triggers save change history with business writes; sending occurs outside those transactions. Each reminder is validated against the current owned offer immediately before sending. Reuse the current /notifications identity and UI; no new permission or route. Manual schema/workflow setup is documented in docs/notifications.md and must precede live use.
+
+An expired notification claim is retryable, distinct from an obsolete offer. The worker isolates failed retry-storage writes per claimed row so remaining notifications can proceed.
+
+PR #68 integration: the shared notification worker retains both waitlist-offer and venue-hold validation, prepares all four work sources independently, and keeps per-row retry-storage failure isolation. Local fixtures model both families together; the two exported PostgreSQL fixture families run in separate disposable databases.

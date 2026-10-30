@@ -138,8 +138,16 @@ async function markSubmitted(id, organiserId, fields, submittedAt = new Date().t
   );
 }
 
-// coordinatorId, when given, must still hold the event at write time, so a
-// reassignment between the access check and the write matches nothing (409).
+// SCRUM-117: the database locks assignment/status and saves history with the transition.
+async function requestChanges(id, coordinatorId, message) {
+  return unwrap(await getSupabase().rpc("request_event_changes", {
+    p_event_id: id,
+    p_coordinator_id: coordinatorId,
+    p_message: message,
+  }).maybeSingle(), "requestChanges");
+}
+
+// Recheck the coordinator and expected status in the write to reject stale decisions.
 async function transitionStatus(id, from, to, extra = {}, coordinatorId) {
   if (!canTransition(from, to)) {
     throw new Error(`events.repository: ${from} -> ${to} is not a permitted transition`);
@@ -269,7 +277,7 @@ async function findArrangements(eventId) {
       .order("booking_date", { ascending: true }),
     supabase
       .from("equipment_requests")
-      .select("id, status, quantity_requested, technical_requirement, is_essential, equipment:equipment!equipment_id(type)")
+      .select("id, status, quantity_requested, technical_requirement, is_essential, equipment_type, equipment:equipment!equipment_id(type)")
       .eq("event_id", eventId)
       .order("created_at", { ascending: true }),
   ]);
@@ -332,6 +340,7 @@ module.exports = {
   updateDraft,
   markSubmitted,
   transitionStatus,
+  requestChanges,
   cancel,
   postpone,
   assignCoordinator,

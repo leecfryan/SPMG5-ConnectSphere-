@@ -13,10 +13,12 @@ test('[E2E-CONFIRM-001] SCRUM-144: on a phone the coordinator sees what blocks c
     event_id: event.id, booking_date: date, slots: ['am'], expected_attendees: 30, room_layout: 'Theatre', required_facilities: ['Projector'],
   } });
   expect((await request.patch(`/api/venues/booking-requests/${(await venue.json()).data.id}/decision`, { headers: headers.dual, data: { decision: 'confirmed' } })).status()).toBe(200);
+  // SCRUM-31: equipment_type replaces equipment_id - the fake's equipment()
+  // gives each account exactly one unit, typed 'Projector ' + its own id.
   const equipment = await request.post(`/api/events/${event.id}/equipment-requests`, { headers: headers.first, data: {
-    equipment_id: first.id, quantity_requested: 1, technical_requirement: 'Spare', borrow_start: date + 'T01:00:00Z', borrow_end: date + 'T03:00:00Z',
+    equipment_type: 'Projector ' + first.id, quantity_requested: 1, technical_requirement: 'Spare', borrow_start: date + 'T01:00:00Z', borrow_end: date + 'T03:00:00Z',
   } });
-  const spare = (await equipment.json()).data.id;
+  const spare = (await equipment.json()).data[0].id;
   const mark = (isEssential) => request.patch(`/api/internal/events/${event.id}/arrangements/equipment/${spare}`, { headers: headers.first, data: { is_essential: isEssential } });
   // Through the safety check with the spare item waived, then essential again so it blocks.
   expect((await mark(false)).status()).toBe(200);
