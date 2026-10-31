@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { getAuthClient } from "../../lib/supabase";
 import { AuthContext } from "./useAuth";
 
-const initialAuth = { client: null, session: undefined, revision: 0, problem: "" };
+const initialAuth = { client: null, session: undefined, revision: 0, problem: "", signedOut: false };
 
 export default function AuthProvider({ children }) {
   const [auth, setAuth] = useState(initialAuth);
+  const [returnSessionId] = useState(() => crypto.randomUUID());
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const [verificationAttempt, setVerificationAttempt] = useState(0);
   const [verification, setVerification] = useState(null);
@@ -21,11 +22,11 @@ export default function AuthProvider({ children }) {
     getAuthClient().then((nextClient) => {
       if (!active) return;
       // Keep this synchronous: invoking async SDK methods here can deadlock refresh.
-      subscription = nextClient.auth.onAuthStateChange((_event, nextSession) => {
+      subscription = nextClient.auth.onAuthStateChange((event, nextSession) => {
         if (!active) return;
         setAuth((previous) => ({
           client: nextClient, session: nextSession,
-          revision: previous.revision + 1, problem: "",
+          revision: previous.revision + 1, problem: "", signedOut: event === "SIGNED_OUT",
         }));
         setSignOutError("");
       }).data.subscription;
@@ -90,17 +91,19 @@ export default function AuthProvider({ children }) {
   }
 
   async function signOut() {
-    if (signOutPending.current || !client) return;
+    if (signOutPending.current || !client) return false;
     signOutPending.current = true;
     setSigningOut(true);
     setSignOutError("");
     try {
       const { error: failure } = await client.auth.signOut({ scope: "local" });
       if (failure) throw failure;
-      setAuth((previous) => ({ ...previous, session: null, revision: previous.revision + 1 }));
+      setAuth((previous) => ({ ...previous, session: null, revision: previous.revision + 1, signedOut: true }));
       setVerification(null);
+      return true;
     } catch {
       setSignOutError("We couldn’t sign you out. Check your connection and try again.");
+      return false;
     } finally {
       signOutPending.current = false;
       setSigningOut(false);
@@ -110,7 +113,9 @@ export default function AuthProvider({ children }) {
   return (
     <AuthContext.Provider value={{
       client, status, user, permissions, error, retry, signOut, signingOut, signOutError,
-      hasSession: Boolean(token), token: user ? token : null,
+      hasSession: Boolean(token), token: user ? token : null, signedOut: auth.signedOut,
+      // Navigation hint only: restored or reverified identities must not reuse an old sign-in return.
+      signInReturnKey: user ? `${returnSessionId}:${revision}:${verificationAttempt}` : null,
       hasPermission: (permission) => permissions.includes(permission),
     }}>
       {children}

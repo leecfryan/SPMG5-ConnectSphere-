@@ -154,6 +154,8 @@ for (const [index, role] of ['attendee', 'event_organiser'].entries()) {
     const account = await accounts.create([role]);
     await page.goto('/staff/responsibilities');
     await signIn(page, account);
+    await expect(page).toHaveURL(/\/account$/);
+    await page.goto('/staff/responsibilities');
     await expect(page).toHaveURL(/\/forbidden$/);
     await expect(page.getByRole('heading', { name: 'Access denied' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Responsibilities', exact: true })).toHaveCount(0);
