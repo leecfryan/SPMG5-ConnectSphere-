@@ -27,8 +27,8 @@
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  color: #fff;
-  background: linear-gradient(145deg, var(--cs-accent), var(--cs-primary));
+  color: var(--cs-surface);
+  background: var(--cs-primary);
   box-shadow: var(--cs-shadow-sm);
   font-size: 19px;
   font-weight: 700;
@@ -237,7 +237,7 @@ input::placeholder, textarea::placeholder { color: var(--cs-text-subtle); }
 }
 
 .primary {
-  color: #fff;
+  color: var(--cs-surface);
   background: var(--cs-primary);
   border: 1px solid var(--cs-primary);
   box-shadow: var(--cs-shadow-sm);
@@ -317,7 +317,7 @@ dd { margin: 0; font-size: var(--cs-text-base); overflow-wrap: anywhere; line-he
 }
 
 .workspace-nav a:hover { background: var(--cs-surface-sunken); color: var(--cs-text); }
-.workspace-nav a.active { background: var(--cs-primary); color: #fff; font-weight: 600; }
+.workspace-nav a.active { background: var(--cs-primary); color: var(--cs-surface); font-weight: 600; }
 
 /* --------------------------------------------------------- dialog modal -- */
 
@@ -331,7 +331,7 @@ dialog.modal {
   color: var(--cs-text);
 }
 
-dialog.modal::backdrop { background: #13272f66; }
+dialog.modal::backdrop { background: var(--cs-overlay); }
 dialog.modal h2 { font-size: var(--cs-text-xl); margin: 0 0 var(--cs-space-2); }
 dialog.modal p { font-size: var(--cs-text-base); line-height: 1.6; color: var(--cs-text-muted); margin: 0 0 var(--cs-space-5); }
 dialog.modal .primary { margin-top: 0; width: auto; min-width: 100px; }
@@ -363,4 +363,104 @@ main.venue-workspace > .intro { display: none; }
   .field-pair { grid-template-columns: 1fr; gap: 0; }
   .workspace-nav { gap: 2px; }
   .workspace-nav a { padding: var(--cs-space-2); }
+}
+
+
+/* The shell gives every signed-in workspace room without changing route logic. */
+.app-shell { padding: 0; }
+.brand { min-height: 80px; padding: 0 clamp(20px, 4vw, 64px); border-bottom: 1px solid var(--cs-border); background: var(--cs-surface); font-size: 21px; letter-spacing: -.045em; }
+.brand-mark { width: 36px; height: 36px; border-radius: var(--cs-radius-sm); font-size: 22px; }
+.brand-caption { margin-left: auto; color: var(--cs-text-muted); font-size: var(--cs-text-sm); font-weight: 400; letter-spacing: 0; }
+.app-shell > main { padding-inline: var(--cs-space-5); }
+.app-shell > main:has(.workspace) { display: block; max-width: 1536px; margin: 0 auto; padding: var(--cs-space-6) clamp(20px, 4vw, 64px) var(--cs-space-7); flex: 1; }
+main:has(.workspace) > .intro { display: none; }
+.workspace { display: grid; grid-template-columns: 208px minmax(0, 1fr); column-gap: var(--cs-space-6); row-gap: var(--cs-space-5); align-items: start; }
+.workspace-nav { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; flex-wrap: nowrap; gap: var(--cs-space-1); margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.workspace-nav__label { padding: var(--cs-space-2) var(--cs-space-3) var(--cs-space-4); color: var(--cs-text-subtle); font-size: 10px; font-weight: 700; letter-spacing: .15em; }
+.workspace-nav a { display: flex; gap: var(--cs-space-3); align-items: center; min-height: 44px; padding: 10px var(--cs-space-3); font-size: var(--cs-text-sm); line-height: 1.4; }
+.workspace-nav a.active { background: var(--cs-primary-soft); color: var(--cs-primary); box-shadow: inset 3px 0 var(--cs-primary); }
+.workspace-nav a:hover { background: var(--cs-surface-sunken); }
+.workspace-content { grid-column: 2; grid-row: 1 / span 3; min-width: 0; }
+.workspace-content > .card { min-height: 320px; }
+.workspace-content > .venues { padding-top: 0; }
+.workspace-content > .eq-page { margin-top: 0; }
+.workspace-session { grid-column: 1; grid-row: 2; padding: var(--cs-space-4) var(--cs-space-3); border-top: 1px solid var(--cs-border); }
+.workspace-session > span { color: var(--cs-text-subtle); font-size: var(--cs-text-xs); }
+.workspace-session .secondary { margin-top: var(--cs-space-3); background: transparent; min-height: 40px; padding: var(--cs-space-2) var(--cs-space-3); font-size: var(--cs-text-sm); }
+.card { box-shadow: var(--cs-shadow-sm); padding: clamp(24px, 3vw, 40px); }
+.card h1 { font-size: clamp(28px, 3vw, 36px); line-height: 1.2; font-weight: 650; letter-spacing: -.04em; }
+.card h2 { letter-spacing: -.025em; }
+.card p { overflow-wrap: anywhere; }
+.card > p:not(.eyebrow, .error, .card-note) { color: var(--cs-text-muted); }
+.primary, .secondary { transition: background var(--cs-transition), border-color var(--cs-transition), box-shadow var(--cs-transition), transform var(--cs-transition); }
+.primary:hover:not(:disabled) { box-shadow: var(--cs-shadow-md); }
+.primary:active:not(:disabled), .secondary:active:not(:disabled) { transform: translateY(1px); }
+input:focus-visible, textarea:focus-visible, select:focus-visible { outline: var(--cs-focus); outline-offset: 2px; }
+input:disabled, textarea:disabled, select:disabled { background: var(--cs-surface-sunken); color: var(--cs-text-muted); }
+.card button:not([class]), .card button[class=""] { min-height: 40px; padding: var(--cs-space-2) var(--cs-space-4); border: 1px solid var(--cs-border-strong); border-radius: var(--cs-radius-sm); background: var(--cs-surface); color: var(--cs-primary); font-weight: 600; }
+.card button:not([class]):hover:not(:disabled) { background: var(--cs-primary-soft); }
+.card [role="status"] { color: var(--cs-text-muted); }
+.card [role="alert"] { overflow-wrap: anywhere; }
+.account-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--cs-space-5); }
+.account-details > div:first-child { grid-column: 1 / -1; }
+.account-details dt { font-size: var(--cs-text-xs); }
+.account-details dd { font-weight: 500; }
+.intro { padding: var(--cs-space-6) 0; }
+.intro h2 { color: var(--cs-hero); font-weight: 650; font-size: clamp(36px, 4.2vw, 56px); }
+.intro-line { max-width: 80px; height: 4px; }
+.app-shell > footer { margin-top: auto; padding: var(--cs-space-5); border-top: 1px solid var(--cs-border); background: var(--cs-surface); letter-spacing: .02em; }
+.skip-link { position: fixed; left: 16px; top: -100px; z-index: 100; padding: 12px 20px; background: var(--cs-primary); color: var(--cs-surface); border-radius: var(--cs-radius-sm); }
+.skip-link:focus { top: 12px; }
+#main-content:focus, #workspace-content:focus { outline: none; }
+.workspace-sidebar { grid-column: 1; grid-row: 1 / span 3; display: flex; flex-direction: column; align-self: start; gap: var(--cs-space-5); min-width: 0; }
+@media (min-width: 761px) { .workspace-sidebar { position: sticky; top: var(--cs-space-5); } }
+@media (max-width: 1099px) {
+  .workspace { grid-template-columns: 176px minmax(0, 1fr); column-gap: var(--cs-space-5); }
+  .workspace-nav a { font-size: 12px; gap: var(--cs-space-2); }
+  .app-shell > main:has(.workspace) { padding-inline: var(--cs-space-5); }
+}
+@media (max-width: 760px) {
+  .brand { min-height: 68px; padding: 0 var(--cs-space-4); font-size: 19px; }
+  .brand-caption { display: none; }
+  .app-shell > main:has(.workspace) { padding: var(--cs-space-4); max-width: none; }
+  .workspace { display: flex; flex-direction: column; gap: var(--cs-space-5); }
+  .workspace-nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; gap: var(--cs-space-1); border-bottom: 1px solid var(--cs-border); padding-bottom: var(--cs-space-4); }
+  .workspace-nav__label { grid-column: 1 / -1; padding: 0 var(--cs-space-2) var(--cs-space-2); }
+  .workspace-nav a { font-size: var(--cs-text-xs); padding: var(--cs-space-2); }
+  .workspace-content { width: 100%; }
+  .workspace-session { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: var(--cs-space-4); padding: var(--cs-space-4) 0 0; }
+  .workspace-session .secondary { width: auto; margin: 0; }
+  .card { padding: var(--cs-space-5) var(--cs-space-4); }
+  .account-details { grid-template-columns: minmax(0, 1fr); }
+}
+
+
+.workspace-nav__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--cs-space-2); margin-bottom: var(--cs-space-2); padding: 0 var(--cs-space-1) 0 var(--cs-space-3); min-height: 36px; }
+.workspace-nav__heading .workspace-nav__label { padding: 0; }
+.workspace-collapse { display: grid; place-items: center; flex-shrink: 0; width: 36px; height: 36px; border: 1px solid var(--cs-border); border-radius: var(--cs-radius-sm); color: var(--cs-text-muted); background: var(--cs-surface); }
+.workspace-collapse:hover { color: var(--cs-primary); background: var(--cs-primary-soft); border-color: var(--cs-primary-border); }
+@media (min-width: 761px) {
+  .workspace--collapsed { grid-template-columns: 64px minmax(0, 1fr); }
+  .workspace--collapsed .workspace-nav__heading { justify-content: center; padding: 0; }
+  .workspace--collapsed .workspace-nav__label, .workspace--collapsed .workspace-session > span { display: none; }
+  .workspace--collapsed .workspace-nav a { position: relative; justify-content: center; padding: 12px; min-height: 48px; }
+  .workspace--collapsed .workspace-nav a > span { position: absolute; left: calc(100% + 8px); top: 50%; transform: translateY(-50%); z-index: 20; visibility: hidden; opacity: 0; pointer-events: none; width: max-content; max-width: 240px; padding: 8px 12px; border-radius: var(--cs-radius-sm); background: var(--cs-text); color: var(--cs-surface); box-shadow: var(--cs-shadow-md); font-size: var(--cs-text-xs); transition: opacity var(--cs-transition); }
+  .workspace--collapsed .workspace-nav a:hover > span, .workspace--collapsed .workspace-nav a:focus > span { visibility: visible; opacity: 1; }
+  .workspace--collapsed .workspace-session { padding: 12px 0; }
+  .workspace--collapsed .workspace-session .secondary { padding: 8px 4px; font-size: 11px; }
+}
+@media (max-width: 760px) {
+  .workspace-nav__heading { grid-column: 1 / -1; padding: 0 8px; min-height: 24px; margin: 0; }
+  .workspace-collapse { display: none; }
+}
+
+.sign-out { display: inline-flex; align-items: center; justify-content: center; gap: var(--cs-space-2); }
+@media (min-width: 761px) { .workspace--collapsed .workspace-session .sign-out { padding: 12px; } .workspace--collapsed .workspace-session .sign-out > span { display: none; } }
+
+
+@media (max-width: 760px) {
+  .workspace-sidebar { display: contents; }
+  .workspace-nav { order: 1; }
+  .workspace-content { order: 2; }
+  .workspace-session { order: 3; }
 }

@@ -9,34 +9,41 @@ commit.
 
 ## Shell
 
-`App.jsx` renders one shell for every page:
+`App.jsx` retains all routes and guards. It renders a skip-to-content link, the
+ConnectSphere wordmark with a small brand caption, `main#main-content` and the footer.
+Guest sign-in and session-error recovery retain the introductory two-column layout.
+Pending session checks use a neutral workspace skeleton instead of the guest intro.
 
-```
-.app-shell
-  header.brand          green "C" mark + "ConnectSphere"
-  main[.wide | .venue-workspace]
-    aside.intro         eyebrow "EVENT PLANNING & VENUE BOOKING", headline, tagline (hidden in full-width mode)
-    <Routes/>           the page, usually a section.card inside WorkspaceLayout
-  footer                "ConnectSphere Event Services"
-```
-
-`WorkspaceLayout` (every signed-in page) renders `nav.workspace-nav[aria-label="Workspace"]` with a `NavLink` per
-permitted feature, then the page (`<Outlet/>`), then `SignOutButton`. The link order is Account, Notifications, Browse events,
-My registrations, then feature links, then Responsibilities. Each link is behind the same `hasPermission` checks as
-its route. Notifications, like Account, is available to every verified signed-in user.
+Every signed-in page uses the same `WorkspaceLayout`: permission-filtered icon
+navigation, `.workspace-content` containing the unchanged route outlet, and the
+existing sign-out action. Navigation and sign-out share a `.workspace-sidebar`
+wrapper that sticks as one unit above 760px. On mobile the wrapper uses
+`display: contents`, keeping navigation above the page and sign-out below it.
+Navigation destinations, order and permission checks
+are unchanged. Icon paths live in `components/ui/Icon.jsx` and are decorative.
 
 ## Layout modes
 
-`main` switches layout by path in `App.jsx`:
+| Mode | Shape |
+|---|---|
+| Guest | Intro plus a 440px sign-in/session-error panel, stacked at 760px |
+| Session loading | Workspace-sized sidebar/content placeholders while access is checked; no protected content or navigation |
+| Signed-in desktop | 208px sidebar plus flexible page content, within a 1536px shell |
+| Compact desktop | 176px sidebar from 761px through 1099px |
+| Collapsed desktop | 64px icon navigation; the page gains the released space |
+| Mobile, 760px and below | Expanded two-column navigation above the page; no collapse control |
 
-| Mode | Class | Used by | Shape |
-|---|---|---|---|
-| Default | none | sign-in, account, notifications, browse events, registrations, managed events (`/events/managed`), responsibilities | Two columns: intro `1fr`, page `440px` |
-| Wide form | `main.wide` | `/events/new` | Intro `1fr`, page `560px` |
-| Full workspace | `main.venue-workspace` | `/venues/*`, `/equipment/*`, `/technical-support`, `/my-event-requests/*`, `/assigned-events/*`, `/event-management/*`, `/events/assignments` | One column up to 1160px, intro hidden |
+The sidebar's Collapse/Expand button exposes `aria-expanded` and `aria-controls`.
+Collapsed links retain explicit accessible names; their visible label appears on
+hover and focus. Collapse is local presentation state for the mounted workspace,
+survives navigation within it, and resets after reload/sign-out. It does not
+remount the route outlet or discard entered form values. At phone width the
+navigation is always expanded, even when resized from a collapsed desktop.
 
-A new list, table, calendar or dashboard page adds its path to the `fullWorkspace` condition in `App.jsx`. A single
-form or detail card stays in the default mode. Everything collapses to one column at **≤ 760px**.
+The existing `fullWorkspace` path detection in App.jsx is retained for compatibility.
+The signed-in CSS layout uses `main:has(.workspace)` instead of adding route cases.
+Feature styles remain scoped to their existing roots. Venue and Equipment retain
+their own layouts and actions inside the wider content column.
 
 ## Design tokens
 
@@ -53,10 +60,11 @@ here now reaches every screen.
 | Text | `--cs-text`, `--cs-text-muted`, `--cs-text-subtle` |
 | Status | `--cs-success`, `--cs-warning`, `--cs-danger`, `--cs-info`, `--cs-neutral`, each with a `-soft` tint |
 | Spacing | `--cs-space-1` 4px to `--cs-space-8` 64px, on a 4px base |
-| Radius | `--cs-radius-sm` 8px for controls, `--cs-radius-lg` 14px for cards, `--cs-radius-pill` |
+| Radius | `--cs-radius-sm` 8px for controls, `--cs-radius-lg` 16px for cards, `--cs-radius-pill` |
 | Elevation | `--cs-shadow-sm`, `--cs-shadow-md`, `--cs-shadow-lg` |
-| Type | `--cs-font`, `--cs-font-mono`, `--cs-text-xs` 12px to `--cs-text-3xl` 34px |
-| Other | `--cs-focus`, `--cs-transition` |
+| Type | `--cs-font`, `--cs-font-mono`, `--cs-text-xs` 12px to `--cs-text-3xl` 36px |
+| Decorative | `--cs-hero`, `--cs-hero-text`, `--cs-hero-muted`, `--cs-art-*` for abstract editorial artwork |
+| Other | `--cs-focus`, `--cs-transition`, `--cs-overlay` |
 
 Rules for a new screen:
 
@@ -67,7 +75,7 @@ Rules for a new screen:
 - **Don't restyle a control that already works.** Inputs, buttons, badges and cards are styled globally in
   `App.css`; a feature stylesheet adds layout, not a second button.
 
-The font is a system stack via `--cs-font`, so it renders natively everywhere with nothing to download. Focus is one
+The font stack prefers locally available Inter, then Segoe UI and system sans fonts via `--cs-font`. There is no font download or new dependency. Focus is one
 treatment for every control, set once by the global `:focus-visible` rule.
 
 The exact values live in `index.css` and are deliberately not repeated here: a second copy would go stale.
@@ -133,3 +141,108 @@ Confirmations before destructive actions follow `WithdrawButton.jsx`: an inline 
 The Under review decision form uses a scoped event-review-decision card with a larger note field, a separate return action explaining notification and retained assignment, and secondary approve/reject controls. Saving disables the note and actions and announces progress. The Changes requested panel uses the existing warning palette, preserves message line breaks, wraps long text and explains Edit, Save changes, then Resubmit request. Resubmission is a separate owner-only action outside edit mode. The coordinator sees the latest immutable before/after comparison with its timestamp. Both layouts stack at 760px and were visually checked at 375px. Styles stay in features/events/workspace.css.
 
 SCRUM-117 saved-edit correction: status appears immediately after the event title. The assigned coordinator sees Saved organiser changes against the submitted/resubmitted baseline on refresh, with decision controls before the long event details. Last resubmission comparisons stay below history and explain that they describe a past submission. Limited-history baselines have explicit labels; missing comparison data is not reported as no changes.
+
+
+## Attendee presentation (30 October 2026)
+
+- `/events`: an emerald editorial hero and three-column event cards on large
+  screens, two at intermediate widths and one on phones. The artwork is abstract
+  decoration, never presented as a photograph of a venue or event.
+- Discovery filters operate only on the authorised server result: name/description
+  search, venue city, local-calendar from-date (inclusive), availability and name/date
+  sorting. Missing dates sort last; unknown capacity is not claimed as available.
+  No price/category controls appear because the existing public payload has neither.
+  No matches and empty catalogues have distinct recovery actions; outages have retry.
+- Event details retain all existing registration-window, capacity, waitlist and
+  submission hooks. A sticky desktop summary holds the event/date/availability and
+  original form. The progress indicator reflects the existing two-stage process:
+  details and registration saved. On smaller screens the summary flows below the
+  event and venue information. Contextual help explains status and withdrawal.
+- My registrations adds counts, an explore link and All/Pending/Confirmed/Withdrawn
+  filter buttons. Offers and waitlist entries remain visible regardless of the
+  registration filter, so filtering cannot conceal a time-sensitive offer.
+- Registration details name the event and date where supplied. Existing status,
+  submitted details, withdrawal restrictions and confirmation remain unchanged.
+
+There are no new backend capabilities, payment steps, QR codes, ticket downloads,
+saved events, transfers, host claims, map integrations or trend claims. Those need
+separate feature requirements. Form handlers, API helpers, auth and permission
+policies, state hooks and route declarations are preserved.
+
+
+### Session-loading presentation
+
+`features/auth/AuthStatus.jsx` renders `.workspace.auth-loading` while the existing
+session/access verification is pending. This opts into the shared workspace shell
+and hides the guest intro without changing App.jsx or routing. `features/auth/auth.css`
+provides non-interactive, aria-hidden sidebar, banner, toolbar and card placeholders.
+The real status text remains announced through `role="status"`; the existing
+conditional sign-out action remains available outside the decorative placeholders.
+No user details, permission-based links or protected pages render before verification.
+Pulse/spinner motion is disabled for reduced-motion preferences. The existing error,
+retry and sign-out paths are retained. No tests were run for this follow-up, per
+Ryan's explicit instruction.
+
+
+### Local Docker refresh
+
+The frontend Vite development server polls source files every 500ms. The Windows
+Docker bind mount was observed to contain the new AuthStatus source while Vite
+still served its cached old transform. Polling in frontend/vite.config.js avoids
+relying on missed native change events. A frontend-only container restart clears
+the existing transform cache; no image rebuild, dependencies or backend restart
+are needed for this presentation update. This is a development-server setting.
+
+
+The My event requests navigation entry uses the shared `request` SVG (a document
+with a folded corner and text lines), distinguishing requests from the My Events
+calendar. The sticky sidebar wrapper applies to expanded and collapsed desktop
+modes; it preserves the existing nav labels, permission checks, sign-out handler
+and route outlet.
+
+
+### Event-request list cards
+
+The organiser's requests and private drafts use `.event-request-list` in the
+existing events workspace stylesheet. Each row is a single keyboard-accessible
+link with a document icon, a plain slate heading, a grouped status/assignment/
+ownership line and a View request or Continue draft affordance. The link name
+comes from the heading; metadata supplies its accessible description. Existing
+destinations and guards remain unchanged. Draft rows use a muted surface and
+dashed border, while section headings show visually separate counts. The shared
+EventList presentation also keeps assigned-event rows consistent. At narrow
+widths metadata and the open affordance wrap without truncating long titles.
+Activity-history and safety-review lists retain their existing styling: the new
+rules are scoped to the additional event-request-list class.
+
+
+### Event-request detail presentation
+
+EventWorkspaceDetailPage now scopes its layout under `.event-request-detail`:
+separated back/refresh navigation; title/status/reference header; start/end/
+attendance summary cards; about, registration, planning requirements and
+coordinator panels; decision/history cards; and existing management controls.
+The coordinator UUID is retained inside an expandable reference rather than
+being the main coordinator label. Event times use the existing local formatWhen
+helper. The saved/edit/review/resubmit/safety/assignment/arrangement/postpone/
+cancel guards and callbacks remain in place.
+
+ChangeRequestControls keeps its original state, eligibility checks and submit
+handler. Its pending panel presents the stored reason and submission time, then
+Current versus Requested values, formatting datetime fields through formatWhen.
+Current means the event payload presently displayed, not a historical snapshot.
+The closed action and open form use the shared control styles; long forms have
+two desktop columns and stack on phones. Activity expansion remains unchanged.
+No backend/API changes or additional requests are introduced. No tests were run
+for this presentation follow-up, following Ryan's instruction.
+
+
+### Sign-out landing behavior
+
+The auth guard owns sign-out navigation. The auth provider marks signed-out
+sessions so the guard clears return state, while the button only invokes sign-out.
+Initial protected deep links still preserve their destination. After sign-in,
+unavailable return pages fall back to `/account`; ordinary signed-in visits to
+restricted pages still show Access denied. Permission checks happen before any
+protected outlet renders. A remembered `/forbidden` return URL also falls back to
+Account. No tests were run for this follow-up. Details are in the routing guide.

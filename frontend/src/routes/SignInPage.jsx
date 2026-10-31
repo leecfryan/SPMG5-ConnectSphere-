@@ -8,14 +8,15 @@ function returnPath(value) {
     return "/account";
   }
   const destination = new URL(value, "https://app.invalid");
-  if (destination.pathname.replace(/\/+$/, "").toLowerCase() === "/sign-in") return "/account";
+  const pathname = destination.pathname.replace(/\/+$/, "").toLowerCase();
+  if (pathname === "/sign-in" || pathname === "/forbidden") return "/account";
   return destination.pathname + destination.search + destination.hash;
 }
 
 export default function SignInPage() {
   const { status, client } = useAuth();
   const location = useLocation();
-  if (status === "authenticated") return <Navigate to={returnPath(location.state?.from)} replace />;
+  if (status === "authenticated") return <Navigate to={returnPath(location.state?.from)} replace state={{ afterSignIn: true }} />;
   if (status !== "anonymous") return <AuthStatus />;
   return <SignIn client={client} />;
 }

@@ -188,12 +188,15 @@ test.each([
   expect(fetchMock).not.toHaveBeenCalledWith("/api/internal/access", expect.anything());
 });
 
-test("[RBAC-ACCESS-005] Sign-in to a forbidden return URL still enforces permission", async () => {
+test("[RBAC-ACCESS-005] Sign-in to an unavailable return page lands on account without loading protected data", async () => {
   const { fetchMock } = setup();
   renderApp(["/staff/responsibilities"]);
   await submitSignIn();
-  expect(await screen.findByRole("heading", { name: "Access denied" })).toBeTruthy();
+  expect(await screen.findByText("Welcome, Verified Person.")).toBeTruthy();
+  expect(screen.getByTestId("location").textContent).toBe("/account");
+  expect(screen.queryByRole("heading", { name: "Access denied" })).toBeNull();
   expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock).not.toHaveBeenCalledWith("/api/internal/access", expect.anything());
 });
 
 test("[ROUTE-002] Page navigation and Back/Forward share one verified identity", async () => {
@@ -414,4 +417,25 @@ test("[AUTH-FLOW-022] Duplicate sign-out clicks send one request and clear acces
   await act(async () => { finish({ error: null }); });
   expect(await screen.findByLabelText("Email address")).toBeTruthy();
   expect(screen.queryByRole("navigation", { name: "Workspace" })).toBeNull();
+});
+
+
+test("The sidebar switches between icons and named navigation without changing access or signing out", async () => {
+  const { fetchMock } = setup(session, staffUser, ["internal.access", "venues.read"]);
+  const user = userEvent.setup();
+  renderApp(["/account"]);
+  const collapse = await screen.findByRole("button", { name: "Collapse sidebar" });
+  expect(collapse.getAttribute("aria-expanded")).toBe("true");
+  const nav = screen.getByRole("navigation", { name: "Workspace" });
+  const destinations = [...nav.querySelectorAll("a")].map(link => [link.getAttribute("href"), link.getAttribute("aria-label")]);
+  await user.click(collapse);
+  expect(screen.getByRole("button", { name: "Expand sidebar" }).getAttribute("aria-expanded")).toBe("false");
+  expect(nav.closest(".workspace").classList.contains("workspace--collapsed")).toBe(true);
+  expect([...nav.querySelectorAll("a")].map(link => [link.getAttribute("href"), link.getAttribute("aria-label")])).toEqual(destinations);
+  expect(screen.getByRole("link", { name: "Venues", exact: true })).toBeTruthy();
+  expect(screen.queryByRole("link", { name: "Technical support", exact: true })).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Expand sidebar" }));
+  expect(nav.closest(".workspace").classList.contains("workspace--collapsed")).toBe(false);
+  expect(screen.getByText("Welcome, Verified Person.")).toBeTruthy();
+  expect(fetchMock.mock.calls.filter(([url]) => url === "/api/auth/me")).toHaveLength(1);
 });
