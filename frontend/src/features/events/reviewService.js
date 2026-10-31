@@ -33,3 +33,11 @@ export function requestEventChanges(eventId, note, token) {
   return apiFetch(`/api/internal/events/${eventId}/request-changes`, token, { method: "POST", body: { note } })
     .then((body) => body.event);
 }
+
+// SCRUM-165: coordinator approves or rejects a pending change request.
+export function decideChangeRequest(eventId, decision, reason, token) {
+  return apiFetch(`/api/internal/events/${eventId}/decide-change-request`, token, {
+    method: "POST",
+    body: { decision, reason },
+  }).then((body) => body.event);
+}
