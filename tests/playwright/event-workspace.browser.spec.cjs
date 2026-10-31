@@ -217,8 +217,12 @@ test('[E2E-EVENT-101] SCRUM-100: Revocation while editing is refused by the real
   await expect(page.getByRole('heading', { name: events.organiser.name, exact: true })).toHaveCount(0);
 });
 
+// SCRUM-171: previously this test also cancelled the event as the lead, after
+// postponing it - the lead's unconditional cancel access is now removed, so
+// the second half instead proves the Cancel event control itself is gone from
+// the manager scope (the postpone half, unaffected by SCRUM-171, is unchanged).
 for (const [id, role, status] of [['001', 'event_coordinator_lead', 'SUBMITTED'], ['002', 'event_ops_manager', 'SAFETY_REVIEW']]) {
-  test(`[SCRUM-142-MERGE-BROWSER-${id}] ${role} can postpone a ${status} event, refresh and cancel it`, async ({ page, accounts, request }) => {
+  test(`[SCRUM-142-MERGE-BROWSER-${id}] ${role} can postpone a ${status} event and refresh, but has no cancel action (SCRUM-171)`, async ({ page, accounts, request }) => {
     const { event, first, update } = await setupWorkflow(accounts, request);
     expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
     await accounts.updateEvent(event.id, { status });
@@ -234,12 +238,7 @@ for (const [id, role, status] of [['001', 'event_coordinator_lead', 'SUBMITTED']
     await expect(page.getByRole('button', { name: 'Postpone event', exact: true })).toHaveCount(0);
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Postponement', exact: true })).toBeVisible();
-    const cancel = page.getByRole('region', { name: 'Cancel event', exact: true });
-    await cancel.getByLabel('Reason', { exact: true }).fill('No replacement date');
-    await cancel.getByRole('button', { name: 'Cancel event', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Cancellation', exact: true })).toBeVisible();
-    await expect(page.getByText('New date pending', { exact: true })).toBeVisible();
-    await expect(page.getByText('No replacement date', { exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Cancel event', exact: true })).toHaveCount(0);
   });
 }
 
@@ -268,8 +267,10 @@ test('[E2E-EVENT-102] SCRUM-161: the Lead filters assignments by coordinator and
   expect((await assign(forTwo.id, second.id)).status()).toBe(200);
   expect((await assign(closed.id, first.id)).status()).toBe(200);
   await accounts.updateEvent(forTwo.id, { status: 'APPROVED' });
+  // SCRUM-171: cancel is assigned-coordinator-only now - `closed` was just
+  // assigned to `first` above, so `first` (not the manager) cancels it here.
   expect((await request.post(`${backendURL}/api/internal/events/${closed.id}/cancel`,
-    { headers: headers.manager, data: { reason: 'Venue no longer available' } })).status()).toBe(200);
+    { headers: headers.first, data: { reason: 'Venue no longer available' } })).status()).toBe(200);
 
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto('/event-management');
