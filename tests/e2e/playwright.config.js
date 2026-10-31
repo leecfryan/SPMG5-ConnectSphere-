@@ -11,6 +11,12 @@ module.exports = defineConfig({
   testDir: ".",
   timeout: 30_000,
   fullyParallel: false,
+  // The shared dev Supabase project's Auth token endpoint is rate-limited
+  // (429 over_request_rate_limit). fullyParallel: false only serializes
+  // tests within one file - two live spec files on separate workers can
+  // still sign in at the same time and trip it together. Capped to 1 so
+  // every live-DB file runs one at a time, team-wide.
+  workers: 1,
   retries: 0,
   reporter: [["list"]],
   use: {
