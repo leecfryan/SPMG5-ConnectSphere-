@@ -8,6 +8,9 @@ const ACTIONS = Object.freeze({
   CHANGES_REQUESTED: "Changes requested",
   SAFETY_APPROVED: "Safety arrangement approved",
   SAFETY_REJECTED: "Safety arrangement rejected",
+  // SCRUM-165: coordinator's decision on a pending change request.
+  CHANGE_REQUEST_APPROVED: "Change request approved",
+  CHANGE_REQUEST_REJECTED: "Change request rejected",
   // SCRUM-164 AC3: organiser edits during planning (SUBMITTED status).
   EDIT: "Updated event details",
   // SCRUM-37: apply_organiser_event_edit (SQL) names the fields that actually
@@ -37,7 +40,7 @@ export default function EventActivityHistory({ activity }) {
       <ol className="event-workspace-list">
         {visible.map(entry => <li key={entry.id}>
           <span>{ACTIONS[entry.action] ?? entry.action} · {formatWhen(entry.created_at)}</span>
-          {entry.note && <span>{["SAFETY_REJECTED", "EDIT", "event.significant_edit", "event.ordinary_edit"].includes(entry.action) ? "Reason" : "Note"}: {entry.note}</span>}
+          {entry.note && <span>{["SAFETY_REJECTED", "CHANGE_REQUEST_APPROVED", "CHANGE_REQUEST_REJECTED", "EDIT", "event.significant_edit", "event.ordinary_edit"].includes(entry.action) ? "Reason" : "Note"}: {entry.note}</span>}
         </li>)}
       </ol>
       {hiddenCount > 0 && (

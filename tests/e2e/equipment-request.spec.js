@@ -75,10 +75,12 @@ test.describe("Scrum-29 follow-up: availability-filtered dropdown and event-deri
   test.beforeEach(async () => { setup = await setupEquipment(); });
   test.afterEach(async () => { await setup.teardown(); });
 
-  // Scrum-30: the dropdown is now type-level, built only from bookable units
-  // for the window - a type disappears from it entirely once every one of
-  // its units is unavailable, rather than one option among several per unit.
-  test("a type with no AVAILABLE units at all for the window does not appear in the type dropdown", async ({ page }) => {
+  // SCRUM-169 AC3 (was Scrum-30 until this story reversed it): the dropdown
+  // is now built from the full catalogue, not just bookable units for the
+  // window - a type with zero AVAILABLE units stays selectable so it can
+  // show "Out of Stock" instead of disappearing entirely, which would make
+  // AC3 unreachable for it.
+  test("a type with no AVAILABLE units at all for the window still appears in the type dropdown, flagged Out of Stock", async ({ page }) => {
     const damagedOnlyType = `${setup.equipmentType}_DAMAGED_ONLY`;
     const damagedId = await createEquipmentUnit({ type: damagedOnlyType, status: "DAMAGED" });
     try {
@@ -90,7 +92,10 @@ test.describe("Scrum-29 follow-up: availability-filtered dropdown and event-deri
       ]);
       const optionValues = await page.getByLabel("Equipment type").locator("option").evaluateAll((els) => els.map((e) => e.value));
       expect(optionValues).toContain(setup.equipmentType); // has an AVAILABLE unit
-      expect(optionValues).not.toContain(damagedOnlyType); // every unit DAMAGED
+      expect(optionValues).toContain(damagedOnlyType); // every unit DAMAGED, but still listed
+
+      await page.getByLabel("Equipment type").selectOption(damagedOnlyType);
+      await expect(page.getByText("Out of Stock", { exact: true })).toBeVisible();
     } finally {
       await deleteEquipmentUnit(damagedId);
     }
