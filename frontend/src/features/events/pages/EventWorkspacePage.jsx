@@ -12,8 +12,12 @@ function EventList({ events, workspace, userId }) {
   return <ul className="event-workspace-list">
     {events.map(event => <li key={event.id}>
       <Link to={`${workspace.path}/${event.id}`}>{event.name}</Link>
-      <span><StatusBadge status={event.status} /> · {event.coordinator_id ? "Coordinator assigned" : "Awaiting coordinator"}
-        {userId && (event.organiser_id === userId ? " · You are responsible" : " · View only")}</span>
+      <span>
+        <StatusBadge status={event.status} />
+        {event.pending_change_request && <span className="status-badge status-change-pending">Change pending</span>}
+        {" · "}{event.coordinator_id ? "Coordinator assigned" : "Awaiting coordinator"}
+        {userId && (event.organiser_id === userId ? " · You are responsible" : " · View only")}
+      </span>
     </li>)}
   </ul>;
 }
