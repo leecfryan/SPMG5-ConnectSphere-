@@ -1,3 +1,4 @@
+const { randomUUID } = require("node:crypto");
 const { ACTIVE_STATUSES, ASSIGNABLE_STATUSES } = require("./lifecycle");
 const { assignWithHistory } = require("./assignmentHistory.repository");
 const { WRITABLE_COLS } = require("./events.repository");
@@ -28,6 +29,11 @@ const FIELDS = [
 // Later stages (SAFETY_REVIEW and beyond) are excluded to avoid disturbing
 // in-flight arrangements; only one request can be pending at a time.
 const ELIGIBLE_CHANGE_REQUEST_STATUSES = ["UNDER_REVIEW", "APPROVED"];
+
+// SCRUM-165: fields whose change on an APPROVED event triggers regression to
+// SUBMITTED. Mirrors the significance rule in apply_organiser_event_edit (SQL).
+// UNDER_REVIEW events have no live arrangements; no regression is needed there.
+const SIGNIFICANT_FIELDS = Object.freeze(["start_time", "end_time", "venue_requirements", "expected_attendance"]);
 
 function isCoordinator(user) {
   return Boolean(user && !user.deleted_at && user.email_confirmed_at &&
@@ -295,6 +301,73 @@ function createEventWorkspaceService(client) {
           .maybeSingle(),
       );
       if (!event) return { ok: false, reason: "conflict" };
+      return { ok: true, event };
+    },
+    // SCRUM-165: coordinator approves or rejects a pending change request.
+    // Approval applies the proposed changes atomically; if the event was APPROVED
+    // and a significant field changed, the event regresses to SUBMITTED for
+    // re-review (mirrors apply_organiser_event_edit's significance rule).
+    // Rejection leaves all event fields unchanged.
+    // Both paths record a reason and write an activity log entry. Notification
+    // is best-effort: an enqueue failure is logged but does not fail the decision.
+    async decideChangeRequest(coordinatorId, eventId, decision, reason) {
+      const trimmedReason = typeof reason === "string" ? reason.trim() : "";
+      if (!["approve", "reject"].includes(decision)) return { ok: false, reason: "invalid_decision" };
+      if (!trimmedReason) return { ok: false, reason: "reason_required" };
+
+      const current = await read("coordinator", coordinatorId, eventId);
+      if (!current) return { ok: false, reason: "not_found" };
+      if (!current.pending_change_request) return { ok: false, reason: "no_pending_request" };
+
+      const proposed = current.pending_change_request.proposed_changes;
+      const patch = { pending_change_request: null };
+
+      if (decision === "approve") {
+        Object.assign(patch, proposed);
+        const significant = current.status === "APPROVED" &&
+          SIGNIFICANT_FIELDS.some(f => Object.hasOwn(proposed, f) && proposed[f] !== current[f]);
+        if (significant) patch.status = "SUBMITTED";
+      }
+
+      // Guard: updated_at prevents a concurrent edit winning in between the read
+      // above and this write. pending_change_request IS NOT NULL prevents a race
+      // where a second coordinator action (if assignment changed) already cleared it.
+      const event = await unwrap(
+        client.from("events")
+          .update(patch)
+          .eq("id", eventId)
+          .eq("coordinator_id", coordinatorId)
+          .eq("updated_at", current.updated_at)
+          .not("pending_change_request", "is", null)
+          .select(FIELDS)
+          .maybeSingle(),
+      );
+      if (!event) return { ok: false, reason: "conflict" };
+
+      await unwrap(client.from("event_activity_log").insert({
+        event_id: eventId,
+        user_id: coordinatorId,
+        action: decision === "approve" ? "CHANGE_REQUEST_APPROVED" : "CHANGE_REQUEST_REJECTED",
+        details: { note: trimmedReason, proposed_changes: proposed },
+      }));
+
+      // SCRUM-165: uses event-decision workflow with a fresh random event_id so
+      // this row does not conflict with the partial unique index that guards
+      // per-event event-decision notifications.
+      const { error: notifError } = await client.from("notification_outbox").insert({
+        event_id: randomUUID(),
+        recipient_id: event.organiser_id,
+        payload: {
+          eventId: event.id,
+          eventName: event.name,
+          outcome: decision === "approve" ? "change request approved" : "change request rejected",
+          remark: trimmedReason,
+        },
+      });
+      if (notifError) {
+        console.error(`SCRUM-165 decide-change-request ${eventId}: notification enqueue failed:`, notifError.message);
+      }
+
       return { ok: true, event };
     },
     async resubmitOrganiserEvent(userId, id, cycleId) {
