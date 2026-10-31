@@ -180,8 +180,8 @@ const eventsRepository = {
     dataClient.activity.push(row);
     return row;
   },
-  // SCRUM-148: same guard as the real write - any of the four active stages,
-  // and, when given, the coordinator still holding the event.
+  // SCRUM-148/171: same guard as the real write - any of the active stages,
+  // and the coordinator still holding the event (always given, as of SCRUM-171).
   async cancel(id, extra = {}, coordinatorId) {
     const event = findEvent(id);
     if (!event || !ACTIVE_STATUSES.includes(event.status) || (coordinatorId && event.coordinator_id !== coordinatorId)) return null;
