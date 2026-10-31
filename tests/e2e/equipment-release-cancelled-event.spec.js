@@ -20,7 +20,8 @@ test.describe("SCRUM-104: equipment reservations are released when an event is c
 
   test.beforeEach(async () => {
     setup = await setupEquipment();
-    tokens = { technical: await getAccessToken(setup.technical), coordinator: await getAccessToken(setup.coordinator) };
+    const [technical, coordinator] = await Promise.all([getAccessToken(setup.technical), getAccessToken(setup.coordinator)]);
+    tokens = { technical, coordinator };
   });
   test.afterEach(async () => { await setup.teardown(); });
 
@@ -43,7 +44,10 @@ test.describe("SCRUM-104: equipment reservations are released when an event is c
     await updateEvent(setup.eventId, { status: "CANCELLED" });
 
     // No script run here - just the kind of read a Technical Support Staff
-    // member would make anyway while checking the catalogue.
+    // member would make anyway while checking the catalogue. Sequential, not
+    // parallel: this GET is what triggers the self-heal
+    // (releaseReservationsForTerminalEvents) that flips the request below to
+    // RELEASED - running them together let the second one race ahead of it.
     const catalogue = await request.get("/api/equipment", { headers: authHeader(tokens.technical) });
     const unit = (await catalogue.json()).data.find((u) => u.id === setup.equipmentId);
     expect(unit.status).toBe("AVAILABLE");
