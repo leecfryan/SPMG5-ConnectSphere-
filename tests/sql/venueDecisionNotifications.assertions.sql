@@ -129,10 +129,13 @@ end $$;
 
 -- Cancelling or releasing a booking is not a decision and queues nothing.
 delete from public.notification_outbox;
-do $$ declare request_id uuid := 'a0000000-0000-4000-8000-000000000005'; begin
-  perform pg_temp.new_request(request_id, 'c0000000-0000-4000-8000-000000000002');
-  insert into public.venue_bookings(request_id, slot, status) values (request_id, 'am', 'confirmed');
-  update public.venue_bookings set status = 'cancelled' where request_id = request_id;
+-- The variable is named v_request, not request_id: venue_bookings has a
+-- request_id column, and a bare "where request_id = request_id" is ambiguous
+-- to PL/pgSQL rather than a comparison.
+do $$ declare v_request uuid := 'a0000000-0000-4000-8000-000000000005'; begin
+  perform pg_temp.new_request(v_request, 'c0000000-0000-4000-8000-000000000002');
+  insert into public.venue_bookings(request_id, slot, status) values (v_request, 'am', 'confirmed');
+  update public.venue_bookings set status = 'cancelled' where request_id = v_request;
 
   if (select count(*) from public.notification_outbox) <> 0 then
     raise exception '[TC-SCRUM-41-S05] cancelling a booking must not queue a decision notification';

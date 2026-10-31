@@ -6,6 +6,8 @@
 -- concatenates and sorts them, and enum concatenation resolves through
 -- different operators than text does, so a text stub would not prove the
 -- function runs against the real schema.
+reset role;
+
 create type public.venue_slot as enum ('am', 'pm', 'night');
 create type public.booking_status as enum ('pending', 'confirmed', 'rejected', 'cancelled', 'hold', 'superseded');
 
@@ -32,3 +34,8 @@ create table public.venue_bookings (
   slot public.venue_slot not null,
   status public.booking_status not null
 );
+
+-- The assertions drive these tables as service_role, the role the backend uses,
+-- so the fixture has to grant it the same access the real project does.
+grant all on public.venues, public.venue_booking_requests, public.venue_bookings
+  to service_role;
