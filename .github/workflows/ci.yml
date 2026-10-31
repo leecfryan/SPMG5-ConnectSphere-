@@ -75,6 +75,7 @@ jobs:
       - run: docker pull postgres:17-alpine
       - run: node tests/sql/run-assignment-notifications.cjs --registration
       - run: node tests/sql/run-assignment-notifications.cjs --venue-holds --clarification
+      - run: node tests/sql/run-assignment-notifications.cjs --venue-decision
 
   docker:
     name: Docker Checks
