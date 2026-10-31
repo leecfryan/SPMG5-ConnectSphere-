@@ -39,18 +39,33 @@ test.describe("SCRUM-144 confirm an event (live Supabase)", () => {
 
     // The venue row still takes the venue_booking_requests column default
     // (true); the equipment row above was created essential explicitly.
-    expect(await readEssential("venue_booking_requests", setup.pendingRequestId)).toBe(true);
-    expect(await readEssential("equipment_requests", equipmentRequestId)).toBe(true);
-    expect((await readiness()).missing.map((item) => item.id)).toEqual([setup.pendingRequestId, equipmentRequestId]);
+    const [initialVenueEssential, initialEquipmentEssential, initialReadiness] = await Promise.all([
+      readEssential("venue_booking_requests", setup.pendingRequestId),
+      readEssential("equipment_requests", equipmentRequestId),
+      readiness(),
+    ]);
+    expect(initialVenueEssential).toBe(true);
+    expect(initialEquipmentEssential).toBe(true);
+    expect(initialReadiness.missing.map((item) => item.id)).toEqual([setup.pendingRequestId, equipmentRequestId]);
 
-    for (const [kind, id] of [["venue", setup.pendingRequestId], ["equipment", equipmentRequestId]]) {
-      const marked = await request.patch(`/api/internal/events/${setup.eventId}/arrangements/${kind}/${id}`, { headers, data: { is_essential: false } });
+    // SCRUM-144: these writes affect separate arrangement rows; finish both before checking readiness.
+    const markedResponses = await Promise.all(
+      [["venue", setup.pendingRequestId], ["equipment", equipmentRequestId]].map(([kind, id]) =>
+        request.patch(`/api/internal/events/${setup.eventId}/arrangements/${kind}/${id}`, { headers, data: { is_essential: false } }),
+      ),
+    );
+    for (const marked of markedResponses) {
       expect(marked.status(), await marked.text()).toBe(200);
     }
-    expect(await readEssential("venue_booking_requests", setup.pendingRequestId)).toBe(false);
-    expect(await readEssential("equipment_requests", equipmentRequestId)).toBe(false);
-    expect(await readEssential("venue_booking_requests", setup.bookedRequestId)).toBe(true);
-    const ready = await readiness();
+    const [updatedVenueEssential, updatedEquipmentEssential, bookedVenueEssential, ready] = await Promise.all([
+      readEssential("venue_booking_requests", setup.pendingRequestId),
+      readEssential("equipment_requests", equipmentRequestId),
+      readEssential("venue_booking_requests", setup.bookedRequestId),
+      readiness(),
+    ]);
+    expect(updatedVenueEssential).toBe(false);
+    expect(updatedEquipmentEssential).toBe(false);
+    expect(bookedVenueEssential).toBe(true);
     expect(ready).toMatchObject({ ready: true, missing: [] });
     expect(ready.optional.map((item) => item.id)).toEqual([setup.pendingRequestId, equipmentRequestId]);
 

@@ -243,6 +243,8 @@ The auth guard owns sign-out navigation. The auth provider marks signed-out
 sessions so the guard clears return state, while the button only invokes sign-out.
 Initial protected deep links still preserve their destination. After sign-in,
 unavailable return pages fall back to `/account`; ordinary signed-in visits to
-restricted pages still show Access denied. Permission checks happen before any
+restricted pages still show Access denied. The fallback marker is bound to the
+current verified identity snapshot and becomes stale on reload or re-verification,
+so later revocation cannot reuse it. Permission checks happen before any
 protected outlet renders. A remembered `/forbidden` return URL also falls back to
 Account. No tests were run for this follow-up. Details are in the routing guide.

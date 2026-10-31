@@ -6,6 +6,7 @@ const initialAuth = { client: null, session: undefined, revision: 0, problem: ""
 
 export default function AuthProvider({ children }) {
   const [auth, setAuth] = useState(initialAuth);
+  const [returnSessionId] = useState(() => crypto.randomUUID());
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const [verificationAttempt, setVerificationAttempt] = useState(0);
   const [verification, setVerification] = useState(null);
@@ -113,6 +114,8 @@ export default function AuthProvider({ children }) {
     <AuthContext.Provider value={{
       client, status, user, permissions, error, retry, signOut, signingOut, signOutError,
       hasSession: Boolean(token), token: user ? token : null, signedOut: auth.signedOut,
+      // Navigation hint only: restored or reverified identities must not reuse an old sign-in return.
+      signInReturnKey: user ? `${returnSessionId}:${revision}:${verificationAttempt}` : null,
       hasPermission: (permission) => permissions.includes(permission),
     }}>
       {children}

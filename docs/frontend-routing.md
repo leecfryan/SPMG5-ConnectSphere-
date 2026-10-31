@@ -151,7 +151,11 @@ Failed sign-out retains the current page/error, and the existing return boolean
 is retained. A new auth event/session resets the sign-out navigation marker.
 
 SignInPage still sanitises return paths and excludes `/forbidden` and sign-in
-loops. Its post-authentication redirect marks the destination `afterSignIn`.
+loops. Its post-authentication redirect marks the destination `afterSignIn`
+with a `signInReturnKey` from AuthProvider. The key combines a provider-lifetime
+identifier, auth revision and verification attempt. Reloading or re-verifying
+identity invalidates old history markers, so revoked access still reaches
+`/forbidden` rather than reusing the Account landing fallback.
 RequirePermission always checks the verified capability first. If that check
 fails for a post-sign-in destination, it redirects to universal `/account` and
 clears the marker rather than making Access denied the landing screen. Permitted

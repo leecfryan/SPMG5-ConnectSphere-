@@ -94,8 +94,10 @@ test("[SCRUM-147-UI-001] AC3: the organiser's drafts are listed apart from submi
   setup(() => response(200, { events }), () => response(200, { drafts }));
   const draftGroup = await screen.findByRole("region", { name: "Your drafts" });
   expect(within(draftGroup).getByText("Only you can see your drafts. Open one to continue editing and submit it.")).toBeTruthy();
-  expect((await within(draftGroup).findByRole("link", { name: "Half-planned gala" })).getAttribute("href")).toBe("/events/new?draft=draft-1");
-  expect(within(draftGroup).getByText(/Draft · started/)).toBeTruthy();
+  const draftLink = await within(draftGroup).findByRole("link", { name: "Half-planned gala" });
+  expect(draftLink.getAttribute("href")).toBe("/events/new?draft=draft-1");
+  expect(within(draftLink).getByText("Draft", { exact: true })).toBeTruthy();
+  expect(within(draftLink).getByText(/^Started\s+\S/)).toBeTruthy();
   const ownGroup = await screen.findByRole("region", { name: "Events you are responsible for" });
   expect(within(ownGroup).queryByRole("link", { name: "Half-planned gala" })).toBeNull();
 });

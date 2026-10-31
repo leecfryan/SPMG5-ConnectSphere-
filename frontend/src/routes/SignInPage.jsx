@@ -14,9 +14,9 @@ function returnPath(value) {
 }
 
 export default function SignInPage() {
-  const { status, client } = useAuth();
+  const { status, client, signInReturnKey } = useAuth();
   const location = useLocation();
-  if (status === "authenticated") return <Navigate to={returnPath(location.state?.from)} replace state={{ afterSignIn: true }} />;
+  if (status === "authenticated") return <Navigate to={returnPath(location.state?.from)} replace state={{ afterSignIn: signInReturnKey }} />;
   if (status !== "anonymous") return <AuthStatus />;
   return <SignIn client={client} />;
 }

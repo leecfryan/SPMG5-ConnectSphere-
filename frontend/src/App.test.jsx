@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { getAuthClient } from "./lib/supabase";
 import App from "./App";
-import { StrictMode } from "react";
+import { StrictMode, useEffect } from "react";
 import { MemoryRouter, useLocation, useNavigate } from "react-router";
 
 vi.mock("./lib/supabase", () => ({ getAuthClient: vi.fn() }));
@@ -230,9 +230,10 @@ test("[ROUTE-003] Browser Back after sign-out cannot reveal protected staff cont
   expect(screen.getByTestId("location").textContent).toBe("/sign-in");
 });
 
-test("[RBAC-ACCESS-006] Re-verification removes revoked navigation and page access", async () => {
-  const { emit, fetchMock } = setup(session, staffUser, ["internal.access"]);
+test("[RBAC-ACCESS-006] Re-verification after sign-in removes revoked navigation and page access", async () => {
+  const { emit, fetchMock } = setup(null, staffUser, ["internal.access"]);
   renderApp(["/staff/responsibilities"]);
+  await submitSignIn();
   await screen.findByText("Venue information and availability");
   let finish;
   fetchMock.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
@@ -241,6 +242,31 @@ test("[RBAC-ACCESS-006] Re-verification removes revoked navigation and page acce
   expect(screen.queryByRole("link", { name: "Responsibilities" })).toBeNull();
   await act(async () => { finish(reply(200, { user: verifiedUser, permissions: [] })); });
   expect(await screen.findByRole("heading", { name: "Access denied" })).toBeTruthy();
+});
+
+test("[RBAC-ACCESS-008] Restored history cannot reuse a previous sign-in fallback after access is revoked", async () => {
+  let returnEntry;
+  function CaptureReturnLocation() {
+    const location = useLocation();
+    useEffect(() => { returnEntry = location; }, [location]);
+    return null;
+  }
+  setup(null, staffUser, ["internal.access"]);
+  const firstVisit = render(<MemoryRouter initialEntries={["/staff/responsibilities"]}>
+    <App /><CaptureReturnLocation />
+  </MemoryRouter>);
+  await submitSignIn();
+  await screen.findByText("Venue information and availability");
+  expect(returnEntry.pathname).toBe("/staff/responsibilities");
+  expect(returnEntry.state.afterSignIn).toBeTypeOf("string");
+  firstVisit.unmount();
+
+  const { fetchMock } = setup(session, verifiedUser, []);
+  renderApp([returnEntry]);
+  expect(await screen.findByRole("heading", { name: "Access denied" })).toBeTruthy();
+  expect(screen.getByTestId("location").textContent).toBe("/forbidden");
+  expect(screen.queryByRole("link", { name: "Responsibilities" })).toBeNull();
+  expect(fetchMock).not.toHaveBeenCalledWith("/api/internal/access", expect.anything());
 });
 
 test("[RBAC-ACCESS-007] Backend denial hides staff data despite previously allowed navigation", async () => {
