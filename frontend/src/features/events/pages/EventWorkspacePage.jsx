@@ -23,6 +23,7 @@ function EventList({ events, workspace, userId }) {
           <h3 className="event-request-title" id={`event-request-title-${event.id}`}>{event.name}</h3>
           <div className="event-request-meta" id={`event-request-meta-${event.id}`}>
             <StatusBadge status={event.status} />
+            {event.pending_change_request && <span className="status-badge status-change-pending">Change pending</span>}
             <span><Icon name="account" size={15} />{event.coordinator_id ? "Coordinator assigned" : "Awaiting coordinator"}</span>
             {userId && <span className="event-request-ownership"><Icon name={event.organiser_id === userId ? "check" : "shield"} size={15} />{event.organiser_id === userId ? "You are responsible" : "View only"}</span>}
           </div>

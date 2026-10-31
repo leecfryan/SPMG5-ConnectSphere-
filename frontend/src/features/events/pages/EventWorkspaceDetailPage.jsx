@@ -15,6 +15,7 @@ import EventPostponeControl from "../components/EventPostponeControl";
 import EventPostponeSummary from "../components/EventPostponeSummary";
 import EventRequestForm from "../components/EventRequestForm";
 import ChangeRequestControls from "../components/ChangeRequestControls";
+import ChangeRequestDecisionControls from "../components/ChangeRequestDecisionControls";
 import SafetyCheckControls from "../components/SafetyCheckControls";
 import ConfirmEventControls from "../components/ConfirmEventControls";
 import EventSavedChanges from "../components/EventSavedChanges";
@@ -88,6 +89,7 @@ function Detail({ scope, eventId }) {
         event.status === "CHANGES_REQUESTED" && !editing && !loading && <EventResubmitControl
           key={clarification?.id} eventId={event.id} cycleId={clarification?.id}
           onResubmitted={() => { setSaved(false); reload(); }} />}
+      {scope === "coordinator" && event.coordinator_id === user.id && <ChangeRequestDecisionControls event={event} onDecided={reload} />}
       {scope === "coordinator" && event.coordinator_id === user.id && <EventDecisionControls event={event} onDecided={reload} />}
       <div className="request-detail-grid">
         {sections.map(section => <section className={`request-detail-panel request-detail-panel--${section.id}`} key={section.id} aria-labelledby={`request-${section.id}-heading`}>

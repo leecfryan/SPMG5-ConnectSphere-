@@ -88,16 +88,27 @@ export default function ChangeRequestControls({ event, onSubmitted }) {
 
   if (!ELIGIBLE_STATUSES.includes(event.status)) return null;
 
+  // SCRUM-165: keep the latest rejection reason beside the organiser's next action.
+  const recentRejection = event.activity?.[0]?.action === "CHANGE_REQUEST_REJECTED"
+    ? event.activity[0]
+    : null;
+
   if (!open) {
     return (
-      <section className="event-change-request event-change-request--start">
-        <div><h2>Need to update the details?</h2><p>Send proposed changes to your coordinator for review.</p></div>
+      <section className="event-change-request event-change-request--start" aria-labelledby="cr-heading">
+        <div>
+          <h2 id="cr-heading">{recentRejection ? "Change request" : "Need to update the details?"}</h2>
+          {recentRejection ? <>
+            <p>Your last change request was not accepted.</p>
+            <p>Coordinator&apos;s reason: {recentRejection.note}</p>
+          </> : <p>Send proposed changes to your coordinator for review.</p>}
+        </div>
         <button
           className="secondary"
           type="button"
           onClick={() => { setFields(initialState(event)); setErrors([]); setMessage(""); setReason(""); setOpen(true); }}
         >
-          Request a change
+          {recentRejection ? "Request another change" : "Request a change"}
         </button>
       </section>
     );

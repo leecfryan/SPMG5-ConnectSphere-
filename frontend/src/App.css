@@ -289,6 +289,7 @@ dd { margin: 0; font-size: var(--cs-text-base); overflow-wrap: anywhere; line-he
 
 .status-badge.status-draft { color: var(--cs-neutral); background: var(--cs-neutral-soft); }
 .status-badge.status-full { color: var(--cs-danger); background: var(--cs-danger-soft); }
+.status-badge.status-change-pending { color: var(--cs-warning); background: var(--cs-warning-soft); }
 
 /* ------------------------------------------------------------ workspace -- */
 
