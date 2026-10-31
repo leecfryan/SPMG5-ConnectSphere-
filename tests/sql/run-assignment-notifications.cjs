@@ -35,6 +35,11 @@ async function run() {
   if (process.argv.includes("--registration") && process.argv.includes("--venue-holds")) {
     throw new Error("Run --registration and --venue-holds in separate invocations so each owns its disposable database.");
   }
+  // SCRUM-41: the venue-holds fixture creates the same venue tables and enums,
+  // so the two cannot share one disposable database.
+  if (process.argv.includes("--venue-decision") && process.argv.includes("--venue-holds")) {
+    throw new Error("Run --venue-decision and --venue-holds in separate invocations so each owns its disposable database.");
+  }
   const guide = fs.readFileSync(path.join(root, "docs/notifications.md"), "utf8");
   const blocks = [...guide.matchAll(/```sql\r?\n([\s\S]*?)\r?\n```/g)].map(match => match[1]);
   const readSql = name => fs.readFileSync(path.join(__dirname, name), "utf8");
@@ -75,7 +80,7 @@ async function run() {
   // trigger, then its scenarios.
   if (process.argv.includes("--venue-decision")) {
     parts.push(readSql("venueDecisionNotifications.setup.sql"),
-      schemaBlock(blocks, "create function public.enqueue_venue_booking_decision_notification()"),
+      schemaBlock(blocks, "function public.enqueue_venue_booking_decision_notification()"),
       readSql("venueDecisionNotifications.assertions.sql"));
   }
   const script = parts.join("\n");

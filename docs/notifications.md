@@ -1677,9 +1677,14 @@ request if that is someone else, and the organiser, who is told only when a
 booking is confirmed.
 
 Nothing in the delivery path changes. The worker already posts each queued
-record's own `workflow` with its own `payload`, so this story adds a fourth
-workflow alongside `event-decision`, `event-assignment` and `equipment-issue`,
-and queues rows for it from the database. No backend JavaScript changes.
+record's own `workflow` with its own `payload`, so this story adds one more
+workflow value alongside the ones other lanes have already registered, and
+queues rows for it from the database. No backend JavaScript changes.
+
+The worker posts `{ name: <workflow>, to: { subscriberId: <recipient_id> },
+transactionId: <outbox row id>, payload: <payload> }`, so the Novu workflow's
+trigger identifier must be exactly `venue-booking-decision` and its subscribers
+are keyed by Supabase auth user id.
 
 ### Where it hooks in
 
@@ -1739,27 +1744,46 @@ function or trigger is modified.
 
 ```sql
 begin;
+set local lock_timeout = '3s';
+
+-- SCRUM-41: fail fast if these tables are not the shape the trigger expects,
+-- rather than part-way through installing it.
+do $$ begin
+  perform r.id, r.event_id, r.venue_id, r.booking_date, r.requested_by,
+          r.decided_at, r.decision_note
+    from public.venue_booking_requests r limit 0;
+  perform b.request_id, b.slot, b.status from public.venue_bookings b limit 0;
+  perform e.id, e.name, e.coordinator_id, e.organiser_id from public.events e limit 0;
+  perform v.id, v.name from public.venues v limit 0;
+  perform o.event_id, o.recipient_id, o.workflow, o.payload
+    from public.notification_outbox o limit 0;
+end $$;
 
 -- SCRUM-41: add one workflow value without restating the list. Reading the
 -- existing check and appending to it means this runs correctly whatever other
--- lanes have already added, and cannot silently drop their values.
-do $ declare existing_check text; begin
+-- lanes have already added, and cannot silently drop their values. The guard
+-- makes a second run a no-op instead of appending the same clause twice.
+do $$ declare existing_check text; begin
   select pg_get_expr(conbin, conrelid) into strict existing_check
   from pg_constraint
   where conrelid = 'public.notification_outbox'::regclass
     and conname = 'notification_outbox_workflow_check' and contype = 'c';
-  execute 'alter table public.notification_outbox drop constraint notification_outbox_workflow_check';
-  execute format('alter table public.notification_outbox add constraint notification_outbox_workflow_check check ((%s) or workflow = %L)',
-    existing_check, 'venue-booking-decision');
-end $;
+  if existing_check like '%venue-booking-decision%' then
+    raise notice 'venue-booking-decision is already allowed; constraint left alone';
+  else
+    execute 'alter table public.notification_outbox drop constraint notification_outbox_workflow_check';
+    execute format('alter table public.notification_outbox add constraint notification_outbox_workflow_check check ((%s) or workflow = %L)',
+      existing_check, 'venue-booking-decision');
+  end if;
+end $$;
 
 -- One notification per recipient per decided request, so a repeated decision
 -- cannot queue a second copy.
-create unique index notification_outbox_venue_decision_key
+create unique index if not exists notification_outbox_venue_decision_key
   on public.notification_outbox(recipient_id, (payload ->> 'requestId'))
   where workflow = 'venue-booking-decision';
 
-create function public.enqueue_venue_booking_decision_notification() returns trigger
+create or replace function public.enqueue_venue_booking_decision_notification() returns trigger
 language plpgsql security definer set search_path = '' as $$
 declare
   decided record;
@@ -1809,6 +1833,7 @@ $$;
 
 revoke all on function public.enqueue_venue_booking_decision_notification() from public, anon, authenticated;
 
+drop trigger if exists enqueue_venue_booking_decision_notification on public.venue_bookings;
 create trigger enqueue_venue_booking_decision_notification
 after update on public.venue_bookings
 referencing new table as changed
