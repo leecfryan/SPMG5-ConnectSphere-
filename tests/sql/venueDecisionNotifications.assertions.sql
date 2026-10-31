@@ -29,7 +29,7 @@ begin
      set decided_at = now(), decision_note = p_note
    where id = p_request;
   update public.venue_bookings
-     set status = p_decision
+     set status = p_decision::public.booking_status
    where request_id = p_request and status <> 'cancelled';
 end;
 $$;

@@ -1793,7 +1793,7 @@ begin
       req.id as request_id, req.event_id, req.booking_date, req.decision_note,
       req.requested_by, e.name as event_name, e.coordinator_id, e.organiser_id,
       v.name as venue_name,
-      (select string_agg(s.slot || ' ' || s.status, ', ' order by
+      (select string_agg(s.slot::text || ' ' || s.status::text, ', ' order by
                 case s.slot when 'am' then 1 when 'pm' then 2 else 3 end)
          from public.venue_bookings s where s.request_id = req.id) as slot_summary,
       (select bool_or(c.status = 'confirmed')
