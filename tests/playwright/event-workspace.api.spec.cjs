@@ -82,8 +82,8 @@ test('[REVIEW-E2E-API-001] SCRUM-98/99 review actions: assigned coordinator only
   expect((await status()).status).toBe('APPROVED');
 });
 
-// SCRUM-148: only the assigned coordinator may cancel, and only with a reason.
-test('[REVIEW-E2E-API-002] SCRUM-148: only the assigned coordinator may cancel, and only with a reason', async ({ accounts, request }) => {
+// SCRUM-148/171: only the assigned coordinator may cancel, and only with a reason.
+test('[REVIEW-E2E-API-002] SCRUM-148/171: only the assigned coordinator may cancel, and only with a reason', async ({ accounts, request }) => {
   const { event, first, second, headers, update } = await setupWorkflow(accounts, request);
   for (const role of ['venue_staff', 'technical_support_staff']) {
     headers[role] = { Authorization: 'Bearer ' + (await accounts.session(await accounts.create([role]))).access_token };
@@ -91,7 +91,9 @@ test('[REVIEW-E2E-API-002] SCRUM-148: only the assigned coordinator may cancel, 
   expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
   const cancel = (as, data) => request.post(`/api/internal/events/${event.id}/cancel`, { headers: as, data });
 
-  for (const role of ['second', 'organiser', 'venue_staff', 'technical_support_staff', 'attendee']) {
+  // SCRUM-171: 'manager' (the coordinator lead) joins this denied list - it no
+  // longer has an unconditional bypass, see REVIEW-E2E-API-003 below.
+  for (const role of ['second', 'organiser', 'manager', 'venue_staff', 'technical_support_staff', 'attendee']) {
     expect((await cancel(headers[role], { reason: 'Not allowed' })).status(), role).toBe(403);
   }
   expect((await cancel(undefined, { reason: 'No session' })).status()).toBe(401);
@@ -104,16 +106,18 @@ test('[REVIEW-E2E-API-002] SCRUM-148: only the assigned coordinator may cancel, 
   expect((await cancel(headers.first, { reason: 'Again' })).status()).toBe(409);
 });
 
-// SCRUM-148: the coordinator lead may cancel any event, not just one assigned to them.
-test('[REVIEW-E2E-API-003] SCRUM-148: the coordinator lead may cancel any event', async ({ accounts, request }) => {
-  const { event, first, manager, headers, update } = await setupWorkflow(accounts, request);
+// SCRUM-171: previously proved the lead's unconditional cancel access from
+// SCRUM-148; that access is now removed, so this proves the opposite - the
+// lead gets the same 403 as any other non-assigned caller, through the real backend.
+test('[REVIEW-E2E-API-003] SCRUM-171: the coordinator lead cannot cancel an event not assigned to them', async ({ accounts, request }) => {
+  const { event, first, headers, update } = await setupWorkflow(accounts, request);
   expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
   const cancel = (as, data) => request.post(`/api/internal/events/${event.id}/cancel`, { headers: as, data });
 
   const response = await cancel(headers.manager, { reason: 'Duplicate booking' });
-  expect(response.status()).toBe(200);
-  expect((await response.json()).event).toMatchObject({ status: 'CANCELLED', cancelled_by: manager.id });
-  expect((await cancel(headers.manager, { reason: 'Again' })).status()).toBe(409);
+  expect(response.status()).toBe(403);
+  const after = await request.get(`/api/event-workspace/manager/${event.id}`, { headers: headers.manager });
+  expect((await after.json()).event.status).toBe('SUBMITTED');
 });
 
 test('[EVENT-API-100] SCRUM-100: Client organiser sees own and same-company requests and denied edits leave complete records unchanged', async ({ accounts, request }) => {
@@ -295,7 +299,10 @@ for (const [id, role] of [['001', 'event_coordinator_lead'], ['002', 'event_ops_
     expect(equipment.status()).toBe(200);
     expect((await equipment.json()).data.find(item => item.id === equipmentId).status).toBe('RELEASED');
     expect((await request.post(`/api/internal/events/${event.id}/postpone`, { headers: leadHeaders, data: { reason: 'Repeat' } })).status()).toBe(409);
-    const cancel = await request.post(`/api/internal/events/${event.id}/cancel`, { headers: leadHeaders, data: { reason: 'No replacement date' } });
+    // SCRUM-171: cancel is assigned-coordinator-only now, so the lead who postponed
+    // it cannot be the one to cancel it - that's the assigned coordinator's call.
+    expect((await request.post(`/api/internal/events/${event.id}/cancel`, { headers: leadHeaders, data: { reason: 'No replacement date' } })).status()).toBe(403);
+    const cancel = await request.post(`/api/internal/events/${event.id}/cancel`, { headers: headers.first, data: { reason: 'No replacement date' } });
     expect(cancel.status()).toBe(200);
     expect((await cancel.json()).event).toMatchObject({ status: 'CANCELLED', postponement_reason: 'Date pending', cancellation_reason: 'No replacement date' });
     const released = await request.get(equipmentPath, { headers: headers.first });

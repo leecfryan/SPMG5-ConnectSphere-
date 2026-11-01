@@ -196,9 +196,13 @@ Equipment uses this same trusted role matrix. Coordinators submit requests for a
 
 Event Coordinator Lead replaces Event Operations Manager. The canonical trusted
 role is `event_coordinator_lead`, including permission policies, account labels,
-coordinator assignment and unrestricted lead cancellation. Its responsibilities
-and permissions are unchanged. Multiple trusted roles still combine capabilities
-without bypassing record checks.
+coordinator assignment and unrestricted lead postponement. (Unrestricted lead
+*cancellation* was part of this at the time of the rename; SCRUM-171 later
+narrowed cancellation to the assigned coordinator only — see
+[Event requests](event-requests.md) §Cancelling an event. Postponement is
+unaffected.) The lead's remaining responsibilities and permissions are
+unchanged. Multiple trusted roles still combine capabilities without bypassing
+record checks.
 
 `requireAuth` translates the legacy `event_ops_manager` claim **only after**
 Supabase verifies the caller and reads administrator-controlled
@@ -274,8 +278,9 @@ overwrite accounts whose trusted roles differ.
 
 - `backend/tests/integration/roles.rename.test.js`: canonical and legacy claims,
   exact permission list, duplicate/combined roles, assignment access, unrestricted
-  lead cancellation, denied coordinator decisions, spoofing refusal with unchanged
-  event data, and role removal on the next request.
+  lead postponement (cancellation is now assigned-coordinator-only, SCRUM-171),
+  denied coordinator decisions, spoofing refusal with unchanged event data, and
+  role removal on the next request.
 - `frontend/src/Rbac.test.jsx`: SCRUM-142 account display and combined navigation.
 - `tests/playwright/api.spec.cjs`: SCRUM-142 canonical/legacy identity and revocation
   over the real local Auth simulator.
@@ -364,5 +369,6 @@ The test specifications and genuine automated execution report stay outside the
 repository under Ryan's local reporting preferences.
 
 SCRUM-117 reuses events.decide for POST /api/internal/events/:eventId/request-changes.
-Only the assigned coordinator may return an UNDER_REVIEW request. The lead may cancel
-or postpone a CHANGES_REQUESTED request but may not return or reassign it in that state.
+Only the assigned coordinator may return an UNDER_REVIEW request. The lead may postpone
+a CHANGES_REQUESTED request (cancellation is assigned-coordinator-only, SCRUM-171) but
+may not return or reassign it in that state.

@@ -141,7 +141,7 @@ stateDiagram-v2
 | `PREPARATION` | Preparation | a Safety Officer's *Approve* (SCRUM-141); active (workload, reassignable, cancellable) but not a planning status, so arrangements stay locked; not postponable; the assigned coordinator's *Confirm event* moves it on (SCRUM-144) |
 | `CONFIRMED` | Confirmed | the assigned coordinator's *Confirm event* (SCRUM-144), only from `PREPARATION` and only with nothing essential outstanding; still a planning status (see *Current limitations*) |
 | `COMPLETED` | Completed | not yet (complete story) |
-| `CANCELLED` | Cancelled | the assigned coordinator's or the coordinator lead's *Cancel event* (SCRUM-148) |
+| `CANCELLED` | Cancelled | the assigned coordinator's *Cancel event* (SCRUM-148; narrowed to the assigned coordinator only by SCRUM-171) |
 | `REJECTED` | Rejected | the assigned coordinator's *Reject* (SCRUM-98) |
 | `POSTPONED` | Postponed | the assigned coordinator's or the coordinator lead's *Postpone event* (SCRUM-149); still cancellable, still counts toward workload, still reassignable (`ACTIVE_STATUSES`) |
 
@@ -219,7 +219,7 @@ Module at `backend/src/modules/events/`.
 | PATCH | /api/internal/events/:eventId/arrangements/:kind/:requestId | same | `kind` is `venue` or `equipment`; body `{ "is_essential": boolean }`; only while `APPROVED` or `PREPARATION` (SCRUM-144) |
 | GET | /api/internal/safety-reviews | requireAuth + internal.access + events.safety.read (any Safety Officer) | `{ events[] }` awaiting safety review, soonest start first |
 | GET | /api/internal/safety-reviews/:eventId | same | `{ event, venues[], equipment[] }`; 404 unless the event is `SAFETY_REVIEW` |
-| POST | /api/internal/events/:eventId/cancel | requireAuth + internal.access + events.cancel (assigned coordinator or coordinator lead) | any active status (including `POSTPONED`) `→ CANCELLED`; body `{ "reason": string }` (required) |
+| POST | /api/internal/events/:eventId/cancel | requireAuth + internal.access + events.cancel (assigned coordinator only - SCRUM-171) | any active status (including `POSTPONED`) `→ CANCELLED`; body `{ "reason": string }` (required) |
 | POST | /api/internal/events/:eventId/postpone | requireAuth + internal.access + events.postpone (assigned coordinator or coordinator lead) | any of the five postponable stages `→ POSTPONED`; body `{ "reason": string }` (required) |
 | POST | /api/event-workspace/organiser/:id/change-request | requireAuth + events.own.update (own event only) | SCRUM-36: submit a change request for an `UNDER_REVIEW` or `APPROVED` event; body `{ "proposed_changes": { ...fields }, "reason": string }`; → 201 `{ event }` with `pending_change_request` set; 409 if already pending or status ineligible |
 | POST | /api/internal/events/:eventId/decide-change-request | requireAuth + internal.access + events.decide (assigned coordinator) | SCRUM-165: approve or reject a pending change request; body `{ "decision": "approve"\|"reject", "reason": string }` (reason required for both); → 200 `{ event }` with `pending_change_request` cleared; if approving an APPROVED event with a significant field change (`start_time`, `end_time`, `venue_requirements`, `expected_attendance`) → status regressed to `SUBMITTED`; 409 if no pending request or concurrent modification |
@@ -507,18 +507,22 @@ Existing rows read as essential, so nothing changed for any event until a coordi
 ### Cancelling an event (SCRUM-148)
 
 `review.service.js#cancel`, `review.controller.js`, `routes/review.routes.js` (same router as review/approval,
-since cancel shares its `/api/internal/events/:eventId` prefix). Either the event's **assigned coordinator** or
-the **Event Coordinator Lead** may cancel — unlike review, which is coordinator-only (discussions #80, #101).
-SCRUM-142 renames the existing manager role to `event_coordinator_lead` without changing its access.
+since cancel shares its `/api/internal/events/:eventId` prefix). Only the event's **assigned coordinator** may
+cancel — same shape as review (discussions #80, #101).
 
-- `events.cancel` is a `record: true` permission. The coordinator lead passes the record check unconditionally; a
-  coordinator must still be `coordinator_id` on the event. Someone else's event, an unknown id and a malformed id
-  all get the same 403.
+**SCRUM-171 (narrows SCRUM-148/142):** cancel was originally granted to the assigned coordinator *or* the Event
+Coordinator Lead unconditionally, matching postpone's access below. The customer's SCRUM-171 AC1 ("Only the
+assigned Event Coordinator can cancel an event") removes the lead's bypass; postpone keeps it, since SCRUM-171
+doesn't mention postpone and that story belongs to a different lane member.
+
+- `events.cancel` is a `record: true` permission, granted only to `event_coordinator`. The caller must be
+  `coordinator_id` on the event — there is no unconditional caller any more. Someone else's event, an unknown id
+  and a malformed id all get the same 403.
 - Cancel has no single "from" status — it is permitted from any of the six active stages (`SUBMITTED`,
   `UNDER_REVIEW`, `APPROVED`, `SAFETY_REVIEW`, `CONFIRMED`, `POSTPONED`; see [Status values](#status-values)), so it uses
-  `events.repository.js#cancel(id, extra, coordinatorId?)` rather than `transitionStatus`. The write still filters
-  on `.in("status", ACTIVE_STATUSES)` and, when the caller is the coordinator, `coordinator_id`, so a stage change
-  or reassignment in between means nothing is written and the answer is 409.
+  `events.repository.js#cancel(id, extra, coordinatorId)` rather than `transitionStatus`. The write always filters
+  on `.in("status", ACTIVE_STATUSES)` and `coordinator_id`, so a stage change or reassignment in between means
+  nothing is written and the answer is 409.
 - A reason is required (`cancellation_reason`, trimmed; blank or missing is a 400) — unlike approve's optional
   note, cancel always needs one.
 - Records `cancelled_by` (the caller) and `cancelled_at` (server clock), additive to any earlier
@@ -537,17 +541,17 @@ SCRUM-142 renames the existing manager role to `event_coordinator_lead` without 
 `approved_rejected_by_name`). The coordinator's and manager's own list scopes now include `CANCELLED`, alongside
 `REJECTED` and the active statuses, so a cancelled event does not vanish from either list.
 
-**In the browser.** On an event in any of the six active stages, the assigned coordinator (coordinator scope) or
-the Event Coordinator Lead (manager scope) sees a *Cancel event* control with a required reason field. After
-cancelling, the page shows a *Cancellation* summary (cancelled by, cancelled on, reason) alongside the existing
-*Review decision* summary, if there is one.
+**In the browser.** On an event in any of the six active stages, only the assigned coordinator (coordinator
+scope) sees a *Cancel event* control with a required reason field — the Event Coordinator Lead (manager scope)
+no longer does (SCRUM-171). After cancelling, the page shows a *Cancellation* summary (cancelled by, cancelled
+on, reason) alongside the existing *Review decision* summary, if there is one.
 
 | Status | When | Message |
 | --- | --- | --- |
 | 200 | Done | `{ event }`, the updated row |
 | 400 | No reason, or a blank one | "Give a reason for cancelling this event." |
 | 401 | No or invalid session | "Please sign in to continue." |
-| 403 | Not the assigned coordinator and not the coordinator lead | "You do not have permission to access this information." |
+| 403 | Not the assigned coordinator (including the coordinator lead, as of SCRUM-171) | "You do not have permission to access this information." |
 | 404 | Event deleted after the access check | "That event request no longer exists." |
 | 409 | Not in an active stage, or reassigned meanwhile | "This event request has changed since you opened it. Refresh to see its current status." |
 | 503 | The access check could not reach storage | "Unable to check access. Please try again." |
@@ -570,7 +574,9 @@ as cancel above, for an event whose new date isn't known yet. The two actions ar
 postponed, then cancelled outright later (see [Status values](#status-values)); there is no path back from
 `POSTPONED` to an active stage yet.
 
-- `events.postpone` is a `record: true` permission, the same assigned-coordinator or Event Coordinator Lead access as `events.cancel` (SCRUM-142).
+- `events.postpone` is a `record: true` permission, granted to the assigned coordinator or the Event Coordinator
+  Lead unconditionally (SCRUM-142) — unchanged by SCRUM-171, which narrowed `events.cancel` (above) to the
+  assigned coordinator only. The two no longer share the same access shape.
 - Postpone is reachable from the active stages **except** `POSTPONED` itself — it uses
   `events.repository.js#postpone(id, extra, coordinatorId?)`, filtered on `POSTPONABLE_STATUSES`
   (`ACTIVE_STATUSES` minus `POSTPONED`), so an already-postponed event can't be postponed again. `cancel()` is
@@ -1147,8 +1153,9 @@ Blank/non-text notes return 400; unauthenticated callers 401; wrong roles/assign
 stale status/assignment 409; write failures a safe 500, matching existing review actions.
 
 Returned requests remain visible and count towards coordinator workload. ACTIVE_STATUSES
-includes them for cancellation/workload; ASSIGNABLE_STATUSES excludes them. Assigned
-coordinators and leads can cancel or postpone them, with the existing required-reason and
+includes them for cancellation/workload; ASSIGNABLE_STATUSES excludes them. The assigned
+coordinator can cancel them (the lead no longer can, as of SCRUM-171); the assigned
+coordinator or the lead can postpone them; both use the existing required-reason and
 release rules. Venue/equipment planning and attendee registration do not admit this status.
 The unassigned queue still requires SUBMITTED plus a null coordinator.
 

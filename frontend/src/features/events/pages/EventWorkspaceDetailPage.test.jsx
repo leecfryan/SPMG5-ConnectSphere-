@@ -418,10 +418,24 @@ test("[SCRUM-117-UI-005] organiser reads the saved clarification and keeps owner
   expect(screen.queryByRole("button", { name: "Return for changes" })).not.toBeInTheDocument();
 });
 
-test.each(["coordinator", "manager"])("[SCRUM-117-UI-006] %s may cancel/postpone but cannot reassign or approve a returned event", async scope => {
-  setup(scope, { status: "CHANGES_REQUESTED", activity: [] });
+// SCRUM-171: cancel is assigned-coordinator-only now - the manager (lead) scope
+// keeps postpone but lost cancel, so this split from one shared assertion into
+// a coordinator case (both actions) and a manager case (postpone only).
+test("[SCRUM-117-UI-006] coordinator may cancel/postpone but cannot reassign or approve a returned event", async () => {
+  setup("coordinator", { status: "CHANGES_REQUESTED", activity: [] });
   await screen.findByText("Changes requested", { selector: ".status-badge" });
   expect(screen.getByRole("button", { name: "Cancel event" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Postpone event" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Save coordinator assignment" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Approve", exact: true })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Arrange venue bookings" })).not.toBeInTheDocument();
+  expect(screen.getByText(/clarification message is unavailable/)).toBeVisible();
+});
+
+test("[SCRUM-117-UI-006] manager may postpone but not cancel, reassign or approve a returned event", async () => {
+  setup("manager", { status: "CHANGES_REQUESTED", activity: [] });
+  await screen.findByText("Changes requested", { selector: ".status-badge" });
+  expect(screen.queryByRole("button", { name: "Cancel event" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Postpone event" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "Save coordinator assignment" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Approve", exact: true })).not.toBeInTheDocument();

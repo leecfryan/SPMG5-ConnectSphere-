@@ -38,12 +38,21 @@ async function updateAccountRoles(id, roles) {
 // For API-level tests (raw HTTP via Playwright's `request` fixture, not a
 // browser session) - a real access token from Supabase's real Auth REST API,
 // same call the frontend's own sign-in makes.
-async function getAccessToken(account) {
+//
+// Defense in depth alongside playwright.config.js's workers: 1: this project's
+// Auth token endpoint is shared with the rest of the team too, not just this
+// suite's own workers, so a transient 429 (over_request_rate_limit) is
+// retried a couple of times with backoff rather than failing the test outright.
+async function getAccessToken(account, attempt = 1) {
   const response = await fetch(`${process.env.SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: process.env.SUPABASE_PUBLISHABLE_KEY },
     body: JSON.stringify({ email: account.email, password: account.password }),
   });
+  if (response.status === 429 && attempt < 3) {
+    await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
+    return getAccessToken(account, attempt + 1);
+  }
   if (!response.ok) throw new Error("getAccessToken failed: " + (await response.text()));
   return (await response.json()).access_token;
 }
