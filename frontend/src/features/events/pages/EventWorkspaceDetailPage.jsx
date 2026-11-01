@@ -120,10 +120,10 @@ function Detail({ scope, eventId }) {
           <Link to="/venues">Arrange venue bookings</Link>
           <Link to={`/equipment/requests?event=${encodeURIComponent(event.id)}`}>Arrange equipment and technical support</Link>
         </nav>}
-        {(scope === "manager" || (scope === "coordinator" && event.coordinator_id === user.id)) && <>
-          <EventPostponeControl event={event} onPostponed={reload} />
-          <EventCancelControl event={event} onCancelled={reload} />
-        </>}
+        {(scope === "manager" || (scope === "coordinator" && event.coordinator_id === user.id)) &&
+          <EventPostponeControl event={event} onPostponed={reload} />}
+        {/* SCRUM-171: postponement still allows managers; cancellation requires the assigned coordinator. */}
+        {scope === "coordinator" && event.coordinator_id === user.id && <EventCancelControl event={event} onCancelled={reload} />}
       </div>
     </>}
   </section>;

@@ -224,8 +224,9 @@ attendance summary cards; about, registration, planning requirements and
 coordinator panels; decision/history cards; and existing management controls.
 The coordinator UUID is retained inside an expandable reference rather than
 being the main coordinator label. Event times use the existing local formatWhen
-helper. The saved/edit/review/resubmit/safety/assignment/arrangement/postpone/
-cancel guards and callbacks remain in place.
+helper. The saved/edit/review/resubmit/safety/assignment/arrangement guards and callbacks
+remain in place. SCRUM-171 restricts cancellation to the assigned coordinator;
+postponement remains available to managers and assigned coordinators.
 
 ChangeRequestControls keeps its original state, eligibility checks and submit
 handler. Its pending panel presents the stored reason and submission time, then

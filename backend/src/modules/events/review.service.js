@@ -85,19 +85,19 @@ function createReviewService({ repository }) {
     return result;
   }
 
-  // SCRUM-148 AC1/AC2: the assigned coordinator or the coordinator lead may cancel
-  // at any active stage, including POSTPONED, with a required reason. Unlike move(),
-  // cancel has no single `from` status, so it uses repository.cancel instead
-  // of transitionStatus - see events.repository.js. isCoordinatorLead means no
-  // coordinator_id filter is added to the write (a coordinator lead may cancel
-  // any event); otherwise the write is guarded to the coordinator still
-  // holding the event, same race-guard shape as move().
+  // SCRUM-148 AC1/AC2, narrowed by SCRUM-171: only the assigned coordinator may
+  // cancel, at any active stage including POSTPONED, with a required reason.
+  // Unlike move(), cancel has no single `from` status, so it uses
+  // repository.cancel instead of transitionStatus - see events.repository.js.
+  // The write is always guarded to the coordinator still holding the event,
+  // same race-guard shape as move() (postpone(), below, keeps its own
+  // coordinator-lead bypass unchanged).
   //
   // AC3: release what the event was holding. Equipment is in-lane; venue
   // release is an optional, owner-approved seam (see the task note's
   // Decisions). Both run synchronously here so AC3 is true the moment
   // cancellation is saved, not only on a later equipment read.
-  async function cancel(eventId, actorId, reason, { isCoordinatorLead = false, equipmentService, releaseVenueBookingsForCancelledEvent } = {}) {
+  async function cancel(eventId, actorId, reason, { equipmentService, releaseVenueBookingsForCancelledEvent } = {}) {
     const parsed = readNote(reason);
     if (!parsed.ok || parsed.note === null) return { ok: false, reason: "reason_required" };
 
@@ -106,7 +106,7 @@ function createReviewService({ repository }) {
       cancelled_at: new Date().toISOString(),
       cancellation_reason: parsed.note,
     };
-    const event = await repository.cancel(eventId, extra, isCoordinatorLead ? undefined : actorId);
+    const event = await repository.cancel(eventId, extra, actorId);
     if (!event) {
       const existing = await repository.findById(eventId);
       return { ok: false, reason: existing ? "conflict" : "not_found" };

@@ -98,7 +98,7 @@ test("SCRUM-148/149 AC2: cancel writes CANCELLED, restricted to the active stage
 
   const event = await loadRepository().cancel("evt-1", {
     cancelled_by: "coord-1", cancelled_at: "2026-10-08T00:00:00.000Z", cancellation_reason: "Venue flooded",
-  });
+  }, "coord-1");
 
   expect(calls).toContainEqual(["from", "events"]);
   expect(calls).toContainEqual(["update", {
@@ -112,25 +112,17 @@ test("SCRUM-148/149 AC2: cancel writes CANCELLED, restricted to the active stage
 test("SCRUM-148: extra cannot override status to anything but CANCELLED", async () => {
   const { calls } = recorder({ id: "evt-1" });
 
-  await loadRepository().cancel("evt-1", { status: "CONFIRMED" });
+  await loadRepository().cancel("evt-1", { status: "CONFIRMED" }, "coord-1");
 
   expect(calls).toContainEqual(["update", { status: "CANCELLED" }]);
 });
 
-test("SCRUM-148 AC1: with a coordinator given, the write also requires that coordinator to still hold the event", async () => {
+test("SCRUM-148 AC1, required as of SCRUM-171: the write always requires the given coordinator to still hold the event", async () => {
   const { calls } = recorder({ id: "evt-1" });
 
   await loadRepository().cancel("evt-1", {}, "coord-1");
 
   expect(calls).toContainEqual(["eq", "coordinator_id", "coord-1"]);
-});
-
-test("SCRUM-148: without a coordinator (the coordinator-lead caller), no coordinator filter is added", async () => {
-  const { calls } = recorder({ id: "evt-1" });
-
-  await loadRepository().cancel("evt-1", {});
-
-  expect(calls.some(([name, column]) => name === "eq" && column === "coordinator_id")).toBe(false);
 });
 
 test("SCRUM-148 conflict: zero rows matched (wrong stage or a reassignment race) returns null", async () => {
@@ -144,7 +136,7 @@ test("SCRUM-148 conflict: zero rows matched (wrong stage or a reassignment race)
 test("SCRUM-148 failure: a Supabase error is thrown with the action named", async () => {
   recorder(null, { message: "boom" });
 
-  await expect(loadRepository().cancel("evt-1", {})).rejects.toThrow("events.repository: cancel failed - boom");
+  await expect(loadRepository().cancel("evt-1", {}, "coord-1")).rejects.toThrow("events.repository: cancel failed - boom");
 });
 
 test("SCRUM-149 AC3: postpone writes POSTPONED, restricted to the postponable stages (not POSTPONED itself), plus any extra columns", async () => {
