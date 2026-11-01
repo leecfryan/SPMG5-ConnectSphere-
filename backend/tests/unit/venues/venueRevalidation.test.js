@@ -156,6 +156,54 @@ describe("[SCRUM-38] revalidateBookingsForEvent", () => {
     expect(markVenueBookingAffected).not.toHaveBeenCalled();
   });
 
+  test("[SCRUM-38] a booking this re-check flagged before gets a fresh reason after a further change", async () => {
+    const small = venue("b1111111-1111-4111-8111-111111111111", 50);
+    const stale = "After the event changed: Over capacity: the venues booked on 2099-10-10 hold 50, fewer than the 60 people now expected.";
+    const flagged = booking("aaaaaaaa-0001-4000-8000-000000000001", small, { is_affected: true, affected_reason: stale });
+    const { revalidateBookingsForEvent, markVenueBookingAffected } = setup({ venues: [small], bookings: [flagged] });
+
+    const result = await revalidateBookingsForEvent(EVENT_ID);
+
+    expect(result.flagged).toHaveLength(1);
+    expect(result.flagged[0].reason).toContain("fewer than the 80 people now expected");
+    expect(markVenueBookingAffected).toHaveBeenCalledExactlyOnceWith(flagged.id, COORDINATOR_ID, result.flagged[0].reason);
+  });
+
+  test("[SCRUM-38] a booking still failing for the same reason is listed again but not rewritten", async () => {
+    const small = venue("b1111111-1111-4111-8111-111111111111", 50);
+    const same = "After the event changed: Over capacity: the venues booked on 2099-10-10 hold 50, fewer than the 80 people now expected.";
+    const flagged = booking("aaaaaaaa-0001-4000-8000-000000000001", small, { is_affected: true, affected_reason: same });
+    const { revalidateBookingsForEvent, markVenueBookingAffected } = setup({ venues: [small], bookings: [flagged] });
+
+    expect((await revalidateBookingsForEvent(EVENT_ID)).flagged).toEqual([{ booking_id: flagged.id, venue_name: small.name, reason: same }]);
+    expect(markVenueBookingAffected).not.toHaveBeenCalled();
+  });
+
+  test("[SCRUM-38] a booking Venue Staff flagged by hand keeps the reason they gave", async () => {
+    const small = venue("b1111111-1111-4111-8111-111111111111", 5);
+    const byStaff = booking("aaaaaaaa-0001-4000-8000-000000000001", small, { is_affected: true, affected_reason: "Roof repairs this week" });
+    const { revalidateBookingsForEvent, markVenueBookingAffected } = setup({ venues: [small], bookings: [byStaff] });
+
+    expect(await revalidateBookingsForEvent(EVENT_ID)).toEqual({ checked: 0, flagged: [] });
+    expect(markVenueBookingAffected).not.toHaveBeenCalled();
+  });
+
+  test("[SCRUM-38] suitability failures are reworded for the coordinator", async () => {
+    const shrunk = venue("b1111111-1111-4111-8111-111111111111", 25, { room_layouts: ["Banquet"], facilities: [] });
+    const { revalidateBookingsForEvent } = setup({
+      event: { ...EVENT, expected_attendance: 20 },
+      venues: [shrunk],
+      bookings: [booking("aaaaaaaa-0001-4000-8000-000000000001", shrunk, { expected_attendees: 30, required_facilities: ["Projector"] })],
+    });
+
+    const [{ reason }] = (await revalidateBookingsForEvent(EVENT_ID)).flagged;
+
+    expect(reason).toContain("Over capacity: this booking is for 30 people but the venue now holds 25.");
+    expect(reason).toContain('The "Theatre" layout is no longer offered here (offered: Banquet).');
+    expect(reason).toContain("Facilities no longer available here: Projector.");
+    expect(reason).not.toMatch(/expected_attendees|room_layout|required_facilities/);
+  });
+
   test("[SCRUM-38] an event with no live bookings, or that no longer exists, checks nothing", async () => {
     const empty = setup({ venues: [], bookings: [] });
     expect(await empty.revalidateBookingsForEvent(EVENT_ID)).toEqual({ checked: 0, flagged: [] });

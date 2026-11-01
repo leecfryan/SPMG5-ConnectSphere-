@@ -35,7 +35,8 @@ function createReviewRoutes(repository, cancelDependencies, dataClient) {
     try {
       const { decision, reason } = req.body || {};
       const result = await workspaceService.decideChangeRequest(req.user.id, req.params.eventId, decision, reason);
-      if (result.ok) return res.json({ event: result.event });
+      // SCRUM-38: venue_recheck tells the coordinator which venues no longer fit.
+      if (result.ok) return res.json({ event: result.event, venue_recheck: result.venue_recheck ?? null });
       if (result.reason === "invalid_decision") return res.status(400).json({ message: "Decision must be 'approve' or 'reject'.", errors: [{ field: "decision", message: "Must be 'approve' or 'reject'." }] });
       if (result.reason === "reason_required") return res.status(400).json({ message: "A reason is required.", errors: [{ field: "reason", message: "required" }] });
       if (result.reason === "not_found") return res.status(404).json({ message: "Event not found." });

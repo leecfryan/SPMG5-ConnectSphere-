@@ -49,9 +49,31 @@ function createBookingChecker({ getVenueById, listSlotRowsForDate, listUnavailab
   };
 }
 
-function failedReasons(result) {
-  return ["suitability", "availability", "conflicts"].flatMap((check) => result[check].passed === false ? result[check].reasons : []);
+// The submission rules (SCRUM-87) word their failures for developers; the
+// coordinator reads these on the event page, so say the same thing plainly.
+const PLAIN_SUITABILITY = [
+  [/^expected_attendees \((\d+)\) exceeds the venue capacity of (\d+)$/, "Over capacity: this booking is for $1 people but the venue now holds $2."],
+  [/^room_layout "(.*)" is not offered here\. Options: (.*)$/, 'The "$1" layout is no longer offered here (offered: $2).'],
+  [/^required_facilities not available at this venue: (.*)$/, "Facilities no longer available here: $1."],
+  [/^accessibility_requirements not available at this venue: (.*)$/, "Accessibility features no longer available here: $1."],
+];
+
+function plainReason(reason) {
+  const rule = PLAIN_SUITABILITY.find(([pattern]) => pattern.test(reason));
+  return rule ? reason.replace(rule[0], rule[1]) : reason;
 }
+
+function failedReasons(result) {
+  return ["suitability", "availability", "conflicts"]
+    .flatMap((check) => result[check].passed === false ? result[check].reasons : [])
+    .map(plainReason);
+}
+
+// A booking this re-validation flagged before is checked again, so its reason
+// follows the latest change. One flagged by Venue Staff (SCRUM-145) keeps the
+// reason a person gave it.
+const REASON_PREFIX = "After the event changed: ";
+const flaggedByUs = (request) => request.is_affected === true && (request.affected_reason ?? "").startsWith(REASON_PREFIX);
 
 function createVenueRevalidation({ getEventForCheckReport, listBookingRequests, markVenueBookingAffected, checkOneBooking, logger = console }) {
   async function revalidateBookingsForEvent(eventId) {
@@ -59,10 +81,8 @@ function createVenueRevalidation({ getEventForCheckReport, listBookingRequests, 
     const event = await getEventForCheckReport(eventId, { allVenues: true });
     if (!event) return { checked: 0, flagged: [] };
 
-    // Already-affected bookings are waiting on the coordinator's replacement or
-    // release; re-marking them would only overwrite the reason they were given.
     const live = (await listBookingRequests({ allVenues: true }, eventId))
-      .filter((request) => !request.is_affected && liveSlotNames(request).length > 0);
+      .filter((request) => (!request.is_affected || flaggedByUs(request)) && liveSlotNames(request).length > 0);
     if (live.length === 0) return { checked: 0, flagged: [] };
 
     // The coordinator owns these bookings and reads the reasons, so the checks
@@ -85,8 +105,9 @@ function createVenueRevalidation({ getEventForCheckReport, listBookingRequests, 
         if (result.overall === "not_checked") continue;
         const reasons = [...failedReasons(result), ...eventFitReasons(request, event, capacityByDate.get(request.booking_date))];
         if (reasons.length === 0) continue;
-        const reason = `After the event changed: ${reasons.join(" ")}`;
-        await markVenueBookingAffected(request.id, coordinatorId, reason);
+        const reason = `${REASON_PREFIX}${reasons.join(" ")}`;
+        // Still failing for the same reason: listed again, not rewritten.
+        if (reason !== request.affected_reason) await markVenueBookingAffected(request.id, coordinatorId, reason);
         flagged.push({ booking_id: request.id, venue_name: result.venue_name, reason });
       } catch (error) {
         logger.error(`SCRUM-38 re-validation of booking ${request.id} failed:`, error.message);

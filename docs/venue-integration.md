@@ -358,6 +358,16 @@ the code that applies the change.
    **instead of releasing them** (SCRUM-37's earlier behaviour). Equipment is still released; reject, cancel and
    postpone still release everything.
 
+**What the coordinator sees (2026-11-01, after manual testing).**
+- **Straight after *Approve change*:** a notice (`VenueRecheckNotice`) from the decision response's `venue_recheck`:
+  each venue that no longer fits with its reason, or "all N still fit", or that the re-check could not run.
+- **My assigned events → the event:** a *Venue needs attention* section (`VenueAttentionPanel`) listing every
+  flagged booking (venue, date, reason, **Find replacement venue**) until it is replaced or released. It reads the
+  existing `GET /api/venues/booking-requests?event_id=…`.
+- **My assigned events list:** a *Venue needs attention* badge on the event, from one read of the same list.
+- **My Events (list and event):** the existing SCRUM-145 card — *Affected - needs alternative*, the reason, and the
+  replacement and release actions.
+
 Both calls are injected from `app.js` (`revalidateVenueBookings: venuesService?.revalidateBookingsForEvent`) and are
 logged-only on error: the decision has already been saved.
 

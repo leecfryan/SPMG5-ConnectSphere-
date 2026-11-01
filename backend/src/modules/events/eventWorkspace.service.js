@@ -387,16 +387,20 @@ function createEventWorkspaceService(client, { revalidateVenueBookings } = {}) {
       // requirements re-validates the event's venue bookings; failures are
       // flagged, passes left alone. The decision is already saved, so a
       // re-validation error is logged, never returned as a failed decision.
+      // The summary goes back to the coordinator so they are told straight away
+      // which venues no longer fit; null means nothing needed re-checking.
+      let venueRecheck = null;
       if (decision === "approve" &&
           VENUE_RECHECK_FIELDS.some(field => Object.hasOwn(proposed, field) && changedField(field, current[field], proposed[field]))) {
         try {
-          await revalidateVenueBookings?.(eventId);
+          venueRecheck = (await revalidateVenueBookings?.(eventId)) ?? null;
         } catch (error) {
           console.error(`SCRUM-38 decide-change-request ${eventId}: venue re-validation failed:`, error.message);
+          venueRecheck = { failed: true };
         }
       }
 
-      return { ok: true, event };
+      return { ok: true, event, venue_recheck: venueRecheck };
     },
     async resubmitOrganiserEvent(userId, id, cycleId) {
       const current = await read("organiser", userId, id);

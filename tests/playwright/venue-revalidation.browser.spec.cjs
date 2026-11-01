@@ -49,6 +49,17 @@ test('[E2E-REVALIDATE-001] SCRUM-38: accepting a larger attendance flags the too
   await panel.getByRole('button', { name: 'Approve change', exact: true }).click();
   await expect(panel).toHaveCount(0);
 
+  // The coordinator is told at once which venue no longer fits, and it stays
+  // flagged on the event page with the reason and the replacement link.
+  const notice = page.getByRole('status').filter({ hasText: '1 venue booking no longer fits the updated event' });
+  await expect(notice).toContainText('Over capacity');
+  await notice.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(notice).toHaveCount(0);
+  const attention = page.getByRole('region', { name: 'A venue booking no longer fits this event' });
+  await expect(attention).toContainText('Integration Hall');
+  await expect(attention).toContainText('Over capacity');
+  await expect(attention.getByRole('link', { name: 'Find replacement venue' })).toHaveAttribute('href', `/venues/booking-requests/${bookingId}/replacement`);
+
   // R2: flagged with the reason; the booking itself is still confirmed, not released.
   const flagged = await booking(request, headers, bookingId);
   expect(flagged.is_affected).toBe(true);
@@ -62,6 +73,11 @@ test('[E2E-REVALIDATE-001] SCRUM-38: accepting a larger attendance flags the too
   expect((await booking(request, headers, bookingId)).slots).toEqual([expect.objectContaining({ status: 'confirmed' })]);
   await page.reload();
   await expect(page.getByRole('list', { name: 'Missing arrangements' })).toContainText('Over capacity');
+  await expect(page.getByRole('region', { name: 'A venue booking no longer fits this event' })).toBeVisible();
+
+  // The coordinator's event list marks the event too.
+  await page.goto('/assigned-events');
+  await expect(page.getByRole('listitem').filter({ hasText: event.name })).toContainText('Venue needs attention');
 });
 
 test('[E2E-REVALIDATE-002] SCRUM-38: accepting an equipment change re-checks the venue, which still fits and is left unchanged', async ({ accounts, request }) => {

@@ -8,7 +8,9 @@ const { randomUUID } = require("node:crypto");
 const createApp = require("../../src/app");
 const storage = require("../../../tests/playwright/support/registration-storage.cjs");
 
-async function setup(t, { proposed, revalidate = vi.fn(async () => ({ checked: 1, flagged: [] })) } = {}) {
+const FLAGGED = { checked: 2, flagged: [{ booking_id: "b1", venue_name: "Hall A", reason: "After the event changed: Over capacity: …" }] };
+
+async function setup(t, { proposed, revalidate = vi.fn(async () => FLAGGED) } = {}) {
   const organiser = { id: randomUUID(), email: "organiser@test", email_confirmed_at: "2026-01-01", app_metadata: { roles: ["event_organiser"] }, user_metadata: {} };
   const coordinator = { id: randomUUID(), email: "coord@test", email_confirmed_at: "2026-01-01", app_metadata: { roles: ["event_coordinator"] }, user_metadata: {} };
   const users = [organiser, coordinator];
@@ -53,6 +55,8 @@ test("[SCRUM-38] TC-SCRUM-38-12: accepting a higher attendance re-validates the 
   expect(response.status).toBe(200);
   expect(revalidate).toHaveBeenCalledExactlyOnceWith(record.id);
   expect(record.expected_attendance).toBe(300);
+  // The coordinator is told straight away which venues no longer fit.
+  expect((await response.json()).venue_recheck).toEqual(FLAGGED);
 });
 
 test("[SCRUM-38] TC-SCRUM-38-13: an equipment-requirements change re-validates too, although SCRUM-165 keeps the event APPROVED", async t => {
@@ -66,8 +70,10 @@ test("[SCRUM-38] TC-SCRUM-38-13: an equipment-requirements change re-validates t
 test("[SCRUM-38] TC-SCRUM-38-14: a change that cannot affect venues (name only) does not re-validate", async t => {
   const { decide, revalidate } = await setup(t, { proposed: { name: "Annual Gala 2099" } });
 
-  expect((await decide("approve")).status).toBe(200);
+  const response = await decide("approve");
+  expect(response.status).toBe(200);
   expect(revalidate).not.toHaveBeenCalled();
+  expect((await response.json()).venue_recheck).toBeNull();
 });
 
 test("[SCRUM-38] TC-SCRUM-38-15: rejecting a change request leaves the event and its venues alone", async t => {
@@ -96,6 +102,7 @@ test("[SCRUM-38] TC-SCRUM-38-17: a re-validation failure is logged and the accep
 
   expect(response.status).toBe(200);
   expect(record.expected_attendance).toBe(300);
+  expect((await response.json()).venue_recheck).toEqual({ failed: true });
   expect(error).toHaveBeenCalledWith(expect.stringContaining("venue re-validation failed"), "venue storage down");
   error.mockRestore();
 });
