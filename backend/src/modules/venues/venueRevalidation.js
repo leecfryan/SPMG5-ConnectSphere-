@@ -55,7 +55,8 @@ function failedReasons(result) {
 
 function createVenueRevalidation({ getEventForCheckReport, listBookingRequests, markVenueBookingAffected, checkOneBooking, logger = console }) {
   async function revalidateBookingsForEvent(eventId) {
-    const event = await getEventForCheckReport(eventId);
+    // Internal call: no caller's scope applies, the same as the booking list below.
+    const event = await getEventForCheckReport(eventId, { allVenues: true });
     if (!event) return { checked: 0, flagged: [] };
 
     // Already-affected bookings are waiting on the coordinator's replacement or

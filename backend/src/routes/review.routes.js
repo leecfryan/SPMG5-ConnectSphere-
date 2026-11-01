@@ -14,7 +14,9 @@ const assignedToCaller = (repository) => async (req) => UUID_PATTERN.test(req.pa
 function createReviewRoutes(repository, cancelDependencies, dataClient) {
   const router = express.Router();
   const controller = createReviewController(repository, cancelDependencies);
-  const workspaceService = dataClient && createEventWorkspaceService(dataClient);
+  const workspaceService = dataClient && createEventWorkspaceService(dataClient, {
+    revalidateVenueBookings: cancelDependencies?.revalidateVenueBookings,
+  });
   const isAssignedCoordinator = assignedToCaller(repository);
   const guard = requirePermission("events.decide", isAssignedCoordinator);
 

@@ -349,12 +349,17 @@ the code that applies the change.
   the coordinator replaces or releases it. This also applies to bookings SCRUM-145 marks by hand.
 - Returns `{ checked, flagged: [{ booking_id, venue_name, reason }] }`. No schema change, route or permission.
 
-**Hand-off for SCRUM-165 (applying an accepted change request).** After the accepted changes are written to the
-event, call `revalidateBookingsForEvent(event.id)` once. Inject it the same way review routes receive
-`releaseVenueBookingsForCancelledEvent` (`app.js`: `venuesService?.revalidateBookingsForEvent`). Apply the changes
-to the event as it stands (`APPROVED`); sending it back to `SUBMITTED` for re-approval would reach
-`review.service.js#approve`, which still releases every venue booking (SCRUM-37) and would undo "passing bookings are
-left unchanged". Treat a thrown error as logged-only, like the release calls: the change itself has already been saved.
+**When it runs (wired 2026-11-01).**
+1. **Accepting a change request** (SCRUM-165, `eventWorkspace.service.js#decideChangeRequest`): when the accepted
+   change touches `start_time`, `end_time`, `expected_attendance`, `venue_requirements` or `equipment_needs`
+   (times compared as instants). A name/description-only change, or a rejection, does not re-validate.
+2. **Re-approving the event** (`review.service.js#approve`, Option A agreed 2026-11-01): SCRUM-165 sends a
+   significantly changed `APPROVED` event back to `SUBMITTED`; approving it again re-validates venue bookings
+   **instead of releasing them** (SCRUM-37's earlier behaviour). Equipment is still released; reject, cancel and
+   postpone still release everything.
+
+Both calls are injected from `app.js` (`revalidateVenueBookings: venuesService?.revalidateBookingsForEvent`) and are
+logged-only on error: the decision has already been saved.
 
 ## Changing or cancelling one venue booking (SCRUM-154)
 

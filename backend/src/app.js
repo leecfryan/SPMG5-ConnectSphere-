@@ -59,6 +59,7 @@ function createApp({ authClient, dataClient, eventsRepository, assignmentDepende
   app.use("/api/internal", createReviewRoutes(eventsRepository, {
     equipmentService: equipmentDependencies?.equipmentService,
     releaseVenueBookingsForCancelledEvent: venuesService?.releaseBookingsForCancelledEvent,
+    revalidateVenueBookings: venuesService?.revalidateBookingsForEvent,
   }, dataClient));
   app.use("/api/internal", createSafetyCheckRoutes(eventsRepository));
   app.use("/api/internal", createSafetyReviewRoutes(eventsRepository));

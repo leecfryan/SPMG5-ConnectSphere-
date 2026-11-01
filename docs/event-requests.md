@@ -681,6 +681,10 @@ The full revised `apply_organiser_event_edit` body (with `p_expected_updated_at`
 `.agent/docs/other/SCRUM-37-flag-significant-edits.md`'s *Schema reference* section, alongside the superseded
 version for comparison.
 
+> **Changed by SCRUM-38 (Option A, agreed 2026-11-01):** approving a resubmission still releases its equipment, but its
+> venue bookings are now **re-validated instead of released** — bookings that still fit stay, failing ones are flagged
+> affected for SCRUM-145's replacement. Rejecting still releases both. See the venue guide's SCRUM-38 section.
+
 **Released, not held, on the coordinator's decision.** Earlier in this story's build, a flagged arrangement was
 going to be *held* for Technical Support/Venue Staff to re-decide — the same shape SCRUM-150 built for equipment.
 The team changed this: approving **or** rejecting the resubmission now releases whatever venue booking and
@@ -867,6 +871,11 @@ review flow.
   If the event was `APPROVED` and any significant field changed (`start_time`, `end_time`, `venue_requirements`,
   `expected_attendance`), the event regresses to `SUBMITTED` so the coordinator can review it again.
   `UNDER_REVIEW` events stay `UNDER_REVIEW` regardless of significance (no arrangements to release).
+- **Venue re-validation (SCRUM-38):** after an approved change to `start_time`, `end_time`, `expected_attendance`,
+  `venue_requirements` or `equipment_needs`, the event's venue bookings are re-validated
+  (`venuesService.revalidateBookingsForEvent`, injected via `app.js` → `review.routes.js`). Times compare as instants.
+  Failures are flagged affected; passes are untouched; an error is logged and never fails the decision. The decision
+  panel's note now says venue bookings are re-checked straight away and equipment is released on re-approval.
 - **Reject:** all event fields remain unchanged; only `pending_change_request` is cleared.
 - Both paths: an `event_activity_log` row is inserted (`CHANGE_REQUEST_APPROVED` or `CHANGE_REQUEST_REJECTED`)
   with `details = { note: reason, proposed_changes: snapshot }` so the history retains what was proposed even after
