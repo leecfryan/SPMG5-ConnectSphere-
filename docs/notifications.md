@@ -1668,3 +1668,177 @@ declare q public.notification_outbox%rowtype; offer record; checked_at timestamp
 end $$;
 commit;
 ```
+
+## Venue booking decision notifications — SCRUM-41
+
+When Venue Staff confirm or reject a venue booking request, three people may
+need to know: the coordinator in charge of the event, the person who made the
+request if that is someone else, and the organiser, who is told only when a
+booking is confirmed.
+
+Nothing in the delivery path changes. The worker already posts each queued
+record's own `workflow` with its own `payload`, so this story adds one more
+workflow value alongside the ones other lanes have already registered, and
+queues rows for it from the database. No backend JavaScript changes.
+
+The worker posts `{ name: <workflow>, to: { subscriberId: <recipient_id> },
+transactionId: <outbox row id>, payload: <payload> }`, so the Novu workflow's
+trigger identifier must be exactly `venue-booking-decision` and its subscribers
+are keyed by Supabase auth user id.
+
+### Where it hooks in
+
+A statement-level `AFTER UPDATE` trigger on `venue_bookings`, not a change to
+`decide_venue_booking_request`. Two reasons:
+
+- The decision function updates the request row first and the slot rows second.
+  A trigger on the request would read slot statuses that are still stale, and
+  AC5 needs the final state of every slot.
+- The venue lane owns that function. A trigger beside it leaves their code
+  untouched.
+
+The trigger uses a transition table, so one decision fires it once however many
+slots the request covers. It only acts on rows that moved to `confirmed` or
+`rejected`, so cancelling or releasing a booking queues nothing.
+
+### What the recipient sees
+
+| Payload field | From | Serves |
+| --- | --- | --- |
+| `eventName`, `venueName`, `bookingDate` | the saved event, venue and request | AC3 |
+| `outcome` | `confirmed` when any slot is confirmed, otherwise `rejected` | AC3 |
+| `note` | `decision_note`, empty string when none was given | AC3 |
+| `slots` | every slot and its final state, e.g. `am confirmed, pm confirmed, night cancelled` | AC5 |
+| `requestPath` | `/venues/booking-requests/<id>`, for the workflow's redirect | AC4 |
+
+**On AC5.** `decide_venue_booking_request` applies one decision to every slot
+that is not already cancelled, so a single action cannot confirm some slots and
+reject others. A request ends up mixed only when a coordinator cancelled a slot
+earlier. `slots` therefore reports each slot's final state, which is the useful
+thing to read, rather than implying a per-slot decision the system cannot make.
+Per-slot decisions would be a change to SCRUM-22 and a separate story.
+
+Duplicate protection is a partial unique index on recipient and request, so a
+repeated decision cannot queue a second copy for the same person.
+
+### Create the Novu workflow (US — matching app environment)
+
+Leave the three existing workflows alone. Create a workflow named **Venue
+booking decision**, identifier exactly **venue-booking-decision**, with one
+**In-App** step. Set it Critical if offered, as it is transactional.
+
+- Subject: `Venue booking {{payload.outcome}}`
+- Body: `{{payload.eventName | escape}} at {{payload.venueName | escape}} on {{payload.bookingDate}} was {{payload.outcome}}. Slots: {{payload.slots}}.{% if payload.note != "" %} Note: {{payload.note | escape}}{% endif %}{% if payload.outcome == "rejected" %} Request another venue to keep planning.{% endif %}`
+- Redirect the In-App step to `{{payload.requestPath}}` so a rejection links
+  straight to the booking request (AC4).
+
+Preview with eventName = Alumni Gala, venueName = Marina Grand Ballroom,
+bookingDate = 2026-10-20, outcome = rejected, slots = `am rejected`, note =
+`Held for another event`. All payload fields are strings.
+
+### Schema reference — run manually
+
+Tell teammates before running this, and again when it is done. It adds one
+workflow value, one index, one function and one trigger. No existing row,
+function or trigger is modified.
+
+```sql
+begin;
+set local lock_timeout = '3s';
+
+-- SCRUM-41: fail fast if these tables are not the shape the trigger expects,
+-- rather than part-way through installing it.
+do $$ begin
+  perform r.id, r.event_id, r.venue_id, r.booking_date, r.requested_by,
+          r.decided_at, r.decision_note
+    from public.venue_booking_requests r limit 0;
+  perform b.request_id, b.slot, b.status from public.venue_bookings b limit 0;
+  perform e.id, e.name, e.coordinator_id, e.organiser_id from public.events e limit 0;
+  perform v.id, v.name from public.venues v limit 0;
+  perform o.event_id, o.recipient_id, o.workflow, o.payload
+    from public.notification_outbox o limit 0;
+end $$;
+
+-- SCRUM-41: add one workflow value without restating the list. Reading the
+-- existing check and appending to it means this runs correctly whatever other
+-- lanes have already added, and cannot silently drop their values. The guard
+-- makes a second run a no-op instead of appending the same clause twice.
+do $$ declare existing_check text; begin
+  select pg_get_expr(conbin, conrelid) into strict existing_check
+  from pg_constraint
+  where conrelid = 'public.notification_outbox'::regclass
+    and conname = 'notification_outbox_workflow_check' and contype = 'c';
+  if existing_check like '%venue-booking-decision%' then
+    raise notice 'venue-booking-decision is already allowed; constraint left alone';
+  else
+    execute 'alter table public.notification_outbox drop constraint notification_outbox_workflow_check';
+    execute format('alter table public.notification_outbox add constraint notification_outbox_workflow_check check ((%s) or workflow = %L)',
+      existing_check, 'venue-booking-decision');
+  end if;
+end $$;
+
+-- One notification per recipient per decided request, so a repeated decision
+-- cannot queue a second copy.
+create unique index if not exists notification_outbox_venue_decision_key
+  on public.notification_outbox(recipient_id, (payload ->> 'requestId'))
+  where workflow = 'venue-booking-decision';
+
+create or replace function public.enqueue_venue_booking_decision_notification() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare
+  decided record;
+begin
+  for decided in
+    select
+      req.id as request_id, req.event_id, req.booking_date, req.decision_note,
+      req.requested_by, e.name as event_name, e.coordinator_id, e.organiser_id,
+      v.name as venue_name,
+      (select string_agg(s.slot::text || ' ' || s.status::text, ', ' order by
+                case s.slot when 'am' then 1 when 'pm' then 2 else 3 end)
+         from public.venue_bookings s where s.request_id = req.id) as slot_summary,
+      (select bool_or(c.status = 'confirmed')
+         from public.venue_bookings c where c.request_id = req.id) as any_confirmed
+    from (select distinct request_id from changed where status in ('confirmed', 'rejected')) touched
+    join public.venue_booking_requests req on req.id = touched.request_id
+    join public.events e on e.id = req.event_id
+    join public.venues v on v.id = req.venue_id
+    where req.decided_at is not null
+  loop
+    -- Joining auth.users skips accounts deleted since the request was made,
+    -- and collapses the coordinator and requester into one row when they match.
+    insert into public.notification_outbox(event_id, recipient_id, workflow, payload)
+      select decided.event_id, u.id, 'venue-booking-decision', jsonb_build_object(
+        'requestId', decided.request_id,
+        'eventId', decided.event_id,
+        'eventName', decided.event_name,
+        'venueName', decided.venue_name,
+        'bookingDate', to_char(decided.booking_date, 'YYYY-MM-DD'),
+        'outcome', case when decided.any_confirmed then 'confirmed' else 'rejected' end,
+        'slots', coalesce(decided.slot_summary, ''),
+        'note', coalesce(decided.decision_note, ''),
+        'requestPath', '/venues/booking-requests/' || decided.request_id
+      )
+      from auth.users u
+      where u.id in (
+        decided.coordinator_id,
+        decided.requested_by,
+        -- AC2: the organiser hears about a confirmation, not a rejection.
+        case when decided.any_confirmed then decided.organiser_id end
+      )
+    on conflict do nothing;
+  end loop;
+  return null;
+end;
+$$;
+
+revoke all on function public.enqueue_venue_booking_decision_notification() from public, anon, authenticated;
+
+drop trigger if exists enqueue_venue_booking_decision_notification on public.venue_bookings;
+create trigger enqueue_venue_booking_decision_notification
+after update on public.venue_bookings
+referencing new table as changed
+for each statement
+execute function public.enqueue_venue_booking_decision_notification();
+
+commit;
+```

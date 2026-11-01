@@ -35,6 +35,11 @@ async function run() {
   if (process.argv.includes("--registration") && process.argv.includes("--venue-holds")) {
     throw new Error("Run --registration and --venue-holds in separate invocations so each owns its disposable database.");
   }
+  // SCRUM-41: the venue-holds fixture creates the same venue tables and enums,
+  // so the two cannot share one disposable database.
+  if (process.argv.includes("--venue-decision") && process.argv.includes("--venue-holds")) {
+    throw new Error("Run --venue-decision and --venue-holds in separate invocations so each owns its disposable database.");
+  }
   const guide = fs.readFileSync(path.join(root, "docs/notifications.md"), "utf8");
   const blocks = [...guide.matchAll(/```sql\r?\n([\s\S]*?)\r?\n```/g)].map(match => match[1]);
   const readSql = name => fs.readFileSync(path.join(__dirname, name), "utf8");
@@ -71,6 +76,13 @@ async function run() {
       schemaBlock(blocks, "-- SCRUM-43: expired-lease repair for an existing installation."),
       "\ndo $$ declare q public.notification_outbox%rowtype; begin\n  if not has_function_privilege('service_role','public.validate_waitlist_offer_reminder(uuid,uuid)','EXECUTE')\n    or has_function_privilege('authenticated','public.validate_waitlist_offer_reminder(uuid,uuid)','EXECUTE') then\n    raise exception '[TC-SCRUM-43-S24] repair changed execute privileges'; end if;\n  perform public.enqueue_registration_notifications();\n  delete from public.notification_outbox;\n  perform public.enqueue_waitlist_offer_reminders();\n  select * into strict q from public.claim_notification_outbox();\n  update public.notification_outbox set locked_until=clock_timestamp()-interval '1 second' where id=q.id;\n  begin\n    perform public.validate_waitlist_offer_reminder(q.id,q.lease_token);\n    raise exception '[TC-SCRUM-43-S24] existing-installation repair did not reject expired lease';\n  exception when sqlstate '55000' then null; end;\nend $$;\nselect 'REGISTRATION REPAIR ASSERTIONS PASSED';");
   }
+  // SCRUM-41: the venue tables the decision trigger reads, then the documented
+  // trigger, then its scenarios.
+  if (process.argv.includes("--venue-decision")) {
+    parts.push(readSql("venueDecisionNotifications.setup.sql"),
+      schemaBlock(blocks, "function public.enqueue_venue_booking_decision_notification()"),
+      readSql("venueDecisionNotifications.assertions.sql"));
+  }
   const script = parts.join("\n");
 
   requireSuccess(docker(["info", "--format", "{{.ServerVersion}}"]), "Start Docker and try again.");
@@ -98,6 +110,9 @@ async function run() {
     ], script), "SQL assertions failed. The failing test ID appears below.");
     if (!output.includes("ASSIGNMENT SQL ASSERTIONS PASSED")) {
       throw new Error("The SQL run ended without the assignment test completion marker.");
+    }
+    if (process.argv.includes("--venue-decision") && !output.includes("VENUE DECISION SQL ASSERTIONS PASSED")) {
+      throw new Error("Venue decision SQL assertions did not complete.");
     }
     if (process.argv.includes("--clarification") && !output.includes("CLARIFICATION SQL ASSERTIONS PASSED")) {
       throw new Error("Clarification SQL assertions did not complete.");
@@ -164,6 +179,20 @@ async function run() {
       process.stdout.write(`PASS TC-SCRUM-155-${id}: ${description}\n`);
     }
     process.stdout.write("5/5 assignment notification SQL scenarios passed.\n");
+    if (process.argv.includes("--venue-decision")) for (const [id, description] of [
+      ["S01", "Confirmation reaches coordinator, requester and organiser with full detail"],
+      ["S02", "Rejection reaches coordinator and requester only, with its reason"],
+      ["S03", "A coordinator who made the request is notified once, with an empty note"],
+      ["S04", "Every slot's final state is listed, including one cancelled earlier"],
+      ["S05", "Cancelling a booking queues nothing"],
+      ["S06", "Deciding twice queues no duplicate"],
+      ["S07", "The authenticated role cannot read the queue"],
+    ]) {
+      process.stdout.write(`PASS TC-SCRUM-41-${id}: ${description}\n`);
+    }
+    if (process.argv.includes("--venue-decision")) {
+      process.stdout.write("7/7 venue decision notification SQL scenarios passed.\n");
+    }
   } finally {
     if (started) {
       requireSuccess(docker(["stop", "--time=1", name]), `Could not remove test container ${name}.`);
