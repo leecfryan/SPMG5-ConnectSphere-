@@ -7,7 +7,7 @@ import { useState } from "react";
 // only through the dedicated Retire action, never this form.
 const OPERATIONAL_STATUSES = ["AVAILABLE", "IN_USE", "MAINTENANCE", "DAMAGED", "UNDER_MAINTENANCE"];
 
-function EquipmentForm({ mode, initial, onSubmit, onCancel, isSaving, saveError }) {
+function EquipmentForm({ mode, initial, existingTypes = [], onSubmit, onCancel, isSaving, saveError }) {
   const [type, setType] = useState(initial?.type || "");
   const [description, setDescription] = useState(initial?.description || "");
   const [currentLocation, setCurrentLocation] = useState(initial?.current_location || "");
@@ -29,7 +29,10 @@ function EquipmentForm({ mode, initial, onSubmit, onCancel, isSaving, saveError 
       <div className="eq-form-grid">
         <label className="eq-field">
           Type
-          <input type="text" value={type} onChange={(e) => setType(e.target.value)} required />
+          <input type="text" list="equipment-type-options" value={type} onChange={(e) => setType(e.target.value)} required />
+          <datalist id="equipment-type-options">
+            {existingTypes.map((existingType) => <option key={existingType} value={existingType} />)}
+          </datalist>
         </label>
 
         <label className="eq-field">
@@ -53,7 +56,7 @@ function EquipmentForm({ mode, initial, onSubmit, onCancel, isSaving, saveError 
 
         <label className="eq-field eq-field-wide">
           Description
-          <textarea rows="3" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. 4K, ceiling-mounted" />
+          <textarea rows="3" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Wireless lapel microphone" />
         </label>
       </div>
 

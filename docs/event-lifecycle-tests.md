@@ -336,9 +336,11 @@ them — pre-existing behaviour of the tool, not something this story introduced
 | Let a non-assigned coordinator or an unrelated role through | TC-149-03, TC-149-20 |
 
 **Note for whoever reads this next:** SCRUM-148 (cancel) itself never received an entry in this file, despite its
-own task note listing one as planned — there is no TC-148-xx table anywhere here. Not backfilled as part of this
-story (out of lane for what SCRUM-149 is responsible for), but worth raising with the story owner if cancel's own
-traceability is ever asked for in the Week 13 Q&A.
+own task note listing one as planned — there is no exhaustive TC-148-xx table anywhere here covering AC2 (stages)
+or AC3 (release). Not backfilled as part of this story (out of lane for what SCRUM-149 is responsible for). §16
+below backfills just the AC1 (who may cancel) slice, since SCRUM-171 changed that slice's contract and its tests
+needed updating anyway — AC2/AC3 traceability remains a gap, worth raising with the story owner if ever asked for
+in the Week 13 Q&A.
 
 ---
 ## 9. SCRUM-139 — submit for the Operational Safety Check
@@ -744,4 +746,57 @@ lost none.
 | **SCRUM-144** (backlog US-41) | Confirm an event once essential arrangements are complete, 1 SP. See §12. Discussions #106 (the coordinator decides with Technical Support whether an item is essential) and #80 (essential arrangements are event-specific; non-essential follow-ups may remain). |
 | **SCRUM-37** (backlog US-37) | Flag edits that could invalidate existing arrangements, so only changes that matter trigger revalidation. See §13. The release-on-decision mechanism (regress to `SUBMITTED`, release on approve or reject) is a **team design decision**, not a customer clarification — AC3/AC4 don't specify it themselves; recorded word for word in the task note. |
 | **SCRUM-161** | View all coordinator assignments. See §14. Placed in *Manage event requests* by the developer, keeping that page's existing status view (SCRUM-148 AC4), so the overview opens on active events and *All statuses* returns the closed ones. |
+| **SCRUM-171** | Cancel an event: only the assigned Event Coordinator can cancel it — narrows SCRUM-148/142's assigned-coordinator-or-lead access to the assigned coordinator only. AC2 (release) is unaffected, already satisfied by SCRUM-148. See §16. |
 | Discussions #80, #94, #95, #101, #125 | The assigned coordinator decides; the manager only assigns; assignment doesn't start review; `approved_rejected_by` kept apart from `coordinator_id`; who sees the outcome |
+
+---
+## 16. SCRUM-171 — cancel narrowed to the assigned coordinator
+
+> **SCRUM-171:** As the assigned Event Coordinator, I want to cancel an event at any stage so that its venues and
+> equipment are released for other events.
+>
+> 1. Only the assigned Event Coordinator can cancel an event.
+> 2. A cancelled event drops the booking and booking requests of its assigned venues and equipment.
+
+AC2 is unchanged behaviour, already proven by SCRUM-148's own release tests (`equipment-release-cancelled-event.test.js`,
+`venue-release-cancelled-event.test.js` — see §9's note above on the pre-existing TC-148-xx gap). This section covers
+only AC1's contract change: `events.cancel` drops `event_coordinator_lead` from its granted roles
+(`backend/src/auth/permissions.js`), and `review.routes.js`'s cancel guard drops the lead's unconditional bypass,
+leaving it identical in shape to `events.decide`'s guard. `review.controller.js`/`review.service.js`/
+`events.repository.js#cancel` all drop the now-dead `isCoordinatorLead` branch that existed only to implement that
+bypass. `events.postpone` (SCRUM-149) is untouched — this AC does not mention it, and postponement belongs to a
+different lane member.
+
+| Layer | File | What changed |
+| --- | --- | --- |
+| Unit | `backend/tests/unit/events/events.transition.test.js` | The "without a coordinator (the coordinator-lead caller)" case removed — that query shape no longer exists; the remaining cases now always pass a `coordinatorId`. |
+| HTTP (integration) | `backend/tests/integration/events.review.test.js` | TC-148-02 flipped from 200 to 403 (in place, same ID); TC-148-04's role list gained `event_coordinator_lead`; SCRUM-117-API-007 split into its own cancel case (403 for the lead, 200 for the assigned coordinator) and its own postpone case (unchanged, both succeed). |
+| HTTP (integration) | `backend/tests/integration/roles.rename.test.js` | `LEAD_PERMISSIONS` dropped `events.cancel`; SCRUM-142-INT-004/005 flipped from 200 to 403 (in place, same IDs). |
+| HTTP (integration) | `backend/tests/integration/auth.test.js` | RBAC-MANAGER-001's exact permission list dropped `events.cancel`. |
+| Playwright API | `tests/playwright/api.spec.cjs` | API-RBAC-050 and SCRUM-142-API-001/002's exact permission lists dropped `events.cancel`. |
+| Playwright API | `tests/playwright/event-workspace.api.spec.cjs` | REVIEW-E2E-API-002 gained the manager role in its denied-caller loop; REVIEW-E2E-API-003 flipped from "the lead may cancel any event" (200) to "the lead cannot" (403); SCRUM-142-MERGE-API-001/002's cancel step (after postpone) now runs as the assigned coordinator, not the lead, and the lead's own attempt is asserted as 403. |
+| Playwright browser | `tests/playwright/event-workspace.browser.spec.cjs` | SCRUM-142-MERGE-BROWSER-001/002 no longer have the lead cancel after postponing (that control is gone from their view) — now asserts the *Cancel event* region has zero count instead; E2E-EVENT-102's fixture setup cancels its throwaway event as the assigned coordinator instead of the manager, since that was only ever a convenience, not the thing under test. |
+| Component | `frontend/src/features/events/pages/EventWorkspaceDetailPage.test.jsx` | SCRUM-117-UI-006 split from one shared coordinator/manager case into a coordinator case (cancel + postpone both visible) and a manager case (postpone only, cancel absent). |
+
+| ID | AC | Type | Scenario | Test data | Expected result | Automated test | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TC-148-01 | 1 | Happy | The assigned coordinator still cancels their own event (unchanged) | Event `coordinator_id` = caller | 200; `CANCELLED` | `[TC-148-01] the assigned coordinator cancels their own event; release runs synchronously` | 2026-10-30 · pass · local |
+| TC-148-02 | 1 | Negative | **Updated in place.** The coordinator lead can no longer cancel an event not assigned to them | caller role `event_coordinator_lead` | 403 (previously 200); `repository.cancel` not called | `[TC-148-02] the coordinator lead cannot cancel an event not assigned to them` | 2026-10-30 · pass · local |
+| TC-148-03 | 1 | Negative | A coordinator not assigned to the event still cannot cancel it (unchanged) | Event assigned to someone else | 403 | `[TC-148-03] a coordinator not assigned to the event cannot cancel it` | 2026-10-30 · pass · local |
+| TC-148-04 | 1 | Negative | **Extended.** Every unrelated role, now including the lead, cannot cancel | `event_organiser`, `venue_staff`, `technical_support_staff`, `attendee`, `unknown`, `event_coordinator_lead` | 403 each | `[TC-148-04] %s cannot cancel an event` (×6, was ×5) | 2026-10-30 · pass · local |
+| SCRUM-142-INT-004/005 | 1 | Negative | **Updated in place.** Neither the canonical nor the legacy lead identifier can cancel an event assigned to someone else | caller role `event_coordinator_lead` / `event_ops_manager` | 403 each (previously 200) | `[SCRUM-142-INT-004/005] %s cannot cancel an event assigned to someone else` | 2026-10-30 · pass · local |
+| REVIEW-E2E-API-003 | 1 | Negative | **Updated in place.** The lead cannot cancel an event not assigned to them, through the real backend | `setupWorkflow` fixture | 403 (previously 200) | `[REVIEW-E2E-API-003] SCRUM-171: the coordinator lead cannot cancel an event not assigned to them` | 2026-10-30 · pass · local |
+| SCRUM-142-MERGE-BROWSER-001/002 | 1 | Negative | The lead postpones an event through the real browser, then finds no cancel control after refreshing | Canonical and legacy lead identifiers | *Cancel event* region count = 0 | `[SCRUM-142-MERGE-BROWSER-001/002]` | 2026-10-30 · pass · local |
+| SCRUM-117-UI-006 (manager case) | 1 | Negative | A CHANGES_REQUESTED request shows postpone but not cancel for the manager scope | `scope = "manager"` | *Cancel event* absent; *Postpone event* visible | `[SCRUM-117-UI-006] manager may postpone but not cancel, reassign or approve a returned event` | 2026-10-30 · pass · local |
+
+**Coverage** (2026-10-30, `test:cov`, local, story's own changed lines): `permissions.js`'s `events.cancel` entry,
+`review.routes.js`'s `cancelGuard`, `review.controller.js#cancel`, `review.service.js#cancel` and
+`events.repository.js#cancel` are all exercised by the table above and the full backend regression
+(1366 Vitest passed, 51 skipped live-DB). No gap: the removed `isCoordinatorLead` branch had no remaining
+caller to exercise it, so there is nothing left uncovered by deleting it.
+
+**Test review** (five questions): every case above either flips an existing assertion's expected status code (200
+→ 403) against the new AC text, or extends an existing parameterised list by one role — no new test shape was
+invented, and nothing was weakened to make a test pass. TC-148-02 and SCRUM-142-INT-004/005 are updated in place
+rather than deleted and replaced, preserving their IDs' traceability back to the original SCRUM-148/142 stories
+whose contract they now reflect post-SCRUM-171.

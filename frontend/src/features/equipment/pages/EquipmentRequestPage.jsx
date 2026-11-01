@@ -97,8 +97,16 @@ function EquipmentRequestPage() {
       .catch((error) => { if (active) setAvailableResult({ key: windowKey, equipment: [], error: error.message }); });
     return () => { active = false; };
   }, [windowKey, token, borrowWindow]);
-  const availableEquipment = availableResult?.key === windowKey ? availableResult.equipment : [];
-  const availabilityError = availableResult?.key === windowKey ? availableResult.error : null;
+  const availabilityResultIsCurrent = availableResult?.key === windowKey;
+  const availableEquipment = availabilityResultIsCurrent ? availableResult.equipment : [];
+  const availabilityError = availabilityResultIsCurrent ? availableResult.error : null;
+  // SCRUM-169: without this, "no result yet for this windowKey", "the fetch
+  // for it failed" and "a real zero-unit result" are all just an empty
+  // availableEquipment array - the form can't tell a genuine stockout apart
+  // from a fetch that's still in flight or that errored, and would flash
+  // "Out of Stock" on every window edit until the refetch resolves, or on
+  // top of a real error banner.
+  const isAvailabilityUnknown = Boolean(borrowWindow) && (!availabilityResultIsCurrent || Boolean(availabilityError));
 
   const [requestResult, setRequestResult] = useState(null);
 
@@ -196,6 +204,8 @@ function EquipmentRequestPage() {
             <EquipmentRequestForm
               key={eventId + ":" + refreshKey}
               equipmentOptions={availableEquipment}
+              allEquipment={allEquipment}
+              isAvailabilityUnknown={isAvailabilityUnknown}
               borrowWindow={borrowWindow}
               onWindowChange={setBorrowWindow}
               onSubmit={handleSubmit}

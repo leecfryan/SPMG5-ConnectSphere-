@@ -13,7 +13,7 @@ test('[E2E-CLARIFICATION-001] SCRUM-117: coordinator returns a request and organ
   await page.goto('/assigned-events/' + event.id);
   await page.getByLabel('Decision note').fill('Please clarify the room layout and attendance.');
   await page.getByRole('button', { name: 'Return for changes' }).click();
-  await expect(page.locator('.status-badge')).toHaveText('Changes requested');
+  await expect(page.locator('.request-detail-status .status-badge')).toHaveText('Changes requested');
   await page.reload();
   await expect(page.getByRole('region', { name: 'Clarification requested' })).toContainText('Please clarify the room layout and attendance.');
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
@@ -84,9 +84,9 @@ test('[E2E-CLARIFICATION-002] SCRUM-117: owner receives the worker notice and fo
   await page.getByLabel('Venue requirements', { exact: false }).fill('Round tables with a central aisle');
   await page.getByRole('button', { name: 'Save changes', exact: true }).click();
   await expect(page.getByText('Event changes saved.', { exact: true })).toBeVisible();
-  await expect(page.locator('.status-badge')).toHaveText('Changes requested');
+  await expect(page.locator('.request-detail-status .status-badge')).toHaveText('Changes requested');
   await page.getByRole('button', { name: 'Resubmit request', exact: true }).click();
-  await expect(page.locator('.status-badge')).toHaveText('Under review');
+  await expect(page.locator('.request-detail-status .status-badge')).toHaveText('Under review');
   const detail = (await (await request.get(backendURL + '/api/event-workspace/coordinator/' + f.event.id, { headers: f.headers.first })).json()).event;
   expect(detail.coordinator_id).toBe(f.first.id);
   const changes = detail.activity.find(row => row.action === 'REQUEST_RESUBMITTED').changes;

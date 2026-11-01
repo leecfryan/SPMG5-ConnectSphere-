@@ -1,4 +1,5 @@
 import { Link } from "react-router";
+import Icon from "../../../components/ui/Icon";
 import RegistrationStatusBadge from "./RegistrationStatusBadge";
 
 function formatDate(iso) {
@@ -13,6 +14,7 @@ export default function RegistrationCard({ registration }) {
   return (
     <li>
       <Link to={`/registrations/me/${registration.id}`} className="registration-card__link">
+        <span className="registration-card__icon"><Icon name="ticket" size={24} /></span>
         <div className="registration-card__body">
           <span className="registration-card__event">{eventName}</span>
           {eventDate && (
@@ -20,6 +22,7 @@ export default function RegistrationCard({ registration }) {
           )}
         </div>
         <RegistrationStatusBadge status={registration.status} />
+        <Icon name="arrow" size={18} />
       </Link>
     </li>
   );

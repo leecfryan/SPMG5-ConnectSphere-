@@ -5,7 +5,7 @@ const { createNotificationDeliveryService } = require("../../../src/modules/noti
 const { createNotificationOutboxRepository } = require("../../../src/modules/notifications/notificationOutbox.repository");
 const row = { id: "delivery-id", recipient_id: "organiser", lease_token: "lease-one", payload: { eventName: "Literacy", outcome: "approved" } };
 function fixture() {
-  const repository = { prepareRegistrations: async () => 0, prepareReminders: async () => 0, prepareAssignments: vi.fn(async () => 0), claim: vi.fn(async () => [row]), complete: vi.fn(async () => true), retry: vi.fn(async () => true) };
+  const repository = { prepareVenueHolds: async () => 0, prepareRegistrations: async () => 0, prepareReminders: async () => 0, prepareAssignments: vi.fn(async () => 0), claim: vi.fn(async () => [row]), complete: vi.fn(async () => true), retry: vi.fn(async () => true) };
   const fetchImpl = vi.fn(async () => ({ ok: true, json: async () => ({ data: { acknowledged: true, status: "processed", transactionId: row.id } }) }));
   const logger = { warn: vi.fn() };
   return { repository, fetchImpl, logger, service: createNotificationDeliveryService({ repository, fetchImpl, logger, secretKey: "fixture-only-key" }) };

@@ -59,7 +59,7 @@ function createApp({ authClient, dataClient, eventsRepository, assignmentDepende
   app.use("/api/internal", createReviewRoutes(eventsRepository, {
     equipmentService: equipmentDependencies?.equipmentService,
     releaseVenueBookingsForCancelledEvent: venuesService?.releaseBookingsForCancelledEvent,
-  }));
+  }, dataClient));
   app.use("/api/internal", createSafetyCheckRoutes(eventsRepository));
   app.use("/api/internal", createSafetyReviewRoutes(eventsRepository));
   app.use("/api/venues", authenticate, requirePermission("internal.access"), createVenuesRoutes(venuesService));

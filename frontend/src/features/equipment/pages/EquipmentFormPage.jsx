@@ -10,21 +10,24 @@ import "../equipment.css";
 // new by-id endpoint - the list is already fetched whole elsewhere in this
 // feature (see EquipmentRequestPage's equipmentLabel) and is small enough
 // that a second single-record route added nothing a client-side find can't.
+// The same fetch also feeds the Type field's existing-types suggestions.
 function EquipmentFormPage({ mode }) {
   const { id } = useParams();
   const { token } = useAuth();
   const navigate = useNavigate();
   const [equipment, setEquipment] = useState(null);
+  const [existingTypes, setExistingTypes] = useState([]);
   const [loadError, setLoadError] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
 
   useEffect(() => {
-    if (mode !== "edit") return;
     let active = true;
     fetchEquipmentCatalogue(token)
       .then((list) => {
         if (!active) return;
+        setExistingTypes([...new Set(list.map((item) => item.type))].sort());
+        if (mode !== "edit") return;
         const match = list.find((item) => item.id === id);
         if (!match) setLoadError("Equipment not found.");
         else if (match.status === "UNAVAILABLE") setLoadError("This equipment has been retired and can no longer be edited.");
@@ -56,6 +59,7 @@ function EquipmentFormPage({ mode }) {
           <EquipmentForm
             mode={mode}
             initial={equipment}
+            existingTypes={existingTypes}
             onSubmit={handleSubmit}
             onCancel={() => navigate("/equipment/catalogue")}
             isSaving={isSaving}

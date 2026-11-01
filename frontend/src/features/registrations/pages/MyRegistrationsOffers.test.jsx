@@ -69,3 +69,22 @@ test("My Registrations refreshes after an offer is declined", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Decline offer" }));
   await waitFor(() => expect(reload).toHaveBeenCalledOnce());
 });
+
+
+test("Status filters narrow registrations while time-sensitive waitlist offers remain available", () => {
+  const reload = vi.fn();
+  useRegistrations.mockReturnValue({ registrations: [
+    { id: "pending-reg", status: "pending", events: { name: "Pending workshop" } },
+    { id: "confirmed-reg", status: "confirmed", events: { name: "Confirmed workshop" } },
+  ], offers: [OFFER], waitlist: [], error: "", loading: false, reload });
+  render(<AuthContext.Provider value={{ token: "attendee-token" }}><MemoryRouter><MyRegistrationsPage /></MemoryRouter></AuthContext.Provider>);
+  fireEvent.click(screen.getByRole("button", { name: "Confirmed", exact: true }));
+  expect(screen.queryByRole("link", { name: /Pending workshop/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /Confirmed workshop/ })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Accept offer" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Withdrawn", exact: true }));
+  expect(screen.getByRole("status")).toHaveTextContent("No withdrawn registrations");
+  expect(screen.getByRole("button", { name: "Accept offer" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "All registrations" }));
+  expect(screen.getByRole("link", { name: /Pending workshop/ })).toBeVisible();
+});

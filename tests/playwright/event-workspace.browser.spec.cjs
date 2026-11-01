@@ -217,8 +217,12 @@ test('[E2E-EVENT-101] SCRUM-100: Revocation while editing is refused by the real
   await expect(page.getByRole('heading', { name: events.organiser.name, exact: true })).toHaveCount(0);
 });
 
+// SCRUM-171: previously this test also cancelled the event as the lead, after
+// postponing it - the lead's unconditional cancel access is now removed, so
+// the second half instead proves the Cancel event control itself is gone from
+// the manager scope (the postpone half, unaffected by SCRUM-171, is unchanged).
 for (const [id, role, status] of [['001', 'event_coordinator_lead', 'SUBMITTED'], ['002', 'event_ops_manager', 'SAFETY_REVIEW']]) {
-  test(`[SCRUM-142-MERGE-BROWSER-${id}] ${role} can postpone a ${status} event, refresh and cancel it`, async ({ page, accounts, request }) => {
+  test(`[SCRUM-142-MERGE-BROWSER-${id}] ${role} can postpone a ${status} event and refresh, but has no cancel action (SCRUM-171)`, async ({ page, accounts, request }) => {
     const { event, first, update } = await setupWorkflow(accounts, request);
     expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
     await accounts.updateEvent(event.id, { status });
@@ -234,12 +238,7 @@ for (const [id, role, status] of [['001', 'event_coordinator_lead', 'SUBMITTED']
     await expect(page.getByRole('button', { name: 'Postpone event', exact: true })).toHaveCount(0);
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Postponement', exact: true })).toBeVisible();
-    const cancel = page.getByRole('region', { name: 'Cancel event', exact: true });
-    await cancel.getByLabel('Reason', { exact: true }).fill('No replacement date');
-    await cancel.getByRole('button', { name: 'Cancel event', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Cancellation', exact: true })).toBeVisible();
-    await expect(page.getByText('New date pending', { exact: true })).toBeVisible();
-    await expect(page.getByText('No replacement date', { exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Cancel event', exact: true })).toHaveCount(0);
   });
 }
 
@@ -268,8 +267,10 @@ test('[E2E-EVENT-102] SCRUM-161: the Lead filters assignments by coordinator and
   expect((await assign(forTwo.id, second.id)).status()).toBe(200);
   expect((await assign(closed.id, first.id)).status()).toBe(200);
   await accounts.updateEvent(forTwo.id, { status: 'APPROVED' });
+  // SCRUM-171: cancel is assigned-coordinator-only now - `closed` was just
+  // assigned to `first` above, so `first` (not the manager) cancels it here.
   expect((await request.post(`${backendURL}/api/internal/events/${closed.id}/cancel`,
-    { headers: headers.manager, data: { reason: 'Venue no longer available' } })).status()).toBe(200);
+    { headers: headers.first, data: { reason: 'Venue no longer available' } })).status()).toBe(200);
 
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto('/event-management');
@@ -304,6 +305,71 @@ test('[E2E-EVENT-102] SCRUM-161: the Lead filters assignments by coordinator and
   await expect(link(closed.name)).toHaveCount(0);
   await link(event.name).click();
   await expect(page.getByRole('heading', { name: event.name, exact: true })).toBeVisible();
+});
+
+// SCRUM-165 TC-SCRUM-165-16/17: coordinator sees a pending change request and can approve or reject it.
+// Helper: create an event with a pending change request by having the organiser submit one via the UI.
+async function submitChangeRequest(page, accounts, organiser, event, proposedName, requestReason) {
+  await accounts.updateEvent(event.id, { status: 'UNDER_REVIEW' });
+  await page.goto(`/my-event-requests/${event.id}`);
+  await signIn(page, organiser);
+  await page.getByRole('button', { name: 'Request a change', exact: true }).click();
+  await page.getByLabel('Event name', { exact: true }).fill(proposedName);
+  await page.getByLabel('Reason for change', { exact: true }).fill(requestReason);
+  await page.getByRole('button', { name: 'Submit change request', exact: true }).click();
+  await expect(page.getByText(/awaiting review/i)).toBeVisible();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+}
+
+// TC-SCRUM-165-16: coordinator approves a change request; proposed name is applied.
+test('[TC-SCRUM-165-16] SCRUM-165: coordinator approves change request; proposed changes applied and history records decision', async ({ page, accounts }) => {
+  const { organiser, first, event } = await setupWorkflow(accounts, page.request);
+  await accounts.assignEvent(event.id, first.id);
+  await submitChangeRequest(page, accounts, organiser, event, 'Annual Gala – revised', 'Venue requested a name update');
+
+  await signIn(page, first);
+  await page.getByRole('link', { name: 'My assigned events', exact: true }).click();
+  await page.getByRole('link', { name: event.name, exact: true }).click();
+
+  await expect(page.getByRole('heading', { name: 'Change request from organiser', exact: true })).toBeVisible();
+  await expect(page.getByText(/venue requested a name update/i)).toBeVisible();
+  await page.getByLabel('Decision reason', { exact: true }).fill('Approved – name update looks fine.');
+  await page.getByRole('button', { name: 'Approve change', exact: true }).click();
+
+  // After reload: proposed name applied, change request gone, decision in history.
+  await expect(page.getByRole('heading', { name: 'Annual Gala – revised', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Change request from organiser' })).toHaveCount(0);
+  await expect(page.getByText('Change request approved')).toBeVisible();
+  await expect(page.getByText(/approved.*name update looks fine/i)).toBeVisible();
+});
+
+// TC-SCRUM-165-17: coordinator rejects a change request; organiser sees the rejection reason in history.
+test('[TC-SCRUM-165-17] SCRUM-165: coordinator rejects change request; organiser sees reason in activity history', async ({ page, accounts }) => {
+  const { organiser, first, event } = await setupWorkflow(accounts, page.request);
+  await accounts.assignEvent(event.id, first.id);
+  await submitChangeRequest(page, accounts, organiser, event, 'Annual Gala – renamed', 'Want a shorter name');
+
+  await signIn(page, first);
+  await page.getByRole('link', { name: 'My assigned events', exact: true }).click();
+  await page.getByRole('link', { name: event.name, exact: true }).click();
+
+  await page.getByLabel('Decision reason', { exact: true }).fill('Name change is out of scope at this stage.');
+  await page.getByRole('button', { name: 'Reject change', exact: true }).click();
+
+  await expect(page.getByRole('heading', { name: 'Change request from organiser' })).toHaveCount(0);
+  // Event name unchanged after rejection.
+  await expect(page.getByRole('heading', { name: event.name, exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+
+  // Organiser sees the rejection and the coordinator's reason in activity history.
+  await signIn(page, organiser);
+  // Wait for auth before navigating — same pattern as ACCESS-E2E-UI-001.
+  await page.getByRole('link', { name: 'My event requests', exact: true }).click();
+  await page.getByRole('link', { name: event.name, exact: true }).click();
+  // Reason appears in both the inline rejection banner (ChangeRequestControls) and
+  // the activity history (EventActivityHistory); either presence satisfies AC3.
+  await expect(page.getByText(/coordinator.*reason/i)).toBeVisible();
+  await expect(page.getByText('Change request rejected')).toBeVisible();
 });
 
 // SCRUM-36 AC5/AC6: submitting a change request stores it without touching the

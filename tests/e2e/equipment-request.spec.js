@@ -37,7 +37,7 @@ test.describe("Scrum-27 AC1-4: equipment request page", () => {
     ]);
     await Promise.all([
       page.waitForResponse((res) => res.url().includes("/api/equipment?") && res.request().method() === "GET"),
-      page.getByLabel("Assigned event").selectOption(setup.eventId),
+      page.getByRole("combobox", { name: /^Assigned event\b/ }).selectOption(setup.eventId),
     ]);
     await page.getByLabel("Equipment type").selectOption(setup.equipmentType);
     await page.getByLabel("Quantity").fill("1");
@@ -62,7 +62,7 @@ test.describe("Scrum-27 AC1-4: equipment request page", () => {
   test("AC4: an unrelated coordinator has no assigned events and cannot read this event's requests", async ({ page }) => {
     await signIn(page, setup.outsider);
     await page.goto("/equipment/requests");
-    await expect(page.getByLabel("Assigned event").locator("option")).toHaveCount(1); // placeholder only
+    await expect(page.getByRole("combobox", { name: /^Assigned event\b/ }).locator("option")).toHaveCount(1); // placeholder only
 
     await page.goto("/equipment/requests?event=" + setup.eventId);
     await expect(page.getByText("Could not load:", { exact: false })).toBeVisible({ timeout: 10000 });
@@ -75,10 +75,12 @@ test.describe("Scrum-29 follow-up: availability-filtered dropdown and event-deri
   test.beforeEach(async () => { setup = await setupEquipment(); });
   test.afterEach(async () => { await setup.teardown(); });
 
-  // Scrum-30: the dropdown is now type-level, built only from bookable units
-  // for the window - a type disappears from it entirely once every one of
-  // its units is unavailable, rather than one option among several per unit.
-  test("a type with no AVAILABLE units at all for the window does not appear in the type dropdown", async ({ page }) => {
+  // SCRUM-169 AC3 (was Scrum-30 until this story reversed it): the dropdown
+  // is now built from the full catalogue, not just bookable units for the
+  // window - a type with zero AVAILABLE units stays selectable so it can
+  // show "Out of Stock" instead of disappearing entirely, which would make
+  // AC3 unreachable for it.
+  test("a type with no AVAILABLE units at all for the window still appears in the type dropdown, flagged Out of Stock", async ({ page }) => {
     const damagedOnlyType = `${setup.equipmentType}_DAMAGED_ONLY`;
     const damagedId = await createEquipmentUnit({ type: damagedOnlyType, status: "DAMAGED" });
     try {
@@ -86,11 +88,14 @@ test.describe("Scrum-29 follow-up: availability-filtered dropdown and event-deri
       await page.goto("/equipment/requests");
       await Promise.all([
         page.waitForResponse((res) => res.url().includes("/api/equipment?") && res.request().method() === "GET"),
-        page.getByLabel("Assigned event").selectOption(setup.eventId),
+        page.getByRole("combobox", { name: /^Assigned event\b/ }).selectOption(setup.eventId),
       ]);
       const optionValues = await page.getByLabel("Equipment type").locator("option").evaluateAll((els) => els.map((e) => e.value));
       expect(optionValues).toContain(setup.equipmentType); // has an AVAILABLE unit
-      expect(optionValues).not.toContain(damagedOnlyType); // every unit DAMAGED
+      expect(optionValues).toContain(damagedOnlyType); // every unit DAMAGED, but still listed
+
+      await page.getByLabel("Equipment type").selectOption(damagedOnlyType);
+      await expect(page.getByText("Out of Stock", { exact: true })).toBeVisible();
     } finally {
       await deleteEquipmentUnit(damagedId);
     }
@@ -99,7 +104,7 @@ test.describe("Scrum-29 follow-up: availability-filtered dropdown and event-deri
   test("Borrow from/until default to the event's own timing (+/-30 minutes), not an unrelated hardcoded default", async ({ page }) => {
     await signIn(page, setup.coordinator);
     await page.goto("/equipment/requests");
-    await page.getByLabel("Assigned event").selectOption(setup.eventId);
+    await page.getByRole("combobox", { name: /^Assigned event\b/ }).selectOption(setup.eventId);
 
     const startValue = await page.getByLabel("Borrow from").inputValue();
     const endValue = await page.getByLabel("Borrow until").inputValue();

@@ -6,9 +6,9 @@ import { cancelEvent } from "../reviewService";
 // status ACTIVE_STATUSES names, which now includes a postponed one.
 const ACTIVE_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "CHANGES_REQUESTED", "APPROVED", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED", "POSTPONED"];
 
-// SCRUM-148 AC1/AC2: who may see this is decided by the page (the assigned
-// coordinator, or the manager scope) - this component only gates on status,
-// the same division EventDecisionControls already uses.
+// SCRUM-148 AC1/AC2, narrowed by SCRUM-171: who may see this is decided by the
+// page (the assigned coordinator only, not the manager scope any more) - this
+// component only gates on status, the same division EventDecisionControls uses.
 export default function EventCancelControl({ event, onCancelled }) {
   const { token } = useAuth();
   const [reason, setReason] = useState("");

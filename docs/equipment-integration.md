@@ -95,6 +95,47 @@ prior Rule A query is commented out in
 `equipment.service.js` for reference, not deleted, in case the team revisits
 this.
 
+## Live count, shortfall and Out of Stock on the request form (SCRUM-169)
+
+`EquipmentRequestForm.jsx` shows a coordinator, as soon as a type is selected, how many units of it are
+currently unreserved for the borrow window ("`N` available now") - no new backend call. It's still read from the
+same per-window list `EquipmentRequestPage.jsx` already fetches via `GET /api/equipment?start=&end=`
+(`findAvailableUnits`, unchanged), not the separate `/equipment/availability` endpoint above (that one needs
+`type`/`quantity`/`location` the frontend has no equivalent for and remains unused by any UI).
+
+"Available now," not "available" - a `PENDING` sibling holds no unit (see SCRUM-31's data model above), so the
+count means "currently unreserved," not "guaranteed yours." It is a **warning only and never gates Submit**,
+consistent with Creation never rejecting for insufficient stock:
+
+- `count >= quantity`: "`N` available now."
+- `0 < count < quantity`: "Only `N` available now, the rest may be unfulfilled."
+- `count === 0`: an "Out of Stock" badge, plus "Out of Stock now. You can still submit, but it may be unfulfilled."
+- Essential ticked and `count < quantity` (zero included): an added line - "Essential: if there aren't enough
+  units, nothing will be reserved and your request stays pending until enough are free" - reflecting
+  `reserveGroup`'s actual all-or-nothing behaviour (a 409, nothing written), not a promise of staff follow-up.
+- No type selected, or the quantity typed is empty/zero/negative/non-integer, or the window-filtered fetch is
+  still in flight or has errored: no count/badge/warning is shown at all, to avoid a misleading zero.
+
+**The type dropdown lists the full equipment catalogue, not just types with units free for this window.** Before
+this story, the dropdown was built from the same window-filtered list as the count, so a fully booked or fully
+retired type was invisible rather than selectable-and-flagged - the "Out of Stock" case had no way to be reached.
+`EquipmentRequestPage.jsx` now also passes its already-fetched, unwindowed `GET /api/equipment` catalogue down as
+`allEquipment`; the form builds the dropdown from that instead. A type with every unit retired is treated like any
+other type at zero availability, not specially excluded - `UNAVAILABLE` (retired) isn't more permanent than
+`MAINTENANCE`/`DAMAGED` at the data level, and Technical Support can restore a retired unit straight back to
+`AVAILABLE` (see *Operational status changes* below).
+
+**Loading and a fetch error both have to be told apart from a genuine zero.** `availableResult?.key === windowKey`
+being false (no result yet for the current window) and a resolved error both leave `availableEquipment` as the
+same empty array a real stockout would produce. `EquipmentRequestPage.jsx` derives `isAvailabilityUnknown` from
+both conditions and passes it down so the form suppresses its message rather than flashing "Out of Stock" on every
+window edit, or stacking a false stockout on top of the page's own "Could not check equipment availability" banner.
+
+Deliberately not built: live polling or refetch-on-window-focus, so an already-open form won't pick up a
+reservation someone else makes elsewhere until the coordinator edits the borrow window themselves. A pre-existing
+limitation of this whole live-computed-availability approach (SCRUM-29), not introduced here - just more visible
+now that a number is on screen.
+
 ## Operational status changes, audit, and retire-flagging (SCRUM-103)
 
 Every write to `equipment.status` (the quick-status `PATCH /equipment/:id/status`,

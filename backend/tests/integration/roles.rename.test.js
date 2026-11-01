@@ -6,9 +6,12 @@ const require = createRequire(import.meta.url);
 const createApp = require("../../src/app");
 const { getPermissions } = require("../../src/auth/permissions");
 const EVENT_ID = "aaaaaaaa-0001-0000-0000-000000000000";
+// SCRUM-171 removed events.cancel from this list - the lead's unconditional
+// cancel access is gone; events.postpone (unchanged) is the lead's only
+// remaining active-stage write on someone else's event.
 const LEAD_PERMISSIONS = [
   "event_organisers.read", "events.assign", "events.assign_coordinator",
-  "events.cancel", "events.postpone", "events.review", "internal.access",
+  "events.postpone", "events.review", "internal.access",
 ];
 let roles, stored, server, base;
 const repository = { findById: vi.fn(), cancel: vi.fn(), postpone: vi.fn(), transitionStatus: vi.fn() };
@@ -87,15 +90,16 @@ test("[SCRUM-142-INT-003] legacy, canonical and duplicate roles combine without 
   ].sort());
 });
 
+// SCRUM-171: previously 200 for both identifiers (the lead could cancel any
+// event unconditionally) - that access is now removed, so both the canonical
+// and legacy identifier get the same 403 as any other non-assigned caller.
 test.each([
   ["004", "event_coordinator_lead"], ["005", "event_ops_manager"],
-])("[SCRUM-142-INT-%s] %s can cancel an event assigned to someone else", async (_id, role) => {
+])("[SCRUM-142-INT-%s] %s cannot cancel an event assigned to someone else", async (_id, role) => {
   roles = [role];
   const response = await send(`/api/internal/events/${EVENT_ID}/cancel`, "POST", { reason: "Duplicate booking" });
-  expect(response.status).toBe(200);
-  expect((await response.json()).event).toMatchObject({ status: "CANCELLED", cancelled_by: "lead" });
-  expect(repository.cancel).toHaveBeenCalledWith(EVENT_ID,
-    expect.objectContaining({ cancellation_reason: "Duplicate booking", cancelled_by: "lead" }), undefined);
+  expect(response.status).toBe(403);
+  expect(repository.cancel).not.toHaveBeenCalled();
 });
 
 test.each([

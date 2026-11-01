@@ -36,6 +36,13 @@ test.describe("SCRUM-162 hold conversion — database constraint", () => {
   // would fail with 23P01 because the function tried to confirm both the
   // pending booking row and the hold row in one UPDATE statement.
   test("TC-SCRUM-162-12: approving a converted hold does not violate the exclusion constraint", async () => {
+    // SCRUM-163: the actual installed trigger must capture canonical ownership before conversion.
+    const before = await supabase.from("venue_hold_notification_state").select("*").eq("hold_id", scenario.holdRow.id).single();
+    expect(before.error, before.error?.message).toBeNull();
+    expect(before.data).toMatchObject({ coordinator_id: scenario.coordinator.id, event_id: scenario.event.id,
+      venue_id: scenario.venue.id, venue_name: scenario.venue.name, event_name: scenario.event.name,
+      ended_at: null, warning_id: null, expired_id: null });
+    expect(Date.parse(before.data.expires_at)).toBe(Date.parse(scenario.holdRow.expires_at));
     const { data, error } = await supabase.rpc("decide_venue_booking_request", {
       p_request_id: scenario.request.id,
       p_decision: "confirmed",
@@ -48,6 +55,11 @@ test.describe("SCRUM-162 hold conversion — database constraint", () => {
 
     // Booking row confirmed, hold row cancelled — in that order of logic
     expect(await slotStatuses(scenario.request.id)).toEqual(["cancelled", "confirmed"]);
+    const after = await supabase.from("venue_hold_notification_state").select("*").eq("id", before.data.id).single();
+    expect(after.error, after.error?.message).toBeNull();
+    expect(after.data.ended_at).not.toBeNull();
+    expect(Date.parse(after.data.ended_at)).toBeLessThan(Date.parse(after.data.expires_at));
+    expect(after.data.expired_id).toBeNull();
   });
 
   // TC-SCRUM-162-13: on rejection the hold's request_id is cleared (not cancelled)

@@ -45,7 +45,7 @@ async function setup(t, rows) {
       pending = structuredClone(rows); prepared = true;
       return { data: rows.length, error: null };
     }
-    if (["enqueue_assignment_notifications", "enqueue_waitlist_offer_reminders"].includes(name)) return { data: 0, error: null };
+    if (["enqueue_assignment_notifications", "enqueue_waitlist_offer_reminders", "enqueue_venue_hold_notifications"].includes(name)) return { data: 0, error: null };
     if (name === "claim_notification_outbox") return { data: structuredClone(pending), error: null };
     if (name === "validate_waitlist_offer_reminder") return { data: current, error: null };
     if (name === "finish_notification_outbox") {

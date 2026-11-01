@@ -330,16 +330,18 @@ test("SCRUM-98/148/149 failure: without storage configured, the actions answer 5
 });
 
 // ---------------------------------------------------------------------------
-// SCRUM-148: cancel. Same router/controller/service as review above, with a
-// different permission (events.cancel: assigned coordinator OR coordinator lead,
-// unlike events.decide's coordinator-only) and no single "from" status.
+// SCRUM-148: cancel. Same router/controller/service as review above, with its
+// own permission (events.cancel) and no single "from" status. SCRUM-171
+// narrowed events.cancel to the assigned coordinator only - unlike
+// events.postpone below, the coordinator lead no longer gets an unconditional
+// bypass here.
 // ---------------------------------------------------------------------------
 
 test.each(["", "invalid"])("SCRUM-148: an unauthenticated caller (%j) cannot cancel", async (token) => {
   expect((await post("cancel", token, { reason: "x" })).status).toBe(401);
 });
 
-test.each(["event_organiser", "venue_staff", "technical_support_staff", "attendee", "unknown"])(
+test.each(["event_organiser", "venue_staff", "technical_support_staff", "attendee", "unknown", "event_coordinator_lead"])(
   "[TC-148-04] %s cannot cancel an event", async (role) => {
     expect((await post("cancel", `${ASSIGNED}:${role}`, { reason: "x" })).status).toBe(403);
     expect(repository.cancel).not.toHaveBeenCalled();
@@ -366,13 +368,15 @@ test("[TC-148-01] the assigned coordinator cancels their own event; release runs
   expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledWith(EVENT_ID);
 });
 
-test("[TC-148-02] the coordinator lead cancels an event not assigned to them", async () => {
+// SCRUM-171: previously 200 (the lead could cancel any event) - the lead's
+// unconditional cancel access is now removed, so this is a 403 like any other
+// non-assigned caller.
+test("[TC-148-02] the coordinator lead cannot cancel an event not assigned to them", async () => {
   const response = await post("cancel", `${MANAGER}:event_coordinator_lead`, { reason: "Duplicate booking" });
 
-  expect(response.status).toBe(200);
-  expect((await response.json()).event.status).toBe("CANCELLED");
-  // No coordinatorId is passed for an coordinator-lead caller - they may cancel any event.
-  expect(repository.cancel).toHaveBeenCalledWith(EVENT_ID, expect.objectContaining({ cancelled_by: MANAGER }), undefined);
+  expect(response.status).toBe(403);
+  expect(repository.cancel).not.toHaveBeenCalled();
+  expect(stored.status).toBe("SUBMITTED");
 });
 
 test("[TC-148-05] a reassignment between the access check and the write is a 409, nothing recorded", async () => {
@@ -676,13 +680,28 @@ test("[SCRUM-117-API-006] RPC failure is safe and records no success", async () 
   } finally { quiet.mockRestore(); }
 });
 
-test.each([["cancel", "CANCELLED"], ["postpone", "POSTPONED"]])(
-  "[SCRUM-117-API-007] coordinator and lead may %s a returned request", async (action, status) => {
-    for (const token of [ASSIGNED + ":event_coordinator", MANAGER + ":event_coordinator_lead"]) {
-      stored.status = "CHANGES_REQUESTED";
-      const response = await post(action, token, { reason: "Plans changed" });
-      expect(response.status).toBe(200);
-      expect(stored.status).toBe(status);
-      expect(stored.coordinator_id).toBe(ASSIGNED);
-    }
-  });
+// SCRUM-171: previously both roles got 200 for cancel too - the lead's
+// unconditional cancel access is now removed, so this splits from one shared
+// case (cancel and postpone together) into cancel's own (assigned coordinator
+// only) and postpone's own (both, unchanged).
+test("[SCRUM-117-API-007] the assigned coordinator may cancel a returned request; the lead may not", async () => {
+  stored.status = "CHANGES_REQUESTED";
+  const denied = await post("cancel", MANAGER + ":event_coordinator_lead", { reason: "Plans changed" });
+  expect(denied.status).toBe(403);
+  expect(stored.status).toBe("CHANGES_REQUESTED");
+
+  const response = await post("cancel", ASSIGNED + ":event_coordinator", { reason: "Plans changed" });
+  expect(response.status).toBe(200);
+  expect(stored.status).toBe("CANCELLED");
+  expect(stored.coordinator_id).toBe(ASSIGNED);
+});
+
+test("[SCRUM-117-API-007] coordinator and lead may postpone a returned request", async () => {
+  for (const token of [ASSIGNED + ":event_coordinator", MANAGER + ":event_coordinator_lead"]) {
+    stored.status = "CHANGES_REQUESTED";
+    const response = await post("postpone", token, { reason: "Plans changed" });
+    expect(response.status).toBe(200);
+    expect(stored.status).toBe("POSTPONED");
+    expect(stored.coordinator_id).toBe(ASSIGNED);
+  }
+});

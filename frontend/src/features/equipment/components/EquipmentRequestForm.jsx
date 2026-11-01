@@ -9,20 +9,41 @@ import { useState } from "react";
 // all-or-nothing at reserve time instead of allowing partial fulfillment -
 // see equipment.validation.js's planReservation.
 //
-// The type list itself still comes from equipmentOptions (units free for
-// this exact window) - a type with zero units free right now won't appear
-// to pick at all, even though an over-request would otherwise be accepted.
-// Showing every catalogue type regardless of current availability, plus a
-// live count next to it, is SCRUM-169's job (see the task note's SCRUM-169
-// interaction section), not reopened here.
-function EquipmentRequestForm({ equipmentOptions, borrowWindow, onWindowChange, onSubmit, isSaving, saveError }) {
+// SCRUM-169: the type list comes from `allEquipment` (the full catalogue,
+// unfiltered by this window) so a type with zero units free right now is
+// still selectable and can show the "Out of Stock" state below - the old
+// equipmentOptions-only list hid it entirely. The live count/warning itself
+// stays keyed off `equipmentOptions` (window-filtered), and is a warning
+// only: it never disables Submit (SCRUM-31 Decision 4; SCRUM-169 Decision 2
+// in the task note).
+function EquipmentRequestForm({ equipmentOptions, allEquipment, isAvailabilityUnknown, borrowWindow, onWindowChange, onSubmit, isSaving, saveError }) {
   const [selectedType, setSelectedType] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [isEssential, setIsEssential] = useState(false);
   const [technicalRequirement, setTechnicalRequirement] = useState("");
   const { start, end } = borrowWindow;
 
-  const types = [...new Set(equipmentOptions.map((item) => item.type))].sort();
+  const types = [...new Set(allEquipment.map((item) => item.type))].sort();
+
+  // "Available now", not "available" - a PENDING sibling holds no unit
+  // (SCRUM-31 Decision 3), so this count is "currently unreserved", not a
+  // guarantee. isAvailabilityUnknown covers both "no result yet" and "the
+  // fetch errored" - the parent's in-flight state, a fetch failure and a
+  // real zero-unit result are all otherwise just an empty equipmentOptions
+  // array, so the page's own error banner (shown above this form) is left
+  // as the only message rather than stacking a false "Out of Stock" on it.
+  const showAvailability = Boolean(selectedType) && !isAvailabilityUnknown;
+  const availableCount = showAvailability
+    ? equipmentOptions.filter((item) => item.type === selectedType).length
+    : 0;
+  const hasValidQuantity = Number.isInteger(quantity) && quantity >= 1;
+  const isOutOfStock = showAvailability && availableCount === 0;
+  const isShortfall = showAvailability && hasValidQuantity && availableCount > 0 && availableCount < quantity;
+  // Essential is all-or-nothing at reserve time (planReservation): a
+  // shortfall - including zero, which is just availableCount < quantity's
+  // own zero case - means Reserve will refuse the whole group, not partially
+  // fill it.
+  const showEssentialWarning = showAvailability && isEssential && hasValidQuantity && availableCount < quantity;
 
   function handleSubmit(event) {
     event.preventDefault();
@@ -103,6 +124,27 @@ function EquipmentRequestForm({ equipmentOptions, borrowWindow, onWindowChange, 
           Essential — the event can't go ahead without the full amount (no partial fulfillment)
         </label>
       </div>
+
+      {showAvailability && (
+        <div className="eq-availability">
+          {isOutOfStock ? (
+            <>
+              <span className="eq-status eq-status-unavailable">Out of Stock</span>
+              <p className="eq-hint">Out of Stock now. You can still submit, but it may be unfulfilled.</p>
+            </>
+          ) : isShortfall ? (
+            <p className="eq-hint">Only {availableCount} available now, the rest may be unfulfilled.</p>
+          ) : (
+            <p className="eq-hint">{availableCount} available now.</p>
+          )}
+          {showEssentialWarning && (
+            <p className="eq-hint eq-essential-warning">
+              Essential: if there aren't enough units, nothing will be reserved and your request stays pending
+              until enough are free.
+            </p>
+          )}
+        </div>
+      )}
 
       {saveError && (
         <p className="eq-error" role="alert">

@@ -144,7 +144,8 @@ and managed events under `/api/managed-events`. Inside any router, declare stati
 | Assignment | `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` | `internal.access` + `events.assign_coordinator` |
 | Review | `POST /api/internal/events/:eventId/{start-review,approve,reject}` | `internal.access` + `events.decide`; assigned coordinator only |
 | Confirmation | `POST /api/internal/events/:eventId/confirm`, `PATCH /api/internal/events/:eventId/arrangements/:kind/:requestId` | `internal.access` + `events.decide`; assigned coordinator only; confirm only from `PREPARATION` (SCRUM-144) |
-| Cancellation, postponement | `POST /api/internal/events/:eventId/cancel`, `POST /api/internal/events/:eventId/postpone` | `internal.access` + `events.cancel` / `events.postpone`; assigned coordinator or Event Coordinator Lead |
+| Cancellation | `POST /api/internal/events/:eventId/cancel` | `internal.access` + `events.cancel`; assigned coordinator only (SCRUM-171 removed the lead's unconditional access) |
+| Postponement | `POST /api/internal/events/:eventId/postpone` | `internal.access` + `events.postpone`; assigned coordinator or Event Coordinator Lead |
 | Safety check | `GET /api/internal/events/:eventId/safety-readiness`, `POST /api/internal/events/:eventId/{submit-safety-check,withdraw-safety-check}` | `internal.access` + `events.safety.submit`, assigned coordinator only |
 | Safety review | `GET /api/internal/safety-reviews`, `GET /api/internal/safety-reviews/:eventId` | `internal.access` + `events.safety.read` (Safety Officer); `SAFETY_REVIEW` events only |
 | Safety decision | `POST /api/internal/safety-reviews/:eventId/{approve,reject}` | `internal.access` + `events.safety.decide` (Safety Officer); `SAFETY_REVIEW` events only; writes `event_activity_log` |
@@ -313,8 +314,12 @@ Returned-request notification queueing is documented in docs/notifications.md; t
 SCRUM-117 saved-edit correction (24 October 2026): an events trigger records internal REQUEST_BASELINE_RECORDED snapshots at submission/resubmission in event_activity_log. Organiser PATCH preserves this baseline. The assigned coordinator detail derives request_changes from current saved fields and that baseline; internal snapshots never appear in public activity responses. Resubmission compares against this baseline and advances it transactionally. See docs/notifications.md for the applied SQL.
 
 
+SCRUM-163 reuses the notification worker/inbox for venue-hold warnings and expiry facts. Private venue_hold_notification_state tracks immutable hold generations and per-cohort delivery IDs; existing venue release/approval logic remains intact. The exact one-time manual SQL and workflow contract are in docs/venue-integration.md. Local tests never contact shared Supabase.
+
 ### SCRUM-43 registration notification extension
 
 The same delivery worker independently prepares assignment history, registration history and due offer reminders before claiming the shared outbox. Registration/waitlist triggers save change history with business writes; sending occurs outside those transactions. Each reminder is validated against the current owned offer immediately before sending. Reuse the current /notifications identity and UI; no new permission or route. Manual schema/workflow setup is documented in docs/notifications.md and must precede live use.
 
 An expired notification claim is retryable, distinct from an obsolete offer. The worker isolates failed retry-storage writes per claimed row so remaining notifications can proceed.
+
+PR #68 integration: the shared notification worker retains both waitlist-offer and venue-hold validation, prepares all four work sources independently, and keeps per-row retry-storage failure isolation. Local fixtures model both families together; the two exported PostgreSQL fixture families run in separate disposable databases.

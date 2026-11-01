@@ -78,9 +78,11 @@ const policies = Object.freeze({
   "events.safety.read": { roles: ["safety_officer"], label: "Operational safety review" },
   // SCRUM-141: deciding is a separate write grant; same pool, so no record check.
   "events.safety.decide": { roles: ["safety_officer"] },
-  // SCRUM-148/142: the lead may cancel any active event; coordinators must still be assigned.
-  "events.cancel": { roles: ["event_coordinator", "event_coordinator_lead"], record: true },
-  // SCRUM-149/142: postponement uses the same assigned-coordinator or lead access as cancellation.
+  // SCRUM-171: narrowed from SCRUM-148/142 - the lead's unconditional cancel access is
+  // removed; only the event's assigned coordinator may cancel it now.
+  "events.cancel": { roles: ["event_coordinator"], record: true },
+  // SCRUM-149/142: postponement grants the assigned coordinator or the lead unconditionally -
+  // unchanged by SCRUM-171, which narrowed events.cancel above but not this one.
   "events.postpone": { roles: ["event_coordinator", "event_coordinator_lead"], record: true },
   "internal.access": {
     roles: [
