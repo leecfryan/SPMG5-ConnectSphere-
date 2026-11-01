@@ -30,10 +30,12 @@ export default function RegistrationForm({
         <div key={field.id}>
           <label htmlFor={`reg-${field.id}`}>
             {field.label}
+            <span className="field-required" aria-hidden="true">{field.required ? " (required)" : " (optional)"}</span>
           </label>
           <input
             id={`reg-${field.id}`}
             type={field.type ?? "text"}
+            aria-label={field.label}
             required={field.required}
             maxLength={500}
             disabled={busy || disabled}
