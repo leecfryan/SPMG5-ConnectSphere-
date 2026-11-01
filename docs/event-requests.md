@@ -312,7 +312,9 @@ event's **assigned coordinator** may act: `events.safety.submit` is a `record: t
 reuses `review.routes.js#assignedToCaller`.
 
 - **Ready** means nothing essential is missing. Since SCRUM-144 a request its coordinator marked non-essential
-  (`is_essential = false`) is listed under `optional` instead and does not block; see SCRUM-144 below.
+  (`is_essential = false`) is listed under `optional` instead and does not block; see SCRUM-144 below. Since
+  SCRUM-38 a confirmed venue booking flagged as affected (after an event change, or by SCRUM-145) does not count as
+  booked; it is listed with its reason (see the venue guide's SCRUM-38 section).
   - Venue: at least one booking request is booked, meaning every slot that isn't `cancelled` is
     `confirmed`. A request with a `pending` slot is missing ("Waiting for Venue Staff to decide.").
     Fully rejected or cancelled requests are ignored. With nothing booked and nothing pending, the

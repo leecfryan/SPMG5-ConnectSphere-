@@ -324,6 +324,38 @@ item link, so it is given no event id and shows no link — a link there would n
 one anchor in another. The Venue Staff side still reaches the list from
 **Venues → Venue booking requests**.
 
+## Re-validating bookings after an event change (SCRUM-38)
+
+When an event's own details change (date, attendance, venue or equipment requirements), its venue bookings are
+checked again so an arrangement that no longer fits is not kept. `venuesService.revalidateBookingsForEvent(eventId)`
+(`venueRevalidation.js`, exported from `venues.service.js`) does this. It has no route of its own: it is called by
+the code that applies the change.
+
+- **Which bookings.** Every booking of the event with a pending or confirmed slot that is not already affected.
+  Cancelled, rejected and already-affected bookings are skipped; an affected booking keeps the reason it was given.
+- **The checks.** SCRUM-138's three checks, unchanged (the shared `createBookingChecker`, which the booking-checks
+  endpoint now also uses), plus two against the event's current details (`venueBookingChecks.js#eventFitReasons`):
+  - the booking date is outside the event's dates (Singapore dates, as at submission);
+  - **over capacity**: the event's expected attendance is above the combined capacity of the event's live bookings
+    on that date, so a multi-venue day is judged as a whole.
+- **Failing bookings** are marked affected through SCRUM-145's `mark_venue_booking_affected`, with the reason
+  `After the event changed: <reasons>`. The coordinator's venue card already shows the venue name, the reason, and
+  SCRUM-145's **Find a replacement venue** and release actions. **Passing bookings are not written to at all.**
+- **Privacy.** The checks run in the event coordinator's scope, so another event in a clash is named
+  `Reserved event` (the SCRUM-138 rule), never by its real name.
+- **Failure.** Each booking is checked and marked on its own; one that throws is logged and the rest continue.
+- **Safety check.** A confirmed booking that is affected no longer counts as the event's venue in the safety-check
+  and confirmation readiness (`safetyReadiness.js#checkArrangements`); it is listed as missing with its reason until
+  the coordinator replaces or releases it. This also applies to bookings SCRUM-145 marks by hand.
+- Returns `{ checked, flagged: [{ booking_id, venue_name, reason }] }`. No schema change, route or permission.
+
+**Hand-off for SCRUM-165 (applying an accepted change request).** After the accepted changes are written to the
+event, call `revalidateBookingsForEvent(event.id)` once. Inject it the same way review routes receive
+`releaseVenueBookingsForCancelledEvent` (`app.js`: `venuesService?.revalidateBookingsForEvent`). Apply the changes
+to the event as it stands (`APPROVED`); sending it back to `SUBMITTED` for re-approval would reach
+`review.service.js#approve`, which still releases every venue booking (SCRUM-37) and would undo "passing bookings are
+left unchanged". Treat a thrown error as logged-only, like the release calls: the change itself has already been saved.
+
 ## Changing or cancelling one venue booking (SCRUM-154)
 
 A coordinator may change or cancel a single venue booking request on their own event without

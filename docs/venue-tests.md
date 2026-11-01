@@ -794,3 +794,34 @@ focused rerun passed all three SCRUM-145 cases, `TC-SCRUM-145-01`,
 PR #62 CI correction (2026-10-24): TC-SCRUM-154-LIVE-01/02/04 snapshot existing event history before the booking operation. Successful operations must preserve all previous entries and append exactly one entry with the expected action and details; refusal must leave the history identical. This accommodates SCRUM-117 baseline entries without ignoring unexpected writes. These live cases require a new CI or human run; the agent does not execute them against shared Supabase.
 
 Offline verification on 2026-10-24: backend lint passed, and Vitest passed 1,173 tests with `tests/live/**` and the six shared-database integration suites excluded. These results do not count as execution of TC-SCRUM-154-LIVE-01/02/04; their updated assertions await CI.
+
+# SCRUM-38 — Re-validate venue bookings after an event change
+
+> As an Event Coordinator, I want affected venue arrangements to be reconsidered after a event change so that an
+> unsuitable or conflicting venue arrangement is not retained. Venue bookings will have to be re validated when there
+> is a change to event details including date, venue and equipment requirements. Bookings that fail are flagged with
+> the venue name and the reason (e.g. "over capacity", "clashes with Event X", "venue unavailable"). Bookings that
+> pass are left unchanged. The coordinator can request a replacement venue for a failed booking.
+
+Design and the SCRUM-165 hand-off: [venue integration — SCRUM-38](venue-integration.md#re-validating-bookings-after-an-event-change-scrum-38).
+Requirements are numbered R1–R4 in the order of the description above.
+
+| Epic | Scrum-# | AC # | Type | Test Case ID | Test Scenario | Pre-conditions | Test Steps | Test Data | Expected Result | Created By* | Date of Creation* | Actual Result | Pass / Fail / Not Executed / Blocked | Remarks | Executed By | Date of Execution |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Venue | SCRUM-38 | R2 | Happy | TC-SCRUM-38-01 | A booking that still fits the changed event has no event-fit reason | Event on 2099-10-10, 80 expected | `eventFitReasons` | Booking 2099-10-10, capacity 100 | No reason | Agent | 2026-10-30 | As expected | Pass | `backend/tests/unit/venues/venueRevalidation.test.js` | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R2 | Negative | TC-SCRUM-38-02 | A booking outside the event's new dates is flagged | Same event | `eventFitReasons` | Bookings 2099-10-09, 2099-10-11 | "…is outside the event's dates (2099-10-10 to 2099-10-10)." | Agent | 2026-10-30 | As expected | Pass | same file | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R2 | Boundary | TC-SCRUM-38-03 | Attendance at and one above the booked capacity | Capacity 80 | `eventFitReasons` | 80, then 81 expected | 80 passes; 81 gives "Over capacity: … hold 80, fewer than the 81 people now expected." | Agent | 2026-10-30 | As expected | Pass | same file | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R2 | Boundary | TC-SCRUM-38-04 | Two venues on one date together hold enough | 80 expected | `revalidateBookingsForEvent` | Venues of 50 and 40 on 2099-10-10 | Nothing flagged, nothing written | Agent | 2026-10-30 | As expected | Pass | same file | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R2 | Negative | TC-SCRUM-38-05 | Nothing recorded to compare | Event without dates or attendance | `eventFitReasons` | nulls | No reason | Agent | 2026-10-30 | As expected | Pass | same file | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R1–R3 | Happy | TC-SCRUM-38-06 | Only the failing booking is flagged; the passing one is untouched | One fitting venue (200), one too small and on the wrong date | `revalidateBookingsForEvent` | Capacity 20 on 2099-10-11 | One flag with the venue name and "After the event changed: …outside…Over capacity…"; `markVenueBookingAffected` called exactly once, for the failing booking | Agent | 2026-10-30 | As expected | Pass | same file | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R3 | Negative | TC-SCRUM-38-07 | Affected, cancelled and rejected bookings are skipped | Three such bookings | `revalidateBookingsForEvent` | — | `checked: 0`; nothing marked | Agent | 2026-10-30 | As expected | Pass | same file | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R2 | Failure | TC-SCRUM-38-08 | One booking cannot be marked | Mark throws for the first booking | `revalidateBookingsForEvent` | Two failing bookings | Error logged; the second is still marked and reported | Agent | 2026-10-30 | As expected | Pass | same file | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R2 | Cross-cutting | TC-SCRUM-38-09 | A clash never reveals the other event's name | Another event confirmed on the same slot | `revalidateBookingsForEvent` | "Secret board meeting" | Reason contains "Reserved event", not the real name | Agent | 2026-10-30 | As expected | Pass | same file | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R2–R4 | Negative | TC-SCRUM-38-10 | A confirmed but affected booking does not pass the safety check | Only venue is affected | `checkArrangements` | Affected reason | Listed as missing with its reason; no booked venue. Non-essential: optional, still "no venue" | Agent | 2026-10-30 | As expected | Pass | `backend/tests/unit/events/safetyReadiness.test.js` | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R4 | Happy | (SCRUM-145) | Replacement for a flagged booking | Booking affected | SCRUM-145 flow | — | Search and replacement request work unchanged | — | — | Covered by `TC-SCRUM-145-01…09` | Pass (existing) | Reused, not re-tested | — | — |
+| Venue | SCRUM-38 | R1 | Happy | TC-SCRUM-38-11 | Re-validation runs when an accepted change request is applied | SCRUM-165 built | Accept a change request that raises attendance | — | Over-capacity booking flagged; others unchanged | Agent | 2026-10-30 | — | Not Executed | Blocked on SCRUM-165 (the only place event details change after approval); to be automated in SCRUM-165's tests | — | — |
+
+Also: SCRUM-138's booking-checks endpoint now uses the shared `createBookingChecker`; its existing tests
+(`tests/integration/venueBookingChecks.test.js`, `tests/unit/venues/venueBookingChecks.test.js`) pass unchanged.
+Coverage (2026-10-30): `venueRevalidation.js` 47/47 statements, 25/25 branches; `eventFitReasons` and the new
+`checkArrangements` branch fully covered.
