@@ -75,6 +75,8 @@ for (const role of ['event_organiser', 'attendee', 'technical_support_staff']) {
     const account = await accounts.create([role]);
     await page.goto(`/venues/${venueId}/edit`);
     await signIn(page, account);
+    await expect(page).toHaveURL(/\/account$/);
+    await page.goto(`/venues/${venueId}/edit`);
     await expect(page).toHaveURL(/\/forbidden$/);
     await expect(page.getByRole('link', { name: 'Venues', exact: true })).toHaveCount(0);
   });
@@ -84,6 +86,8 @@ test('[VENUE-E2E-004] Venue Staff cannot enter coordinator-only booking URLs', a
   const staff = await accounts.create(['venue_staff']);
   await page.goto(`/venues/${venueId}/booking-request`);
   await signIn(page, staff);
+  await expect(page).toHaveURL(/\/account$/);
+  await page.goto(`/venues/${venueId}/booking-request`);
   await expect(page).toHaveURL(/\/forbidden$/);
 });
 

@@ -12,6 +12,6 @@ const proxy = {
 
 export default defineConfig({
   plugins: [react(), babel({ presets: [reactCompilerPreset()] })],
-  server: { proxy },
+  server: { proxy, watch: { usePolling: true, interval: 500 } },
   preview: { proxy },
 })

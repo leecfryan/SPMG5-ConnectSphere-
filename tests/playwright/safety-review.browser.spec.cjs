@@ -29,8 +29,11 @@ test('[E2E-SAFETY-REVIEW-001] SCRUM-140: the Safety Officer opens the queue on a
   await expect(venues.getByRole('heading', { level: 3 })).toContainText('Integration Hall');
   await expect(venues.getByText('Venue capacity')).toBeVisible();
   await expect(page.getByRole('region', { name: 'Reserved equipment' })).toContainText('No equipment is reserved for this event.');
-  // SCRUM-141: the only controls beyond Sign out are the two safety decisions.
-  await expect(page.getByRole('button')).toHaveText(['Approve', 'Reject', 'Sign out']);
+  // SCRUM-141: scope the two decisions to the review, independent of sidebar controls.
+  const decisions = page.getByRole('region', { name: 'Safety decision', exact: true });
+  await expect(decisions.getByRole('button')).toHaveText(['Approve', 'Reject']);
+  await expect(page.locator('#workspace-content').getByRole('button')).toHaveCount(2);
+  await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
@@ -56,7 +59,7 @@ test('[E2E-SAFETY-REVIEW-002] SCRUM-141: on a phone the Safety Officer rejects w
   await signIn(page, first);
   await expect(page.getByRole('link', { name: 'My assigned events', exact: true })).toBeVisible();
   await page.goto(`/assigned-events/${event.id}`);
-  await expect(page.locator('.status-badge')).toHaveText('Approved – planning');
+  await expect(page.locator('.request-detail-status .status-badge')).toHaveText('Approved – planning');
   const history = page.getByRole('region', { name: 'Activity history' });
   await expect(history.getByRole('listitem')).toHaveCount(1);
   await expect(history).toContainText('Safety arrangement rejected');

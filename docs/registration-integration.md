@@ -183,3 +183,22 @@ requires database-level enforcement beyond these application tests.
 
 The shared CI workflow remains intact: frontend tests/lint/build, all backend
 tests/checks, Docker validation/build, and browser/API acceptance tests.
+
+
+## Attendee visual refresh (30 October 2026)
+
+The attendee pages retain their routes, API requests, registration-window/capacity
+checks, waitlist actions and original submit/withdraw handlers. Discovery adds
+client-side search, venue-city, inclusive from-date and availability filters, plus
+date/name sorting and an empty-result reset. Unknown capacity does not qualify for
+the places-available filter. Clear filters also resets sorting.
+
+The detail form appears in a sticky desktop summary and stacks on phones. Progress
+describes the actual details → saved registration flow; it does not imply a payment
+or confirmed-registration stage. Required/optional labels supplement native field
+validation. My registrations filters statuses without hiding offers or waitlists.
+Registration details display the existing event name/date when available.
+
+New focused checks extend `AttendeeAccess.test.jsx`, `MyRegistrationsOffers.test.jsx`
+and `App.test.jsx`; existing registration/browser/API regression cases are retained.
+The shared visual and responsive contract is in [the UI reference](../.agent/docs/ui.md).

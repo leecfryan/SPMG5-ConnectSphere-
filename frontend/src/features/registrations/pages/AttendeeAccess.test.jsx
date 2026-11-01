@@ -134,3 +134,66 @@ test("[ATT-UI-006] Changing the registration ID removes the previous record whil
     headers: { Authorization: "Bearer attendee-a-token" },
   }));
 });
+
+
+const discoveryEvents = [
+  { ...event, id: "beta", name: "Beta workshop", start_time: "2099-10-11T10:00:00Z", venue_booking_requests: [{ venue: { name: "Community Hall", city: "Singapore" } }] },
+  { ...event, id: "alpha", name: "Alpha talk", description: "Design for everyone", start_time: "2099-10-12T10:00:00Z", slots_remaining: 0, venue_booking_requests: [{ venue: { name: "Design Hall", city: "London" } }] },
+  { ...event, id: "gamma", name: "Gamma meet-up", start_time: null, slots_remaining: undefined },
+];
+
+test("Discovery combines search, location, date and availability and clears back to the complete list", async () => {
+  const user = userEvent.setup();
+  mount("/events", { "/api/events": reply({ events: discoveryEvents }), "/api/events/registration-windows": reply({ windows: [] }) });
+  const list = await screen.findByRole("list", { name: "Available events" });
+  expect(within(list).getAllByRole("link")).toHaveLength(3);
+  await user.type(screen.getByLabelText("Search events"), "attendee-facing");
+  await user.selectOptions(screen.getByLabelText("Location"), "Singapore");
+  await user.type(screen.getByLabelText("From date"), "2099-10-11");
+  await user.selectOptions(screen.getByLabelText("Availability"), "available");
+  expect(within(list).getAllByRole("link")).toHaveLength(1);
+  expect(within(list).getByRole("link", { name: /Beta workshop/ })).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Clear filters" }));
+  expect(within(list).getAllByRole("link")).toHaveLength(3);
+  expect(screen.getByLabelText("Search events")).toHaveValue("");
+  expect(screen.getByLabelText("Location")).toHaveValue("");
+  expect(screen.getByLabelText("From date")).toHaveValue("");
+});
+
+test("Discovery treats unknown capacity separately from available places and keeps full events reachable", async () => {
+  const user = userEvent.setup();
+  mount("/events", { "/api/events": reply({ events: discoveryEvents }), "/api/events/registration-windows": reply({ windows: [] }) });
+  await screen.findByRole("list", { name: "Available events" });
+  await user.selectOptions(screen.getByLabelText("Availability"), "available");
+  expect(screen.queryByRole("link", { name: /Gamma meet-up/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /Alpha talk/ })).not.toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText("Availability"), "full");
+  expect(screen.getByRole("link", { name: /Alpha talk/ })).toHaveAttribute("href", "/events/alpha");
+  expect(screen.queryByRole("link", { name: /Beta workshop/ })).not.toBeInTheDocument();
+});
+
+test("Discovery sorts copies, places undated events last and provides recovery for no matches", async () => {
+  const user = userEvent.setup();
+  const original = discoveryEvents.map(item => item.id);
+  mount("/events", { "/api/events": reply({ events: discoveryEvents }), "/api/events/registration-windows": reply({ windows: [] }) });
+  const list = await screen.findByRole("list", { name: "Available events" });
+  expect(within(list).getAllByRole("link").map(link => link.getAttribute("href"))).toEqual(["/events/beta", "/events/alpha", "/events/gamma"]);
+  await user.selectOptions(screen.getByLabelText("Sort by"), "name");
+  expect(within(list).getAllByRole("link")[0]).toHaveAttribute("href", "/events/alpha");
+  expect(discoveryEvents.map(item => item.id)).toEqual(original);
+  await user.type(screen.getByLabelText("Search events"), "no such experience");
+  expect(screen.getByRole("heading", { name: "No events match your filters" })).toBeVisible();
+  await user.click(screen.getAllByRole("button", { name: "Clear filters" })[0]);
+  expect(screen.getByRole("list", { name: "Available events" })).toBeVisible();
+});
+
+test("Discovery exposes a retry after an outage and recovers without reloading the application", async () => {
+  let unavailable = true;
+  const user = userEvent.setup();
+  mount("/events", { "/api/events": () => unavailable ? reply({ message: "Events are temporarily unavailable. Please try again." }, 503) : reply({ events: [event] }), "/api/events/registration-windows": reply({ windows: [] }) });
+  expect(await screen.findByRole("alert")).toHaveTextContent("Events are temporarily unavailable");
+  unavailable = false;
+  await user.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByRole("list", { name: "Available events" })).toBeVisible();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});

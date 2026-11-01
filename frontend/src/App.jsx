@@ -42,8 +42,9 @@ export default function App() {
   return (
     <AuthProvider>
       <div className="app-shell">
-        <header className="brand"><span className="brand-mark" aria-hidden="true">C</span>ConnectSphere</header>
-        <main className={fullWorkspace ? "venue-workspace" : location.pathname === "/events/new" ? "wide" : undefined}>
+        <a className="skip-link" href="#main-content">Skip to content</a>
+        <header className="brand"><span className="brand-mark" aria-hidden="true">C</span>ConnectSphere<span className="brand-caption">Extraordinary starts here.</span></header>
+        <main id="main-content" tabIndex={-1} className={fullWorkspace ? "venue-workspace" : location.pathname === "/events/new" ? "wide" : undefined}>
           <aside className="intro">
             <p className="eyebrow">EVENT PLANNING & VENUE BOOKING</p>
             <h2>Great events.<br />Connected people.</h2>
