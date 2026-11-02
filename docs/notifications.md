@@ -655,7 +655,9 @@ outside the original assignment AC, explicitly requested as an extension.
 The hooks cover the Technical Support dashboard status action and requests flagged
 by the existing equipment-retirement operation. The reporting actor is included
 among recipients if they hold that role. No venue staff broadcast is included.
-Cancellation/postponement notifications remain pending recipient ownership rules.
+Cancellation notifications remain pending recipient ownership rules. Postponement
+notifications (SCRUM-170) go to the organiser and registered attendees; see
+*Event postponed notifications* below.
 
 The original validation, permission checks, status writes, reservation selection,
 retirement messages and response bodies remain. An optional notification service
@@ -1842,3 +1844,31 @@ execute function public.enqueue_venue_booking_decision_notification();
 
 commit;
 ```
+
+
+## Event postponed notifications — SCRUM-170
+
+When the assigned coordinator postpones an event, `postpone_event` (SQL in
+[event-requests.md](event-requests.md#schema-reference--scrum-170)) queues one `event-postponed` row each for the
+organiser and every attendee whose registration is `pending` or `confirmed`, in the same transaction as the
+postponement. Withdrawn registrations, waitlist entries and deleted accounts get none. A refused or repeated
+postponement queues nothing, because the function stops before writing anything. The existing worker delivers the
+rows; no new endpoint, permission or environment variable is needed.
+
+Payload: `eventId`, `eventName`, `reason`, `newStart` (null without a new date), `message` ("<event> has been
+postponed. A new date has not been set yet.", or "<event> has been postponed to <d Mon yyyy>." in Singapore time when
+a new date was given) and `requestPath` (`/my-event-requests/<eventId>` for the organiser, `/registrations/me` for
+attendees).
+
+### Create the Novu workflow
+
+In the same environment as the existing workflows, create **Event postponed** with identifier exactly
+`event-postponed` and one **In-App** step:
+
+- Subject: `Event postponed: {{payload.eventName | escape}}`
+- Body: `{{payload.message | escape}} Reason: {{payload.reason | escape}}`
+- Payload validation (if enabled): every field is a required string except `newStart`, which must allow `null`
+- Redirect (same tab): `{{payload.requestPath}}`
+
+Keep it transactional (Critical if offered) and HMAC security enabled. Until the workflow exists, queued rows stay
+pending and are retried; nothing else is affected.

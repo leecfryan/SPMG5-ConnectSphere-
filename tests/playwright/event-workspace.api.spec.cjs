@@ -269,8 +269,10 @@ test('[SCRUM-36-API-002] SCRUM-36: coordinator is denied the change-request endp
   expect(denied.status()).toBe(403);
 });
 
+// SCRUM-170 AC1 (PO confirmed 2026-11-02): previously the lead postponed here. The
+// lead is now refused and changes nothing; the assigned coordinator postpones once.
 for (const [id, role] of [['001', 'event_coordinator_lead'], ['002', 'event_ops_manager']]) {
-  test(`[SCRUM-142-MERGE-API-${id}] ${role} postpones another coordinator's event and releases its equipment`, async ({ accounts, request }) => {
+  test(`[SCRUM-142-MERGE-API-${id}][TC-SCRUM-170-02] ${role} cannot postpone another coordinator's event; the assigned coordinator can, once`, async ({ accounts, request }) => {
     const { headers, event, first, date, update } = await setupWorkflow(accounts, request);
     expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
     await accounts.updateEvent(event.id, { status: 'APPROVED' });
@@ -289,18 +291,25 @@ for (const [id, role] of [['001', 'event_coordinator_lead'], ['002', 'event_ops_
     const bookingId = (await bookingResponse.json()).data.id;
     const lead = await accounts.create([role]);
     const leadHeaders = { Authorization: 'Bearer ' + (await accounts.session(lead)).access_token };
-    const postpone = await request.post(`/api/internal/events/${event.id}/postpone`, { headers: leadHeaders, data: { reason: 'Date pending' } });
+    const slotStatuses = async () => (await (await request.get(`/api/venues/booking-requests/${bookingId}`, { headers: headers.first })).json()).data.slots.map(slot => slot.status);
+    const equipmentStatus = async () => (await (await request.get(equipmentPath, { headers: headers.first })).json()).data.find(item => item.id === equipmentId).status;
+    const slotsBefore = await slotStatuses();
+    const equipmentBefore = await equipmentStatus();
+
+    const denied = await request.post(`/api/internal/events/${event.id}/postpone`, { headers: leadHeaders, data: { reason: 'Date pending' } });
+    expect(denied.status()).toBe(403);
+    expect(await slotStatuses()).toEqual(slotsBefore);
+    expect(await equipmentStatus()).toBe(equipmentBefore);
+
+    const postpone = await request.post(`/api/internal/events/${event.id}/postpone`, { headers: headers.first, data: { reason: 'Date pending' } });
     expect(postpone.status()).toBe(200);
-    expect((await postpone.json()).event).toMatchObject({ status: 'POSTPONED', postponed_by: lead.id, postponement_reason: 'Date pending' });
-    const booking = await request.get(`/api/venues/booking-requests/${bookingId}`, { headers: headers.first });
-    expect(booking.status()).toBe(200);
-    expect((await booking.json()).data.slots.map(slot => slot.status)).toEqual(['cancelled']);
-    const equipment = await request.get(equipmentPath, { headers: headers.first });
-    expect(equipment.status()).toBe(200);
-    expect((await equipment.json()).data.find(item => item.id === equipmentId).status).toBe('RELEASED');
-    expect((await request.post(`/api/internal/events/${event.id}/postpone`, { headers: leadHeaders, data: { reason: 'Repeat' } })).status()).toBe(409);
-    // SCRUM-171: cancel is assigned-coordinator-only now, so the lead who postponed
-    // it cannot be the one to cancel it - that's the assigned coordinator's call.
+    expect((await postpone.json()).event).toMatchObject({ status: 'POSTPONED', postponed_by: first.id, postponement_reason: 'Date pending' });
+    expect(await slotStatuses()).toEqual(['cancelled']);
+    expect(await equipmentStatus()).toBe('RELEASED');
+    // TC-SCRUM-170-06: postponing again is refused and changes nothing.
+    expect((await request.post(`/api/internal/events/${event.id}/postpone`, { headers: headers.first, data: { reason: 'Repeat' } })).status()).toBe(409);
+    expect(await slotStatuses()).toEqual(['cancelled']);
+    // SCRUM-171: cancel is assigned-coordinator-only, so the lead cannot cancel it either.
     expect((await request.post(`/api/internal/events/${event.id}/cancel`, { headers: leadHeaders, data: { reason: 'No replacement date' } })).status()).toBe(403);
     const cancel = await request.post(`/api/internal/events/${event.id}/cancel`, { headers: headers.first, data: { reason: 'No replacement date' } });
     expect(cancel.status()).toBe(200);
@@ -310,6 +319,53 @@ for (const [id, role] of [['001', 'event_coordinator_lead'], ['002', 'event_ops_
     expect((await released.json()).data.find(item => item.id === equipmentId).status).toBe('RELEASED');
   });
 }
+
+// SCRUM-170 phase 2: postponing with a new date checks each booking on that date
+// through the real backend; the fitting booking moves, the blocked one is released.
+test('[TC-SCRUM-170-20][TC-SCRUM-170-21][TC-SCRUM-170-22] postponing to a new date moves the booking that still fits and releases the blocked one', async ({ accounts, request }) => {
+  const { headers, event, first, date, update } = await setupWorkflow(accounts, request);
+  expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
+  await accounts.updateEvent(event.id, { status: 'APPROVED' });
+  const book = async (slot) => {
+    const response = await request.post(`/api/venues/${venueId}/booking-requests`, { headers: headers.first, data: {
+      event_id: event.id, booking_date: date, slots: [slot], expected_attendees: 30, room_layout: 'Theatre', required_facilities: ['Projector'],
+    } });
+    expect(response.status()).toBe(201);
+    return (await response.json()).data.id;
+  };
+  // The fixture venue has setup and turnaround time, so each booking also needs its
+  // neighbouring slot free (SCRUM-134). Morning needs AM and PM; night needs PM and Night.
+  const morning = await book('am');
+  const night = await book('night');
+  const newDate = new Date(Date.parse(date + 'T00:00:00Z') + 7 * 86400000).toISOString().slice(0, 10);
+  const staff = await accounts.create(['venue_staff']);
+  const staffHeaders = { Authorization: 'Bearer ' + (await accounts.session(staff)).access_token };
+  expect((await request.post(`/api/venues/${venueId}/unavailability`, { headers: staffHeaders, data: {
+    start_date: newDate, end_date: newDate, slots: ['night'], reason: 'Floor resurfacing',
+  } })).status()).toBe(201);
+
+  const postpone = await request.post(`/api/internal/events/${event.id}/postpone`, { headers: headers.first, data: {
+    reason: 'Roof repairs', new_start_time: newDate + 'T00:00:00Z', new_end_time: newDate + 'T15:00:00Z',
+  } });
+
+  expect(postpone.status()).toBe(200);
+  const body = await postpone.json();
+  expect(body.event).toMatchObject({ status: 'POSTPONED', start_time: newDate + 'T00:00:00.000Z', postponement_reason: 'Roof repairs' });
+  expect(body.venue_recheck).toHaveLength(2);
+  expect(body.venue_recheck).toEqual(expect.arrayContaining([
+    expect.objectContaining({ booking_id: morning, new_booking_date: newDate, slots: ['am'], passed: true, reasons: [] }),
+    expect.objectContaining({ booking_id: night, new_booking_date: newDate, slots: ['night'], passed: false,
+      reasons: ['Night is recorded unavailable (Floor resurfacing).'] }),
+  ]));
+  const booking = async (id) => (await (await request.get(`/api/venues/booking-requests/${id}`, { headers: headers.first })).json()).data;
+  expect(await booking(morning)).toMatchObject({ booking_date: newDate, slots: [{ slot: 'am', status: 'pending' }] });
+  expect((await booking(night)).slots.map(slot => slot.status)).toEqual(['cancelled']);
+  const detail = await (await request.get(`/api/event-workspace/coordinator/${event.id}`, { headers: headers.first })).json();
+  expect(detail.event.activity.find(entry => entry.action === 'EVENT_POSTPONED')).toMatchObject({ new_start: newDate + 'T00:00:00.000Z' });
+  // TC-SCRUM-170-24: postponing again is refused and the moved booking stays where it is.
+  expect((await request.post(`/api/internal/events/${event.id}/postpone`, { headers: headers.first, data: { reason: 'Again' } })).status()).toBe(409);
+  expect(await booking(morning)).toMatchObject({ booking_date: newDate, slots: [{ slot: 'am', status: 'pending' }] });
+});
 
 // SCRUM-164: update event information during planning.
 test('[TC-SCRUM-164-E2E-API-01] AC2: edit is locked once the event moves past SUBMITTED', async ({ accounts, request }) => {

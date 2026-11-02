@@ -38,6 +38,16 @@ test("an ordinary-edit entry shows a friendly label and names the changed fields
   expect(screen.getByText(/Changed: description\. No re-approval needed/)).toBeInTheDocument();
 });
 
+test("[TC-SCRUM-170-12] a postponement entry is labelled Event postponed and shows its reason", () => {
+  render(<EventActivityHistory activity={[{
+    id: "a3", action: "EVENT_POSTPONED", created_at: "2026-11-02T10:00:00Z", note: "Speaker unavailable.",
+  }]} />);
+
+  expect(screen.getByText(/Event postponed/)).toBeInTheDocument();
+  expect(screen.getByText("Reason: Speaker unavailable.")).toBeInTheDocument();
+  expect(screen.queryByText(/EVENT_POSTPONED/)).not.toBeInTheDocument();
+});
+
 test("an unmapped action falls back to the raw string rather than hiding it", () => {
   render(<EventActivityHistory activity={[{ id: "a1", action: "something.unexpected", created_at: null, note: null }]} />);
 

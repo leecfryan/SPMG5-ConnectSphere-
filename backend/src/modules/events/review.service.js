@@ -5,6 +5,20 @@ function readNote(note) {
   return { ok: true, note: note.trim() || null };
 }
 
+// SCRUM-170: a postponement's optional new date. Both ends or neither; the start
+// in the future and the end after it, the same rule as a submitted event's dates.
+function readNewSchedule(start, end) {
+  const blank = (value) => value === undefined || value === null || value === "";
+  if (blank(start) && blank(end)) return { ok: true, start: null, end: null };
+  if (blank(start) || blank(end)) return { ok: false, reason: "new_date_incomplete" };
+  const startMillis = typeof start === "string" ? Date.parse(start) : NaN;
+  const endMillis = typeof end === "string" ? Date.parse(end) : NaN;
+  if (Number.isNaN(startMillis) || Number.isNaN(endMillis)) return { ok: false, reason: "new_date_invalid" };
+  if (startMillis <= Date.now()) return { ok: false, reason: "new_start_past" };
+  if (endMillis <= startMillis) return { ok: false, reason: "new_end_before_start" };
+  return { ok: true, start: new Date(startMillis).toISOString(), end: new Date(endMillis).toISOString() };
+}
+
 function createReviewService({ repository }) {
   async function move(eventId, coordinatorId, from, to, extra = {}) {
     const event = await repository.transitionStatus(eventId, from, to, extra, coordinatorId);
@@ -123,39 +137,51 @@ function createReviewService({ repository }) {
     return { ok: true, event };
   }
 
-  // SCRUM-149 AC1/AC3: same shape as cancel() - the assigned coordinator or
-  // the coordinator lead, a required reason, gated on repository.postpone's own
-  // POSTPONABLE_STATUSES (not ACTIVE_STATUSES, so an already-postponed event
-  // can't be postponed again). Reuses the same venue release call cancel()
-  // uses, synchronously - it releases every venue_bookings row tied to the
-  // event regardless of why the event changed.
+  // SCRUM-170: the assigned coordinator postpones with a required reason; a new
+  // date is optional (AC2). repository.postpone is one database transaction that
+  // also handles the event's venue bookings and holds, writes its history and
+  // queues its notifications, so a refused or repeated postpone (AC3) changes
+  // and sends nothing. With a new date, the venue checks run first and only
+  // bookings that pass on the new date are moved; the rest are released.
   //
-  // SCRUM-150: equipment release on postpone reuses the exact same function
-  // cancel() calls above; releaseReservationsForEvent never reads
-  // events.status, so the same call is correct here without any new
-  // equipment-side code path. (A reschedule releases the same way too, as of
-  // SCRUM-37's team design - see approve()/reject() above.)
-  async function postpone(eventId, actorId, reason, { isCoordinatorLead = false, equipmentService, releaseVenueBookingsForCancelledEvent } = {}) {
+  // SCRUM-150: equipment is still released here, by the same call cancel()
+  // makes. The postponement is already saved by then, so a release failure is
+  // logged rather than reported as a failed postponement.
+  async function postpone(eventId, actorId, reason, { equipmentService, checkVenuesForNewDates, newStart, newEnd } = {}) {
     const parsed = readNote(reason);
     // A distinct key from cancel's "reason_required" - same FAILURES map in
     // review.controller.js, different message ("postponing" vs "cancelling").
     if (!parsed.ok || parsed.note === null) return { ok: false, reason: "postpone_reason_required" };
+    const schedule = readNewSchedule(newStart, newEnd);
+    if (!schedule.ok) return { ok: false, reason: schedule.reason };
 
-    const extra = {
-      postponed_by: actorId,
-      postponed_at: new Date().toISOString(),
-      postponement_reason: parsed.note,
-    };
-    const event = await repository.postpone(eventId, extra, isCoordinatorLead ? undefined : actorId);
+    let venueRecheck = null;
+    if (schedule.start) {
+      const current = await repository.findById(eventId);
+      if (!current) return { ok: false, reason: "not_found" };
+      try {
+        venueRecheck = await checkVenuesForNewDates(current, schedule.start, schedule.end);
+      } catch (error) {
+        console.error(`postpone ${eventId}: venue checks for the new date failed:`, error.message);
+        return { ok: false, reason: "venue_check_unavailable" };
+      }
+    }
+    const moves = (venueRecheck ?? []).filter((result) => result.passed)
+      .map((result) => ({ request_id: result.booking_id, booking_date: result.new_booking_date }));
+
+    const event = await repository.postpone(eventId, actorId, parsed.note, { newStart: schedule.start, newEnd: schedule.end, moves });
     if (!event) {
       const existing = await repository.findById(eventId);
       return { ok: false, reason: existing ? "conflict" : "not_found" };
     }
 
-    await equipmentService?.releaseReservationsForEvent?.(eventId, actorId);
-    await releaseVenueBookingsForCancelledEvent?.(eventId);
+    try {
+      await equipmentService?.releaseReservationsForEvent?.(eventId, actorId);
+    } catch (error) {
+      console.error(`postpone ${eventId}: equipment release failed:`, error.message);
+    }
 
-    return { ok: true, event };
+    return { ok: true, event, venueRecheck };
   }
 
   async function requestChanges(eventId, coordinatorId, note) {

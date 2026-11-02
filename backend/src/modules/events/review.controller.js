@@ -6,6 +6,11 @@ const FAILURES = Object.freeze({
   note_required: [400, "Give a reason for rejecting this request."],
   reason_required: [400, "Give a reason for cancelling this event."],
   postpone_reason_required: [400, "Give a reason for postponing this event."],
+  new_date_incomplete: [400, "Give both a new start and a new end, or leave both empty."],
+  new_date_invalid: [400, "The new start and end must be valid dates and times."],
+  new_start_past: [400, "The new start must be in the future."],
+  new_end_before_start: [400, "The new end must be after the new start."],
+  venue_check_unavailable: [503, "We couldn't check the venues for the new date, so the event was not postponed. Please try again."],
   not_found: [404, "That event request no longer exists."],
   conflict: [409, "This event request has changed since you opened it. Refresh to see its current status."],
 });
@@ -28,9 +33,8 @@ function createReviewController(repository, cancelDependencies = {}) {
     };
   }
 
-  // SCRUM-171: a cancel caller is always the assigned coordinator now - the
-  // coordinator-lead bypass from SCRUM-148 was removed, so there is no
-  // isCoordinatorLead to derive here any more (postpone below still has its own).
+  // SCRUM-171/170: cancel and postpone callers are always the assigned
+  // coordinator - the coordinator-lead bypasses were removed.
   async function cancel(req, res) {
     try {
       const result = await review.cancel(req.params.eventId, req.user.id, req.body?.reason, cancelDependencies);
@@ -43,13 +47,15 @@ function createReviewController(repository, cancelDependencies = {}) {
     }
   }
 
-  // SCRUM-149: same shape as cancel - isCoordinatorLead is derived from the
-  // verified session, not trusted from the body.
+  // Only the reason and the optional new start/end are read from the body;
+  // anything else, such as a status, is ignored.
   async function postpone(req, res) {
     try {
-      const isCoordinatorLead = req.user.roles.includes("event_coordinator_lead");
-      const result = await review.postpone(req.params.eventId, req.user.id, req.body?.reason, { isCoordinatorLead, ...cancelDependencies });
-      if (result.ok) return res.json({ event: result.event });
+      const result = await review.postpone(req.params.eventId, req.user.id, req.body?.reason, {
+        ...cancelDependencies, newStart: req.body?.new_start_time, newEnd: req.body?.new_end_time,
+      });
+      // SCRUM-170: with a new date, which venues moved and which were released, and why.
+      if (result.ok) return res.json({ event: result.event, venue_recheck: result.venueRecheck });
       const [status, message] = FAILURES[result.reason];
       return res.status(status).json({ message });
     } catch (error) {

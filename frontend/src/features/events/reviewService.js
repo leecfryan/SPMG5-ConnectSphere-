@@ -23,10 +23,12 @@ export function cancelEvent(eventId, reason, token) {
     .then((body) => body.event);
 }
 
-// SCRUM-149: same shape as cancelEvent.
-export function postponeEvent(eventId, reason, token) {
-  return apiFetch(`/api/internal/events/${eventId}/postpone`, token, { method: "POST", body: { reason } })
-    .then((body) => body.event);
+// SCRUM-149/170: a required reason and an optional new start and end. With a
+// new date the server also reports which venues moved and which were released.
+export function postponeEvent(eventId, reason, token, { newStart, newEnd } = {}) {
+  const body = newStart || newEnd ? { reason, new_start_time: newStart, new_end_time: newEnd } : { reason };
+  return apiFetch(`/api/internal/events/${eventId}/postpone`, token, { method: "POST", body })
+    .then((result) => ({ event: result.event, venueRecheck: result.venue_recheck ?? null }));
 }
 
 export function requestEventChanges(eventId, note, token) {

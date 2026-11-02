@@ -54,6 +54,15 @@ function setup(scope, initial, { userId = "coord-1", events } = {}) {
     else if (options.method === "POST" && url.endsWith("/confirm")) event = { ...event, status: "CONFIRMED" };
     else if (options.method === "POST" && url.endsWith("/approve")) event = { ...event, status: "APPROVED", ...DECISION };
     else if (options.method === "POST" && url.endsWith("/reject")) event = { ...event, status: "REJECTED", ...DECISION, approval_rejection_remark: JSON.parse(options.body).note };
+    else if (options.method === "POST" && url.endsWith("/postpone")) {
+      const { reason, new_start_time: newStart = null, new_end_time: newEnd } = JSON.parse(options.body);
+      event = { ...event, status: "POSTPONED", postponed_at: "2099-10-05T02:30:00Z", postponement_reason: reason,
+        ...(newStart ? { start_time: newStart, end_time: newEnd } : {}),
+        activity: [{ id: "postponed", action: "EVENT_POSTPONED", new_start: newStart, created_at: "2099-10-05T02:30:00Z", note: reason }, ...(event.activity ?? [])] };
+      if (newStart) return ok({ event, venue_recheck: [
+        { booking_id: "req-1", venue_name: "Marina Hall", new_booking_date: "2099-11-12", slots: ["am"], passed: true, reasons: [] },
+      ] });
+    }
     else throw new Error("Unexpected test request: " + url);
     return ok({ event });
   });
@@ -418,9 +427,8 @@ test("[SCRUM-117-UI-005] organiser reads the saved clarification and keeps owner
   expect(screen.queryByRole("button", { name: "Return for changes" })).not.toBeInTheDocument();
 });
 
-// SCRUM-171: cancel is assigned-coordinator-only now - the manager (lead) scope
-// keeps postpone but lost cancel, so this split from one shared assertion into
-// a coordinator case (both actions) and a manager case (postpone only).
+// SCRUM-171 made cancel, and SCRUM-170 made postpone, assigned-coordinator-only,
+// so the manager (lead) scope now offers neither.
 test("[SCRUM-117-UI-006] coordinator may cancel/postpone but cannot reassign or approve a returned event", async () => {
   setup("coordinator", { status: "CHANGES_REQUESTED", activity: [] });
   await screen.findByText("Changes requested", { selector: ".status-badge" });
@@ -432,11 +440,77 @@ test("[SCRUM-117-UI-006] coordinator may cancel/postpone but cannot reassign or 
   expect(screen.getByText(/clarification message is unavailable/)).toBeVisible();
 });
 
-test("[SCRUM-117-UI-006] manager may postpone but not cancel, reassign or approve a returned event", async () => {
+// SCRUM-170: everyone who can open a postponed event sees that it is postponed and
+// that its dates are the original ones. Postponing is not offered again.
+test.each(["organiser", "coordinator", "manager"])(
+  "[TC-SCRUM-170-12] the %s sees a postponed event clearly marked, with its original dates", async (scope) => {
+    setup(scope, { status: "POSTPONED", postponement_reason: "Speaker unavailable.", start_time: "2099-10-05T02:30:00Z", activity: [] },
+      { userId: scope === "organiser" ? "org-1" : "coord-1" });
+
+    const notice = await screen.findByRole("region", { name: "This event is postponed" });
+    expect(notice).toHaveTextContent("No new date has been set yet.");
+    expect(notice).toHaveTextContent("Speaker unavailable.");
+    expect(screen.getByText("Original start", { selector: "dt" })).toBeInTheDocument();
+    expect(screen.getByText("Original end", { selector: "dt" })).toBeInTheDocument();
+    expect(screen.queryByText("Start", { selector: "dt" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Postpone event" })).not.toBeInTheDocument();
+  });
+
+test.each(["SUBMITTED", "APPROVED", "CONFIRMED"])(
+  "[TC-SCRUM-170-13] the lead sees no postpone action on a %s event, which the assigned coordinator would see", async (status) => {
+    setup("manager", { status, activity: [] });
+    expect(await screen.findByRole("heading", { name: "Digital Literacy for Seniors" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Postpone event" })).not.toBeInTheDocument();
+    cleanup();
+
+    setup("coordinator", { status, activity: [] });
+    expect(await screen.findByRole("region", { name: "Postpone event" })).toBeInTheDocument();
+  });
+
+test("[TC-SCRUM-170-12] an event that is not postponed keeps its plain Start and End and shows no notice", async () => {
+  setup("coordinator", { status: "APPROVED", activity: [] });
+
+  expect(await screen.findByText("Start", { selector: "dt" })).toBeInTheDocument();
+  expect(screen.getByText("End", { selector: "dt" })).toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "This event is postponed" })).not.toBeInTheDocument();
+});
+
+test("[TC-SCRUM-170-01] the assigned coordinator postpones with a reason and the reloaded page shows the notice", async () => {
+  const { fetchMock, user } = setup("coordinator", { status: "APPROVED", activity: [] });
+
+  const postponeSection = await screen.findByRole("region", { name: "Postpone event" });
+  await user.type(within(postponeSection).getByLabelText("Reason"), "Speaker unavailable.");
+  await user.click(within(postponeSection).getByRole("button", { name: "Postpone event" }));
+
+  const notice = await screen.findByRole("region", { name: "This event is postponed" });
+  expect(notice).toHaveTextContent("Speaker unavailable.");
+  expect(posts(fetchMock)).toEqual([`/api/internal/events/${EVENT_ID}/postpone`]);
+  expect(screen.getByText("Postponed", { selector: ".status-badge" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Arrange venue bookings" })).not.toBeInTheDocument();
+});
+
+test("[TC-SCRUM-170-20] the coordinator postpones to a new date and sees the new dates and which venues moved", async () => {
+  const { fetchMock, user } = setup("coordinator", { status: "APPROVED", start_time: "2099-11-05T01:00:00Z", activity: [] });
+
+  const postponeSection = await screen.findByRole("region", { name: "Postpone event" });
+  await user.type(within(postponeSection).getByLabelText("Reason"), "Roof repairs");
+  await user.type(within(postponeSection).getByLabelText("New start"), "2099-11-12T09:00");
+  await user.type(within(postponeSection).getByLabelText("New end"), "2099-11-12T17:00");
+  await user.click(within(postponeSection).getByRole("button", { name: "Postpone event" }));
+
+  const notice = await screen.findByRole("region", { name: "This event is postponed" });
+  expect(notice).toHaveTextContent(/New date: (12 Nov|Nov 12),? 2099/);
+  expect(screen.getByRole("region", { name: "Venues for the new date" })).toHaveTextContent("Marina Hall");
+  expect(screen.getByText("New start", { selector: "dt" })).toBeInTheDocument();
+  expect(screen.getByText("New end", { selector: "dt" })).toBeInTheDocument();
+  expect(posts(fetchMock)).toEqual([`/api/internal/events/${EVENT_ID}/postpone`]);
+});
+
+test("[SCRUM-117-UI-006][TC-SCRUM-170-13] manager may not postpone, cancel, reassign or approve a returned event", async () => {
   setup("manager", { status: "CHANGES_REQUESTED", activity: [] });
   await screen.findByText("Changes requested", { selector: ".status-badge" });
   expect(screen.queryByRole("button", { name: "Cancel event" })).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Postpone event" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Postpone event" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Save coordinator assignment" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Approve", exact: true })).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "Arrange venue bookings" })).not.toBeInTheDocument();
