@@ -39,5 +39,6 @@ export function decideChangeRequest(eventId, decision, reason, token) {
   return apiFetch(`/api/internal/events/${eventId}/decide-change-request`, token, {
     method: "POST",
     body: { decision, reason },
-  }).then((body) => body.event);
+  // SCRUM-38: the venue re-check summary comes back with the decision.
+  }).then((body) => ({ event: body.event, venueRecheck: body.venue_recheck ?? null }));
 }

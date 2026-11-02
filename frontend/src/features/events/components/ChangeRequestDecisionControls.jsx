@@ -50,7 +50,7 @@ export default function ChangeRequestDecisionControls({ event, onDecided }) {
       <p>Organiser&apos;s reason: {orgReason}</p>
       {fieldChanges.length > 0 && <EventFieldChanges changes={fieldChanges} />}
       {willRegress && (
-        <p role="note">Approving this change will return the event to Submitted for re-review, because it affects significant details (dates, expected attendance, or venue requirements). Arrangements stay in place until the coordinator re-approves.</p>
+        <p role="note">Approving this change will return the event to Submitted for re-review, because it affects significant details (dates, expected attendance, or venue requirements). Venue bookings are re-checked against the new details straight away, and any that no longer fit are flagged for a replacement (SCRUM-38). Equipment is released when the event is re-approved.</p>
       )}
       {error && <p className="error" role="alert">{error}</p>}
       <form aria-busy={busy}>

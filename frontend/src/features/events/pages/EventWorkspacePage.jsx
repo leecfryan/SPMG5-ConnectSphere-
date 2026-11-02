@@ -7,9 +7,10 @@ import { workspaces } from "../workspaces";
 import StatusBadge from "../components/StatusBadge";
 import DraftList from "../components/DraftList";
 import CoordinatorWorkloadOverview from "../components/CoordinatorWorkloadOverview";
+import { needsAttention } from "../venueAttention";
 import "../workspace.css";
 
-function EventList({ events, workspace, userId }) {
+function EventList({ events, workspace, userId, venueAttention }) {
   return <ul className="event-workspace-list event-request-list">
     {events.map(event => <li key={event.id}>
       <Link
@@ -24,6 +25,7 @@ function EventList({ events, workspace, userId }) {
           <div className="event-request-meta" id={`event-request-meta-${event.id}`}>
             <StatusBadge status={event.status} />
             {event.pending_change_request && <span className="status-badge status-change-pending">Change pending</span>}
+            {venueAttention?.has(event.id) && <span className="status-badge status-venue-attention">Venue needs attention</span>}
             <span><Icon name="account" size={15} />{event.coordinator_id ? "Coordinator assigned" : "Awaiting coordinator"}</span>
             {userId && <span className="event-request-ownership"><Icon name={event.organiser_id === userId ? "check" : "shield"} size={15} />{event.organiser_id === userId ? "You are responsible" : "View only"}</span>}
           </div>
@@ -32,6 +34,15 @@ function EventList({ events, workspace, userId }) {
       </Link>
     </li>)}
   </ul>;
+}
+
+// SCRUM-38: the coordinator's list marks events with a venue booking that no
+// longer fits, from one read of their booking requests. If that read fails the
+// list still shows; the event page itself reports the error.
+function CoordinatorEventList({ events, workspace }) {
+  const { data } = useApiResource("/api/venues/booking-requests");
+  const venueAttention = new Set((data?.data ?? []).filter(needsAttention).map(request => request.event?.id));
+  return <EventList events={events} workspace={workspace} venueAttention={venueAttention} />;
 }
 
 export default function EventWorkspacePage({ scope }) {
@@ -69,7 +80,7 @@ export default function EventWorkspacePage({ scope }) {
     </>}
     {/* Mounted while loading too, so Refresh events keeps the Lead's filters. */}
     {scope === "manager" && <CoordinatorWorkloadOverview events={data?.events ?? []} path={workspace.path} refreshKey={refreshKey} />}
-    {scope === "coordinator" && <EventList events={events} workspace={workspace} />}
+    {scope === "coordinator" && <CoordinatorEventList events={events} workspace={workspace} />}
     {scope === "organiser" && <Link to="/events/new">Submit an event request</Link>}
   </section>;
 }

@@ -21,6 +21,7 @@
 // (equipment.service.js) about the same equipment_requests data.
 
 const VENUE_PENDING = "Waiting for Venue Staff to decide.";
+const VENUE_AFFECTED = "This venue booking is flagged as no longer suitable. Find a replacement or release it.";
 const NO_VENUE = "No venue booking has been approved yet.";
 const EQUIPMENT_REASONS = Object.freeze({
   PENDING: "Waiting for Technical Support Staff to reserve it.",
@@ -44,6 +45,13 @@ function checkArrangements({ venueRequests, equipmentRequests }) {
 
   for (const request of venueRequests) {
     const state = venueState(request);
+    // SCRUM-38 (and SCRUM-145): a confirmed booking flagged as affected no
+    // longer fits the event, so it cannot count as the event's venue until the
+    // coordinator replaces or releases it.
+    if (state === "booked" && request.is_affected === true) {
+      outstanding(request, { kind: "venue", label: `${request.venue.name} · ${request.booking_date}`, reason: request.affected_reason || VENUE_AFFECTED });
+      continue;
+    }
     if (state === "booked") booked = true;
     if (state === "pending") {
       outstanding(request, { kind: "venue", label: `${request.venue.name} · ${request.booking_date}`, reason: VENUE_PENDING });

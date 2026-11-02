@@ -20,6 +20,8 @@ const { SLOTS, committedSlots } = require("./venues.availability");
 const {
   validateAgainstVenue,
   deriveRequestStatus,
+  localDateInTimeZone,
+  VENUE_TIME_ZONE,
 } = require("./venues.bookingRequests.validation");
 
 // A booking is live while any of its slots is still pending or confirmed.
@@ -165,9 +167,33 @@ function checkBooking(booking, venue, calendarDay, slotRows, eventId) {
   };
 }
 
+// SCRUM-38: checkBooking compares a booking with its own stored requirements.
+// After the event itself changes, the booking must also still fit the event:
+// its date inside the event's dates, and the venues booked on that date large
+// enough for everyone now expected. `capacityOnDate` is the combined capacity
+// of the event's live bookings on this booking's date, so a multi-venue day
+// is judged as a whole rather than venue by venue.
+function eventFitReasons(booking, event, capacityOnDate) {
+  const reasons = [];
+  const firstDay = event.start_time ? localDateInTimeZone(event.start_time, VENUE_TIME_ZONE) : null;
+  const lastDay = event.end_time ? localDateInTimeZone(event.end_time, VENUE_TIME_ZONE) : null;
+  if (firstDay && lastDay && (booking.booking_date < firstDay || booking.booking_date > lastDay)) {
+    reasons.push(`${booking.booking_date} is outside the event's dates (${firstDay} to ${lastDay}).`);
+  }
+  if (Number.isInteger(event.expected_attendance) && Number.isInteger(capacityOnDate) &&
+      event.expected_attendance > capacityOnDate) {
+    reasons.push(
+      `Over capacity: the venues booked on ${booking.booking_date} hold ${capacityOnDate}, ` +
+      `fewer than the ${event.expected_attendance} people now expected.`,
+    );
+  }
+  return reasons;
+}
+
 module.exports = {
   LIVE_SLOT_STATUSES,
   liveSlotNames,
   notCheckedResult,
   checkBooking,
+  eventFitReasons,
 };

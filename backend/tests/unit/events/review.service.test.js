@@ -90,16 +90,36 @@ test("[SCRUM-117-UNIT-005] a request deleted before the atomic return is not fou
 // committed by the time these release calls run, so a release throwing must
 // not look like the decision itself failed, and one release failing must
 // not stop the other from being attempted.
-test("TC-37-22: approve still reports ok, and still releases the venue, when the equipment release throws", async () => {
+// Updated for SCRUM-38 (Option A, agreed 2026-11-01): approve's venue step is
+// now a re-validation, not a release. The intent is SCRUM-37's and unchanged:
+// an equipment failure must not stop the venue step or fail the decision.
+test("TC-37-22: approve still reports ok, and still re-validates the venues, when the equipment release throws", async () => {
   vi.spyOn(console, "error").mockImplementation(() => {});
-  const releaseVenueBookingsForCancelledEvent = vi.fn(async () => {});
+  const revalidateVenueBookings = vi.fn(async () => {});
   const equipmentService = { releaseReservationsForEvent: vi.fn(async () => { throw new Error("db down"); }) };
 
-  const result = await review.approve("evt-1", "coord-1", null, { equipmentService, releaseVenueBookingsForCancelledEvent });
+  const result = await review.approve("evt-1", "coord-1", null, { equipmentService, revalidateVenueBookings });
 
   expect(result.ok).toBe(true);
-  expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledWith("evt-1");
+  expect(revalidateVenueBookings).toHaveBeenCalledWith("evt-1");
   expect(console.error).toHaveBeenCalled();
+});
+
+// SCRUM-38: the decision is already saved when venues are re-validated, so a
+// re-validation error is logged and approve still succeeds; venues are never
+// released on approve any more.
+test("[SCRUM-38] TC-SCRUM-38-18: approve still reports ok when venue re-validation throws, and releases no venues", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const revalidateVenueBookings = vi.fn(async () => { throw new Error("venue storage down"); });
+  const releaseVenueBookingsForCancelledEvent = vi.fn();
+  const equipmentService = { releaseReservationsForEvent: vi.fn(async () => {}) };
+
+  const result = await review.approve("evt-1", "coord-1", null, { equipmentService, revalidateVenueBookings, releaseVenueBookingsForCancelledEvent });
+
+  expect(result.ok).toBe(true);
+  expect(equipmentService.releaseReservationsForEvent).toHaveBeenCalledWith("evt-1", "coord-1");
+  expect(releaseVenueBookingsForCancelledEvent).not.toHaveBeenCalled();
+  expect(console.error).toHaveBeenCalledWith(expect.stringContaining("venue re-validation failed"), "venue storage down");
 });
 
 test("TC-37-23: reject still reports ok, and still releases equipment, when the venue release throws", async () => {

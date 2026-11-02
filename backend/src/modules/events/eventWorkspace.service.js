@@ -35,6 +35,21 @@ const ELIGIBLE_CHANGE_REQUEST_STATUSES = ["UNDER_REVIEW", "APPROVED"];
 // UNDER_REVIEW events have no live arrangements; no regression is needed there.
 const SIGNIFICANT_FIELDS = Object.freeze(["start_time", "end_time", "venue_requirements", "expected_attendance"]);
 
+// SCRUM-38: a change to any of these can make an existing venue booking stop
+// fitting, so an accepted change request re-validates the event's venues. It
+// is SCRUM-165's list plus equipment requirements, which the story names too.
+const VENUE_RECHECK_FIELDS = Object.freeze([...SIGNIFICANT_FIELDS, "equipment_needs"]);
+const TIME_FIELDS = Object.freeze(["start_time", "end_time"]);
+
+// Times compare as instants, so the same moment written in another format is
+// not a change.
+function changedField(field, before, after) {
+  if (TIME_FIELDS.includes(field)) {
+    return (before ? new Date(before).getTime() : null) !== (after ? new Date(after).getTime() : null);
+  }
+  return (before ?? null) !== (after ?? null);
+}
+
 function isCoordinator(user) {
   return Boolean(user && !user.deleted_at && user.email_confirmed_at &&
     !(new Date(user.banned_until).getTime() > Date.now()) &&
@@ -55,7 +70,7 @@ function isCoordinator(user) {
 // REVIEW_REQUIRED mechanism is therefore unreachable via this trigger now;
 // its own task note and docs/equipment-integration.md record why.
 
-function createEventWorkspaceService(client) {
+function createEventWorkspaceService(client, { revalidateVenueBookings } = {}) {
   async function unwrap(query) {
     const { data, error } = await query;
     if (error) throw error;
@@ -368,7 +383,24 @@ function createEventWorkspaceService(client) {
         console.error(`SCRUM-165 decide-change-request ${eventId}: notification enqueue failed:`, notifError.message);
       }
 
-      return { ok: true, event };
+      // SCRUM-38 R1: an accepted change to date, attendance, venue or equipment
+      // requirements re-validates the event's venue bookings; failures are
+      // flagged, passes left alone. The decision is already saved, so a
+      // re-validation error is logged, never returned as a failed decision.
+      // The summary goes back to the coordinator so they are told straight away
+      // which venues no longer fit; null means nothing needed re-checking.
+      let venueRecheck = null;
+      if (decision === "approve" &&
+          VENUE_RECHECK_FIELDS.some(field => Object.hasOwn(proposed, field) && changedField(field, current[field], proposed[field]))) {
+        try {
+          venueRecheck = (await revalidateVenueBookings?.(eventId)) ?? null;
+        } catch (error) {
+          console.error(`SCRUM-38 decide-change-request ${eventId}: venue re-validation failed:`, error.message);
+          venueRecheck = { failed: true };
+        }
+      }
+
+      return { ok: true, event, venue_recheck: venueRecheck };
     },
     async resubmitOrganiserEvent(userId, id, cycleId) {
       const current = await read("organiser", userId, id);
