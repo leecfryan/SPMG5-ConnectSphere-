@@ -141,7 +141,7 @@ describe.skipIf(!live)("Registration capacity against Supabase", () => {
     await createTemporaryEvent(2);
   });
 
-  afterEach(async () => {
+  async function cleanupTemporaryEvent() {
     if (!eventId) return;
     const currentEventId = eventId;
     eventId = undefined;
@@ -162,7 +162,9 @@ describe.skipIf(!live)("Registration capacity against Supabase", () => {
     if (cleanupErrors.length) {
       throw new Error(`Could not clean temporary live test data (${cleanupErrors.join("; ")})`);
     }
-  });
+  }
+
+  afterEach(cleanupTemporaryEvent);
 
   test("the approved event list and detail expose the live count and cap", async () => {
     const listed = await api(attendeeTokens[ATTENDEES[0]], "/api/events");
@@ -246,23 +248,7 @@ describe.skipIf(!live)("Registration capacity against Supabase", () => {
   afterAll(async () => {
     try {
       if (eventId && admin) {
-        const currentEventId = eventId;
-        eventId = undefined;
-        const { error: registrationsError } = await admin
-          .from("registrations")
-          .delete()
-          .eq("event_id", currentEventId);
-        const { error: eventError } = await admin
-          .from("events")
-          .delete()
-          .eq("id", currentEventId);
-        const cleanupErrors = [
-          registrationsError && `registrations: ${registrationsError.message}`,
-          eventError && `event: ${eventError.message}`,
-        ].filter(Boolean);
-        if (cleanupErrors.length) {
-          throw new Error(`Could not clean temporary live test data (${cleanupErrors.join("; ")})`);
-        }
+        await cleanupTemporaryEvent();
       }
     } finally {
       if (closeServer) await closeServer();
