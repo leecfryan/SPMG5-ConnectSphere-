@@ -81,15 +81,16 @@ async function insertEquipment({ type, status = "AVAILABLE" }) {
 // SCRUM-31: equipment_type and group_id are now required columns. This
 // fixture still inserts one row per physical unit (the pre-SCRUM-31 shape),
 // so it's "a group of one" - group_id is its own id, same as the migration
-// backfilled every existing row - and the type is resolved from the unit
-// it's already given, so every call site above is unchanged.
-async function insertRequest({ eventId, equipmentId, status = "APPROVED", borrowStart, borrowEnd }) {
+// backfilled every existing row. equipment_type is filled from the caller's
+// own `type` rather than re-reading the unit's row back from Supabase first
+// (SCRUM-148: that lookup was one of the sequential round-trips that made
+// this live-DB suite tip past the default 5s timeout under CI contention) -
+// every call site already generated the type it just gave insertEquipment.
+async function insertRequest({ eventId, equipmentId, type, status = "APPROVED", borrowStart, borrowEnd }) {
   const id = randomUUID();
-  const { data: unit, error: unitError } = await supabase.from("equipment").select("type").eq("id", equipmentId).single();
-  if (unitError) throw new Error("equipment lookup failed: " + unitError.message);
   const { error } = await supabase.from("equipment_requests").insert({
     id, event_id: eventId, equipment_id: equipmentId, requested_by: coordinatorUserId,
-    equipment_type: unit.type, group_id: id,
+    equipment_type: type, group_id: id,
     quantity_requested: 1, borrow_start: borrowStart, borrow_end: borrowEnd, status,
   });
   if (error) throw new Error("equipment_requests insert failed: " + error.message);
@@ -123,8 +124,9 @@ const equipmentService = createEquipmentService(supabase);
 describe("SCRUM-104 AC1: cancelling an event releases its equipment reservations", () => {
   test("[TC-SCRUM-104-01] an APPROVED request on a cancelled event moves to RELEASED", async () => {
     const eventId = await insertEvent();
-    const equipmentId = await insertEquipment({ type: freshType() });
-    const requestId = await insertRequest({ eventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
+    const type = freshType();
+    const equipmentId = await insertEquipment({ type });
+    const requestId = await insertRequest({ eventId, equipmentId, type, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
     const summary = await equipmentService.releaseReservationsForEvent(eventId);
 
@@ -138,10 +140,12 @@ describe("SCRUM-104 AC1: cancelling an event releases its equipment reservations
   // mattering. Already-REJECTED requests are still untouched.
   test("[TC-SCRUM-104-02] a REJECTED request on the same cancelled event is untouched; PENDING is now released (SCRUM-148)", async () => {
     const eventId = await insertEvent();
-    const pendingUnit = await insertEquipment({ type: freshType() });
-    const rejectedUnit = await insertEquipment({ type: freshType() });
-    const pendingRequest = await insertRequest({ eventId, equipmentId: pendingUnit, status: "PENDING", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
-    const rejectedRequest = await insertRequest({ eventId, equipmentId: rejectedUnit, status: "REJECTED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
+    const pendingType = freshType();
+    const pendingUnit = await insertEquipment({ type: pendingType });
+    const rejectedType = freshType();
+    const rejectedUnit = await insertEquipment({ type: rejectedType });
+    const pendingRequest = await insertRequest({ eventId, equipmentId: pendingUnit, type: pendingType, status: "PENDING", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
+    const rejectedRequest = await insertRequest({ eventId, equipmentId: rejectedUnit, type: rejectedType, status: "REJECTED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
     const summary = await equipmentService.releaseReservationsForEvent(eventId);
 
@@ -152,8 +156,9 @@ describe("SCRUM-104 AC1: cancelling an event releases its equipment reservations
 
   test("[TC-SCRUM-104-03] a future-dated APPROVED request is still released - not scoped to today", async () => {
     const eventId = await insertEvent();
-    const equipmentId = await insertEquipment({ type: freshType() });
-    const requestId = await insertRequest({ eventId, equipmentId, status: "APPROVED", borrowStart: isoNextWeek("00:00:00"), borrowEnd: isoNextWeek("23:59:59") });
+    const type = freshType();
+    const equipmentId = await insertEquipment({ type });
+    const requestId = await insertRequest({ eventId, equipmentId, type, status: "APPROVED", borrowStart: isoNextWeek("00:00:00"), borrowEnd: isoNextWeek("23:59:59") });
 
     const summary = await equipmentService.releaseReservationsForEvent(eventId);
 
@@ -163,8 +168,9 @@ describe("SCRUM-104 AC1: cancelling an event releases its equipment reservations
 
   test("[TC-SCRUM-104-08] running the release twice is a no-op the second time", async () => {
     const eventId = await insertEvent();
-    const equipmentId = await insertEquipment({ type: freshType() });
-    const requestId = await insertRequest({ eventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
+    const type = freshType();
+    const equipmentId = await insertEquipment({ type });
+    const requestId = await insertRequest({ eventId, equipmentId, type, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
     await equipmentService.releaseReservationsForEvent(eventId);
     const second = await equipmentService.releaseReservationsForEvent(eventId);
@@ -186,10 +192,12 @@ describe("SCRUM-104 AC1: cancelling an event releases its equipment reservations
   test("[TC-SCRUM-148-13] requests on a different, still-active event are untouched", async () => {
     const cancelledEventId = await insertEvent({ status: "CANCELLED" });
     const activeEventId = await insertEvent({ status: "APPROVED" });
-    const pendingUnit = await insertEquipment({ type: freshType() });
-    const approvedUnit = await insertEquipment({ type: freshType() });
-    const otherPending = await insertRequest({ eventId: activeEventId, equipmentId: pendingUnit, status: "PENDING", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
-    const otherApproved = await insertRequest({ eventId: activeEventId, equipmentId: approvedUnit, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
+    const pendingType = freshType();
+    const pendingUnit = await insertEquipment({ type: pendingType });
+    const approvedType = freshType();
+    const approvedUnit = await insertEquipment({ type: approvedType });
+    const otherPending = await insertRequest({ eventId: activeEventId, equipmentId: pendingUnit, type: pendingType, status: "PENDING", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
+    const otherApproved = await insertRequest({ eventId: activeEventId, equipmentId: approvedUnit, type: approvedType, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
     const summary = await equipmentService.releaseReservationsForEvent(cancelledEventId);
 
@@ -231,7 +239,7 @@ describe("SCRUM-104 AC2: the released quantity is available for new reservations
     const eventId = await insertEvent();
     const type = freshType();
     const equipmentId = await insertEquipment({ type });
-    await insertRequest({ eventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
+    await insertRequest({ eventId, equipmentId, type, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
     await equipmentService.releaseReservationsForEvent(eventId);
 
@@ -251,8 +259,8 @@ describe("SCRUM-104 AC2: the released quantity is available for new reservations
     const activeEventId = await insertEvent({ status: "APPROVED" });
     const type = freshType();
     const equipmentId = await insertEquipment({ type });
-    await insertRequest({ eventId: cancelledEventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
-    await insertRequest({ eventId: activeEventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
+    await insertRequest({ eventId: cancelledEventId, equipmentId, type, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
+    await insertRequest({ eventId: activeEventId, equipmentId, type, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
     await equipmentService.releaseReservationsForEvent(cancelledEventId);
 
@@ -271,7 +279,7 @@ describe("SCRUM-104 AC2: the released quantity is available for new reservations
     const eventId = await insertEvent({ status: "CANCELLED" });
     const type = freshType();
     const equipmentId = await insertEquipment({ type, status: "IN_USE" });
-    const requestId = await insertRequest({ eventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
+    const requestId = await insertRequest({ eventId, equipmentId, type, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
     // No call to releaseReservationsForEvent here - that's the point.
     const { base, server } = await startApp({ listReleasableEventIds: listLiveCancelledEventIds });
@@ -291,8 +299,9 @@ describe("SCRUM-104 AC2: the released quantity is available for new reservations
 describe("SCRUM-104 AC3: reserved equipment's status is automatically changed to available", () => {
   test("[TC-SCRUM-104-05] equipment manually stored IN_USE reverts to AVAILABLE once its only reservation is released", async () => {
     const eventId = await insertEvent();
-    const equipmentId = await insertEquipment({ type: freshType(), status: "IN_USE" });
-    await insertRequest({ eventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
+    const type = freshType();
+    const equipmentId = await insertEquipment({ type, status: "IN_USE" });
+    await insertRequest({ eventId, equipmentId, type, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
     const summary = await equipmentService.releaseReservationsForEvent(eventId);
 
@@ -306,9 +315,10 @@ describe("SCRUM-104 AC3: reserved equipment's status is automatically changed to
     const today = new Date().toISOString().slice(0, 10);
     const cancelledEventId = await insertEvent({ status: "CANCELLED" });
     const activeEventId = await insertEvent({ status: "APPROVED" });
-    const equipmentId = await insertEquipment({ type: freshType(), status: "IN_USE" });
-    await insertRequest({ eventId: cancelledEventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
-    await insertRequest({ eventId: activeEventId, equipmentId, status: "APPROVED", borrowStart: today + "T00:00:00Z", borrowEnd: today + "T23:59:59Z" });
+    const type = freshType();
+    const equipmentId = await insertEquipment({ type, status: "IN_USE" });
+    await insertRequest({ eventId: cancelledEventId, equipmentId, type, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
+    await insertRequest({ eventId: activeEventId, equipmentId, type, status: "APPROVED", borrowStart: today + "T00:00:00Z", borrowEnd: today + "T23:59:59Z" });
 
     const summary = await equipmentService.releaseReservationsForEvent(cancelledEventId);
 
@@ -318,8 +328,9 @@ describe("SCRUM-104 AC3: reserved equipment's status is automatically changed to
 
   test("[TC-SCRUM-104-07] a deliberately DAMAGED unit is never forced back to AVAILABLE", async () => {
     const eventId = await insertEvent();
-    const equipmentId = await insertEquipment({ type: freshType(), status: "DAMAGED" });
-    await insertRequest({ eventId, equipmentId, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
+    const type = freshType();
+    const equipmentId = await insertEquipment({ type, status: "DAMAGED" });
+    await insertRequest({ eventId, equipmentId, type, status: "APPROVED", borrowStart: "2026-01-01T09:00:00Z", borrowEnd: "2026-01-01T17:00:00Z" });
 
     const summary = await equipmentService.releaseReservationsForEvent(eventId);
 
