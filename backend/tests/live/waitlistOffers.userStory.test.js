@@ -15,6 +15,7 @@ const path = require("node:path");
 require("dotenv").config({ path: path.resolve(__dirname, "../../../.env"), quiet: true });
 
 const createApp = require("../../src/app");
+const requestLiveJson = require("../helpers/requestLiveJson");
 const { createClient } = require("@supabase/supabase-js");
 
 const live = Boolean(
@@ -96,18 +97,7 @@ describe.skipIf(!live)("Waitlist offer story against real Supabase", () => {
   }
 
   async function api(token, pathName, options = {}) {
-    const response = await fetch(`${baseUrl}${pathName}`, {
-      ...options,
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(options.body ? { "Content-Type": "application/json" } : {}),
-        ...options.headers,
-      },
-    });
-    return {
-      status: response.status,
-      body: response.status === 204 ? null : await response.json(),
-    };
+    return requestLiveJson(baseUrl, token, pathName, options);
   }
 
   async function join(index, data = null) {
