@@ -27,6 +27,8 @@ const POSTPONABLE_STATUSES = ["CHANGES_REQUESTED", "SUBMITTED", "UNDER_REVIEW", 
 const repository = { requestChanges: vi.fn(), findById: vi.fn(), transitionStatus: vi.fn(), cancel: vi.fn(), postpone: vi.fn() };
 const equipmentService = { releaseReservationsForEvent: vi.fn() };
 const releaseVenueBookingsForCancelledEvent = vi.fn();
+const checkBookingsForNewDates = vi.fn();
+const NO_NEW_DATE = { newStart: null, newEnd: null, moves: [] };
 let stored;
 
 // The token is "<user id>:<roles>", so each case states the identity it exercises.
@@ -45,7 +47,7 @@ beforeAll(async () => {
   server = createApp({
     authClient, eventsRepository: repository,
     equipmentDependencies: { equipmentService },
-    venuesService: { releaseBookingsForCancelledEvent: releaseVenueBookingsForCancelledEvent },
+    venuesService: { releaseBookingsForCancelledEvent: releaseVenueBookingsForCancelledEvent, checkBookingsForNewDates },
   }).listen(0, "127.0.0.1");
   await once(server, "listening");
   base = `http://127.0.0.1:${server.address().port}`;
@@ -73,16 +75,18 @@ beforeEach(() => {
     stored = { ...stored, ...extra, status: "CANCELLED" };
     return { ...stored };
   });
-  repository.postpone.mockReset().mockImplementation(async (id, extra, coordinatorId) => {
+  // SCRUM-170: stands in for postpone_event, which records the postponement itself.
+  repository.postpone.mockReset().mockImplementation(async (id, coordinatorId, reason) => {
     if (id !== EVENT_ID) return null;
     if (!POSTPONABLE_STATUSES.includes(stored.status)) return null;
-    if (coordinatorId && stored.coordinator_id !== coordinatorId) return null;
-    stored = { ...stored, ...extra, status: "POSTPONED" };
+    if (stored.coordinator_id !== coordinatorId) return null;
+    stored = { ...stored, status: "POSTPONED", postponed_by: coordinatorId, postponed_at: new Date().toISOString(), postponement_reason: reason };
     return { ...stored };
   });
   equipmentService.releaseReservationsForEvent.mockReset()
     .mockResolvedValue({ released: [], equipmentReverted: [], equipmentSkipped: [] });
   releaseVenueBookingsForCancelledEvent.mockReset().mockResolvedValue([]);
+  checkBookingsForNewDates.mockReset();
 });
 
 function post(action, token = `${ASSIGNED}:event_coordinator`, body, id = EVENT_ID) {
@@ -454,11 +458,13 @@ test("SCRUM-148 failure: a storage error on the write is a safe 500", async () =
 });
 
 // ---------------------------------------------------------------------------
-// SCRUM-149: postpone. Same router/controller/service shape as cancel, with
-// its own permission (events.postpone) and its own repository gate
+// SCRUM-149/170: postpone. Same router/controller/service shape as cancel, with
+// its own permission (events.postpone) and its own stage gate
 // (POSTPONABLE_STATUSES, not ACTIVE_STATUSES - an already-postponed event
-// can't be postponed again). No equipment release - AC3 names only venue
-// bookings and holds.
+// can't be postponed again). SCRUM-170 narrowed it to the assigned coordinator
+// and moved the venue release into postpone_event, so the HTTP layer only
+// sees the repository call and the equipment release; the release itself is
+// proven by tests/sql (TC-SCRUM-170-01, -08).
 // ---------------------------------------------------------------------------
 
 test.each(["", "invalid"])("SCRUM-149: an unauthenticated caller (%j) cannot postpone", async (token) => {
@@ -479,32 +485,44 @@ test("[TC-149-03] a coordinator not assigned to the event cannot postpone it", a
   expect(stored.status).toBe("SUBMITTED");
 });
 
-// SCRUM-150: postpone now also releases equipment (reusing the same
-// releaseReservationsForEvent call cancel makes), since postpone never
-// carries a new date to hold a reservation against. Title/assertion updated
-// from "equipment is untouched" accordingly - this test's main job (status
-// fields, venue release) is unaffected, only this one fact about postpone
-// changed.
-test("[TC-149-01] the assigned coordinator postpones their own event; venue and equipment release both run synchronously", async () => {
+// SCRUM-150 added the equipment release. SCRUM-170 moved the venue release into
+// postpone_event, so the JavaScript venue release is no longer called here.
+test("[TC-149-01][TC-SCRUM-170-01] the assigned coordinator postpones their own event with a trimmed reason; equipment is released", async () => {
   const before = Date.now();
 
-  const response = await post("postpone", undefined, { reason: "New date not yet known" });
+  const response = await post("postpone", undefined, { reason: "  New date not yet known  " });
 
   expect(response.status).toBe(200);
   const { event } = await response.json();
   expect(event).toMatchObject({ status: "POSTPONED", postponed_by: ASSIGNED, postponement_reason: "New date not yet known" });
   expect(Date.parse(event.postponed_at)).toBeGreaterThanOrEqual(before - 1000);
-  expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledWith(EVENT_ID);
+  expect(repository.postpone).toHaveBeenCalledExactlyOnceWith(EVENT_ID, ASSIGNED, "New date not yet known", NO_NEW_DATE);
   expect(equipmentService.releaseReservationsForEvent).toHaveBeenCalledWith(EVENT_ID, ASSIGNED);
+  expect(releaseVenueBookingsForCancelledEvent).not.toHaveBeenCalled();
+  expect(checkBookingsForNewDates).not.toHaveBeenCalled();
 });
 
-test("[TC-149-02] the coordinator lead postpones an event not assigned to them", async () => {
-  const response = await post("postpone", `${MANAGER}:event_coordinator_lead`, { reason: "Venue double-booked" });
+// SCRUM-170 AC1 (PO confirmed 2026-11-02, superseding SCRUM-149 AC1): previously
+// 200 - the lead could postpone any event.
+test("[TC-149-02][TC-SCRUM-170-02] the coordinator lead cannot postpone an event, assigned to someone else or not", async () => {
+  for (const coordinator of [ASSIGNED, MANAGER]) {
+    stored.coordinator_id = coordinator;
+    const response = await post("postpone", `${MANAGER}:event_coordinator_lead`, { reason: "Venue double-booked" });
 
-  expect(response.status).toBe(200);
-  expect((await response.json()).event.status).toBe("POSTPONED");
-  // No coordinatorId is passed for an coordinator-lead caller - they may postpone any event.
-  expect(repository.postpone).toHaveBeenCalledWith(EVENT_ID, expect.objectContaining({ postponed_by: MANAGER }), undefined);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ message: "You do not have permission to access this information." });
+  }
+  expect(repository.postpone).not.toHaveBeenCalled();
+  expect(equipmentService.releaseReservationsForEvent).not.toHaveBeenCalled();
+  expect(stored.status).toBe("SUBMITTED");
+});
+
+test("[TC-SCRUM-170-02] a forged lead claim in the body does not skip the assignment check", async () => {
+  const response = await post("postpone", `${OTHER}:event_coordinator`, { reason: "x", isCoordinatorLead: true, roles: ["event_coordinator_lead"] });
+
+  expect(response.status).toBe(403);
+  expect(repository.postpone).not.toHaveBeenCalled();
+  expect(stored.status).toBe("SUBMITTED");
 });
 
 test("[TC-149-05] a reassignment between the access check and the write is a 409, nothing recorded", async () => {
@@ -524,6 +542,17 @@ test("[TC-149-05] a reassignment between the access check and the write is a 409
 // The exhaustive stage list is proven once, precisely, by
 // events.transition.test.js's unit test on the repository query - this is
 // one representative case on each side of the boundary.
+test("[TC-SCRUM-170-14] an event deleted after the access check is a 404 and nothing is released", async () => {
+  repository.findById.mockImplementationOnce(async () => ({ ...stored })).mockImplementationOnce(async () => null);
+  repository.postpone.mockResolvedValueOnce(null);
+
+  const response = await post("postpone", undefined, { reason: "x" });
+
+  expect(response.status).toBe(404);
+  expect(await response.json()).toEqual({ message: "That event request no longer exists." });
+  expect(equipmentService.releaseReservationsForEvent).not.toHaveBeenCalled();
+});
+
 test("[TC-149-19] postpone succeeds from an active stage (APPROVED) - companion to TC-149-12's refusal boundary", async () => {
   stored.status = "APPROVED";
 
@@ -543,13 +572,118 @@ test("[TC-149-12] postpone is refused from a terminal stage (COMPLETED)", async 
   expect(releaseVenueBookingsForCancelledEvent).not.toHaveBeenCalled();
 });
 
-test("[TC-149-12] postpone is refused on an already-postponed event", async () => {
-  stored.status = "POSTPONED";
+test("[TC-149-12][TC-SCRUM-170-06] postponing an already-postponed event is a 409 that changes and releases nothing", async () => {
+  stored = { ...stored, status: "POSTPONED", postponement_reason: "First reason" };
+  const before = structuredClone(stored);
 
-  const response = await post("postpone", undefined, { reason: "x" });
+  const response = await post("postpone", undefined, { reason: "Second reason" });
+
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({ message: "This event request has changed since you opened it. Refresh to see its current status." });
+  expect(stored).toEqual(before);
+  expect(equipmentService.releaseReservationsForEvent).not.toHaveBeenCalled();
+});
+
+test("[TC-SCRUM-170-05] no replacement date is needed, and a date or status sent with the reason is ignored", async () => {
+  stored = { ...stored, start_time: "2099-06-01T09:00:00Z" };
+
+  const response = await post("postpone", undefined, { reason: "x", start_time: "2099-07-01T09:00:00Z", status: "APPROVED" });
+
+  expect(response.status).toBe(200);
+  expect((await response.json()).event).toMatchObject({ status: "POSTPONED", start_time: "2099-06-01T09:00:00Z" });
+  expect(repository.postpone).toHaveBeenCalledExactlyOnceWith(EVENT_ID, ASSIGNED, "x", NO_NEW_DATE);
+});
+
+// ---------------------------------------------------------------------------
+// SCRUM-170 phase 2: postponing with a new date. The venue checks run first;
+// only bookings that pass are moved, the rest are released by postpone_event.
+// ---------------------------------------------------------------------------
+
+const NEW_START = "2099-07-08T01:00:00.000Z";
+const NEW_END = "2099-07-08T09:00:00.000Z";
+const CHECKED = [
+  { booking_id: "req-pass", venue_name: "Marina Hall", booking_date: "2099-07-01", new_booking_date: "2099-07-08", slots: ["am"], passed: true, reasons: [] },
+  { booking_id: "req-fail", venue_name: "Garden Room", booking_date: "2099-07-01", new_booking_date: "2099-07-08", slots: ["pm"], passed: false, reasons: ["PM is already taken by another event (Reserved event)."] },
+];
+
+test("[TC-SCRUM-170-20][TC-SCRUM-170-21][TC-SCRUM-170-22] with a new date, the venues are checked first and only passing bookings are moved", async () => {
+  stored = { ...stored, status: "APPROVED", start_time: "2099-07-01T01:00:00Z" };
+  checkBookingsForNewDates.mockResolvedValueOnce(CHECKED);
+
+  const response = await post("postpone", undefined, { reason: "Roof repairs", new_start_time: NEW_START, new_end_time: NEW_END });
+
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.event.status).toBe("POSTPONED");
+  expect(body.venue_recheck).toEqual(CHECKED);
+  expect(checkBookingsForNewDates).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ id: EVENT_ID, start_time: "2099-07-01T01:00:00Z" }), NEW_START, NEW_END);
+  expect(repository.postpone).toHaveBeenCalledExactlyOnceWith(EVENT_ID, ASSIGNED, "Roof repairs", {
+    newStart: NEW_START, newEnd: NEW_END, moves: [{ request_id: "req-pass", booking_date: "2099-07-08" }],
+  });
+  expect(equipmentService.releaseReservationsForEvent).toHaveBeenCalledWith(EVENT_ID, ASSIGNED);
+});
+
+test.each([
+  [{ new_start_time: NEW_START }, "Give both a new start and a new end, or leave both empty."],
+  [{ new_end_time: NEW_END }, "Give both a new start and a new end, or leave both empty."],
+  [{ new_start_time: "not a date", new_end_time: NEW_END }, "The new start and end must be valid dates and times."],
+  [{ new_start_time: 20990708, new_end_time: NEW_END }, "The new start and end must be valid dates and times."],
+  [{ new_start_time: NEW_START, new_end_time: 20990708 }, "The new start and end must be valid dates and times."],
+  [{ new_start_time: "2000-01-01T00:00:00Z", new_end_time: NEW_END }, "The new start must be in the future."],
+  [{ new_start_time: NEW_END, new_end_time: NEW_START }, "The new end must be after the new start."],
+  [{ new_start_time: NEW_START, new_end_time: NEW_START }, "The new end must be after the new start."],
+])("[TC-SCRUM-170-23] an incomplete or impossible new date (%j) is a 400 and nothing is checked or written", async (dates, message) => {
+  const response = await post("postpone", undefined, { reason: "x", ...dates });
+
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ message });
+  expect(checkBookingsForNewDates).not.toHaveBeenCalled();
+  expect(repository.postpone).not.toHaveBeenCalled();
+  expect(stored.status).toBe("SUBMITTED");
+});
+
+test("[TC-SCRUM-170-23] empty new date fields mean no new date", async () => {
+  const response = await post("postpone", undefined, { reason: "x", new_start_time: "", new_end_time: null });
+
+  expect(response.status).toBe(200);
+  expect(checkBookingsForNewDates).not.toHaveBeenCalled();
+  expect(repository.postpone).toHaveBeenCalledExactlyOnceWith(EVENT_ID, ASSIGNED, "x", NO_NEW_DATE);
+});
+
+test("[TC-SCRUM-170-14] an event deleted after the access check, while postponing with a new date, is a 404 with nothing checked", async () => {
+  repository.findById.mockImplementationOnce(async () => ({ ...stored })).mockImplementationOnce(async () => null);
+
+  const response = await post("postpone", undefined, { reason: "x", new_start_time: NEW_START, new_end_time: NEW_END });
+
+  expect(response.status).toBe(404);
+  expect(checkBookingsForNewDates).not.toHaveBeenCalled();
+  expect(repository.postpone).not.toHaveBeenCalled();
+});
+
+test("[TC-SCRUM-170-25] when the venue checks cannot run, nothing is postponed or released (503)", async () => {
+  checkBookingsForNewDates.mockRejectedValueOnce(new Error("venue storage down"));
+  const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const response = await post("postpone", undefined, { reason: "x", new_start_time: NEW_START, new_end_time: NEW_END });
+
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ message: "We couldn't check the venues for the new date, so the event was not postponed. Please try again." });
+  expect(repository.postpone).not.toHaveBeenCalled();
+  expect(equipmentService.releaseReservationsForEvent).not.toHaveBeenCalled();
+  expect(stored.status).toBe("SUBMITTED");
+  quiet.mockRestore();
+});
+
+test("[TC-SCRUM-170-24] postponing an already-postponed event with a new date is a 409 after the checks, and nothing moves", async () => {
+  stored = { ...stored, status: "POSTPONED" };
+  checkBookingsForNewDates.mockResolvedValueOnce([]);
+
+  const response = await post("postpone", undefined, { reason: "again", new_start_time: NEW_START, new_end_time: NEW_END });
 
   expect(response.status).toBe(409);
   expect(stored.status).toBe("POSTPONED");
+  expect(equipmentService.releaseReservationsForEvent).not.toHaveBeenCalled();
 });
 
 test("[TC-149-11] a POSTPONED event can still be cancelled", async () => {
@@ -587,37 +721,39 @@ test("SCRUM-149: status, postponed_by and postponed_at in the body are ignored; 
   expect(event.postponed_at).not.toBe("2000-01-01T00:00:00Z");
 });
 
-test("[TC-149-10] venue release is skipped when postpone itself fails (missing reason)", async () => {
+test("[TC-149-10] nothing is postponed or released when the reason is missing", async () => {
   await post("postpone", undefined, {});
 
-  expect(releaseVenueBookingsForCancelledEvent).not.toHaveBeenCalled();
+  expect(repository.postpone).not.toHaveBeenCalled();
+  expect(equipmentService.releaseReservationsForEvent).not.toHaveBeenCalled();
 });
 
-test("SCRUM-149 failure: a storage error on the write is a safe 500", async () => {
-  repository.postpone.mockRejectedValueOnce(new Error("events.repository: postpone failed - boom"));
+test("[TC-SCRUM-170-11] a storage failure is a safe 500 with nothing saved or released", async () => {
+  repository.postpone.mockRejectedValueOnce(new Error("events.repository: postpone failed - private detail"));
   const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
 
   const response = await post("postpone", undefined, { reason: "x" });
 
   expect(response.status).toBe(500);
   expect(await response.json()).toEqual({ message: "Something went wrong. Please try again." });
+  expect(stored.status).toBe("SUBMITTED");
+  expect(equipmentService.releaseReservationsForEvent).not.toHaveBeenCalled();
   quiet.mockRestore();
 });
 
-// TC-149-18: a characterization test. It documents cancel's existing,
-// equally-untested behaviour (no try/catch around the release call, so a
-// failure there surfaces as a generic 500 even though the status write
-// already committed) rather than endorsing it as correct - see the task
-// note's Decisions.
-test("[TC-149-18] characterization: a venue-release failure is a 500, even though the status write already committed", async () => {
-  releaseVenueBookingsForCancelledEvent.mockRejectedValueOnce(new Error("Failed to release venue bookings: boom"));
+// SCRUM-170 replaces TC-149-18's characterization (a venue-release failure was
+// a 500 after the status had already been saved). The venue release now
+// commits with the status, and the one release left in JavaScript (equipment)
+// is logged, so the coordinator is told the truth: the event is postponed.
+test("[TC-149-18][TC-SCRUM-170-11] an equipment-release failure after the postponement is saved is logged, not a 500", async () => {
+  equipmentService.releaseReservationsForEvent.mockRejectedValueOnce(new Error("equipment storage down"));
   const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
 
   const response = await post("postpone", undefined, { reason: "x" });
 
-  expect(response.status).toBe(500);
-  expect(await response.json()).toEqual({ message: "Something went wrong. Please try again." });
-  expect(stored.status).toBe("POSTPONED");
+  expect(response.status).toBe(200);
+  expect((await response.json()).event.status).toBe("POSTPONED");
+  expect(quiet).toHaveBeenCalledWith(`postpone ${EVENT_ID}: equipment release failed:`, "equipment storage down");
   quiet.mockRestore();
 });
 
@@ -696,12 +832,15 @@ test("[SCRUM-117-API-007] the assigned coordinator may cancel a returned request
   expect(stored.coordinator_id).toBe(ASSIGNED);
 });
 
-test("[SCRUM-117-API-007] coordinator and lead may postpone a returned request", async () => {
-  for (const token of [ASSIGNED + ":event_coordinator", MANAGER + ":event_coordinator_lead"]) {
-    stored.status = "CHANGES_REQUESTED";
-    const response = await post("postpone", token, { reason: "Plans changed" });
-    expect(response.status).toBe(200);
-    expect(stored.status).toBe("POSTPONED");
-    expect(stored.coordinator_id).toBe(ASSIGNED);
-  }
+// SCRUM-170 AC1: previously the lead could postpone a returned request too.
+test("[SCRUM-117-API-007] the assigned coordinator may postpone a returned request; the lead may not", async () => {
+  stored.status = "CHANGES_REQUESTED";
+  const denied = await post("postpone", MANAGER + ":event_coordinator_lead", { reason: "Plans changed" });
+  expect(denied.status).toBe(403);
+  expect(stored.status).toBe("CHANGES_REQUESTED");
+
+  const response = await post("postpone", ASSIGNED + ":event_coordinator", { reason: "Plans changed" });
+  expect(response.status).toBe(200);
+  expect(stored.status).toBe("POSTPONED");
+  expect(stored.coordinator_id).toBe(ASSIGNED);
 });

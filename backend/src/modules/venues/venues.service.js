@@ -743,4 +743,8 @@ module.exports = {
   markVenueBookingAffected: require("./venueReplacement.service").markVenueBookingAffected,
   releaseAffectedVenueBooking: require("./venueReplacement.service").releaseAffectedVenueBooking,
   searchReplacementVenues: require("./venueReplacement.service").searchReplacementVenues,
+  // SCRUM-170: called by a postponement that gives a new date, before it is written.
+  checkBookingsForNewDates: require("./venueReschedule").createRescheduleCheck({
+    listBookingRequests, getVenueById, listSlotRowsForDate, listUnavailabilityInRange,
+  }),
 };

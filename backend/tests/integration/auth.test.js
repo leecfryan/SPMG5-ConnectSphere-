@@ -216,8 +216,8 @@ test("[RBAC-MANAGER-001] Managers can review events without gaining venue or equ
   const headers = { Authorization: "Bearer valid" };
   const { user, permissions } = await (await fetch(base + "/api/auth/me", { headers })).json();
   assert.deepEqual(user.accountTypes, ["internal"]);
-  // SCRUM-171: events.cancel removed - the lead's unconditional cancel access is gone.
-  assert.deepEqual(permissions.sort(), ["event_organisers.read", "events.assign", "events.assign_coordinator", "events.postpone", "events.review", "internal.access"]);
+  // SCRUM-171/170: events.cancel and events.postpone removed - the lead's unconditional access to both is gone.
+  assert.deepEqual(permissions.sort(), ["event_organisers.read", "events.assign", "events.assign_coordinator", "events.review", "internal.access"]);
   assert.equal((await fetch(base + "/api/internal/access", { headers })).status, 200);
 
   // Not a coordinator, not venue staff, not technical support. The manager

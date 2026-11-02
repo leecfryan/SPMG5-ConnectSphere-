@@ -490,7 +490,7 @@ resubmission and difference presentation are covered in the later sections below
 
 | Source tests | Observable outcome |
 | --- | --- |
-| SCRUM-117-API-001–007 in backend/tests/integration/events.review.test.js | Assigned coordinator only, UNDER_REVIEW only, required note, trusted actor, duplicate/stale refusals, safe storage failure, cancellation/postponement by coordinator or lead. Denials assert unchanged state. |
+| SCRUM-117-API-001–007 in backend/tests/integration/events.review.test.js | Assigned coordinator only, UNDER_REVIEW only, required note, trusted actor, duplicate/stale refusals, safe storage failure, cancellation and postponement by the assigned coordinator only (SCRUM-171, SCRUM-170). Denials assert unchanged state. |
 | SCRUM-117-API-008 in backend/tests/integration/eventWorkspace.test.js | Returned request remains visible; lead reassignment returns 409 and leaves stored events unchanged. |
 | SCRUM-117-UNIT-001 in lifecycle.test.js | Returned requests count in workload but are neither assignable nor planning eligible. |
 | SCRUM-117-UNIT-002 in eventWorkspace.service.test.js | Saved note is readable without leaking stored snapshots/actor details. |

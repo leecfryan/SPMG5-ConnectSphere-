@@ -277,6 +277,11 @@ on the shared Supabase project's free tier.
 > 2. The event's details and registrations are retained.
 > 3. The event's venue bookings and holds are released.
 
+**Superseded in part by SCRUM-170 (§17), 2026-11-02:** the Product Owner confirmed SCRUM-170 AC1, so only the assigned
+coordinator may postpone; the lead's access in AC1 above is withdrawn and TC-149-02 now expects 403. SCRUM-170 also
+moves the release into one database transaction, which releases holds too (AC3 above was previously met for bookings
+only). The other stories' tests this changed are listed in §17.
+
 | Layer | File | Pre-conditions |
 | --- | --- | --- |
 | Lifecycle (unit) | `backend/tests/unit/events/lifecycle.test.js` | Extended with `POSTPONED` in `STATUSES`, the four new edges into it, `POSTPONED → CANCELLED`, and dedicated `ACTIVE_STATUSES`/`POSTPONABLE_STATUSES` assertions. Same "typed from the agreed table" discipline as §3. |
@@ -291,7 +296,7 @@ on the shared Supabase project's free tier.
 | ID | AC | Type | Scenario | Test data | Expected result | Automated test | Latest execution |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | TC-149-01 | 149-1, 149-3 | Happy | Assigned coordinator postpones their own event; the venue release call happens in the same request (also proves TC-149-09) | Event `coordinator_id` = caller | 200; `POSTPONED`, `postponed_by`/`postponed_at`/`postponement_reason` set; `releaseVenueBookingsForCancelledEvent` called with the event id; equipment release **not** called | `[TC-149-01] the assigned coordinator postpones their own event; venue release runs synchronously, equipment is untouched` | 2026-10-11 · pass · local |
-| TC-149-02 | 149-1 | Happy | Event Coordinator Lead postpones an event not assigned to them | caller role `event_coordinator_lead` | 200; `POSTPONED`; no `coordinatorId` passed to the write | `[TC-149-02] the coordinator lead postpones an event not assigned to them` | 2026-10-11 · pass · local |
+| TC-149-02 | 149-1 | Negative | **Updated in place by SCRUM-170 AC1.** The Event Coordinator Lead cannot postpone an event, assigned to someone else or not | caller role `event_coordinator_lead` | 403 (previously 200); nothing written or released | `[TC-149-02][TC-SCRUM-170-02] the coordinator lead cannot postpone an event, assigned to someone else or not` | 2026-11-02 · pass · local |
 | TC-149-03 | 149-1 | Negative | A coordinator not assigned to the event postpones it | caller `event_coordinator`, different id | 403; `repository.postpone` not called | `[TC-149-03] a coordinator not assigned to the event cannot postpone it` | 2026-10-11 · pass · local |
 | TC-149-04 | 149-1 | Negative / Boundary | No reason, blank reason, whitespace-only reason | `{}`, `{ reason: "" }`, `{ reason: "   " }` | 400 "Give a reason for postponing this event."; nothing written | `[TC-149-04] postpone without a reason (%j) is a 400, nothing recorded` (×2); `[TC-149-04] a whitespace-only reason is treated as blank` | 2026-10-11 · pass · local |
 | TC-149-05 | 149-1 | Conflict | Event reassigned between the access check and the write | write finds `coordinator_id` changed | 409; nothing recorded | `[TC-149-05] a reassignment between the access check and the write is a 409, nothing recorded` | 2026-10-11 · pass · local |
@@ -800,3 +805,84 @@ caller to exercise it, so there is nothing left uncovered by deleting it.
 invented, and nothing was weakened to make a test pass. TC-148-02 and SCRUM-142-INT-004/005 are updated in place
 rather than deleted and replaced, preserving their IDs' traceability back to the original SCRUM-148/142 stories
 whose contract they now reflect post-SCRUM-171.
+
+
+## 17. SCRUM-170 — postpone an event and release its commitments
+
+Branch `feature/postponeReleaseCommitments`. Task note: `.agent/docs/other/SCRUM-170-postpone-release-commitments.md`.
+
+> **Story:** As the assigned Event Coordinator, I want to postpone an event whose new date isn't known yet so that its
+> venues are released while the event's details are kept.
+>
+> 1. Only the assigned Event Coordinator can postpone an event without a new date, with a reason.
+> 2. The coordinator must provide a reason, but a replacement date is not required.
+> 3. Postponing an already postponed event does not create duplicate notifications or release unrelated venue
+>    bookings.
+
+### SCRUM-170 AC1 supersedes SCRUM-149 AC1
+
+SCRUM-149 AC1 (§9) let **the assigned Event Coordinator or the Event Coordinator Lead** postpone; SCRUM-170 AC1 says
+**only** the assigned Event Coordinator. The Product Owner confirmed SCRUM-170's rule on 2026-11-02, in the same way
+SCRUM-171 superseded SCRUM-148's cancel rule (§16). The lead lost `events.postpone`, the route uses the
+assigned-coordinator check, and the lead's *Manage event requests* page no longer offers *Postpone event*.
+
+### Effect on other stories
+
+| Story | What it requires | Effect of SCRUM-170 |
+| --- | --- | --- |
+| SCRUM-149 AC1 | Assigned coordinator **or lead** can postpone, no date, with reason | **Superseded** for the lead (Product Owner, 2026-11-02); unchanged for the assigned coordinator |
+| SCRUM-149 AC2 | Details and registrations retained | Unchanged; now also proven in SQL (TC-SCRUM-170-05) |
+| SCRUM-149 AC3 | Venue bookings and holds released | **Now fully met.** Holds were previously never released (the old release joined through `request_id`, which holds do not have) |
+| SCRUM-150 | Postponing releases equipment | Unchanged call; a failure after the postponement is saved is now logged instead of returned as a 500 |
+| SCRUM-148/171 | Cancel rules, assigned coordinator only | Unchanged |
+| SCRUM-142 | Lead rename | The rename is unchanged; the lead's carried-over postponement capability is removed (as SCRUM-171 removed cancellation) |
+| SCRUM-117 | Design note: lead may postpone a returned request | The lead now cannot; the assigned coordinator still can |
+| SCRUM-41, SCRUM-163 | Venue decision and hold notifications | Unchanged; the release queues neither (TC-SCRUM-170-09, proven against the live triggers) |
+| SCRUM-43 | Registration notifications | Unchanged; `event-postponed` is a new, separate outbox workflow |
+
+### Other stories' tests changed, and why
+
+| Test | File | Change |
+| --- | --- | --- |
+| TC-149-01 | `backend/tests/integration/events.review.test.js` | Same outcome; asserts one `postpone_event` call with the trimmed reason instead of a JavaScript venue release (the release is proven by TC-SCRUM-170-01/-08 in SQL) |
+| TC-149-02 | same | **Outcome flipped by AC1:** the lead postponing was 200, now 403 with nothing changed or released |
+| TC-149-10 | same | "Venue release skipped" became "nothing postponed or released" (no JavaScript venue release exists to skip) |
+| TC-149-12 (already postponed) | same | Same 409; now also asserts nothing changed and nothing was released |
+| TC-149-18 | same | Was a characterization of a defect (a venue-release failure was a 500 after the status was saved). The venue release now commits with the status; an equipment-release failure is logged and the response is 200 |
+| SCRUM-117-API-007 (postpone case) | same | **Outcome flipped by AC1:** the lead is refused (403); the assigned coordinator still postpones |
+| SCRUM-142-INT-011/012 | `backend/tests/integration/roles.rename.test.js` | **Outcome flipped by AC1:** both lead identifiers get 403; `LEAD_PERMISSIONS` drops `events.postpone` |
+| RBAC-MANAGER-001 | `backend/tests/integration/auth.test.js` | The lead's exact permission list drops `events.postpone` |
+| API-RBAC-050, SCRUM-142-API-001/002 | `tests/playwright/api.spec.cjs` | The lead's exact permission list drops `events.postpone` |
+| SCRUM-142-MERGE-API-001/002 | `tests/playwright/event-workspace.api.spec.cjs` | **Outcome flipped by AC1:** the lead is refused and nothing changes; the assigned coordinator's postpone releases the venue slot and equipment, once (a repeat is 409) |
+| SCRUM-142-MERGE-BROWSER-001/002 | `tests/playwright/event-workspace.browser.spec.cjs` | **Outcome flipped by AC1:** the lead sees neither *Postpone* nor *Cancel*; the assigned coordinator postpones at 375px and the lead then sees the postponed notice |
+| SCRUM-117-UI-006 (manager case) | `frontend/src/features/events/pages/EventWorkspaceDetailPage.test.jsx` | **Outcome flipped by AC1:** the manager scope shows no *Postpone event* |
+| SCRUM-149 repository tests | `backend/tests/unit/events/events.transition.test.js` | The hand-built update no longer exists; replaced by TC-SCRUM-170-01/-06/-11 on the `postpone_event` call |
+
+### Test cases
+
+The full register (pre-conditions, steps, data) is in the task note.
+
+| ID | AC | Type | Scenario | Automated | Latest execution |
+| --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-170-01 | 1, goal | Happy | Assigned coordinator postpones; live slots and holds released; details kept; history written | SQL `postponeEvent.assertions.sql`; `[TC-149-01][TC-SCRUM-170-01]`; repository unit; `[TC-SCRUM-170-01]` page test | 2026-11-02 · pass · live dry run (SQL) and local |
+| TC-SCRUM-170-02 | 1 | Negative | The lead, an unassigned coordinator, other roles, the browser role and a forged lead claim change nothing | SQL; `[TC-149-02][TC-SCRUM-170-02]`, `[TC-SCRUM-170-02]`, `[TC-149-03]`, `[TC-149-20]`; SCRUM-142-INT-011/012; SCRUM-142-MERGE-API-001/002 | 2026-11-02 · pass · local |
+| TC-SCRUM-170-04 | 2 | Negative | Missing or blank reason refused, nothing written | SQL; `[TC-149-04]` | 2026-11-02 · pass · live dry run and local |
+| TC-SCRUM-170-05 | 2 | Boundary | No date needed; a sent date or status is ignored | SQL; `[TC-SCRUM-170-05]` | 2026-11-02 · pass · live dry run and local |
+| TC-SCRUM-170-06 | 3 | Conflict | Postponing again changes and queues nothing | SQL; `[TC-149-12][TC-SCRUM-170-06]`; repository unit; SCRUM-142-MERGE-API | 2026-11-02 · pass · live dry run and local |
+| TC-SCRUM-170-07 | 3 | Conflict | Two postpones at once: one wins | SQL harness (two sessions) | Not executed (needs the Docker harness; `postgres:17-alpine` could not be downloaded locally) |
+| TC-SCRUM-170-08 | 3 | Negative | Rejected slots, expired holds and other events' rows untouched | SQL | 2026-11-02 · pass · live dry run |
+| TC-SCRUM-170-09 | 3 | Happy | One notice each to organiser and pending/confirmed attendees; no venue-lane notices | SQL | 2026-11-02 · pass · live dry run |
+| TC-SCRUM-170-10 | 1 | Boundary | Only the six postponable stages | SQL | 2026-11-02 · pass · live dry run |
+| TC-SCRUM-170-11 | 3 | Failure | Failure part-way saves nothing; equipment failure after saving is logged | SQL; `[TC-SCRUM-170-11]`; `[TC-149-18][TC-SCRUM-170-11]` | 2026-11-02 · pass · live dry run and local |
+| TC-SCRUM-170-12 | goal | Happy | Postponed event clearly shown to every role, with original dates | `EventPostponedNotice.test.jsx`; page `[TC-SCRUM-170-12]`; activity history; SCRUM-142-MERGE-BROWSER-001/002 | 2026-11-02 · pass · local |
+| TC-SCRUM-170-13 | 1 | Negative | The lead sees no postpone control | page `[TC-SCRUM-170-13]`, `[SCRUM-117-UI-006][TC-SCRUM-170-13]`; SCRUM-142-MERGE-BROWSER-001/002 | 2026-11-02 · pass · local |
+| TC-SCRUM-170-14 | 1 | Failure | Event deleted mid-request → 404, nothing released | `[TC-SCRUM-170-14]` | 2026-11-02 · pass · local |
+| TC-SCRUM-170-15 | — | Withdrawn | The lead postpones (SCRUM-149 AC1) | Withdrawn by the Product Owner's decision; the SQL harness keeps one function-level check that the assignment is only skipped when explicitly asked, which no caller does | Withdrawn |
+| TC-SCRUM-170-20 | 2 (phase 2) | Happy | Postponing with a new date: POSTPONED on the new dates, history keeps old and new dates and the moved bookings | SQL `postponeEvent.assertions.sql`; `[TC-SCRUM-170-20]...` API test; Playwright API journey; page and component tests | 2026-11-02 · pass · local (SQL live dry run pending) |
+| TC-SCRUM-170-21 | 2 (phase 2) | Happy | A booking that still fits on the new date (same slots, shifted days) moves there as pending | SQL; `venueReschedule.test.js`; repository unit; Playwright API journey; `EventPostponeVenueReport.test.jsx` | 2026-11-02 · pass · local |
+| TC-SCRUM-170-22 | 2 (phase 2) | Negative | A booking that fails (clash, unavailable, unsuitable, venue gone, outside the new dates) is released with its reason; a move naming another event's booking is ignored | SQL; `venueReschedule.test.js`; Playwright API journey | 2026-11-02 · pass · local |
+| TC-SCRUM-170-23 | 2 (phase 2) | Negative | Half a new date, an invalid one, a start in the past or an end not after the start is refused before anything is checked or written | SQL; `[TC-SCRUM-170-23]` API cases; `EventPostponeControl.test.jsx` | 2026-11-02 · pass · local |
+| TC-SCRUM-170-24 | 3 (phase 2) | Conflict | The notice names the new date; postponing again after a new date is refused and nothing moves | SQL; `[TC-SCRUM-170-24]`; Playwright API journey | 2026-11-02 · pass · local |
+| TC-SCRUM-170-25 | 2 (phase 2) | Failure | Venue checks that cannot run postpone nothing (503) | `[TC-SCRUM-170-25]` API and unit | 2026-11-02 · pass · local |
+| TC-SCRUM-170-26 | 2 (phase 2) | Boundary | The day shift is counted in Singapore time | `venueReschedule.test.js` | 2026-11-02 · pass · local |
+| TC-SCRUM-170-27 | 2 (phase 2) | Negative | Bookings with nothing live are not checked; the event's own rows are not its own clash | `venueReschedule.test.js` | 2026-11-02 · pass · local |

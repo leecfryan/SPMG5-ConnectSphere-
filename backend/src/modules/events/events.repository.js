@@ -1,6 +1,6 @@
 // Importing the application/validation must not require administrative credentials.
 const getSupabase = () => require("../../supabase");
-const { canTransition, ACTIVE_STATUSES, POSTPONABLE_STATUSES } = require("./lifecycle");
+const { canTransition, ACTIVE_STATUSES } = require("./lifecycle");
 
 const { assignWithHistory } = require("./assignmentHistory.repository");
 
@@ -182,16 +182,22 @@ async function cancel(id, extra = {}, coordinatorId) {
   );
 }
 
-// SCRUM-149: same shape as cancel(), gated on POSTPONABLE_STATUSES so an
-// already-postponed event cannot be postponed again.
-async function postpone(id, extra = {}, coordinatorId) {
-  let query = getSupabase()
-    .from(TABLE)
-    .update({ ...extra, status: "POSTPONED" })
-    .eq("id", id)
-    .in("status", POSTPONABLE_STATUSES);
-  if (coordinatorId) query = query.eq("coordinator_id", coordinatorId);
-  return unwrap(await query.select().maybeSingle(), "postpone");
+// SCRUM-170: the database records the postponement, moves the bookings given in
+// `moves` to the new date, releases the event's other live venue rows, writes
+// its history and queues its notifications in one transaction. No row back
+// means the coordinator no longer holds the event or it is not in a postponable
+// stage (including already POSTPONED).
+async function postpone(id, coordinatorId, reason, { newStart = null, newEnd = null, moves = [] } = {}) {
+  return unwrap(await getSupabase().rpc("postpone_event", {
+    p_event_id: id,
+    p_actor_id: coordinatorId,
+    p_reason: reason,
+    // SCRUM-170 AC1: always the assigned coordinator, rechecked under the row lock.
+    p_assigned_only: true,
+    p_new_start: newStart,
+    p_new_end: newEnd,
+    p_moves: moves,
+  }).maybeSingle(), "postpone");
 }
 
 async function assignCoordinator(id, coordinatorId, actor) {

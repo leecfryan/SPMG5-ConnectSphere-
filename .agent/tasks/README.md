@@ -16,7 +16,7 @@ Update the row when a story changes state. Keep finished rows. They're the recor
 
 | Story | Title | Lane | State | Branch |
 |---|---|---|---|---|
-| — | — | — | — | — |
+| SCRUM-170 | Postpone an event and release its commitments | Event Lifecycle | 🔧 in progress (2026-11-02) | `feature/postponeReleaseCommitments` |
 
 States: `📋 planned` · `🔧 in progress (<date>)` · `🧪 in review (PR #n)` · `✅ merged (<date>)` · `⏸ blocked (<on what>)`
 

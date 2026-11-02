@@ -238,6 +238,16 @@ No backend/API changes or additional requests are introduced. No tests were run
 for this presentation follow-up, following Ryan's instruction.
 
 
+### Postponed events (SCRUM-170)
+
+A `POSTPONED` event's detail page shows `EventPostponedNotice` directly under the header for every role: a
+`.event-postponed` panel (the clarification panel's warning palette and spacing, stacking at 760px) saying it is
+postponed and either the new date (fitting venues moved, the rest released) or that no new date is set (venues
+released), with the reason. The date facts read *New start* / *New end* or *Original start* / *Original end* while
+postponed. *Postpone event* appears only for the assigned coordinator; its optional *New start* / *New end* sit in a
+`.field-pair`. After postponing with a new date the coordinator sees `EventPostponeVenueReport` (same `.event-postponed`
+panel) listing each venue as moved or released, with the reason.
+
 ### Sign-out landing behavior
 
 The auth guard owns sign-out navigation. The auth provider marks signed-out

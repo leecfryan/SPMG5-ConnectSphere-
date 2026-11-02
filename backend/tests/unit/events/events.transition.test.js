@@ -139,58 +139,43 @@ test("SCRUM-148 failure: a Supabase error is thrown with the action named", asyn
   await expect(loadRepository().cancel("evt-1", {}, "coord-1")).rejects.toThrow("events.repository: cancel failed - boom");
 });
 
-test("SCRUM-149 AC3: postpone writes POSTPONED, restricted to the postponable stages (not POSTPONED itself), plus any extra columns", async () => {
-  const { calls } = recorder({ id: "evt-1", status: "POSTPONED" });
+// SCRUM-170: postponing is one postpone_event call; which stages, which
+// coordinator and what is released are the function's rules, proven in tests/sql.
+test("[TC-SCRUM-170-01] postpone hands the event, the verified coordinator and the reason to postpone_event, always requiring the assignment", async () => {
+  const event = { id: "evt-1", status: "POSTPONED" };
+  const rpc = vi.fn(() => ({ maybeSingle: async () => ({ data: event, error: null }) }));
+  stubSupabase({ rpc });
 
-  const event = await loadRepository().postpone("evt-1", {
-    postponed_by: "coord-1", postponed_at: "2026-10-10T00:00:00.000Z", postponement_reason: "New date not yet known",
+  expect(await loadRepository().postpone("evt-1", "coord-1", "New date not yet known")).toEqual(event);
+  expect(rpc).toHaveBeenCalledExactlyOnceWith("postpone_event", {
+    p_event_id: "evt-1", p_actor_id: "coord-1", p_reason: "New date not yet known", p_assigned_only: true,
+    p_new_start: null, p_new_end: null, p_moves: [],
   });
-
-  expect(calls).toContainEqual(["from", "events"]);
-  expect(calls).toContainEqual(["update", {
-    postponed_by: "coord-1", postponed_at: "2026-10-10T00:00:00.000Z", postponement_reason: "New date not yet known", status: "POSTPONED",
-  }]);
-  expect(calls).toContainEqual(["eq", "id", "evt-1"]);
-  expect(calls).toContainEqual(["in", "status", ["SUBMITTED", "UNDER_REVIEW", "CHANGES_REQUESTED", "APPROVED", "SAFETY_REVIEW", "CONFIRMED"]]);
-  expect(event).toEqual({ id: "evt-1", status: "POSTPONED" });
 });
 
-test("SCRUM-149: extra cannot override status to anything but POSTPONED", async () => {
-  const { calls } = recorder({ id: "evt-1" });
+test("[TC-SCRUM-170-21] with a new date, the dates and the bookings to move are handed to postpone_event", async () => {
+  const rpc = vi.fn(() => ({ maybeSingle: async () => ({ data: { id: "evt-1" }, error: null }) }));
+  stubSupabase({ rpc });
+  const moves = [{ request_id: "req-1", booking_date: "2099-07-08" }];
 
-  await loadRepository().postpone("evt-1", { status: "CONFIRMED" });
+  await loadRepository().postpone("evt-1", "coord-1", "Roof repairs", { newStart: "2099-07-08T01:00:00.000Z", newEnd: "2099-07-08T09:00:00.000Z", moves });
 
-  expect(calls).toContainEqual(["update", { status: "POSTPONED" }]);
+  expect(rpc).toHaveBeenCalledExactlyOnceWith("postpone_event", {
+    p_event_id: "evt-1", p_actor_id: "coord-1", p_reason: "Roof repairs", p_assigned_only: true,
+    p_new_start: "2099-07-08T01:00:00.000Z", p_new_end: "2099-07-08T09:00:00.000Z", p_moves: moves,
+  });
 });
 
-test("SCRUM-149: with a coordinator given, the write also requires that coordinator to still hold the event", async () => {
-  const { calls } = recorder({ id: "evt-1" });
+test("[TC-SCRUM-170-06] no row back (wrong stage, already POSTPONED, or not the coordinator) returns null", async () => {
+  stubSupabase({ rpc: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) });
 
-  await loadRepository().postpone("evt-1", {}, "coord-1");
-
-  expect(calls).toContainEqual(["eq", "coordinator_id", "coord-1"]);
+  expect(await loadRepository().postpone("evt-1", "coord-1", "x")).toBeNull();
 });
 
-test("SCRUM-149: without a coordinator (the coordinator-lead caller), no coordinator filter is added", async () => {
-  const { calls } = recorder({ id: "evt-1" });
+test("[TC-SCRUM-170-11] a Supabase error is thrown with the action named", async () => {
+  stubSupabase({ rpc: () => ({ maybeSingle: async () => ({ data: null, error: { message: "boom" } }) }) });
 
-  await loadRepository().postpone("evt-1", {});
-
-  expect(calls.some(([name, column]) => name === "eq" && column === "coordinator_id")).toBe(false);
-});
-
-test("SCRUM-149 conflict/boundary: zero rows matched (wrong stage, already POSTPONED, or a reassignment race) returns null", async () => {
-  recorder(null);
-
-  const event = await loadRepository().postpone("evt-1", {}, "coord-1");
-
-  expect(event).toBeNull();
-});
-
-test("SCRUM-149 failure: a Supabase error is thrown with the action named", async () => {
-  recorder(null, { message: "boom" });
-
-  await expect(loadRepository().postpone("evt-1", {})).rejects.toThrow("events.repository: postpone failed - boom");
+  await expect(loadRepository().postpone("evt-1", "coord-1", "x")).rejects.toThrow("events.repository: postpone failed - boom");
 });
 
 test("SCRUM-141 AC4: recordActivity inserts one event_activity_log row, with the move and note in details", async () => {

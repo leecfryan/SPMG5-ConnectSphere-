@@ -117,6 +117,8 @@ function createEventWorkspaceService(client) {
       } : { source: "NO_BASELINE", version_at: null, changes: [] },
     } : {};
     const activity = data.filter(entry => entry.action !== "REQUEST_BASELINE_RECORDED").map(({ id, action, details, created_at }) => ({
+      // SCRUM-170: whether a postponement gave a new date, so the page can say so.
+      ...(action === "EVENT_POSTPONED" ? { new_start: details.new_start ?? null } : {}),
       ...(scope === "coordinator" && action === "REQUEST_RESUBMITTED" ? {
         baseline_source: details.baseline_source ?? null,
         changes: (details.changes || []).filter(change => WRITABLE_COLS.includes(change.field))

@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router";
 import { useAuth } from "../../auth/useAuth";
 import { useApiResource } from "../../../hooks/useApiResource";
 import Icon from "../../../components/ui/Icon";
-import { formatWhen, shortReference } from "../eventFormat";
+import { formatWhen, postponedToStart, shortReference } from "../eventFormat";
 import { workspaces } from "../workspaces";
 import EventReviewControls from "../components/EventReviewControls";
 import EventDecisionControls from "../components/EventDecisionControls";
@@ -13,6 +13,8 @@ import EventCancelControl from "../components/EventCancelControl";
 import EventCancellationSummary from "../components/EventCancellationSummary";
 import EventPostponeControl from "../components/EventPostponeControl";
 import EventPostponeSummary from "../components/EventPostponeSummary";
+import EventPostponedNotice from "../components/EventPostponedNotice";
+import EventPostponeVenueReport from "../components/EventPostponeVenueReport";
 import EventRequestForm from "../components/EventRequestForm";
 import ChangeRequestControls from "../components/ChangeRequestControls";
 import ChangeRequestDecisionControls from "../components/ChangeRequestDecisionControls";
@@ -28,8 +30,11 @@ function Detail({ scope, eventId }) {
   const { user, hasPermission } = useAuth();
   const [editing, setEditing] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [postponeVenues, setPostponeVenues] = useState(null);
   const { data, loading, error, reload } = useApiResource(`/api/event-workspace/${scope}/${eventId}`);
   const event = data?.event;
+  // SCRUM-170: a postponed event's dates are the original ones, unless the postponement gave new ones.
+  const dateLabel = event?.status !== "POSTPONED" ? "" : postponedToStart(event) ? "New " : "Original ";
   const clarification = event?.activity?.find(entry => entry.action === "CHANGES_REQUESTED");
   const sections = [
     { id: "about", title: "About the event", icon: "request", fields: [["Purpose", "purpose"], ["Description", "description"]] },
@@ -52,9 +57,11 @@ function Detail({ scope, eventId }) {
         </div>
         <div className="request-detail-reference"><span><Icon name="request" size={15} />Request <code title={event.id}>{shortReference(event.id)}</code></span><span>Times shown in your local timezone.</span></div>
       </header>
+      <EventPostponedNotice event={event} />
+      {scope === "coordinator" && event.coordinator_id === user.id && <EventPostponeVenueReport report={postponeVenues} />}
       <dl className="request-detail-facts">
-        <div><dt><Icon name="calendar" size={17} />Start</dt><dd>{formatWhen(event.start_time)}</dd></div>
-        <div><dt><Icon name="clock" size={17} />End</dt><dd>{formatWhen(event.end_time)}</dd></div>
+        <div><dt><Icon name="calendar" size={17} />{dateLabel ? `${dateLabel}start` : "Start"}</dt><dd>{formatWhen(event.start_time)}</dd></div>
+        <div><dt><Icon name="clock" size={17} />{dateLabel ? `${dateLabel}end` : "End"}</dt><dd>{formatWhen(event.end_time)}</dd></div>
         <div><dt><Icon name="account" size={17} />Expected attendance</dt><dd>{event.expected_attendance ?? "Not provided"}</dd></div>
       </dl>
       {scope === "coordinator" && event.coordinator_id === user.id && <EventSavedChanges comparison={event.request_changes} />}
@@ -120,8 +127,9 @@ function Detail({ scope, eventId }) {
           <Link to="/venues">Arrange venue bookings</Link>
           <Link to={`/equipment/requests?event=${encodeURIComponent(event.id)}`}>Arrange equipment and technical support</Link>
         </nav>}
-        {(scope === "manager" || (scope === "coordinator" && event.coordinator_id === user.id)) &&
-          <EventPostponeControl event={event} onPostponed={reload} />}
+        {/* SCRUM-170 AC1: only the assigned coordinator postpones. */}
+        {scope === "coordinator" && event.coordinator_id === user.id &&
+          <EventPostponeControl event={event} onPostponed={(result) => { setPostponeVenues(result.venueRecheck); reload(); }} />}
         {/* SCRUM-171: postponement still allows managers; cancellation requires the assigned coordinator. */}
         {scope === "coordinator" && event.coordinator_id === user.id && <EventCancelControl event={event} onCancelled={reload} />}
       </div>
