@@ -435,6 +435,13 @@ there. Run it locally with `npm --prefix tests/e2e test`.
   browser UI (Scrum-30). SCRUM-103 added one case: restoring a retired unit
   back to `AVAILABLE` through the catalogue page's "Restore to available"
   control, confirmed on a page reload.
+  SCRUM-168 synchronizes TC-103-13 with the initial and reloaded catalogue
+  GET responses before checking rows; both responses must return 200, and the
+  initial payload must contain its UNAVAILABLE fixture. The existing exact
+  status assertions, timeout settings, fixtures and cleanup are retained.
+  PR #78 exposed a successful 5.87-second catalogue response arriving after
+  the default 5-second row assertion. Five controlled local browser replays
+  passed after this fix; real shared-database/CI re-execution is pending.
 - `equipment-release-cancelled-event.spec.js` (SCRUM-104): a cancelled throwaway
   event, with no script or action run at all, relying only on the next
   `GET /equipment`/`GET /equipment/availability` call to self-heal. Confirms

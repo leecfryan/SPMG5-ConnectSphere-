@@ -92,7 +92,16 @@ test.describe("SCRUM-103 (added scope): retired equipment can be restored to AVA
 
   test("[SCRUM-103 added-scope / TC-103-13] restoring a retired unit through the UI sets it back to AVAILABLE", async ({ page }) => {
     await signIn(page, setup.technical);
+    // SCRUM-168: navigation can finish before the live catalogue request resolves.
+    const catalogueLoaded = page.waitForResponse((response) =>
+      response.url().endsWith("/api/equipment") && response.request().method() === "GET"
+    );
     await page.goto("/equipment/catalogue");
+    const catalogueResponse = await catalogueLoaded;
+    expect(catalogueResponse.status(), await catalogueResponse.text()).toBe(200);
+    expect((await catalogueResponse.json()).data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: restoreId, type: restoreType, status: "UNAVAILABLE" }),
+    ]));
 
     await page.getByLabel("Show retired equipment").check();
     const row = page.locator(".eq-request-row", { hasText: restoreType });
@@ -109,7 +118,12 @@ test.describe("SCRUM-103 (added scope): retired equipment can be restored to AVA
 
     await expect(badge).toHaveText("AVAILABLE", { timeout: 10000 });
 
+    const catalogueReloaded = page.waitForResponse((response) =>
+      response.url().endsWith("/api/equipment") && response.request().method() === "GET"
+    );
     await page.reload();
+    const reloadedResponse = await catalogueReloaded;
+    expect(reloadedResponse.status(), await reloadedResponse.text()).toBe(200);
     await page.getByLabel("Show retired equipment").check();
     await expect(page.locator(".eq-request-row", { hasText: restoreType }).locator(".eq-status")).toHaveText("AVAILABLE");
   });
