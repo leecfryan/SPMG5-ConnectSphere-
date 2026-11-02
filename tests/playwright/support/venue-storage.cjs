@@ -86,9 +86,10 @@ module.exports = function venueStorage(accounts) {
       return id;
     },
     // SCRUM-148/149: mirror the production release RPC for cancellation and postponement.
-    async releaseBookingsForCancelledEvent(eventId) {
+    // SCRUM-170: `keep` is the requests postpone_event moves to a new date instead.
+    async releaseBookingsForCancelledEvent(eventId, keep = []) {
       let released = 0;
-      for (const request of requests.filter(r => r.event_id === eventId)) {
+      for (const request of requests.filter(r => r.event_id === eventId && !keep.includes(r.id))) {
         for (const slot of request.slots) {
           if (!['pending', 'confirmed'].includes(slot.status)) continue;
           slot.status = 'cancelled';
@@ -96,6 +97,19 @@ module.exports = function venueStorage(accounts) {
         }
       }
       return released;
+    },
+    // SCRUM-170: mirrors postpone_event's moves - a moved request takes its live
+    // slots to the new date as pending, with its decision cleared.
+    async moveBookingsForPostponement(eventId, moves) {
+      for (const move of moves) {
+        const request = requests.find(r => r.id === move.request_id && r.event_id === eventId);
+        const live = (request?.slots || []).filter(slot => ['pending', 'confirmed'].includes(slot.status)).map(slot => slot.slot);
+        if (live.length === 0) continue;
+        request.booking_date = move.booking_date;
+        request.slots = live.map(slot => ({ slot, status: 'pending' }));
+        request.decided_at = null;
+        request.decision_note = null;
+      }
     },
     // SCRUM-133: unavailability period CRUD
     async createUnavailabilityPeriod(venueId, data, createdBy) {

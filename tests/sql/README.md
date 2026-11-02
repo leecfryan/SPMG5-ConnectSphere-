@@ -58,6 +58,15 @@ prove live Novu inbox delivery or the event assignment operation; those remain
 manual acceptance checks.
 
 
+## SCRUM-170 postponing an event
+
+`node tests/sql/run-assignment-notifications.cjs --postpone` installs SCRUM-41's venue-decision trigger, SCRUM-163's
+hold-notification block and the `postpone_event` block from `docs/event-requests.md`, then runs
+`postponeEvent.assertions.sql` and a two-session race. It owns its disposable database, so run it on its own.
+Expected: `16/16 postpone SQL scenarios passed.` Each failure names its `TC-SCRUM-170-NN` case. TC-SCRUM-170-15 checks
+that the function skips the assignment check only when explicitly asked; since the Product Owner's 2026-11-02
+decision the backend never asks.
+
 ## SCRUM-117 returned-request notifications
 
 From the repository root, with Docker running and the existing postgres:17-alpine image cached, run `node tests/sql/run-assignment-notifications.cjs --clarification`. The existing isolated runner additionally extracts the exact Task 2 return function and Task 3 trigger from the guides. No cloud credentials or shared database connection are used. Expected: `CLARIFICATION SQL ASSERTIONS PASSED`, exit zero. S01 proves refusal without mutations; S02 exact saved recipient/message/link and duplicate rejection; S03 independent cycles; S04 transaction rollback on enqueue failure; S05 browser access restrictions. The setup and assertions are disposable test fixtures, never migrations or shared-database scripts. Executed by Codex on 22 Oct 2026 after Ryan started Docker: all five clarification scenarios passed along with the existing decision/assignment assertions. This optional SQL suite is not part of CI.

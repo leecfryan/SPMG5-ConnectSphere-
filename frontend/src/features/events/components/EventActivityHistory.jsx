@@ -20,6 +20,8 @@ const ACTIONS = Object.freeze({
   // re-approval consequence.
   "event.significant_edit": "Significant change",
   "event.ordinary_edit": "Normal change",
+  // SCRUM-170: written by postpone_event in the same transaction as the postponement.
+  EVENT_POSTPONED: "Event postponed",
 });
 
 // A long-lived event accumulates one entry per edit (SCRUM-37 logs every one,
@@ -40,7 +42,7 @@ export default function EventActivityHistory({ activity }) {
       <ol className="event-workspace-list">
         {visible.map(entry => <li key={entry.id}>
           <span>{ACTIONS[entry.action] ?? entry.action} · {formatWhen(entry.created_at)}</span>
-          {entry.note && <span>{["SAFETY_REJECTED", "CHANGE_REQUEST_APPROVED", "CHANGE_REQUEST_REJECTED", "EDIT", "event.significant_edit", "event.ordinary_edit"].includes(entry.action) ? "Reason" : "Note"}: {entry.note}</span>}
+          {entry.note && <span>{["SAFETY_REJECTED", "CHANGE_REQUEST_APPROVED", "CHANGE_REQUEST_REJECTED", "EDIT", "event.significant_edit", "event.ordinary_edit", "EVENT_POSTPONED"].includes(entry.action) ? "Reason" : "Note"}: {entry.note}</span>}
         </li>)}
       </ol>
       {hiddenCount > 0 && (

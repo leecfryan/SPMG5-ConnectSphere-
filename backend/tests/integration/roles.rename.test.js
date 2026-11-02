@@ -6,12 +6,11 @@ const require = createRequire(import.meta.url);
 const createApp = require("../../src/app");
 const { getPermissions } = require("../../src/auth/permissions");
 const EVENT_ID = "aaaaaaaa-0001-0000-0000-000000000000";
-// SCRUM-171 removed events.cancel from this list - the lead's unconditional
-// cancel access is gone; events.postpone (unchanged) is the lead's only
-// remaining active-stage write on someone else's event.
+// SCRUM-171 removed events.cancel and SCRUM-170 removed events.postpone from
+// this list: the lead has no active-stage write on someone else's event.
 const LEAD_PERMISSIONS = [
   "event_organisers.read", "events.assign", "events.assign_coordinator",
-  "events.postpone", "events.review", "internal.access",
+  "events.review", "internal.access",
 ];
 let roles, stored, server, base;
 const repository = { findById: vi.fn(), cancel: vi.fn(), postpone: vi.fn(), transitionStatus: vi.fn() };
@@ -43,10 +42,7 @@ beforeEach(() => {
     stored = { ...stored, ...extra, status: "CANCELLED" };
     return { ...stored };
   });
-  repository.postpone.mockReset().mockImplementation(async (_id, extra) => {
-    stored = { ...stored, ...extra, status: "POSTPONED" };
-    return { ...stored };
-  });
+  repository.postpone.mockReset();
   releaseVenueBookingsForCancelledEvent.mockReset().mockResolvedValue([]);
   equipmentService.releaseReservationsForEvent.mockReset().mockResolvedValue({});
   repository.transitionStatus.mockReset();
@@ -144,24 +140,19 @@ test("[SCRUM-142-POLICY-001] the legacy identifier grants nothing directly outsi
   expect(getPermissions(["event_coordinator_lead"]).sort()).toEqual(LEAD_PERMISSIONS);
 });
 
-// SCRUM-150 (a later, unrelated story) changed what postpone() itself does:
-// it now releases equipment via equipmentService.releaseReservationsForEvent,
-// same as cancel. This test's original "no equipment release" assertion was
-// true for SCRUM-142's role rename verification at the time it was written,
-// and is updated here to match postpone's new behaviour - not a change to
-// anything this test actually verifies (venue release, the role rename
-// itself), just the one fact about postpone that moved under it.
+// SCRUM-170 AC1 (PO confirmed 2026-11-02): previously 200 for both identifiers
+// (SCRUM-149/142 let the lead postpone any event). Postponement is now the
+// assigned coordinator's alone, so both identifiers are refused like cancel above.
 test.each([
   ["011", "event_coordinator_lead"], ["012", "event_ops_manager"],
-])("[SCRUM-142-INT-%s] %s retains postponement access with venue release and equipment release", async (_id, role) => {
+])("[SCRUM-142-INT-%s] %s cannot postpone an event assigned to someone else", async (_id, role) => {
   roles = [role];
+  const before = { ...stored };
   const response = await send(`/api/internal/events/${EVENT_ID}/postpone`, "POST", { reason: "New date not yet known" });
-  expect(response.status).toBe(200);
-  expect((await response.json()).event).toMatchObject({ status: "POSTPONED", postponed_by: "lead", postponement_reason: "New date not yet known" });
-  expect(repository.postpone).toHaveBeenCalledWith(EVENT_ID,
-    expect.objectContaining({ postponed_by: "lead", postponement_reason: "New date not yet known" }), undefined);
-  expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledWith(EVENT_ID);
-  expect(equipmentService.releaseReservationsForEvent).toHaveBeenCalledWith(EVENT_ID, "lead");
+  expect(response.status).toBe(403);
+  expect(repository.postpone).not.toHaveBeenCalled();
+  expect(equipmentService.releaseReservationsForEvent).not.toHaveBeenCalled();
+  expect(stored).toEqual(before);
 });
 
 test("[SCRUM-142-INT-013] forged lead claims cannot postpone or release arrangements", async () => {

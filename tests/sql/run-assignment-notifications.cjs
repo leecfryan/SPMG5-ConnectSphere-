@@ -40,6 +40,10 @@ async function run() {
   if (process.argv.includes("--venue-decision") && process.argv.includes("--venue-holds")) {
     throw new Error("Run --venue-decision and --venue-holds in separate invocations so each owns its disposable database.");
   }
+  // SCRUM-170: the postpone fixture builds its own events, registration and venue tables.
+  if (process.argv.includes("--postpone") && ["--clarification", "--registration", "--venue-holds", "--venue-decision"].some(flag => process.argv.includes(flag))) {
+    throw new Error("Run --postpone on its own so it owns its disposable database.");
+  }
   const guide = fs.readFileSync(path.join(root, "docs/notifications.md"), "utf8");
   const blocks = [...guide.matchAll(/```sql\r?\n([\s\S]*?)\r?\n```/g)].map(match => match[1]);
   const readSql = name => fs.readFileSync(path.join(__dirname, name), "utf8");
@@ -82,6 +86,19 @@ async function run() {
     parts.push(readSql("venueDecisionNotifications.setup.sql"),
       schemaBlock(blocks, "function public.enqueue_venue_booking_decision_notification()"),
       readSql("venueDecisionNotifications.assertions.sql"));
+  }
+  // SCRUM-170: both venue notification triggers are installed first, so the
+  // assertions prove releasing the venues sets neither of them off.
+  if (process.argv.includes("--postpone")) {
+    const venueGuide = fs.readFileSync(path.join(root, "docs/venue-integration.md"), "utf8");
+    const venueBlocks = [...venueGuide.matchAll(/```sql\r?\n([\s\S]*?)\r?\n```/g)].map(match => match[1]);
+    const eventGuide = fs.readFileSync(path.join(root, "docs/event-requests.md"), "utf8");
+    const eventBlocks = [...eventGuide.matchAll(/```sql\r?\n([\s\S]*?)\r?\n```/g)].map(match => match[1]);
+    parts.push(readSql("postponeEvent.setup.sql"),
+      schemaBlock(blocks, "function public.enqueue_venue_booking_decision_notification()"),
+      schemaBlock(venueBlocks, "create table public.venue_hold_notification_state ("),
+      schemaBlock(eventBlocks, "create or replace function public.postpone_event("),
+      readSql("postponeEvent.assertions.sql"));
   }
   const script = parts.join("\n");
 
@@ -168,6 +185,47 @@ async function run() {
       process.stdout.write(result);
     }
 
+    if (process.argv.includes("--postpone")) {
+      if (!output.includes("POSTPONE SQL ASSERTIONS PASSED")) throw new Error("Postpone SQL assertions did not complete.");
+      const psql = ["exec", "-i", name, "psql", "-Atq", "-h", "127.0.0.1", "-X", "-v", "ON_ERROR_STOP=1", "-U", "postgres"];
+      const race = "eeeeeeee-0170-4170-8170-000000000003";
+      const postpone = reason => `select count(*) from public.postpone_event('${race}', '22222222-2222-4222-8222-222222222222', '${reason}', true);`;
+      requireSuccess(docker(psql, `truncate public.notification_outbox; insert into public.events(id, name, status, organiser_id, coordinator_id) values ('${race}', 'Race', 'APPROVED', '11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222');`), "Could not arrange the concurrent postpone fixture.");
+      const session = () => {
+        const child = spawn("docker", psql, { windowsHide: true });
+        const state = { child, output: "", error: "" };
+        child.stdout.on("data", chunk => { state.output += chunk; });
+        child.stderr.on("data", chunk => { state.error += chunk; });
+        child.stdin.on("error", () => {});
+        state.closed = new Promise(resolve => child.once("close", resolve));
+        return state;
+      };
+      const first = session();
+      let timer;
+      const ready = new Promise((resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("The first postpone never took the event lock.")), 15000);
+        first.child.stdout.on("data", () => { if (first.output.includes("FIRST_READY")) { clearTimeout(timer); resolve(); } });
+      });
+      first.child.stdin.write(`begin; ${postpone("first")}\n\\echo FIRST_READY\n`);
+      let second;
+      try {
+        await ready;
+        second = session();
+        second.child.stdin.end(`set statement_timeout = '10s'; ${postpone("second")}\n`);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        if (second.child.exitCode !== null) throw new Error("[TC-SCRUM-170-07] the second postpone did not wait for the first: " + second.output + second.error);
+      } finally {
+        clearTimeout(timer);
+        first.child.stdin.end("commit;\n");
+      }
+      if (await first.closed !== 0 || await second.closed !== 0) throw new Error("A concurrent postpone failed: " + first.error + second.error);
+      if (!first.output.startsWith("1") || second.output.trim() !== "0") {
+        throw new Error(`[TC-SCRUM-170-07] expected exactly one postpone to win, got ${JSON.stringify(first.output)} and ${JSON.stringify(second.output)}`);
+      }
+      const verified = requireSuccess(docker(psql, `do $$ begin if (select count(*) from public.notification_outbox where event_id = '${race}') <> 1 or (select count(*) from public.event_activity_log where event_id = '${race}') <> 1 or (select postponement_reason from public.events where id = '${race}') <> 'first' then raise exception '[TC-SCRUM-170-07] the losing postpone wrote or queued something'; end if; end $$; select 'POSTPONE CONCURRENCY ASSERTIONS PASSED';`), "Concurrent postpone assertions failed.");
+      process.stdout.write(verified);
+    }
+
     process.stdout.write(output);
     for (const [id, description] of [
       ["S01", "Initial assignment recipient and names"],
@@ -192,6 +250,29 @@ async function run() {
     }
     if (process.argv.includes("--venue-decision")) {
       process.stdout.write("7/7 venue decision notification SQL scenarios passed.\n");
+    }
+    if (process.argv.includes("--postpone")) {
+      for (const [id, description] of [
+        ["01", "The assigned coordinator postpones; live slots and holds are released and history is written"],
+        ["02", "The browser role and an unassigned coordinator change nothing"],
+        ["04", "A missing or blank reason is refused before any write"],
+        ["05", "The event's dates and details are kept"],
+        ["06", "Postponing again changes and queues nothing"],
+        ["07", "Two postpones at once: one wins, the other writes nothing"],
+        ["08", "Rejected slots, expired holds and other events' rows are untouched"],
+        ["09", "One notice each to the organiser and pending/confirmed attendees; no venue-lane notices"],
+        ["10", "Only the six postponable stages can be postponed"],
+        ["11", "A failure part-way saves nothing"],
+        ["15", "With the assignment check off (the lead), a non-assigned actor postpones and is recorded"],
+        ["20", "With a new date the event is POSTPONED on the new dates and the history keeps both"],
+        ["21", "A booking that passed the new-date checks moves to the new date as pending"],
+        ["22", "A booking that failed is released; a move naming another event's booking is ignored"],
+        ["23", "Half a new date, or one in the past, is refused before any write"],
+        ["24", "The notice names the new date"],
+      ]) {
+        process.stdout.write(`PASS TC-SCRUM-170-${id}: ${description}\n`);
+      }
+      process.stdout.write("16/16 postpone SQL scenarios passed.\n");
     }
   } finally {
     if (started) {

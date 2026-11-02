@@ -81,9 +81,9 @@ const policies = Object.freeze({
   // SCRUM-171: narrowed from SCRUM-148/142 - the lead's unconditional cancel access is
   // removed; only the event's assigned coordinator may cancel it now.
   "events.cancel": { roles: ["event_coordinator"], record: true },
-  // SCRUM-149/142: postponement grants the assigned coordinator or the lead unconditionally -
-  // unchanged by SCRUM-171, which narrowed events.cancel above but not this one.
-  "events.postpone": { roles: ["event_coordinator", "event_coordinator_lead"], record: true },
+  // SCRUM-170 AC1 (PO confirmed 2026-11-02, superseding SCRUM-149 AC1): only the
+  // assigned coordinator may postpone, so the lead's access is removed as SCRUM-171 did for cancel.
+  "events.postpone": { roles: ["event_coordinator"], record: true },
   "internal.access": {
     roles: [
       "event_coordinator",

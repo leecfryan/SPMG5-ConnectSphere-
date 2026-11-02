@@ -43,7 +43,7 @@ read matrix below, which lists read permissions only. The Safety Officer's
 | `events.submit` | Event Organisers | `POST /api/events`, `/events/new`; the draft routes `/api/events/drafts[/:id[/submit]]`, scoped to the caller's own drafts (SCRUM-147) |
 | `events.own.update` | Event Organisers | `PATCH /api/event-workspace/organiser/:id`; owner check in lookup and write; colleague events remain view only |
 | `events.assign_coordinator` | Event Coordinator Leads | The assignment queue: `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` |
-| `events.postpone` | Event Coordinators assigned to the event, Event Coordinator Leads | `POST /api/internal/events/:eventId/postpone`; coordinators retain the assignment check (SCRUM-149/142) |
+| `events.postpone` | Event Coordinators assigned to the event | `POST /api/internal/events/:eventId/postpone`. SCRUM-170 AC1 (Product Owner, 2026-11-02) removed the Event Coordinator Lead's access granted by SCRUM-149/142, as SCRUM-171 did for cancel |
 | `events.waitlist.manage` | Event Coordinators assigned to the event | Coordinator waitlist listing, offer settings and manual promotion; leads do not gain this capability (SCRUM-142 staging integration) |
 | `events.decide` | Event Coordinators, **assigned event only** (record check on `coordinator_id`) | `POST /api/internal/events/:eventId/{start-review,approve,reject,confirm}`, `PATCH /api/internal/events/:eventId/arrangements/:kind/:requestId` (SCRUM-144) |
 | `events.safety.submit` | Event Coordinators, **assigned event only** (same record check) | `GET /api/internal/events/:eventId/safety-readiness`, `POST /api/internal/events/:eventId/{submit-safety-check,withdraw-safety-check}` |
@@ -196,12 +196,11 @@ Equipment uses this same trusted role matrix. Coordinators submit requests for a
 
 Event Coordinator Lead replaces Event Operations Manager. The canonical trusted
 role is `event_coordinator_lead`, including permission policies, account labels,
-coordinator assignment and unrestricted lead postponement. (Unrestricted lead
-*cancellation* was part of this at the time of the rename; SCRUM-171 later
-narrowed cancellation to the assigned coordinator only — see
-[Event requests](event-requests.md) §Cancelling an event. Postponement is
-unaffected.) The lead's remaining responsibilities and permissions are
-unchanged. Multiple trusted roles still combine capabilities without bypassing
+coordinator assignment. (Unrestricted lead *cancellation* and *postponement*
+were part of this at the time of the rename; SCRUM-171 later narrowed
+cancellation, and SCRUM-170 postponement, to the assigned coordinator only — see
+[Event requests](event-requests.md) §Cancelling an event and §Postponing an
+event.) The lead's remaining responsibilities and permissions are unchanged. Multiple trusted roles still combine capabilities without bypassing
 record checks.
 
 `requireAuth` translates the legacy `event_ops_manager` claim **only after**
@@ -277,9 +276,9 @@ overwrite accounts whose trusted roles differ.
 ### Rename verification
 
 - `backend/tests/integration/roles.rename.test.js`: canonical and legacy claims,
-  exact permission list, duplicate/combined roles, assignment access, unrestricted
-  lead postponement (cancellation is now assigned-coordinator-only, SCRUM-171),
-  denied coordinator decisions, spoofing refusal with unchanged event data, and
+  exact permission list, duplicate/combined roles, assignment access, refused
+  lead cancellation and postponement (assigned-coordinator-only since SCRUM-171
+  and SCRUM-170), denied coordinator decisions, spoofing refusal with unchanged event data, and
   role removal on the next request.
 - `frontend/src/Rbac.test.jsx`: SCRUM-142 account display and combined navigation.
 - `tests/playwright/api.spec.cjs`: SCRUM-142 canonical/legacy identity and revocation
@@ -300,6 +299,11 @@ assertion (and title) changed to match this new release behaviour; everything el
 verify is unchanged.
 The frontend cancel/postpone controls include SAFETY_REVIEW to match the existing
 server status lists; POSTPONED is cancellable but not postponable again.
+
+**Updated 2026-11-02 (SCRUM-170):** the lead no longer postpones. SCRUM-142-INT-011/012
+and SCRUM-142-MERGE-API/BROWSER-001/002 now assert that both lead identifiers are
+refused (403, nothing changed) and that the assigned coordinator's postponement
+is then visible to the lead.
 
 The SCRUM-142 working plan and execution reports stay outside this repository
 under Ryan's local reporting preferences. Manual UAT and the shared Auth update
@@ -369,6 +373,5 @@ The test specifications and genuine automated execution report stay outside the
 repository under Ryan's local reporting preferences.
 
 SCRUM-117 reuses events.decide for POST /api/internal/events/:eventId/request-changes.
-Only the assigned coordinator may return an UNDER_REVIEW request. The lead may postpone
-a CHANGES_REQUESTED request (cancellation is assigned-coordinator-only, SCRUM-171) but
-may not return or reassign it in that state.
+Only the assigned coordinator may return an UNDER_REVIEW request. The lead may not
+return, reassign, cancel (SCRUM-171) or postpone (SCRUM-170) a CHANGES_REQUESTED request.

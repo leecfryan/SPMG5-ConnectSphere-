@@ -221,24 +221,41 @@ test('[E2E-EVENT-101] SCRUM-100: Revocation while editing is refused by the real
 // postponing it - the lead's unconditional cancel access is now removed, so
 // the second half instead proves the Cancel event control itself is gone from
 // the manager scope (the postpone half, unaffected by SCRUM-171, is unchanged).
+// SCRUM-170 AC1 (PO confirmed 2026-11-02): the lead no longer postpones here. The
+// lead sees neither action; the assigned coordinator postpones on a phone-width
+// screen, and the lead then sees the event clearly marked as postponed.
 for (const [id, role, status] of [['001', 'event_coordinator_lead', 'SUBMITTED'], ['002', 'event_ops_manager', 'SAFETY_REVIEW']]) {
-  test(`[SCRUM-142-MERGE-BROWSER-${id}] ${role} can postpone a ${status} event and refresh, but has no cancel action (SCRUM-171)`, async ({ page, accounts, request }) => {
+  test(`[SCRUM-142-MERGE-BROWSER-${id}][TC-SCRUM-170-13][TC-SCRUM-170-12] ${role} cannot postpone or cancel a ${status} event; the assigned coordinator postpones and everyone sees it`, async ({ page, accounts, request }) => {
     const { event, first, update } = await setupWorkflow(accounts, request);
     expect((await update('coordinator', { coordinatorId: first.id, expectedCoordinatorId: null })).status()).toBe(200);
     await accounts.updateEvent(event.id, { status });
     const lead = await accounts.create([role]);
+    await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(`/event-management/${event.id}`);
     await signIn(page, lead);
     await expect(page.getByRole('heading', { name: event.name, exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Postpone event', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'Cancel event', exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+
+    await page.goto(`/assigned-events/${event.id}`);
+    await signIn(page, first);
     const postpone = page.getByRole('region', { name: 'Postpone event', exact: true });
     await postpone.getByLabel('Reason', { exact: true }).fill('New date pending');
     await postpone.getByRole('button', { name: 'Postpone event', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Postponement', exact: true })).toBeVisible();
-    await expect(page.getByText('New date pending', { exact: true })).toBeVisible();
+    const notice = page.getByRole('region', { name: 'This event is postponed', exact: true });
+    await expect(notice).toContainText('No new date has been set yet.');
+    await expect(notice).toContainText('New date pending');
+    await expect(page.getByText('Original start', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Postpone event', exact: true })).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+
+    await page.goto(`/event-management/${event.id}`);
+    await signIn(page, lead);
+    await expect(page.getByRole('region', { name: 'This event is postponed', exact: true })).toBeVisible();
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Postponement', exact: true })).toBeVisible();
-    await expect(page.getByRole('region', { name: 'Cancel event', exact: true })).toHaveCount(0);
   });
 }
 

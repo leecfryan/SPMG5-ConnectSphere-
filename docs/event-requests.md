@@ -143,7 +143,7 @@ stateDiagram-v2
 | `COMPLETED` | Completed | not yet (complete story) |
 | `CANCELLED` | Cancelled | the assigned coordinator's *Cancel event* (SCRUM-148; narrowed to the assigned coordinator only by SCRUM-171) |
 | `REJECTED` | Rejected | the assigned coordinator's *Reject* (SCRUM-98) |
-| `POSTPONED` | Postponed | the assigned coordinator's or the coordinator lead's *Postpone event* (SCRUM-149); still cancellable, still counts toward workload, still reassignable (`ACTIVE_STATUSES`) |
+| `POSTPONED` | Postponed | the assigned coordinator's *Postpone event* (SCRUM-149/170); still cancellable, still counts toward workload, still reassignable (`ACTIVE_STATUSES`) |
 
 `COMPLETED` and `REJECTED` are fully terminal. `CANCELLED` is terminal too. `POSTPONED` has exactly one way
 forward — Cancel — until a future "reschedule" story adds a path back to an active stage. Any move not on the
@@ -220,7 +220,7 @@ Module at `backend/src/modules/events/`.
 | GET | /api/internal/safety-reviews | requireAuth + internal.access + events.safety.read (any Safety Officer) | `{ events[] }` awaiting safety review, soonest start first |
 | GET | /api/internal/safety-reviews/:eventId | same | `{ event, venues[], equipment[] }`; 404 unless the event is `SAFETY_REVIEW` |
 | POST | /api/internal/events/:eventId/cancel | requireAuth + internal.access + events.cancel (assigned coordinator only - SCRUM-171) | any active status (including `POSTPONED`) `→ CANCELLED`; body `{ "reason": string }` (required) |
-| POST | /api/internal/events/:eventId/postpone | requireAuth + internal.access + events.postpone (assigned coordinator or coordinator lead) | any of the five postponable stages `→ POSTPONED`; body `{ "reason": string }` (required) |
+| POST | /api/internal/events/:eventId/postpone | requireAuth + internal.access + events.postpone (assigned coordinator only - SCRUM-170) | any postponable stage `→ POSTPONED`, releasing the event's venue bookings and holds (or, with a new date, moving those that still fit) and notifying the organiser and registered attendees; body `{ "reason": string, "new_start_time"?: string, "new_end_time"?: string }`; response `{ event, venue_recheck }` (`venue_recheck` is `null` without a new date) |
 | POST | /api/event-workspace/organiser/:id/change-request | requireAuth + events.own.update (own event only) | SCRUM-36: submit a change request for an `UNDER_REVIEW` or `APPROVED` event; body `{ "proposed_changes": { ...fields }, "reason": string }`; → 201 `{ event }` with `pending_change_request` set; 409 if already pending or status ineligible |
 | POST | /api/internal/events/:eventId/decide-change-request | requireAuth + internal.access + events.decide (assigned coordinator) | SCRUM-165: approve or reject a pending change request; body `{ "decision": "approve"\|"reject", "reason": string }` (reason required for both); → 200 `{ event }` with `pending_change_request` cleared; if approving an APPROVED event with a significant field change (`start_time`, `end_time`, `venue_requirements`, `expected_attendance`) → status regressed to `SUBMITTED`; 409 if no pending request or concurrent modification |
 
@@ -576,23 +576,22 @@ as cancel above, for an event whose new date isn't known yet. The two actions ar
 postponed, then cancelled outright later (see [Status values](#status-values)); there is no path back from
 `POSTPONED` to an active stage yet.
 
-- `events.postpone` is a `record: true` permission, granted to the assigned coordinator or the Event Coordinator
-  Lead unconditionally (SCRUM-142) — unchanged by SCRUM-171, which narrowed `events.cancel` (above) to the
-  assigned coordinator only. The two no longer share the same access shape.
-- Postpone is reachable from the active stages **except** `POSTPONED` itself — it uses
-  `events.repository.js#postpone(id, extra, coordinatorId?)`, filtered on `POSTPONABLE_STATUSES`
-  (`ACTIVE_STATUSES` minus `POSTPONED`), so an already-postponed event can't be postponed again. `cancel()` is
+- `events.postpone` is a `record: true` permission granted to `event_coordinator` only, with the same
+  assigned-coordinator record check as cancel (SCRUM-170 AC1, confirmed by the Product Owner on 2026-11-02; it
+  supersedes SCRUM-149 AC1, which also let the Event Coordinator Lead postpone).
+- Postpone is reachable from the active stages **except** `POSTPONED` itself (`POSTPONABLE_STATUSES`, i.e.
+  `ACTIVE_STATUSES` minus `POSTPONED`), so an already-postponed event can't be postponed again. `cancel()` is
   unchanged and already reaches `POSTPONED` through the wider `ACTIVE_STATUSES`.
-- A reason is required (`postponement_reason`, trimmed; blank or missing is a 400), same rule as cancel's.
+- A reason is required (`postponement_reason`, trimmed; blank or missing is a 400), same rule as cancel's. No new
+  date is taken; anything else in the body is ignored.
 - Records `postponed_by` and `postponed_at`, kept in separate columns from `cancelled_by`/`cancelled_at` so an
   event that is postponed and later cancelled keeps both reasons on record rather than one overwriting the other.
-- Releases the event's venue bookings and holds, synchronously, by calling the **same**
-  `venuesService.releaseBookingsForCancelledEvent(eventId)` cancel uses — unchanged, no new Venue-lane SQL.
-  **SCRUM-150:** postpone now also releases the event's equipment reservations, the same way cancel does —
-  reusing the exact same `equipmentService.releaseReservationsForEvent(eventId, actorId)` call (renamed from
-  `releaseReservationsForCancelledEvent`, since it never actually read `events.status`). Postpone never carries a
-  new date, so there is no window left to hold equipment against; see `docs/equipment-integration.md` for the
-  full reschedule/postpone equipment handling.
+- `events.repository.js#postpone(id, coordinatorId, reason)` calls `postpone_event` (below), which writes the
+  postponement, releases the event's venue bookings and holds, and queues notifications in one transaction.
+  **SCRUM-150:** the event's equipment reservations are then released by the same
+  `equipmentService.releaseReservationsForEvent(eventId, actorId)` call cancel makes. The postponement is already
+  saved by then, so an equipment-release failure is logged rather than answered as a 500. See
+  `docs/equipment-integration.md` for the full reschedule/postpone equipment handling.
 - A postponed event still counts toward its coordinator's workload, is still reassignable to a different
   coordinator, and is still cancellable outright — all because `POSTPONED` is in `ACTIVE_STATUSES`, not because
   postpone's own code does anything special for them.
@@ -602,20 +601,191 @@ postponed, then cancelled outright later (see [Status values](#status-values)); 
 No scope-filter change was needed for visibility — `POSTPONED` joining `ACTIVE_STATUSES` already keeps a
 postponed event in the coordinator's and manager's own lists.
 
-**In the browser.** On an event in any of the five postponable stages, the assigned coordinator or the Event Coordinator
-Lead sees a *Postpone event* control alongside *Cancel event*, with a required reason field. After
-postponing, the page shows a *Postponement* summary (postponed by, postponed on, reason) alongside any existing
-*Review decision* and *Cancellation* summaries.
+**In the browser.** On an event in any of the postponable stages, the assigned coordinator sees a *Postpone event*
+control alongside *Cancel event*, with a required reason and an optional *New start* / *New end* (both or neither);
+the Event Coordinator Lead's *Manage event requests* page shows neither. After postponing with a new date the
+coordinator sees *Venues for the new date*: each venue moved (waiting for Venue Staff) or released, with the reason.
+Once postponed, every role that can open the event sees a *This event is postponed* notice at the top (the new date and
+that fitting venues moved, or that no new date is set and the venues were released; and the reason), the dates
+labelled *New start*/*New end* or *Original start*/*Original end*, an *Event postponed* entry in the activity history,
+and the *Postponement* summary (postponed by, postponed on, reason) alongside any *Review decision* and *Cancellation*
+summaries.
 
 | Status | When | Message |
 | --- | --- | --- |
 | 200 | Done | `{ event }`, the updated row |
 | 400 | No reason, or a blank one | "Give a reason for postponing this event." |
+| 400 | Only one of the new start/end, an invalid date, a start in the past, or an end not after the start | "Give both a new start and a new end, or leave both empty." / "The new start and end must be valid dates and times." / "The new start must be in the future." / "The new end must be after the new start." |
 | 401 | No or invalid session | "Please sign in to continue." |
-| 403 | Not the assigned coordinator and not the coordinator lead | "You do not have permission to access this information." |
+| 403 | Not the assigned coordinator (including the Event Coordinator Lead) | "You do not have permission to access this information." |
 | 404 | Event deleted after the access check | "That event request no longer exists." |
-| 409 | Not in a postponable stage, or reassigned meanwhile | "This event request has changed since you opened it. Refresh to see its current status." |
+| 409 | Not in a postponable stage (including already postponed), or reassigned meanwhile | "This event request has changed since you opened it. Refresh to see its current status." |
+| 500 | The database failed; nothing was saved | "Something went wrong. Please try again." |
+| 503 | A new date was given but the venue checks could not run; nothing was saved | "We couldn't check the venues for the new date, so the event was not postponed. Please try again." |
 | 503 | The access check could not reach storage | "Unable to check access. Please try again." |
+
+### Postponing releases its commitments (SCRUM-170)
+
+`postpone_event` does the whole postponement in one transaction: it locks the event, refuses unless the status is
+postponable (and, when `p_assigned_only` is true, unless the actor is the assigned coordinator), records the
+postponement against the actor, handles the event's live venue rows, writes an `EVENT_POSTPONED` history entry and
+queues one `event-postponed` notification each for the organiser and every attendee whose registration is `pending`
+or `confirmed`. Either all of it is saved or none of it is.
+
+- **Who may postpone:** only the assigned coordinator (SCRUM-170 AC1, confirmed by the Product Owner on 2026-11-02).
+  The backend always passes `p_assigned_only = true`, so the function rechecks the assignment under the row lock. The
+  flag exists because the lead briefly kept access while that decision was pending; nothing passes `false` now.
+- **Without a new date (AC2):** the event keeps its dates, and every live venue row is released.
+- **With a new date:** the coordinator may give a new start and end together (the start in the future, the end after
+  it). Before the function runs, the backend checks each live booking request on the new date with SCRUM-138's rules
+  (`backend/src/modules/venues/venueReschedule.js`): the booking keeps its slots and moves by the same number of
+  days as the event, counted in the venues' time zone (Asia/Singapore), and must still be suitable, available, free
+  of clashes and inside the new event dates. Bookings that pass are passed in as `p_moves`; the function moves each
+  to its new date as `pending` (old slot rows cancelled, new ones inserted, the decision cleared, the same shape as
+  SCRUM-154's change) for Venue Staff to decide again. Every other live row, and every hold, is released. The event
+  stays `POSTPONED` with the new dates; the history entry keeps the previous and new dates and the moved bookings, and
+  the notice says "postponed to <new date>". If a slot is taken between the check and this write, the moved booking
+  is only `pending`, so Venue Staff's decision meets the confirmed-slot constraint as for any other request. If the
+  checks cannot run, nothing is postponed (503).
+- **Released:** the `pending`/`confirmed` slots of the event's booking requests (other than moved ones), and holds
+  still in force, whether linked by `event_id` or through one of the event's booking requests. `rejected`,
+  `cancelled`, `superseded` and expired rows keep their history, and other events' rows are never touched.
+- **Postponing twice:** the second call waits on the row lock, then finds `POSTPONED` and returns nothing, so no
+  second release, move, history entry or notification is written (AC3).
+- **Other triggers:** SCRUM-41's booking-decision trigger ignores rows becoming `cancelled` or `pending`; SCRUM-163's
+  hold trigger marks a hold released before expiry as ended, which suppresses its warning and expiry notice.
+
+#### Schema reference — SCRUM-170
+
+Apply by hand in the Supabase SQL Editor. Tell teammates before and after. It appends `event-postponed` to the
+outbox's allowed workflows without restating the other lanes' values, and is safe to run again: the workflow is only
+appended once, earlier versions (three arguments, applied 2026-11-01; four arguments, applied 2026-11-02) are dropped,
+and the function is replaced. The three new arguments default to "no new date", so a four-argument call behaves as
+before.
+
+```sql
+begin;
+
+do $$ declare existing_check text; begin
+  select pg_get_expr(conbin, conrelid) into strict existing_check
+  from pg_constraint
+  where conrelid = 'public.notification_outbox'::regclass
+    and conname = 'notification_outbox_workflow_check' and contype = 'c';
+  if existing_check like '%event-postponed%' then
+    raise notice 'event-postponed is already allowed; constraint left alone';
+  else
+    execute 'alter table public.notification_outbox drop constraint notification_outbox_workflow_check';
+    execute format('alter table public.notification_outbox add constraint notification_outbox_workflow_check check ((%s) or workflow = %L)',
+      existing_check, 'event-postponed');
+  end if;
+end $$;
+
+drop function if exists public.postpone_event(uuid, uuid, text);
+drop function if exists public.postpone_event(uuid, uuid, text, boolean);
+
+create or replace function public.postpone_event(
+  p_event_id uuid, p_actor_id uuid, p_reason text, p_assigned_only boolean,
+  p_new_start timestamptz default null, p_new_end timestamptz default null, p_moves jsonb default '[]'::jsonb)
+returns setof public.events
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_event public.events%rowtype;
+  v_reason text := btrim(p_reason);
+  v_moved uuid[] := '{}';
+  v_slots text[];
+  v_move record;
+begin
+  if v_reason is null or v_reason = '' then
+    raise exception 'A postponement reason is required.' using errcode = '22023';
+  end if;
+  if (p_new_start is null) <> (p_new_end is null)
+     or (p_new_start is not null and (p_new_start <= now() or p_new_end <= p_new_start)) then
+    raise exception 'A new date needs a future start and an end after it.' using errcode = '22023';
+  end if;
+
+  -- SCRUM-170 AC3: a second postpone waits here, then finds POSTPONED and stops
+  -- before releasing, moving or notifying anything.
+  select * into v_event from public.events where id = p_event_id for update;
+  if not found then return; end if;
+  -- Mirrors POSTPONABLE_STATUSES in backend/src/modules/events/lifecycle.js.
+  if p_actor_id is null or p_assigned_only is null
+     or (p_assigned_only and v_event.coordinator_id is distinct from p_actor_id)
+     or v_event.status not in ('SUBMITTED', 'UNDER_REVIEW', 'CHANGES_REQUESTED', 'APPROVED', 'SAFETY_REVIEW', 'CONFIRMED') then
+    return;
+  end if;
+
+  update public.events
+  set status = 'POSTPONED', postponed_by = p_actor_id, postponed_at = now(), postponement_reason = v_reason,
+      start_time = coalesce(p_new_start, start_time), end_time = coalesce(p_new_end, end_time)
+  where id = v_event.id;
+
+  -- With a new date, bookings that passed the backend's checks on that date move
+  -- to it as pending for Venue Staff to decide again (SCRUM-154's change shape).
+  -- A move for a request that is not this event's, or no longer live, is ignored.
+  for v_move in
+    select (m ->> 'request_id')::uuid as request_id, (m ->> 'booking_date')::date as booking_date
+    from jsonb_array_elements(coalesce(p_moves, '[]'::jsonb)) m
+  loop
+    select array_agg(b.slot::text order by b.slot) into v_slots
+    from public.venue_bookings b join public.venue_booking_requests r on r.id = b.request_id
+    where b.request_id = v_move.request_id and r.event_id = v_event.id and b.status in ('pending', 'confirmed');
+    continue when v_slots is null or p_new_start is null;
+
+    update public.venue_bookings set status = 'cancelled', updated_at = now()
+    where request_id = v_move.request_id and status in ('pending', 'confirmed');
+    insert into public.venue_bookings(venue_id, booking_date, slot, status, event_name, requested_by, request_id)
+    select r.venue_id, v_move.booking_date, s::public.venue_slot, 'pending', v_event.name, 'booking-request', r.id
+    from public.venue_booking_requests r cross join unnest(v_slots) as s
+    where r.id = v_move.request_id;
+    update public.venue_booking_requests
+    set booking_date = v_move.booking_date, decided_by = null, decided_at = null, decision_note = null
+    where id = v_move.request_id;
+    v_moved := v_moved || v_move.request_id;
+  end loop;
+
+  -- Every other row still holding a venue for this event. Rejected, cancelled,
+  -- superseded and expired rows keep their history (SCRUM-170 AC3).
+  update public.venue_bookings b
+  set status = 'cancelled', updated_at = now()
+  where (b.status in ('pending', 'confirmed') and not (b.request_id = any(v_moved))
+         and b.request_id in (select r.id from public.venue_booking_requests r where r.event_id = v_event.id))
+     or (b.status = 'hold' and b.expires_at > now()
+         and (b.event_id = v_event.id
+              or b.request_id in (select r.id from public.venue_booking_requests r where r.event_id = v_event.id)));
+
+  insert into public.event_activity_log(event_id, user_id, action, details)
+  values (v_event.id, p_actor_id, 'EVENT_POSTPONED', jsonb_build_object(
+    'from_status', v_event.status, 'to_status', 'POSTPONED', 'note', v_reason,
+    'previous_start', v_event.start_time, 'previous_end', v_event.end_time,
+    'new_start', p_new_start, 'new_end', p_new_end, 'moved_bookings', to_jsonb(v_moved)));
+
+  -- Joining auth.users skips accounts deleted since they registered.
+  insert into public.notification_outbox(event_id, recipient_id, workflow, payload)
+  select v_event.id, u.id, 'event-postponed', jsonb_build_object(
+    'eventId', v_event.id, 'eventName', v_event.name, 'reason', v_reason, 'newStart', p_new_start,
+    'message', case when p_new_start is null
+      then v_event.name || ' has been postponed. A new date has not been set yet.'
+      else v_event.name || ' has been postponed to ' || to_char(p_new_start at time zone 'Asia/Singapore', 'FMDD Mon YYYY') || '.' end,
+    'requestPath', recipient.request_path)
+  from (
+    select v_event.organiser_id as id, '/my-event-requests/' || v_event.id as request_path
+    union
+    select distinct r.attendee_id, '/registrations/me'
+    from public.registrations r
+    where r.event_id = v_event.id and r.status in ('pending', 'confirmed')
+      and r.attendee_id is distinct from v_event.organiser_id
+  ) recipient
+  join auth.users u on u.id = recipient.id;
+
+  return query select * from public.events where id = v_event.id;
+end;
+$$;
+revoke all on function public.postpone_event(uuid, uuid, text, boolean, timestamptz, timestamptz, jsonb) from public, anon, authenticated;
+grant execute on function public.postpone_event(uuid, uuid, text, boolean, timestamptz, timestamptz, jsonb) to service_role;
+
+commit;
+```
 
 ### Significant edits regress the event (SCRUM-37)
 
@@ -1166,7 +1336,7 @@ stale status/assignment 409; write failures a safe 500, matching existing review
 Returned requests remain visible and count towards coordinator workload. ACTIVE_STATUSES
 includes them for cancellation/workload; ASSIGNABLE_STATUSES excludes them. The assigned
 coordinator can cancel them (the lead no longer can, as of SCRUM-171); the assigned
-coordinator or the lead can postpone them; both use the existing required-reason and
+coordinator can postpone them (the lead no longer can, as of SCRUM-170); both use the existing required-reason and
 release rules. Venue/equipment planning and attendee registration do not admit this status.
 The unassigned queue still requires SUBMITTED plus a null coordinator.
 

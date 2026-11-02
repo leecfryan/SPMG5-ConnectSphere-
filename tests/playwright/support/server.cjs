@@ -190,11 +190,20 @@ const eventsRepository = {
     Object.assign(event, extra, { status: 'CANCELLED' });
     return { ...event };
   },
-  // SCRUM-149: same guard shape as cancel, gated on POSTPONABLE_STATUSES.
-  async postpone(id, extra = {}, coordinatorId) {
+  // SCRUM-170: mirrors postpone_event - same guards, then the venue release and
+  // history entry it writes in the same transaction.
+  async postpone(id, coordinatorId, reason, { newStart = null, newEnd = null, moves = [] } = {}) {
     const event = findEvent(id);
-    if (!event || !POSTPONABLE_STATUSES.includes(event.status) || (coordinatorId && event.coordinator_id !== coordinatorId)) return null;
-    Object.assign(event, extra, { status: 'POSTPONED' });
+    if (!event || !POSTPONABLE_STATUSES.includes(event.status) || event.coordinator_id !== coordinatorId) return null;
+    const previous = { status: event.status, start: event.start_time, end: event.end_time };
+    Object.assign(event, { status: 'POSTPONED', postponed_by: coordinatorId, postponed_at: new Date().toISOString(), postponement_reason: reason },
+      newStart ? { start_time: newStart, end_time: newEnd } : {});
+    const moved = newStart ? moves.map(move => move.request_id) : [];
+    await venuesService.releaseBookingsForCancelledEvent(id, moved);
+    if (newStart) await venuesService.moveBookingsForPostponement(id, moves);
+    dataClient.activity.push({ id: randomUUID(), event_id: id, user_id: coordinatorId, action: 'EVENT_POSTPONED', created_at: new Date().toISOString(),
+      details: { from_status: previous.status, to_status: 'POSTPONED', note: reason, previous_start: previous.start, previous_end: previous.end,
+        new_start: newStart, new_end: newEnd, moved_bookings: moved } });
     return { ...event };
   },
   async createSubmitted(fields, organiserId) {
@@ -230,6 +239,8 @@ const eventsRepository = {
   },
 };
 const venuesService = require('./venue-storage.cjs')(accounts);
+// SCRUM-170: the production new-date venue checks, run over the fake venue storage.
+venuesService.checkBookingsForNewDates = require('../../../backend/src/modules/venues/venueReschedule').createRescheduleCheck(venuesService);
 // SCRUM-38: the production re-validation, run over the fake venue storage.
 {
   const { createBookingChecker, createVenueRevalidation } = require('../../../backend/src/modules/venues/venueRevalidation');
