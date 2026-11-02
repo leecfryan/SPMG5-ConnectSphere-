@@ -77,13 +77,15 @@ async function insertEquipment({ type, status = "AVAILABLE", location = "Test Ro
 // SCRUM-31: equipment_type and group_id are now required columns. This
 // fixture still inserts one row per physical unit (the pre-SCRUM-31 shape),
 // so it's "a group of one" - group_id is its own id, same as the migration
-// backfilled every existing row. SCRUM-168 passes the same type used to create
-// the fixture unit, avoiding a redundant read.
-async function insertRequest({ equipmentId, type, status = "PENDING", borrowStart, borrowEnd }) {
+// backfilled every existing row - and the type is resolved from the unit
+// it's already given, so every call site above is unchanged.
+async function insertRequest({ equipmentId, status = "PENDING", borrowStart, borrowEnd }) {
   const id = randomUUID();
+  const { data: unit, error: unitError } = await supabase.from("equipment").select("type").eq("id", equipmentId).single();
+  if (unitError) throw new Error("equipment lookup failed: " + unitError.message);
   const { error } = await supabase.from("equipment_requests").insert({
     id, event_id: anchorEventId, equipment_id: equipmentId, requested_by: anchorUserId,
-    equipment_type: type, group_id: id,
+    equipment_type: unit.type, group_id: id,
     quantity_requested: 1, borrow_start: borrowStart, borrow_end: borrowEnd, status,
   });
   if (error) throw new Error("equipment_requests insert failed: " + error.message);
@@ -186,7 +188,7 @@ describe("Scrum-29 AC2: Equipment committed to another event that overlaps the r
     const type = freshType();
     const unit1 = await insertEquipment({ type });
     const unit2 = await insertEquipment({ type });
-    await insertRequest({ equipmentId: unit1, type, status: "PENDING", borrowStart: "2026-09-10T08:00:00Z", borrowEnd: "2026-09-10T12:00:00Z" });
+    await insertRequest({ equipmentId: unit1, status: "PENDING", borrowStart: "2026-09-10T08:00:00Z", borrowEnd: "2026-09-10T12:00:00Z" });
     const base = await startApp();
 
     const response = await send(base, availabilityQuery(type), "technical_support_staff");
@@ -198,7 +200,7 @@ describe("Scrum-29 AC2: Equipment committed to another event that overlaps the r
   test("a unit with an overlapping APPROVED request is also excluded", async () => {
     const type = freshType();
     const unit = await insertEquipment({ type });
-    await insertRequest({ equipmentId: unit, type, status: "APPROVED", borrowStart: "2026-09-10T08:00:00Z", borrowEnd: "2026-09-10T12:00:00Z" });
+    await insertRequest({ equipmentId: unit, status: "APPROVED", borrowStart: "2026-09-10T08:00:00Z", borrowEnd: "2026-09-10T12:00:00Z" });
     const base = await startApp();
 
     const response = await send(base, availabilityQuery(type), "technical_support_staff");
@@ -235,7 +237,7 @@ describe("Scrum-29 AC4: Equipment returned on a given day is not counted as avai
   test("a request starting the same day the equipment is returned shows 0 available", async () => {
     const type = freshType();
     const unit = await insertEquipment({ type });
-    await insertRequest({ equipmentId: unit, type, status: "APPROVED", borrowStart: "2026-09-09T08:00:00Z", borrowEnd: "2026-09-10T12:00:00Z" });
+    await insertRequest({ equipmentId: unit, status: "APPROVED", borrowStart: "2026-09-09T08:00:00Z", borrowEnd: "2026-09-10T12:00:00Z" });
     const base = await startApp();
 
     const response = await send(base, availabilityQuery(type, { start: "2026-09-10T14:00:00Z", end: "2026-09-10T18:00:00Z" }), "technical_support_staff");
@@ -246,7 +248,7 @@ describe("Scrum-29 AC4: Equipment returned on a given day is not counted as avai
   test("the same request starting the following day shows the equipment as available", async () => {
     const type = freshType();
     const unit = await insertEquipment({ type });
-    await insertRequest({ equipmentId: unit, type, status: "APPROVED", borrowStart: "2026-09-09T08:00:00Z", borrowEnd: "2026-09-10T12:00:00Z" });
+    await insertRequest({ equipmentId: unit, status: "APPROVED", borrowStart: "2026-09-09T08:00:00Z", borrowEnd: "2026-09-10T12:00:00Z" });
     const base = await startApp();
 
     const response = await send(base, availabilityQuery(type, { start: "2026-09-11T08:00:00Z", end: "2026-09-11T12:00:00Z" }), "technical_support_staff");

@@ -7,7 +7,6 @@ const path = require("node:path");
 require("dotenv").config({ path: path.resolve(__dirname, "../../../.env"), quiet: true });
 
 const createApp = require("../../src/app");
-const requestLiveJson = require("../helpers/requestLiveJson");
 const { createManagedEventsService } = require("../../src/modules/managedEvents/managedEvents.service");
 const { createClient } = require("@supabase/supabase-js");
 
@@ -53,7 +52,18 @@ describe.skipIf(!live)("waitlist coordinator controls against live Supabase", ()
   }
 
   async function api(token, pathName, options = {}) {
-    return requestLiveJson(baseUrl, token, pathName, options);
+    const response = await fetch(`${baseUrl}${pathName}`, {
+      ...options,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...options.headers,
+      },
+    });
+    return {
+      status: response.status,
+      body: response.status === 204 ? null : await response.json(),
+    };
   }
 
   async function join(token) {

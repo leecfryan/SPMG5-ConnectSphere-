@@ -485,9 +485,3 @@ Ryan confirmed successful manual SQL application on 2026-10-15, and the Novu
 remain pending. See [equipment issue broadcast setup and limits](notifications.md#equipment-issue-broadcasts--scrum-155-extension-live-verification-pending).
 Catalogue condition edits and ordinary thread messages do not send issue alerts.
 No new tests were authored; live verification remains pending.
-
-## SCRUM-168 fixture performance refactor
-
-The availability integration fixture passes the same generated equipment type used to create its unit into `insertRequest`, matching the existing status-change/release fixtures. This removes four redundant SELECT round-trips across the 13 existing cases. The request payload, real service/API path, 24 assertion statements and cleanup IDs are retained. Production behavior and test runner/timeout settings are unchanged. Controlled original/new fixture checks pass; shared-database timing and live results still require user/CI execution. Raw evidence stays outside the repository in Ryan's `outputs/SCRUM-168-performance/` directory.
-
-SCRUM-168 live verification update (2026-11-02): Ryan's complete backend run passed all 1584 cases with no failures/skips, including the refactored equipment availability fixture. This supplies an actual shared-database pass for the fixture change. No pre/post live speedup or five-run/CI reliability is claimed; raw evidence remains outside the repository in outputs/SCRUM-168-live-cleanup/.

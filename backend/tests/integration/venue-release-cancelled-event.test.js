@@ -52,39 +52,34 @@ async function insertEvent({ status = "CANCELLED" } = {}) {
   return id;
 }
 
-async function insertVenues(count) {
-  const rows = Array.from({ length: count }, () => {
-    const id = randomUUID();
-    return {
-      id, name: "SCRUM-148 test venue " + id.slice(0, 8), address: "1 Test Street", city: "Singapore", country: "Singapore", capacity: 50,
-    };
+async function insertVenue() {
+  const id = randomUUID();
+  const { error } = await supabase.from("venues").insert({
+    id, name: "SCRUM-148 test venue " + id.slice(0, 8), address: "1 Test Street", city: "Singapore", country: "Singapore", capacity: 50,
   });
-  // SCRUM-168: independent fixture rows share one round-trip; child rows wait for their parents.
-  const { error } = await supabase.from("venues").insert(rows);
   if (error) throw new Error("venues insert failed: " + error.message);
-  const ids = rows.map(row => row.id);
-  createdVenueIds.push(...ids);
-  return ids;
+  createdVenueIds.push(id);
+  return id;
 }
 
-async function insertBookingRequests(requests) {
-  const rows = requests.map(({ eventId, venueId, bookingDate = "2026-02-01" }) => ({
-    id: randomUUID(), venue_id: venueId, event_id: eventId, booking_date: bookingDate,
+async function insertBookingRequest({ eventId, venueId, bookingDate = "2026-02-01" }) {
+  const id = randomUUID();
+  const { error } = await supabase.from("venue_booking_requests").insert({
+    id, venue_id: venueId, event_id: eventId, booking_date: bookingDate,
     expected_attendees: 1, room_layout: "Theatre",
-  }));
-  const { error } = await supabase.from("venue_booking_requests").insert(rows);
+  });
   if (error) throw new Error("venue_booking_requests insert failed: " + error.message);
-  return rows.map(row => row.id);
+  return id;
 }
 
-async function insertBookings(bookings) {
-  const rows = bookings.map(({ requestId, venueId, status = "pending", slot = "am", bookingDate = "2026-02-01" }) => ({
-    id: randomUUID(), venue_id: venueId, booking_date: bookingDate, slot, status,
+async function insertBooking({ requestId, venueId, status = "pending", slot = "am", bookingDate = "2026-02-01" }) {
+  const id = randomUUID();
+  const { error } = await supabase.from("venue_bookings").insert({
+    id, venue_id: venueId, booking_date: bookingDate, slot, status,
     event_name: "SCRUM-148 venue release test", requested_by: "test-harness", request_id: requestId,
-  }));
-  const { error } = await supabase.from("venue_bookings").insert(rows);
+  });
   if (error) throw new Error("venue_bookings insert failed: " + error.message);
-  return rows.map(row => row.id);
+  return id;
 }
 
 async function bookingStatus(id) {
@@ -96,15 +91,12 @@ async function bookingStatus(id) {
 describe("SCRUM-148 AC3 (venue): cancelling an event releases its venue bookings", () => {
   test("[TC-148-14] pending and confirmed bookings across more than one venue are both released", async () => {
     const eventId = await insertEvent();
-    const [venueA, venueB] = await insertVenues(2);
-    const [requestA, requestB] = await insertBookingRequests([
-      { eventId, venueId: venueA },
-      { eventId, venueId: venueB },
-    ]);
-    const [pendingBooking, confirmedBooking] = await insertBookings([
-      { requestId: requestA, venueId: venueA, status: "pending" },
-      { requestId: requestB, venueId: venueB, status: "confirmed" },
-    ]);
+    const venueA = await insertVenue();
+    const venueB = await insertVenue();
+    const requestA = await insertBookingRequest({ eventId, venueId: venueA });
+    const requestB = await insertBookingRequest({ eventId, venueId: venueB });
+    const pendingBooking = await insertBooking({ requestId: requestA, venueId: venueA, status: "pending" });
+    const confirmedBooking = await insertBooking({ requestId: requestB, venueId: venueB, status: "confirmed" });
 
     const released = await venuesService.releaseBookingsForCancelledEvent(eventId);
 
@@ -116,15 +108,11 @@ describe("SCRUM-148 AC3 (venue): cancelling an event releases its venue bookings
   test("[TC-148-15] an already-cancelled booking and a different event's booking are untouched; re-running is a no-op", async () => {
     const eventId = await insertEvent();
     const otherEventId = await insertEvent({ status: "APPROVED" });
-    const [venue] = await insertVenues(1);
-    const [request, otherRequest] = await insertBookingRequests([
-      { eventId, venueId: venue },
-      { eventId: otherEventId, venueId: venue },
-    ]);
-    const [alreadyCancelled, otherEventBooking] = await insertBookings([
-      { requestId: request, venueId: venue, status: "cancelled", slot: "pm" },
-      { requestId: otherRequest, venueId: venue, status: "confirmed", slot: "night" },
-    ]);
+    const venue = await insertVenue();
+    const request = await insertBookingRequest({ eventId, venueId: venue });
+    const otherRequest = await insertBookingRequest({ eventId: otherEventId, venueId: venue });
+    const alreadyCancelled = await insertBooking({ requestId: request, venueId: venue, status: "cancelled", slot: "pm" });
+    const otherEventBooking = await insertBooking({ requestId: otherRequest, venueId: venue, status: "confirmed", slot: "night" });
 
     const released = await venuesService.releaseBookingsForCancelledEvent(eventId);
 

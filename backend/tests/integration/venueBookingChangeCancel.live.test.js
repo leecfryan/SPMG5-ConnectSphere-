@@ -53,39 +53,34 @@ async function insertEvent() {
   return id;
 }
 
-async function insertVenues(count) {
-  const rows = Array.from({ length: count }, () => {
-    const id = randomUUID();
-    return {
-      id, name: "SCRUM-154 test venue " + id.slice(0, 8), address: "1 Test Street", city: "Singapore", country: "Singapore", capacity: 50,
-    };
+async function insertVenue() {
+  const id = randomUUID();
+  const { error } = await supabase.from("venues").insert({
+    id, name: "SCRUM-154 test venue " + id.slice(0, 8), address: "1 Test Street", city: "Singapore", country: "Singapore", capacity: 50,
   });
-  // SCRUM-168: independent fixture rows share one round-trip; child rows wait for their parents.
-  const { error } = await supabase.from("venues").insert(rows);
   if (error) throw new Error("venues insert failed: " + error.message);
-  const ids = rows.map(row => row.id);
-  createdVenueIds.push(...ids);
-  return ids;
+  createdVenueIds.push(id);
+  return id;
 }
 
-async function insertBookingRequests(requests) {
-  const rows = requests.map(({ eventId, venueId, bookingDate = "2026-02-01" }) => ({
-    id: randomUUID(), venue_id: venueId, event_id: eventId, booking_date: bookingDate,
+async function insertBookingRequest({ eventId, venueId, bookingDate = "2026-02-01" }) {
+  const id = randomUUID();
+  const { error } = await supabase.from("venue_booking_requests").insert({
+    id, venue_id: venueId, event_id: eventId, booking_date: bookingDate,
     expected_attendees: 10, room_layout: "Theatre",
-  }));
-  const { error } = await supabase.from("venue_booking_requests").insert(rows);
+  });
   if (error) throw new Error("venue_booking_requests insert failed: " + error.message);
-  return rows.map(row => row.id);
+  return id;
 }
 
-async function insertBookings(bookings) {
-  const rows = bookings.map(({ requestId, venueId, status = "confirmed", slot = "am", bookingDate = "2026-02-01" }) => ({
-    id: randomUUID(), venue_id: venueId, booking_date: bookingDate, slot, status,
+async function insertBooking({ requestId, venueId, status = "confirmed", slot = "am", bookingDate = "2026-02-01" }) {
+  const id = randomUUID();
+  const { error } = await supabase.from("venue_bookings").insert({
+    id, venue_id: venueId, booking_date: bookingDate, slot, status,
     event_name: "SCRUM-154 live test", requested_by: "test-harness", request_id: requestId,
-  }));
-  const { error } = await supabase.from("venue_bookings").insert(rows);
+  });
   if (error) throw new Error("venue_bookings insert failed: " + error.message);
-  return rows.map(row => row.id);
+  return id;
 }
 
 async function bookingsForRequest(requestId) {
@@ -109,15 +104,12 @@ async function activityLogRows(eventId) {
 describe("SCRUM-154 AC1/AC3/AC4 (live): cancelling one booking releases it and leaves siblings untouched", () => {
   test("[TC-SCRUM-154-LIVE-01] cancelling one of two venue bookings on an event only touches that one, and is logged", async () => {
     const eventId = await insertEvent();
-    const [venueA, venueB] = await insertVenues(2);
-    const [requestA, requestB] = await insertBookingRequests([
-      { eventId, venueId: venueA },
-      { eventId, venueId: venueB },
-    ]);
-    await insertBookings([
-      { requestId: requestA, venueId: venueA, status: "confirmed", slot: "am" },
-      { requestId: requestB, venueId: venueB, status: "confirmed", slot: "pm" },
-    ]);
+    const venueA = await insertVenue();
+    const venueB = await insertVenue();
+    const requestA = await insertBookingRequest({ eventId, venueId: venueA });
+    const requestB = await insertBookingRequest({ eventId, venueId: venueB });
+    await insertBooking({ requestId: requestA, venueId: venueA, status: "confirmed", slot: "am" });
+    await insertBooking({ requestId: requestB, venueId: venueB, status: "confirmed", slot: "pm" });
 
     const historyBefore = await activityLogRows(eventId);
     const released = await venuesService.cancelBookingRequest(requestA, technicalUserId);
@@ -139,9 +131,9 @@ describe("SCRUM-154 AC1/AC3/AC4 (live): cancelling one booking releases it and l
 
   test("[TC-SCRUM-154-LIVE-02] cancelling a request with no live rows is refused (NOT_LIVE), nothing logged", async () => {
     const eventId = await insertEvent();
-    const [venueId] = await insertVenues(1);
-    const [requestId] = await insertBookingRequests([{ eventId, venueId }]);
-    await insertBookings([{ requestId, venueId, status: "cancelled", slot: "am" }]);
+    const venueId = await insertVenue();
+    const requestId = await insertBookingRequest({ eventId, venueId });
+    await insertBooking({ requestId, venueId, status: "cancelled", slot: "am" });
 
     const historyBefore = await activityLogRows(eventId);
     await expect(
@@ -161,15 +153,12 @@ describe("SCRUM-154 AC1/AC3/AC4 (live): cancelling one booking releases it and l
 describe("SCRUM-154 AC1/AC2/AC4 (live): changing one booking re-flags it and leaves siblings untouched", () => {
   test("[TC-SCRUM-154-LIVE-04] changing the date moves the booking's slots and leaves a sibling request alone", async () => {
     const eventId = await insertEvent();
-    const [venueA, venueB] = await insertVenues(2);
-    const [requestA, requestB] = await insertBookingRequests([
-      { eventId, venueId: venueA, bookingDate: "2026-02-01" },
-      { eventId, venueId: venueB, bookingDate: "2026-02-01" },
-    ]);
-    await insertBookings([
-      { requestId: requestA, venueId: venueA, status: "confirmed", slot: "am", bookingDate: "2026-02-01" },
-      { requestId: requestB, venueId: venueB, status: "confirmed", slot: "pm", bookingDate: "2026-02-01" },
-    ]);
+    const venueA = await insertVenue();
+    const venueB = await insertVenue();
+    const requestA = await insertBookingRequest({ eventId, venueId: venueA, bookingDate: "2026-02-01" });
+    const requestB = await insertBookingRequest({ eventId, venueId: venueB, bookingDate: "2026-02-01" });
+    await insertBooking({ requestId: requestA, venueId: venueA, status: "confirmed", slot: "am", bookingDate: "2026-02-01" });
+    await insertBooking({ requestId: requestB, venueId: venueB, status: "confirmed", slot: "pm", bookingDate: "2026-02-01" });
 
     const historyBefore = await activityLogRows(eventId);
     await venuesService.changeBookingRequest(requestA, technicalUserId, {
@@ -206,9 +195,9 @@ describe("SCRUM-154 AC1/AC2/AC4 (live): changing one booking re-flags it and lea
 
   test("[TC-SCRUM-154-LIVE-05] changing non-slot details on the same date flips the existing row in place, not a new one", async () => {
     const eventId = await insertEvent();
-    const [venueId] = await insertVenues(1);
-    const [requestId] = await insertBookingRequests([{ eventId, venueId, bookingDate: "2026-02-01" }]);
-    const [bookingId] = await insertBookings([{ requestId, venueId, status: "confirmed", slot: "am", bookingDate: "2026-02-01" }]);
+    const venueId = await insertVenue();
+    const requestId = await insertBookingRequest({ eventId, venueId, bookingDate: "2026-02-01" });
+    const bookingId = await insertBooking({ requestId, venueId, status: "confirmed", slot: "am", bookingDate: "2026-02-01" });
 
     await venuesService.changeBookingRequest(requestId, technicalUserId, {
       booking_date: "2026-02-01", expected_attendees: 40, room_layout: "Theatre",
@@ -223,9 +212,9 @@ describe("SCRUM-154 AC1/AC2/AC4 (live): changing one booking re-flags it and lea
 
   test("[TC-SCRUM-154-LIVE-06] changing a request with no live rows is refused (NOT_LIVE)", async () => {
     const eventId = await insertEvent();
-    const [venueId] = await insertVenues(1);
-    const [requestId] = await insertBookingRequests([{ eventId, venueId }]);
-    await insertBookings([{ requestId, venueId, status: "rejected", slot: "am" }]);
+    const venueId = await insertVenue();
+    const requestId = await insertBookingRequest({ eventId, venueId });
+    await insertBooking({ requestId, venueId, status: "rejected", slot: "am" });
 
     await expect(
       venuesService.changeBookingRequest(requestId, technicalUserId, {
