@@ -1,248 +1,135 @@
 # ConnectSphere
-
+Team 5
 Event Planning and Venue Booking System for IS212.
+Repository: https://github.com/leecfryan/SPMG5-ConnectSphere-
 
-## Run locally
+Tech Stack: 
+- React 19 + Vite (frontend)
+-  Express 5 on Node 22 (backend)
+-  Supabase(Postgres database and email/password sign-in)
+-  Novu (notification inbox).
 
-Use Node.js 22. Copy .env.example to .env in the repository root and fill in
-SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY from the team's Supabase Cloud project.
-SUPABASE_SECRET_KEY is needed for server-side event submission, venue storage and administrative scripts such as seeding.
-Keep .env private.
+## Running locally
+You need Node.js 22 (check with `node --version`) and access to the Supabase
+Cloud project.
+
+### 1. Configure .env
+
+Copy .env.example to .env in the repository root and fill it in. 
+.env values can be found in the .env file in the zip file attached, under project setup
+| Variable | Needed for |
+| --- | --- |
+| SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY | Required. The backend refuses to start without them. |
+| SUPABASE_SECRET_KEY | Server-side data access (events, venues, equipment, registrations), seeding and npm --prefix backend test. Without it you can sign in, but data pages answer "not configured". |
+| SEED_USER_PASSWORD | Seeding the demo accounts. |
+| NOVU_APPLICATION_IDENTIFIER, NOVU_SECRET_KEY | Optional. The notification inbox; without them /notifications shows a short error with a retry button and everything else works. |
+| PORT | Optional backend port (default 3000). |
+
+### 2. Install dependencies (once, and after pulling new dependencies)
 
 From the repository root:
 
-```sh
-npm --prefix backend ci
-npm --prefix frontend ci
+
+npm ci && npm --prefix backend ci && npm --prefix frontend ci
+
+
+The root install is only needed for the Playwright tests.
+
+### 3. Start the app
+
+In one terminal, from the repository root, start the backend. It should print
+"Server is running on port 3000":
+
+
 npm --prefix backend run dev
-```
 
-In a second terminal:
 
-```sh
+In a second terminal, also from the repository root, start the frontend:
+
+
 npm --prefix frontend run dev
-```
 
-Open http://localhost:5173. Alternatively, run `docker compose up --build --renew-anon-volumes`
-from the repository root with Docker available and .env configured.
-Supabase stays in the cloud. The renew-anon-volumes flag refreshes the containers'
-node_modules volumes so newly added dependencies are available.
 
-See [dummy accounts](docs/seed-users.md) for sign-in emails and the seed command.
-The seed password is SEED_USER_PASSWORD in your private root .env.
+Open http://localhost:5173 and sign in with one of the demo accounts, the sign in emails for the respective roles can be found in either the seed-users.md doc (/docs/seed-users.md) or in the sign in credentials.md in the attached zip file.
 
-## Notification centre (SCRUM-143, in progress)
+The password for all demo accounts is SEED_USER_PASSWORD from your .env.
 
-The backend now provides a verified user's own Novu inbox configuration at
-GET /api/notifications/inbox-config. Novu setup is optional; without it the endpoint
-returns 503 and sign-in continues to work. Signed-in users can open /notifications for their own
-inbox and unread count. Approval/rejection delivery uses a durable pending queue and the Novu event-decision workflow; apply the documented Supabase SQL and activate that workflow before live testing. See [notification setup and tests](docs/notifications.md).
+If the backend stops with "Set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY in the root
+.env", the file is missing, misnamed or not in the repository root.
 
-## Sign in securely
+## Running in Docker
 
-The shared sign-in page uses Supabase Auth email/password authentication.
-It accepts any valid email domain; Supabase determines whether the entered
-credentials belong to a registered account. Demo seed addresses are test data,
-not an allowlist. The form delegates authentication and safe error messages to
-`frontend/src/features/auth/signInService.js`; it never displays raw provider errors.
-The Supabase browser SDK stores the session in browser local storage, restores it
-on reload, refreshes access tokens and publishes sign-in/sign-out events.
-Passwords are cleared from form state after each attempt. No password or token
-is logged by the application.
+With Docker running and .env configured, from the repository root:
 
-The browser sends a bearer access token to GET /api/auth/me. Express verifies it
-with Supabase Auth getUser(token) before returning account information. Missing,
-invalid, or expired tokens cannot access this endpoint; provider outages fail
-closed. A browser session alone does not grant access to protected API data.
 
-Only the project URL and publishable key are returned by GET /api/auth/config.
-The secret key stays with backend administrative scripts and is not bundled into
-the frontend. The seed admin client is separate from normal user verification.
+docker compose up --build --renew-anon-volumes
 
-Internal staff and external users share one sign-in flow. Verified
-app_metadata.roles supplies application roles. The backend derives accountTypes
-from these roles and attaches the identity to req.user for later authorisation.
-A person can have roles from both groups. User-editable metadata, form fields,
-and request parameters cannot grant roles.
+Then open http://localhost:5173. The --renew-anon-volumes flag refreshes the
+containers' node_modules so newly added dependencies are picked up. Merging or
+restarting Docker never changes the database.
 
-This story provides sign-in, a protected account screen, session restoration, and
-sign-out. The account screen is not an event dashboard. Registration and password
-reset are outside this story. See the staff-access implementation below for
-authorisation.
+## Features and guides
 
-Sign-out uses Supabase's local scope (the current session). As with Supabase JWT
-sessions generally, a previously issued access token may remain valid until its
-expiry; sign-out clears the browser session and revokes its refresh capability.
-Use HTTPS when deployed, protect against XSS because the SDK persists sessions in
-local storage, and keep Supabase's authentication rate limits enabled.
+Each guide covers the feature's pages, permissions, database columns and tests.
+[2/11/2026 11:10 pm] Javen: | Feature | Used by | Main pages | Guide |
+| --- | --- | --- | --- |
+| Sign-in and staff access | Everyone; internal staff | /sign-in, /account, /staff/responsibilities | [Staff access](docs/staff-access.md) |
+| Event requests, drafts, edits and change requests | Event Organisers | /events/new, /my-event-requests | [Event requests](docs/event-requests.md), [Event access](docs/event-access.md) |
+| Coordinator assignment and event review | Event Coordinators, Coordinator Lead | /events/assignments, /assigned-events, /event-management | [Event assignment](docs/event-assignment.md) |
+| Safety review | Safety Officers | /safety-reviews | [Staff access](docs/staff-access.md) |
+| Venue catalogue and bookings | Venue Staff, Event Coordinators | /venues | [Venue integration](docs/venue-integration.md) |
+| Equipment catalogue, requests and reservations | Event Coordinators, Technical Support | /equipment/catalogue, /equipment/requests, /technical-support | [Equipment integration](docs/equipment-integration.md) |
+| Attendee registration and waitlist | Attendees | /events, /registrations/me | [Registrations](docs/registrations.md), [Registration integration](docs/registration-integration.md) |
+| Registration figures for managed events | Event Organisers, Event Coordinators | /events/managed | [Managed event registrations](docs/managed-event-registrations.md) |
+| Notification inbox | Everyone signed in | /notifications | [Notifications](docs/notifications.md) |
 
-## Restrict internal staff access by responsibility
+## Running tests
+From the repository root:
 
-The backend verifies staff roles before serving /api/internal routes. A central
-permission matrix grants Venue Staff venue/booking reads, Technical Support Staff
-equipment/technical reads, and Event Coordinators coordination reads. External
-roles grant no internal access. The staff responsibilities page displays responsibilities
-returned by GET /api/internal/access. SCRUM-142 also recognises Safety Officer
-(`safety_officer`) as internal staff; SCRUM-140 gives it a read-only safety review
-queue at `/safety-reviews`; SCRUM-141 lets it approve (to preparation) or reject
-(with a reason, back to planning) the safety arrangement, and each decision appears
-in the event's activity history. SCRUM-144 lets the assigned Event Coordinator
-confirm an event once it has passed the safety check and nothing essential is
-outstanding; an outstanding venue booking or equipment request can be marked
-non-essential so it does not block. Other assigned
-roles continue to grant their own capabilities.
 
-Feature owners must attach requirePermission to their data endpoints. Sensitive
-record permissions also require a server-side relationship resolver. The Venue feature now applies these guards to its real endpoints; other feature
-PRs must do the same. See [staff access](docs/staff-access.md) for
-the agreed matrix, integration examples, tests and remaining work.
-
-## Event request submission
-
-Event Organisers can open `/events/new` through the workspace navigation. The
-frontend and backend both enforce `events.submit`; the API obtains ownership
-from the verified user. _Save draft_ keeps an unfinished request that needs only
-a name; the organiser's drafts are listed under _Your drafts_ on
-`/my-event-requests`, visible to no one else, and the full checks run when a
-draft is submitted (SCRUM-147). At `/my-event-requests`, organisers can edit responsible
-events and view colleagues’ events in their client organisation. Unrelated clients
-are hidden. Configure trusted organisation metadata using
-[the event access guide](docs/event-access.md#scrum-100-external-client-organiser-scope).
-See [event-request integration](docs/event-request-integration.md)
-for setup, preserved functionality and combined test commands.
-
-## Venue catalogue and booking requests
-
-Venue Staff and Event Coordinators can open `/venues` from the workspace.
-The catalogue, operating-information editor, availability calendar and booking
-request review are integrated with shared sign-in and RBAC. Coordinators request
-bookings for their assigned events, and can check them one venue at a time:
-from an event under **My Events**, the Venues section links to an event-scoped
-booking list whose **Check venue bookings** button reports
-suitability, availability and conflicts for each venue separately, naming the
-venue and the reason when one fails without changing any booking. See
-[Venue integration](docs/venue-integration.md)
-for routes, role permissions and the venue schema reference. Schema changes are
-applied by hand in the Supabase dashboard. Earlier venue migrations are recorded
-in that guide; RBAC's existing event-review SQL reference 007 is retained (see
-[event access](docs/event-access.md)). Merging or restarting Docker does not
-change the database.
-
-## Registration information for managed events
-
-Event Organisers and Event Coordinators can open `/events/managed` from the
-workspace to list the events they own or manage, and open one to see
-"Current Registrations: X/MaxEnrollment" and "Waiting List: Y". Registration
-uses `expected_attendance` as a hard cap and stops when the cap is reached;
-the pages mark full events. When an event is full, attendees can join its
-waitlist from the event page, see their position and leave at any time
-(SCRUM-151). Ownership is checked in the server-side query, and an event belonging
-to someone else is indistinguishable from one that does not exist. Attendee identity
-and submitted registration data are never returned. The managed-event **Waiting
-List** figure still reads 0 because it counts a `registrations` status the
-waitlist does not use. See
-[managed event registrations](docs/managed-event-registrations.md) for the
-permissions, the columns and the test commands.
-
-Attendees can also see registration opening/closing times and a countdown.
-The server enforces the inclusive UTC window; the coordinator/organiser can
-extend a closed window from the managed-event detail page. The window columns
-were added manually in Supabase with no migration file; environment setup notes
-are in [Registration integration](docs/registration-integration.md).
-
-The opt-in live Supabase capacity suite is documented in
-[Registration integration](docs/registration-integration.md); it creates and
-cleans up only uniquely identified temporary test events.
-
-## Frontend navigation
-
-The application uses React Router: `/sign-in`, `/account`,
-`/staff/responsibilities`, `/events/new`, `/events/managed/*`, `/venues/*`, and `/forbidden`. The root redirects after session
-checking. Protected routes wait for backend verification; navigation and feature
-guards use permission identifiers returned by `/api/auth/me`. Express remains
-responsible for enforcing every API permission and record-access check.
-
-See [frontend routing](docs/frontend-routing.md) for the teammate integration
-contract, behavior, Docker dependency refresh and production SPA fallback.
-
-## Test dashboard and saved reports
-
-The existing frontend tests have a live browser dashboard and automatically save
-a self-contained HTML report after each completed run. See
-[test reporting](docs/test-reporting.md) for local and Docker commands.
-
-Playwright also runs browser-to-backend sign-in/RBAC scenarios and direct HTTP
-API tests. From the repository root, run `npm run test:playwright` after the
-one-time setup in the [Playwright acceptance guide](docs/testing/playwright-acceptance.md).
-Use `npm run test:playwright:report` to inspect the saved results.
-
-## Checks and story traceability
-
-```sh
-npm --prefix backend test
-npm --prefix backend run check
-npm --prefix frontend run lint
+npm --prefix backend test           # needs SUPABASE_URL and SUPABASE_SECRET_KEY in .env
+npm --prefix backend run check      # backend lint
 npm --prefix frontend test -- --run
+npm --prefix frontend run lint
 npm --prefix frontend run build
-```
-
-Backend tests use Node's built-in test runner and a fake Auth provider; no cloud
-credentials or dummy accounts are needed in CI.
-Frontend tests use Vitest and fake Auth/API responses. CI runs both suites.
-Fixed UI copy, HTTP status codes and named input limits are application constants;
-credentials, account identity and tokens are supplied at runtime. Role permission
-rules remain server-controlled and must not come from the sign-in form.
-
-| Acceptance criterion                                           | Verification                                                                                                                    |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Valid credentials grant access                                 | Sign in with a seeded account; verify the protected account screen and reload restoration.                                      |
-| Invalid credentials leave protected functionality inaccessible | Wrong-password UI check; API tests reject missing, malformed, forged and expired tokens and fail closed during provider errors. |
-| Sign-in establishes identity for subsequent authorisation      | API tests verify user ID, trusted roles, internal/external classification and resistance to client-supplied role claims.        |
-| Team may choose a secure method                                | Supabase email/password authentication; server verifies each protected request independently.                                   |
-
-Additional manual checks: sign out and reload; repeat with an internal staff
-account and an external account; try a narrow mobile viewport; stop the backend
-and confirm protected account information is not shown for a new session.
-
-Frontend regression coverage uses unique IDs and descriptive titles. See the
-[frontend acceptance test guide](docs/testing/frontend-acceptance.md) for the
-criterion mapping, full test catalog, commands and remaining acceptance evidence.
-
-| Test group                             | Evidence                                                                                               |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| AUTH-FORM / AUTH-SERVICE / AUTH-CONFIG | Form validation, credential forwarding, safe failures, retries and client configuration.               |
-| AUTH-FLOW / ROUTE                      | Verified identity, session changes, sign-out, direct links, return URLs and browser history.           |
-| RBAC-ROLE / RBAC-GUARD / RBAC-SCOPE    | Current role policy, 48 role/permission guard combinations and responsibility-based guard eligibility. |
-| RBAC-ACCESS / RBAC-DENY / RBAC-DATA    | Forbidden navigation, permission revocation, malformed claims and denied staff API responses.          |
-
-These automated tests simulate Supabase and do not establish that the deployed
-service is configured correctly. Record live internal/external sign-in, wrong
-password, reload and sign-out results against the story before marking it Done.
-
-## Configuration and deployment
-
-Vite proxies /api to http://localhost:3000 locally. Docker sets API_PROXY_TARGET
-to http://backend:3000. FRONTEND_ORIGIN optionally configures Express CORS
-(default http://localhost:5173). For deployment, serve frontend and /api behind
-the same HTTPS origin; Vite's development/preview proxy is not a production server.
-
-References:
-
-- https://supabase.com/docs/reference/javascript/auth-signinwithpassword
-- https://supabase.com/docs/reference/javascript/auth-getuser
-- https://supabase.com/docs/guides/auth/signout
-
-## Equipment requests and technical support
-
-Coordinators use `/equipment/requests`; technical support uses `/technical-support`. Both pages share sign-in, role permissions and the existing frontend port. See [Equipment integration](docs/equipment-integration.md) for preserved workflows, database prerequisites and test commands.
-
-## Attendee registration
-
-Signed-in users can browse approved events at `/events` and manage their own registrations at `/registrations/me`. Staff permissions and existing feature routes are unchanged. See [Registration integration](docs/registration-integration.md) for integration details, tests and database requirements.
-
-SCRUM-117: coordinators return requests with a message; organisers save and resubmit to the same coordinator. In-app notifications link both roles to the request, and coordinators see the changed fields. See [event request workflow](docs/event-requests.md#resubmission-and-coordinator-changes-scrum-117) for setup and the applied SQL reference.
-
-SCRUM-163 adds coordinator in-app venue-hold warnings one hour before expiry and notices when a tentative reservation expires. See [venue notification setup](docs/venue-integration.md#coordinator-venue-hold-expiry-notifications--scrum-163). Manual schema/workflow setup is required.
+npm run test:playwright             # browser + API tests against a fake backend store
 
 
-SCRUM-43 attendee notifications reuse the existing Notifications inbox and background worker for confirmed registrations, waitlist joins, place offers and expiry reminders. Local code requires the additive manual database setup and two Novu workflows in [docs/notifications.md](docs/notifications.md#attendee-registration-notifications--scrum-43); live setup/UAT is pending.
+CI runs all of these on every pull request to staging, plus two more suites:
+
+- SQL tests (`tests/sql`): notification triggers in a throwaway PostgreSQL
+  container. Needs Docker, no credentials. See [the SQL test guide](tests/sql/README.md).
+- Live-database tests (`tests/e2e`, `npm --prefix tests/e2e test`): the real UI
+  against the shared dev Supabase. Tell the team before running them locally.
+
+Setup and reports: [Playwright guide](docs/testing/playwright-acceptance.md),
+[test reporting](docs/test-reporting.md),
+[sign-in and access test catalogue](docs/testing/frontend-acceptance.md).
+
+## Sign-in and security
+
+- Sign-in is Supabase email/password. The browser keeps the session in local
+  storage; the server checks the access token with Supabase on every API request
+  and refuses when it is missing, invalid, expired or Supabase is unreachable.
+- Roles come only from app_metadata.roles, which users cannot edit. Form fields
+  and request parameters can never grant a role.
+- The browser only ever receives the project URL and publishable key
+  (`GET /api/auth/config`). SUPABASE_SECRET_KEY stays on the server.
+- Sign-out ends the current session, but an already-issued access token works
+  until it expires. When deployed: use HTTPS, guard against XSS (sessions live in
+  local storage) and keep Supabase's sign-in rate limits on.
+
+## Configuration
+
+Locally, Vite forwards /api to http://localhost:3000; in Docker,
+API_PROXY_TARGET points it at http://backend:3000. FRONTEND_ORIGIN sets the
+origin the backend accepts requests from (default `http://localhost:5173`). In
+production, serve the frontend and /api from the same HTTPS address; the Vite
+proxy is for development only.
+
+## Branching Strategy
+
+Branch from staging as feature/, fix/ plus a three-word summary,
+and open a pull request back to staging. Every PR needs a teammate's review and
+green CI; the author merges. The full workflow is in [AGENTS.md](AGENTS.md).
+Main Branch is used as production environment and will be merged with new features for bigger releases
