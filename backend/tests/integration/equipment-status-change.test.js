@@ -85,10 +85,11 @@ afterEach(async () => {
 
 async function insertEquipment({ type, status = "AVAILABLE", location = "Test Room" }) {
   const id = randomUUID();
-  const { error } = await supabase.from("equipment").insert({ id, type, current_location: location, status });
+  const { data, error } = await supabase.from("equipment")
+    .insert({ id, type, current_location: location, status }).select("id, updated_at").single();
   if (error) throw new Error("equipment insert failed: " + error.message);
   createdEquipmentIds.push(id);
-  return id;
+  return data;
 }
 
 // SCRUM-31: equipment_type and group_id are now required columns. This
@@ -188,14 +189,10 @@ async function getRequestStatus(base, eventId, requestId) {
 describe("SCRUM-103 AC4: the status change is recorded with who made it and when", () => {
   test("[SCRUM-103 AC4 / TC-103-08] the quick status PATCH records who and when", async () => {
     const type = freshType();
-    const id = await insertEquipment({ type });
+    const beforeRow = await insertEquipment({ type });
+    const { id } = beforeRow;
     const base = await startApp();
-    // updated_at is stamped by the database, not by this process, so comparing
-    // it with a locally captured wall-clock time compares two different clocks.
-    // Read the row's own previous value instead - both come from the database.
-    const { data: beforeRow, error: beforeError } = await supabase
-      .from("equipment").select("updated_at").eq("id", id).single();
-    if (beforeError) throw beforeError;
+    // SCRUM-168: the insert returns the database timestamp, avoiding a separate read.
 
     const response = await send(base, `/equipment/${id}/status`, "technical_support_staff", {
       method: "PATCH", body: { status: "DAMAGED" },
@@ -209,12 +206,10 @@ describe("SCRUM-103 AC4: the status change is recorded with who made it and when
 
   test("[SCRUM-103 AC4 / TC-103-09] retire also records who and when", async () => {
     const type = freshType();
-    const id = await insertEquipment({ type });
+    const beforeRow = await insertEquipment({ type });
+    const { id } = beforeRow;
     const base = await startApp();
-    // Same database-clock reasoning as TC-103-08 above.
-    const { data: beforeRow, error: beforeError } = await supabase
-      .from("equipment").select("updated_at").eq("id", id).single();
-    if (beforeError) throw beforeError;
+    // SCRUM-168: the insert returns the database timestamp, avoiding a separate read.
 
     const response = await send(base, `/equipment/${id}/retire`, "technical_support_staff", { method: "PATCH" });
     expect(response.status).toBe(200);
@@ -226,7 +221,7 @@ describe("SCRUM-103 AC4: the status change is recorded with who made it and when
 
   test("[SCRUM-103 AC4 / TC-103-10] updated_by is never taken from the client body - a forged field is rejected outright, not silently dropped", async () => {
     const type = freshType();
-    const id = await insertEquipment({ type });
+    const { id } = await insertEquipment({ type });
     const base = await startApp();
 
     const forgedResponse = await send(base, `/equipment/${id}/status`, "technical_support_staff", {
@@ -248,7 +243,7 @@ describe("SCRUM-103 AC4: the status change is recorded with who made it and when
 describe("SCRUM-103 (added scope, no AC number): retired equipment can be restored to AVAILABLE", () => {
   test("[SCRUM-103 added-scope / TC-103-11] Technical Support Staff can restore a retired unit to AVAILABLE", async () => {
     const type = freshType();
-    const id = await insertEquipment({ type, status: "UNAVAILABLE" });
+    const { id } = await insertEquipment({ type, status: "UNAVAILABLE" });
     const base = await startApp();
 
     const response = await send(base, `/equipment/${id}/status`, "technical_support_staff", {
@@ -275,7 +270,7 @@ describe("SCRUM-103 (added scope, no AC number): the catalogue shows a unit as I
 
   test("an AVAILABLE unit with an APPROVED request covering today reads as IN_USE, without writing to the row", async () => {
     const type = freshType();
-    const id = await insertEquipment({ type, status: "AVAILABLE" });
+    const { id } = await insertEquipment({ type, status: "AVAILABLE" });
     await insertRequest({ equipmentId: id, type, status: "APPROVED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
     const base = await startApp();
 
@@ -288,7 +283,7 @@ describe("SCRUM-103 (added scope, no AC number): the catalogue shows a unit as I
 
   test("a PENDING (not APPROVED) request covering today does not trigger IN_USE", async () => {
     const type = freshType();
-    const id = await insertEquipment({ type, status: "AVAILABLE" });
+    const { id } = await insertEquipment({ type, status: "AVAILABLE" });
     await insertRequest({ equipmentId: id, type, status: "PENDING", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
     const base = await startApp();
 
@@ -297,7 +292,7 @@ describe("SCRUM-103 (added scope, no AC number): the catalogue shows a unit as I
 
   test("an APPROVED request starting tomorrow does not trigger IN_USE today, and will stop once the window passes", async () => {
     const type = freshType();
-    const id = await insertEquipment({ type, status: "AVAILABLE" });
+    const { id } = await insertEquipment({ type, status: "AVAILABLE" });
     await insertRequest({ equipmentId: id, type, status: "APPROVED", borrowStart: isoTomorrow("00:00:00"), borrowEnd: isoTomorrow("23:59:59") });
     const base = await startApp();
 
@@ -306,7 +301,7 @@ describe("SCRUM-103 (added scope, no AC number): the catalogue shows a unit as I
 
   test("a DAMAGED unit with an APPROVED request covering today still reads as DAMAGED, not IN_USE", async () => {
     const type = freshType();
-    const id = await insertEquipment({ type, status: "DAMAGED" });
+    const { id } = await insertEquipment({ type, status: "DAMAGED" });
     await insertRequest({ equipmentId: id, type, status: "APPROVED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
     const base = await startApp();
 
@@ -317,7 +312,7 @@ describe("SCRUM-103 (added scope, no AC number): the catalogue shows a unit as I
 describe("SCRUM-103 AC3: marking equipment unavailable while reserved flags every affected event", () => {
   test("[SCRUM-103 AC3 / TC-103-03] retiring equipment with one APPROVED request covering today flags that event and moves the request to REJECTED (Issues)", async () => {
     const type = freshType();
-    const id = await insertEquipment({ type });
+    const { id } = await insertEquipment({ type });
     const requestId = await insertRequest({ equipmentId: id, type, status: "APPROVED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
     const base = await startApp();
 
@@ -337,8 +332,8 @@ describe("SCRUM-103 AC3: marking equipment unavailable while reserved flags ever
 
   test("[SCRUM-103 AC3 / TC-103-04] PENDING and REJECTED requests covering today are NOT flagged - only APPROVED counts", async () => {
     const type = freshType();
-    const pendingUnit = await insertEquipment({ type });
-    const rejectedUnit = await insertEquipment({ type });
+    const { id: pendingUnit } = await insertEquipment({ type });
+    const { id: rejectedUnit } = await insertEquipment({ type });
     const pendingRequest = await insertRequest({ equipmentId: pendingUnit, type, status: "PENDING", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
     const rejectedRequest = await insertRequest({ equipmentId: rejectedUnit, type, status: "REJECTED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
     const base = await startApp();
@@ -357,7 +352,7 @@ describe("SCRUM-103 AC3: marking equipment unavailable while reserved flags ever
 
   test("[SCRUM-103 AC3 / TC-103-05] an APPROVED request starting tomorrow is NOT flagged (today only, not future-inclusive)", async () => {
     const type = freshType();
-    const id = await insertEquipment({ type });
+    const { id } = await insertEquipment({ type });
     const requestId = await insertRequest({ equipmentId: id, type, status: "APPROVED", borrowStart: isoTomorrow("00:00:00"), borrowEnd: isoTomorrow("23:59:59") });
     const base = await startApp();
 
@@ -371,7 +366,7 @@ describe("SCRUM-103 AC3: marking equipment unavailable while reserved flags ever
 
   test("[SCRUM-103 AC3 / TC-103-06] multiple APPROVED requests across different events each get their own correctly-mapped message", async () => {
     const type = freshType();
-    const id = await insertEquipment({ type });
+    const { id } = await insertEquipment({ type });
     const requestA = await insertRequest({ equipmentId: id, type, status: "APPROVED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59"), eventId: anchorEventId });
     const requestB = await insertRequest({ equipmentId: id, type, status: "APPROVED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59"), eventId: secondEventId });
     const base = await startApp();
@@ -393,7 +388,7 @@ describe("SCRUM-103 AC3: marking equipment unavailable while reserved flags ever
 
   test("[SCRUM-103 AC3 / TC-103-07] no APPROVED reservation at all - retire still succeeds, no messages", async () => {
     const type = freshType();
-    const id = await insertEquipment({ type });
+    const { id } = await insertEquipment({ type });
     const base = await startApp();
 
     const response = await send(base, `/equipment/${id}/retire`, "technical_support_staff", { method: "PATCH" });
