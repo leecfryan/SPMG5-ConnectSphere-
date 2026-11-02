@@ -94,15 +94,16 @@ async function insertEquipment({ type, status = "AVAILABLE", location = "Test Ro
 // SCRUM-31: equipment_type and group_id are now required columns. This
 // fixture still inserts one row per physical unit (the pre-SCRUM-31 shape),
 // so it's "a group of one" - group_id is its own id, same as the migration
-// backfilled every existing row - and the type is resolved from the unit
-// it's already given, so every call site above is unchanged.
-async function insertRequest({ equipmentId, status = "APPROVED", borrowStart, borrowEnd, eventId = anchorEventId }) {
+// backfilled every existing row. equipment_type is filled from the caller's
+// own `type` rather than re-reading the unit's row back from Supabase first
+// (SCRUM-148: that lookup was one of the sequential round-trips that made
+// this live-DB suite tip past the default 5s timeout under CI contention) -
+// every call site already generated the type it just gave insertEquipment.
+async function insertRequest({ equipmentId, type, status = "APPROVED", borrowStart, borrowEnd, eventId = anchorEventId }) {
   const id = randomUUID();
-  const { data: unit, error: unitError } = await supabase.from("equipment").select("type").eq("id", equipmentId).single();
-  if (unitError) throw new Error("equipment lookup failed: " + unitError.message);
   const { error } = await supabase.from("equipment_requests").insert({
     id, event_id: eventId, equipment_id: equipmentId, requested_by: coordinatorUserId,
-    equipment_type: unit.type, group_id: id,
+    equipment_type: type, group_id: id,
     quantity_requested: 1, borrow_start: borrowStart, borrow_end: borrowEnd, status,
   });
   if (error) throw new Error("equipment_requests insert failed: " + error.message);
@@ -275,7 +276,7 @@ describe("SCRUM-103 (added scope, no AC number): the catalogue shows a unit as I
   test("an AVAILABLE unit with an APPROVED request covering today reads as IN_USE, without writing to the row", async () => {
     const type = freshType();
     const id = await insertEquipment({ type, status: "AVAILABLE" });
-    await insertRequest({ equipmentId: id, status: "APPROVED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
+    await insertRequest({ equipmentId: id, type, status: "APPROVED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
     const base = await startApp();
 
     expect(await catalogueStatus(base, id)).toBe("IN_USE");
@@ -288,7 +289,7 @@ describe("SCRUM-103 (added scope, no AC number): the catalogue shows a unit as I
   test("a PENDING (not APPROVED) request covering today does not trigger IN_USE", async () => {
     const type = freshType();
     const id = await insertEquipment({ type, status: "AVAILABLE" });
-    await insertRequest({ equipmentId: id, status: "PENDING", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
+    await insertRequest({ equipmentId: id, type, status: "PENDING", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
     const base = await startApp();
 
     expect(await catalogueStatus(base, id)).toBe("AVAILABLE");
@@ -297,7 +298,7 @@ describe("SCRUM-103 (added scope, no AC number): the catalogue shows a unit as I
   test("an APPROVED request starting tomorrow does not trigger IN_USE today, and will stop once the window passes", async () => {
     const type = freshType();
     const id = await insertEquipment({ type, status: "AVAILABLE" });
-    await insertRequest({ equipmentId: id, status: "APPROVED", borrowStart: isoTomorrow("00:00:00"), borrowEnd: isoTomorrow("23:59:59") });
+    await insertRequest({ equipmentId: id, type, status: "APPROVED", borrowStart: isoTomorrow("00:00:00"), borrowEnd: isoTomorrow("23:59:59") });
     const base = await startApp();
 
     expect(await catalogueStatus(base, id)).toBe("AVAILABLE");
@@ -306,7 +307,7 @@ describe("SCRUM-103 (added scope, no AC number): the catalogue shows a unit as I
   test("a DAMAGED unit with an APPROVED request covering today still reads as DAMAGED, not IN_USE", async () => {
     const type = freshType();
     const id = await insertEquipment({ type, status: "DAMAGED" });
-    await insertRequest({ equipmentId: id, status: "APPROVED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
+    await insertRequest({ equipmentId: id, type, status: "APPROVED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
     const base = await startApp();
 
     expect(await catalogueStatus(base, id)).toBe("DAMAGED");
@@ -317,7 +318,7 @@ describe("SCRUM-103 AC3: marking equipment unavailable while reserved flags ever
   test("[SCRUM-103 AC3 / TC-103-03] retiring equipment with one APPROVED request covering today flags that event and moves the request to REJECTED (Issues)", async () => {
     const type = freshType();
     const id = await insertEquipment({ type });
-    const requestId = await insertRequest({ equipmentId: id, status: "APPROVED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
+    const requestId = await insertRequest({ equipmentId: id, type, status: "APPROVED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
     const base = await startApp();
 
     const response = await send(base, `/equipment/${id}/retire`, "technical_support_staff", { method: "PATCH" });
@@ -338,8 +339,8 @@ describe("SCRUM-103 AC3: marking equipment unavailable while reserved flags ever
     const type = freshType();
     const pendingUnit = await insertEquipment({ type });
     const rejectedUnit = await insertEquipment({ type });
-    const pendingRequest = await insertRequest({ equipmentId: pendingUnit, status: "PENDING", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
-    const rejectedRequest = await insertRequest({ equipmentId: rejectedUnit, status: "REJECTED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
+    const pendingRequest = await insertRequest({ equipmentId: pendingUnit, type, status: "PENDING", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
+    const rejectedRequest = await insertRequest({ equipmentId: rejectedUnit, type, status: "REJECTED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59") });
     const base = await startApp();
 
     await send(base, `/equipment/${pendingUnit}/retire`, "technical_support_staff", { method: "PATCH" });
@@ -357,7 +358,7 @@ describe("SCRUM-103 AC3: marking equipment unavailable while reserved flags ever
   test("[SCRUM-103 AC3 / TC-103-05] an APPROVED request starting tomorrow is NOT flagged (today only, not future-inclusive)", async () => {
     const type = freshType();
     const id = await insertEquipment({ type });
-    const requestId = await insertRequest({ equipmentId: id, status: "APPROVED", borrowStart: isoTomorrow("00:00:00"), borrowEnd: isoTomorrow("23:59:59") });
+    const requestId = await insertRequest({ equipmentId: id, type, status: "APPROVED", borrowStart: isoTomorrow("00:00:00"), borrowEnd: isoTomorrow("23:59:59") });
     const base = await startApp();
 
     await send(base, `/equipment/${id}/retire`, "technical_support_staff", { method: "PATCH" });
@@ -371,8 +372,8 @@ describe("SCRUM-103 AC3: marking equipment unavailable while reserved flags ever
   test("[SCRUM-103 AC3 / TC-103-06] multiple APPROVED requests across different events each get their own correctly-mapped message", async () => {
     const type = freshType();
     const id = await insertEquipment({ type });
-    const requestA = await insertRequest({ equipmentId: id, status: "APPROVED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59"), eventId: anchorEventId });
-    const requestB = await insertRequest({ equipmentId: id, status: "APPROVED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59"), eventId: secondEventId });
+    const requestA = await insertRequest({ equipmentId: id, type, status: "APPROVED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59"), eventId: anchorEventId });
+    const requestB = await insertRequest({ equipmentId: id, type, status: "APPROVED", borrowStart: isoToday("00:00:00"), borrowEnd: isoToday("23:59:59"), eventId: secondEventId });
     const base = await startApp();
 
     await send(base, `/equipment/${id}/retire`, "technical_support_staff", { method: "PATCH" });
