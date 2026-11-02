@@ -135,6 +135,8 @@ const eventsRepository = {
     const venueRequests = (await venuesService.listBookingRequests({ allVenues: true })).filter(r => r.event_id === id)
       .map(r => ({ id: r.id, booking_date: r.booking_date, expected_attendees: r.expected_attendees, room_layout: r.room_layout,
         is_essential: essentialFlags.get('venue:' + r.id) ?? true,
+        // SCRUM-38: same two columns the real findArrangements now reads.
+        is_affected: r.is_affected === true, affected_reason: r.affected_reason ?? null,
         accessibility_requirements: r.accessibility_requirements ?? [], slots: r.slots,
         venue: { name: r.venue.name, capacity: r.venue.capacity, accessibility_features: r.venue.accessibility_features, notes: r.venue.notes } }));
     // SCRUM-31: equipment_id is null until Reserve assigns a unit, so the
@@ -239,6 +241,13 @@ const eventsRepository = {
 const venuesService = require('./venue-storage.cjs')(accounts);
 // SCRUM-170: the production new-date venue checks, run over the fake venue storage.
 venuesService.checkBookingsForNewDates = require('../../../backend/src/modules/venues/venueReschedule').createRescheduleCheck(venuesService);
+// SCRUM-38: the production re-validation, run over the fake venue storage.
+{
+  const { createBookingChecker, createVenueRevalidation } = require('../../../backend/src/modules/venues/venueRevalidation');
+  venuesService.revalidateBookingsForEvent = createVenueRevalidation({
+    ...venuesService, checkOneBooking: createBookingChecker(venuesService),
+  }).revalidateBookingsForEvent;
+}
 const equipmentDependencies = require('./equipment-storage.cjs')(accounts);
 const dataClient = require('./registration-storage.cjs')(accounts);
 dataClient.auth = { admin: {

@@ -279,7 +279,7 @@ async function findArrangements(eventId) {
     supabase
       .from("venue_booking_requests")
       .select(
-        "id, booking_date, expected_attendees, room_layout, accessibility_requirements, is_essential, " +
+        "id, booking_date, expected_attendees, room_layout, accessibility_requirements, is_essential, is_affected, affected_reason, " +
         "venue:venues!venue_id(name, capacity, accessibility_features, notes), " +
         "slots:venue_bookings!request_id(slot, status)",
       )

@@ -29,6 +29,8 @@ const equipmentService = { releaseReservationsForEvent: vi.fn() };
 const releaseVenueBookingsForCancelledEvent = vi.fn();
 const checkBookingsForNewDates = vi.fn();
 const NO_NEW_DATE = { newStart: null, newEnd: null, moves: [] };
+// SCRUM-38: approve re-validates venue bookings instead of releasing them.
+const revalidateVenueBookings = vi.fn();
 let stored;
 
 // The token is "<user id>:<roles>", so each case states the identity it exercises.
@@ -47,7 +49,10 @@ beforeAll(async () => {
   server = createApp({
     authClient, eventsRepository: repository,
     equipmentDependencies: { equipmentService },
-    venuesService: { releaseBookingsForCancelledEvent: releaseVenueBookingsForCancelledEvent, checkBookingsForNewDates },
+    venuesService: {
+      releaseBookingsForCancelledEvent: releaseVenueBookingsForCancelledEvent, checkBookingsForNewDates,
+      revalidateBookingsForEvent: revalidateVenueBookings,
+    },
   }).listen(0, "127.0.0.1");
   await once(server, "listening");
   base = `http://127.0.0.1:${server.address().port}`;
@@ -87,6 +92,7 @@ beforeEach(() => {
     .mockResolvedValue({ released: [], equipmentReverted: [], equipmentSkipped: [] });
   releaseVenueBookingsForCancelledEvent.mockReset().mockResolvedValue([]);
   checkBookingsForNewDates.mockReset();
+  revalidateVenueBookings.mockReset().mockResolvedValue({ checked: 0, flagged: [] });
 });
 
 function post(action, token = `${ASSIGNED}:event_coordinator`, body, id = EVENT_ID) {
@@ -160,7 +166,11 @@ test("SCRUM-99 AC1/SCRUM-98 AC3: approving records APPROVED, the approver and th
   expect(Date.parse(event.approved_rejected_at)).toBeGreaterThanOrEqual(before - 1000);
 });
 
-test("[SCRUM-37] TC-37-19: approving a resubmission releases its held arrangements, so the coordinator re-requests fresh ones", async () => {
+// Updated for SCRUM-38 (Option A, agreed 2026-11-01): approving a resubmission
+// still releases equipment, but re-validates venue bookings instead of
+// releasing them, so venues that still fit are kept. Only the venue
+// expectation changed; the equipment and status expectations are SCRUM-37's.
+test("[SCRUM-37] TC-37-19: approving a resubmission releases its equipment and re-validates its venues (SCRUM-38)", async () => {
   // Simulate a resubmission: a significant edit already changed start_time
   // and sent the event back for re-approval.
   stored = { ...stored, start_time: "2099-06-01T00:00:00.000Z" };
@@ -171,17 +181,21 @@ test("[SCRUM-37] TC-37-19: approving a resubmission releases its held arrangemen
   expect(response.status).toBe(200);
   expect(stored.status).toBe("APPROVED");
   expect(equipmentService.releaseReservationsForEvent).toHaveBeenCalledExactlyOnceWith(EVENT_ID, ASSIGNED);
-  expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledExactlyOnceWith(EVENT_ID);
+  expect(revalidateVenueBookings).toHaveBeenCalledExactlyOnceWith(EVENT_ID);
+  expect(releaseVenueBookingsForCancelledEvent).not.toHaveBeenCalled();
 });
 
-test("[SCRUM-37] TC-37-20: approving a first-time submission that never had arrangements is a safe no-op release", async () => {
+// Updated for SCRUM-38 (Option A): same change as TC-37-19 - the venue step is
+// now a re-validation, still a safe no-op when nothing has been arranged.
+test("[SCRUM-37] TC-37-20: approving a first-time submission that never had arrangements is a safe no-op release and re-validation", async () => {
   await post("start-review");
 
   const response = await post("approve", undefined, { note: "All details supplied" });
 
   expect(response.status).toBe(200);
   expect(equipmentService.releaseReservationsForEvent).toHaveBeenCalledExactlyOnceWith(EVENT_ID, ASSIGNED);
-  expect(releaseVenueBookingsForCancelledEvent).toHaveBeenCalledExactlyOnceWith(EVENT_ID);
+  expect(revalidateVenueBookings).toHaveBeenCalledExactlyOnceWith(EVENT_ID);
+  expect(releaseVenueBookingsForCancelledEvent).not.toHaveBeenCalled();
 });
 
 test("SCRUM-99 AC1 conflict: an event that is not under review cannot be approved", async () => {

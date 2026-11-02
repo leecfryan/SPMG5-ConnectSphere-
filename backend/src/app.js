@@ -60,6 +60,7 @@ function createApp({ authClient, dataClient, eventsRepository, assignmentDepende
     equipmentService: equipmentDependencies?.equipmentService,
     releaseVenueBookingsForCancelledEvent: venuesService?.releaseBookingsForCancelledEvent,
     checkVenuesForNewDates: venuesService?.checkBookingsForNewDates,
+    revalidateVenueBookings: venuesService?.revalidateBookingsForEvent,
   }, dataClient));
   app.use("/api/internal", createSafetyCheckRoutes(eventsRepository));
   app.use("/api/internal", createSafetyReviewRoutes(eventsRepository));

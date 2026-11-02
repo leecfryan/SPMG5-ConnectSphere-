@@ -62,21 +62,26 @@ function createReviewService({ repository }) {
   }
 
   // SCRUM-99 AC2: approval writes the decision only, for a first-time review.
-  // SCRUM-37 team design: for a resubmission (an event apply_organiser_event_edit
-  // sent back to SUBMITTED), approving releases whatever arrangements it had -
-  // the coordinator re-requests fresh ones rather than the same reservation
-  // being re-reviewed by Technical Support/Venue Staff. Both release calls are
-  // already no-ops when nothing is live, so this is safe on an ordinary
-  // first-time approval too (discussion #80: approval itself still books
-  // nothing new; it only ever releases what a significant edit had flagged
-  // as stale).
-  async function approve(eventId, coordinatorId, note, { equipmentService, releaseVenueBookingsForCancelledEvent } = {}) {
+  // SCRUM-37 team design: for a resubmission (an event sent back to SUBMITTED by
+  // a significant change - SCRUM-165's accepted change request since SCRUM-164
+  // locked organiser edits), approving releases its equipment - the coordinator
+  // re-requests it rather than the same reservation being re-reviewed.
+  // SCRUM-38 (Option A, agreed 2026-11-01): venue bookings are re-validated
+  // instead of released, so bookings that still fit stay and only failing ones
+  // are flagged for replacement. Both calls are no-ops when nothing is live, so
+  // this is safe on an ordinary first-time approval too (discussion #80).
+  async function approve(eventId, coordinatorId, note, { equipmentService, revalidateVenueBookings } = {}) {
     const parsed = readNote(note);
     if (!parsed.ok) return { ok: false, reason: "invalid_note" };
     const result = await move(eventId, coordinatorId, "UNDER_REVIEW", "APPROVED", outcome(coordinatorId, parsed.note));
     if (!result.ok) return result;
 
-    await releaseArrangements("approve", eventId, coordinatorId, { equipmentService, releaseVenueBookingsForCancelledEvent });
+    await releaseArrangements("approve", eventId, coordinatorId, { equipmentService });
+    try {
+      await revalidateVenueBookings?.(eventId);
+    } catch (error) {
+      console.error(`approve ${eventId}: venue re-validation failed:`, error.message);
+    }
 
     return result;
   }

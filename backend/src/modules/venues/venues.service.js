@@ -4,6 +4,7 @@ const { eachDateInRange, committedSlots } = require("./venues.availability");
 const { PLANNING_STATUSES } = require("../events/lifecycle");
 const { findBufferConflicts } = require("./venues.conflicts");
 const { localDateInTimeZone, VENUE_TIME_ZONE } = require("./venues.bookingRequests.validation");
+const { createBookingChecker, createVenueRevalidation } = require("./venueRevalidation");
 
 // SCRUM-82, 83, 84: everything a Coordinator needs to assess a venue
 const VENUE_FIELDS = [
@@ -747,4 +748,12 @@ module.exports = {
   checkBookingsForNewDates: require("./venueReschedule").createRescheduleCheck({
     listBookingRequests, getVenueById, listSlotRowsForDate, listUnavailabilityInRange,
   }),
+  // SCRUM-38: called by whatever applies a change to an event's details
+  // (SCRUM-165's accepted change request), after the event row is written.
+  revalidateBookingsForEvent: createVenueRevalidation({
+    getEventForCheckReport,
+    listBookingRequests,
+    markVenueBookingAffected: require("./venueReplacement.service").markVenueBookingAffected,
+    checkOneBooking: createBookingChecker({ getVenueById, listSlotRowsForDate, listUnavailabilityInRange }),
+  }).revalidateBookingsForEvent,
 };

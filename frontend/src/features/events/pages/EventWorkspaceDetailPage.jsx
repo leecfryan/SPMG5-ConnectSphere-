@@ -24,6 +24,8 @@ import EventSavedChanges from "../components/EventSavedChanges";
 import EventResubmitControl from "../components/EventResubmitControl";
 import EventResubmissionChanges from "../components/EventResubmissionChanges";
 import StatusBadge from "../components/StatusBadge";
+import VenueRecheckNotice from "../components/VenueRecheckNotice";
+import VenueAttentionPanel from "../components/VenueAttentionPanel";
 import "../workspace.css";
 
 function Detail({ scope, eventId }) {
@@ -31,6 +33,7 @@ function Detail({ scope, eventId }) {
   const [editing, setEditing] = useState(false);
   const [saved, setSaved] = useState(false);
   const [postponeVenues, setPostponeVenues] = useState(null);
+  const [venueRecheck, setVenueRecheck] = useState(null);
   const { data, loading, error, reload } = useApiResource(`/api/event-workspace/${scope}/${eventId}`);
   const event = data?.event;
   // SCRUM-170: a postponed event's dates are the original ones, unless the postponement gave new ones.
@@ -96,7 +99,13 @@ function Detail({ scope, eventId }) {
         event.status === "CHANGES_REQUESTED" && !editing && !loading && <EventResubmitControl
           key={clarification?.id} eventId={event.id} cycleId={clarification?.id}
           onResubmitted={() => { setSaved(false); reload(); }} />}
-      {scope === "coordinator" && event.coordinator_id === user.id && <ChangeRequestDecisionControls event={event} onDecided={reload} />}
+      {/* SCRUM-38: what the venue re-check found, then the bookings still needing attention. */}
+      {scope === "coordinator" && event.coordinator_id === user.id && <>
+        <VenueRecheckNotice recheck={venueRecheck} onDismiss={() => setVenueRecheck(null)} />
+        <VenueAttentionPanel key={event.updated_at} eventId={event.id} />
+      </>}
+      {scope === "coordinator" && event.coordinator_id === user.id && <ChangeRequestDecisionControls event={event}
+        onDecided={result => { setVenueRecheck(result?.venueRecheck ?? null); reload(); }} />}
       {scope === "coordinator" && event.coordinator_id === user.id && <EventDecisionControls event={event} onDecided={reload} />}
       <div className="request-detail-grid">
         {sections.map(section => <section className={`request-detail-panel request-detail-panel--${section.id}`} key={section.id} aria-labelledby={`request-${section.id}-heading`}>
