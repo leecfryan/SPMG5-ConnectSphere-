@@ -7,6 +7,7 @@ const cors = require('../../../backend/node_modules/cors');
 const { createClient } = require('../../../backend/node_modules/@supabase/supabase-js');
 const createApp = require('../../../backend/src/app');
 const requirePermission = require('../../../backend/src/middleware/requirePermission');
+const { canTransition, ACTIVE_STATUSES, POSTPONABLE_STATUSES } = require('../../../backend/src/modules/events/lifecycle');
 const { frontendURL, backendPort, authPort, authURL, publicKey } = require('./settings.cjs');
 
 if (!process.env.PW_CONTROL_KEY) throw new Error('Start using Playwright; control key is required.');
@@ -25,7 +26,7 @@ auth.post('/__test/accounts', (req, res) => {
   const id = randomUUID();
   const account = {
     id, email: id + '@example.test', password: 'Local-fixture-only-42!',
-    roles: req.body.roles ?? ['venue_staff'], metadata: req.body.metadata ?? {},
+    roles: req.body.roles ?? ['venue_staff'], metadata: req.body.metadata ?? {}, appMetadata: req.body.appMetadata ?? {},
     revoked: false, providerStatus: 200, loginStatus: 200,
     events: [], submissionFailure: false,
     counts: { login: 0, verification: 0, refresh: 0, logout: 0, record: 0, handler: 0 },
@@ -36,16 +37,16 @@ auth.post('/__test/accounts', (req, res) => {
 auth.patch('/__test/accounts/:id', (req, res) => {
   const account = accounts.get(req.params.id);
   if (!account) return res.sendStatus(404);
-  for (const key of ['roles', 'revoked', 'providerStatus', 'loginStatus', 'submissionFailure']) {
+  for (const key of ['roles', 'revoked', 'providerStatus', 'loginStatus', 'submissionFailure', 'appMetadata']) {
     if (Object.hasOwn(req.body, key)) account[key] = req.body[key];
   }
   res.sendStatus(204);
 });
-// Assignment is fixture setup only; no assignment API is added to production.
+// Fixture setup for older feature tests; event-workspace tests exercise the real manager API.
 auth.patch('/__test/events/:id', (req, res) => {
   const event = [...accounts.values()].flatMap(account => account.events).find(event => event.id === req.params.id);
   if (!event) return res.sendStatus(404);
-  for (const key of ['start_time', 'end_time', 'coordinator_id', 'status', 'registration_fields']) if (Object.hasOwn(req.body, key)) event[key] = req.body[key];
+  for (const key of ['start_time', 'end_time', 'coordinator_id', 'status', 'registration_fields', 'enrolled_attendees', 'expected_attendance', 'cancelled_at']) if (Object.hasOwn(req.body, key)) event[key] = req.body[key];
   res.sendStatus(204);
 });
 auth.post('/__test/events/:id/assignment', (req, res) => {
@@ -62,9 +63,9 @@ auth.get('/__test/accounts/:id', (req, res) => {
 function user(account) {
   return {
     id: account.id, email: account.email, aud: 'authenticated', role: 'authenticated',
-    app_metadata: { provider: 'email', providers: ['email'], roles: account.roles },
+    app_metadata: { ...account.appMetadata, provider: 'email', providers: ['email'], roles: account.roles },
     user_metadata: { full_name: 'Playwright Staff', ...account.metadata },
-    created_at: '2026-01-01T00:00:00.000Z',
+    email_confirmed_at: '2026-01-01T00:00:00.000Z', created_at: '2026-01-01T00:00:00.000Z',
   };
 }
 function issueSession(account) {
@@ -111,27 +112,186 @@ auth.post('/auth/v1/logout', (req, res) => {
 });
 
 const client = createClient(authURL, publicKey, { auth: { persistSession: false, autoRefreshToken: false } });
+// SCRUM-144: the coordinator's is_essential flags, keyed "<kind>:<request id>"; unset reads as essential (the column default).
+const essentialFlags = new Map();
+const findEvent = (id) => [...accounts.values()].flatMap(account => account.events).find(event => event.id === id) || null;
 // Only storage is substituted; event routing, validation, normalization and
 // verified ownership are the production implementations.
 const eventsRepository = {
+  async findById(id) { return findEvent(id); },
+  requestChanges: (...args) => require("./clarification-storage.cjs")(findEvent, dataClient)(...args),
+  // SCRUM-98/99: same guards as the real write: a permitted move, the expected
+  // current status and, when given, the coordinator still holding the event.
+  async transitionStatus(id, from, to, extra = {}, coordinatorId) {
+    if (!canTransition(from, to)) throw new Error(`Fixture: ${from} -> ${to} is not a permitted transition`);
+    const event = findEvent(id);
+    if (!event || event.status !== from || (coordinatorId && event.coordinator_id !== coordinatorId)) return null;
+    Object.assign(event, extra, { status: to });
+    return { ...event };
+  },
+  // SCRUM-139/140: read from the venue and equipment fixtures, in the production row shape.
+  async findArrangements(id) {
+    const { equipmentService } = equipmentDependencies;
+    const venueRequests = (await venuesService.listBookingRequests({ allVenues: true })).filter(r => r.event_id === id)
+      .map(r => ({ id: r.id, booking_date: r.booking_date, expected_attendees: r.expected_attendees, room_layout: r.room_layout,
+        is_essential: essentialFlags.get('venue:' + r.id) ?? true,
+        // SCRUM-38: same two columns the real findArrangements now reads.
+        is_affected: r.is_affected === true, affected_reason: r.affected_reason ?? null,
+        accessibility_requirements: r.accessibility_requirements ?? [], slots: r.slots,
+        venue: { name: r.venue.name, capacity: r.venue.capacity, accessibility_features: r.venue.accessibility_features, notes: r.venue.notes } }));
+    // SCRUM-31: equipment_id is null until Reserve assigns a unit, so the
+    // row's own equipment_type (always set at creation) is the primary
+    // source now, same fix as equipment.controller.js's getTechSupportDashboard -
+    // the old lookup-by-equipment_id crashed on any unreserved row.
+    const equipmentRequests = await Promise.all((await equipmentService.listRequestsByEvent(id))
+      .map(async r => ({ id: r.id, status: r.status, quantity_requested: r.quantity_requested, technical_requirement: r.technical_requirement,
+        is_essential: essentialFlags.get('equipment:' + r.id) ?? true,
+        equipment: { type: r.equipment_type ?? (await equipmentService.findEquipmentById(r.equipment_id))?.type ?? null } })));
+    return { venueRequests, equipmentRequests };
+  },
+  // SCRUM-140: same filter and columns as the real queries.
+  async findAwaitingSafetyReview() {
+    return [...accounts.values()].flatMap(account => account.events).filter(event => event.status === 'SAFETY_REVIEW')
+      .sort((a, b) => a.start_time.localeCompare(b.start_time))
+      .map(({ id, name, start_time, end_time, expected_attendance }) => ({ id, name, start_time, end_time, expected_attendance }));
+  },
+  async findAwaitingSafetyReviewById(id) {
+    const event = findEvent(id);
+    if (event?.status !== 'SAFETY_REVIEW') return null;
+    const { name, description, start_time, end_time, expected_attendance, accessibility_needs, other_comments } = event;
+    return { id, name, description, start_time, end_time, expected_attendance, accessibility_needs, other_comments };
+  },
+  // SCRUM-144: same filter as the real write - the request must belong to the event.
+  async setArrangementEssential(kind, requestId, eventId, isEssential) {
+    const { venueRequests, equipmentRequests } = await eventsRepository.findArrangements(eventId);
+    const requests = kind === 'venue' ? venueRequests : equipmentRequests;
+    if (!requests.some(request => request.id === requestId)) return null;
+    essentialFlags.set(kind + ':' + requestId, isEssential);
+    return { id: requestId, is_essential: isEssential };
+  },
+  // SCRUM-141: same guards as the real writes. Rows land in the data client's
+  // event_activity_log list, in the live table's shape, which the event workspace reads back.
+  async undoTransition(id, from, to) {
+    const event = findEvent(id);
+    if (event?.status !== to) return null;
+    event.status = from;
+    return { id };
+  },
+  async recordActivity({ eventId, actorId, action, fromStatus, toStatus, note }) {
+    const row = { id: randomUUID(), event_id: eventId, user_id: actorId, action, details: { from_status: fromStatus, to_status: toStatus, note }, created_at: new Date().toISOString() };
+    dataClient.activity.push(row);
+    return row;
+  },
+  // SCRUM-148/171: same guard as the real write - any of the active stages,
+  // and the coordinator still holding the event (always given, as of SCRUM-171).
+  async cancel(id, extra = {}, coordinatorId) {
+    const event = findEvent(id);
+    if (!event || !ACTIVE_STATUSES.includes(event.status) || (coordinatorId && event.coordinator_id !== coordinatorId)) return null;
+    Object.assign(event, extra, { status: 'CANCELLED' });
+    return { ...event };
+  },
+  // SCRUM-170: mirrors postpone_event - same guards, then the venue release and
+  // history entry it writes in the same transaction.
+  async postpone(id, coordinatorId, reason, { newStart = null, newEnd = null, moves = [] } = {}) {
+    const event = findEvent(id);
+    if (!event || !POSTPONABLE_STATUSES.includes(event.status) || event.coordinator_id !== coordinatorId) return null;
+    const previous = { status: event.status, start: event.start_time, end: event.end_time };
+    Object.assign(event, { status: 'POSTPONED', postponed_by: coordinatorId, postponed_at: new Date().toISOString(), postponement_reason: reason },
+      newStart ? { start_time: newStart, end_time: newEnd } : {});
+    const moved = newStart ? moves.map(move => move.request_id) : [];
+    await venuesService.releaseBookingsForCancelledEvent(id, moved);
+    if (newStart) await venuesService.moveBookingsForPostponement(id, moves);
+    dataClient.activity.push({ id: randomUUID(), event_id: id, user_id: coordinatorId, action: 'EVENT_POSTPONED', created_at: new Date().toISOString(),
+      details: { from_status: previous.status, to_status: 'POSTPONED', note: reason, previous_start: previous.start, previous_end: previous.end,
+        new_start: newStart, new_end: newEnd, moved_bookings: moved } });
+    return { ...event };
+  },
   async createSubmitted(fields, organiserId) {
     const account = accounts.get(organiserId);
     if (!account || account.submissionFailure) throw new Error('Fixture event storage unavailable');
-    const event = { ...fields, id: randomUUID(), organiser_id: organiserId, status: 'SUBMITTED', submitted_at: new Date().toISOString() };
+    const event = { ...fields, id: randomUUID(), organiser_id: organiserId, enrolled_attendees: 0, status: 'SUBMITTED', submitted_at: new Date().toISOString() };
     account.events.push(event);
     return event;
   },
+  // SCRUM-147: same scoping as the real draft queries - the caller's own DRAFT rows only.
+  async createDraft(fields, organiserId) {
+    const account = accounts.get(organiserId);
+    if (!account || account.submissionFailure) throw new Error('Fixture event storage unavailable');
+    const event = { ...fields, id: randomUUID(), organiser_id: organiserId, enrolled_attendees: 0, status: 'DRAFT', created_at: new Date().toISOString() };
+    account.events.push(event);
+    return { ...event };
+  },
+  async findOwnDrafts(organiserId) {
+    return (accounts.get(organiserId)?.events || []).filter(event => event.status === 'DRAFT')
+      .sort((a, b) => b.created_at.localeCompare(a.created_at)).map(event => ({ ...event }));
+  },
+  async findOwnDraft(id, organiserId) {
+    const event = findEvent(id);
+    return event && event.organiser_id === organiserId && event.status === 'DRAFT' ? { ...event } : null;
+  },
+  async updateDraft(id, organiserId, fields) {
+    const event = await this.findOwnDraft(id, organiserId) && findEvent(id);
+    return event ? { ...Object.assign(event, fields) } : null;
+  },
+  async markSubmitted(id, organiserId, fields) {
+    const event = await this.findOwnDraft(id, organiserId) && findEvent(id);
+    return event ? { ...Object.assign(event, fields, { status: 'SUBMITTED', submitted_at: new Date().toISOString() }) } : null;
+  },
 };
 const venuesService = require('./venue-storage.cjs')(accounts);
+// SCRUM-170: the production new-date venue checks, run over the fake venue storage.
+venuesService.checkBookingsForNewDates = require('../../../backend/src/modules/venues/venueReschedule').createRescheduleCheck(venuesService);
+// SCRUM-38: the production re-validation, run over the fake venue storage.
+{
+  const { createBookingChecker, createVenueRevalidation } = require('../../../backend/src/modules/venues/venueRevalidation');
+  venuesService.revalidateBookingsForEvent = createVenueRevalidation({
+    ...venuesService, checkOneBooking: createBookingChecker(venuesService),
+  }).revalidateBookingsForEvent;
+}
 const equipmentDependencies = require('./equipment-storage.cjs')(accounts);
 const dataClient = require('./registration-storage.cjs')(accounts);
+dataClient.auth = { admin: {
+  async listUsers({ page, perPage }) { return { data: { users: [...accounts.values()].slice((page - 1) * perPage, page * perPage).map(user) }, error: null }; },
+  async getUserById(id) { return { data: { user: accounts.has(id) ? user(accounts.get(id)) : null }, error: null }; },
+} };
 auth.patch('/__test/registrations/:id', (req, res) => {
   const registration = dataClient.registrations.find(row => row.id === req.params.id);
   if (!registration) return res.sendStatus(404);
+  const previous = { ...registration };
   if (Object.hasOwn(req.body, 'status')) registration.status = req.body.status;
+  dataClient.recordRegistrationChange('registrations', registration, previous);
   res.sendStatus(204);
 });
-const app = createApp({ dataClient, authClient: client, eventsRepository, venuesService, equipmentDependencies, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
+// SCRUM-26/159: the assignment queue, with the same filters, order and columns as
+// the real queries. The coordinator directory is the production module over the
+// fake Auth admin. Queue assignments write no SCRUM-155 history here.
+const allEvents = () => [...accounts.values()].flatMap(account => account.events);
+const assignmentDependencies = {
+  repository: {
+    findById: findEvent,
+    async findSubmittedUnassigned() {
+      return allEvents().filter(event => event.status === 'SUBMITTED' && !event.coordinator_id)
+        .sort((a, b) => (a.submitted_at ?? '').localeCompare(b.submitted_at ?? ''))
+        .map(({ id, name, status, organiser_id, start_time, end_time, expected_attendance, purpose, description,
+          venue_requirements, accessibility_needs, equipment_needs, other_comments, submitted_at }) => ({ id, name, status,
+          organiser_id, start_time, end_time, expected_attendance, purpose, description, venue_requirements,
+          accessibility_needs, equipment_needs, other_comments, submitted_at }));
+    },
+    async findActiveAssignments() {
+      return allEvents().filter(event => ACTIVE_STATUSES.includes(event.status) && event.coordinator_id)
+        .map(({ coordinator_id, start_time }) => ({ coordinator_id, start_time }));
+    },
+    async assignCoordinator(id, coordinatorId) {
+      const event = findEvent(id);
+      if (event?.status !== 'SUBMITTED' || event.coordinator_id) return null;
+      event.coordinator_id = coordinatorId;
+      return { ...event };
+    },
+  },
+  directory: require('../../../backend/src/modules/events/coordinators.directory')(dataClient),
+};
+const notificationFixture = require('./notification-storage.cjs')({ auth, eventsRepository, dataClient, venuesService });
+const app = createApp({ notificationsService: notificationFixture.identity, dataClient, authClient: client, eventsRepository, assignmentDependencies, venuesService, equipmentDependencies, supabaseUrl: authURL, publishableKey: publicKey, frontendOrigin: frontendURL });
 // Fixture endpoints exercise real middleware; these are NOT production business endpoints.
 const permissions = ['venues.read', 'equipment.read', 'bookings.read', 'technical_requests.read', 'event_planning.read', 'attendees.read', 'clients.read', 'event_organisers.read'];
 for (const permission of permissions) {

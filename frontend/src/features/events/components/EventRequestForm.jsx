@@ -1,16 +1,32 @@
 import { useRef, useState } from "react";
-import { EVENT_LIMITS, submitEventRequest } from "../eventsService";
+import { EVENT_LIMITS, saveDraft, submitDraft, submitEventRequest, updateDraft, updateEventRequest } from "../eventsService";
+import {
+  registrationEndsAfterEventStarts,
+  registrationWindowValidationError,
+} from "../registrationWindowFields";
 import { useAuth } from "../../auth/useAuth";
 
-// Mirrors WRITABLE_COLS in backend/src/modules/events/events.repository.js. The
-// backend ignores anything outside that list, so an extra key here is inert -
-// a missing one silently drops what the organiser typed.
+// SCRUM-37 AC4: the same significance rule apply_organiser_event_edit (SQL)
+// decides server-side, duplicated here only to warn the organiser before
+// saving - same already-established duplication pattern as the status lists
+// in EventCancelControl.jsx/EventReviewControls.jsx.
+const SIGNIFICANT_FIELDS = ["start_time", "end_time", "expected_attendance", "venue_requirements", "equipment_needs"];
+// Statuses at which a live venue booking or equipment request could already
+// exist - matches apply_organiser_event_edit's own regression-eligible
+// source statuses in backend/src/modules/events/lifecycle.js.
+const ARRANGEMENT_STATUSES = ["APPROVED", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED"];
+const SAFETY_REVIEWED_STATUSES = ["SAFETY_REVIEW", "PREPARATION", "CONFIRMED"];
+
+// Ownership, assignment and status are server-controlled; the form edits only
+// the existing event-detail fields in WRITABLE_COLS.
 const EMPTY = {
   name: "",
   purpose: "",
   description: "",
   start_time: "",
   end_time: "",
+  registration_start: "",
+  registration_end: "",
   expected_attendance: "",
   venue_requirements: "",
   accessibility_needs: "",
@@ -106,18 +122,45 @@ function TextAreaField({
   );
 }
 
-export default function EventRequestForm({ onSubmitted }) {
+function initialFields(event) {
+  if (!event) return EMPTY;
+  const fields = Object.fromEntries(Object.keys(EMPTY).map(field => [field, String(event[field] ?? "")]));
+  // A saved draft can hold registration times too, so all four are shown in
+  // the organiser's local time, the way the datetime-local inputs expect.
+  for (const field of ["start_time", "end_time", "registration_start", "registration_end"]) {
+    if (!event[field]) continue;
+    const date = new Date(event[field]);
+    fields[field] = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+  }
+  return fields;
+}
+
+// SCRUM-147: a new request (no `event`) can be saved as a draft at any point;
+// `draft` is the saved draft being continued, and onDraftSaved receives each save.
+export default function EventRequestForm({ onSubmitted, event: existingEvent, onCancel, draft, onDraftSaved }) {
   const { token } = useAuth();
-  const [fields, setFields] = useState(EMPTY);
+  const initial = initialFields(existingEvent ?? draft);
+  const [fields, setFields] = useState(() => initial);
   const [errors, setErrors] = useState([]);
   const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
+  // SCRUM-164 AC3: reason is required for every edit of a submitted event;
+  // kept separate from EMPTY because it is not an event column.
+  const [reason, setReason] = useState("");
+  // false, or which button is working: "draft" or "submit".
+  const [pending, setPending] = useState(false);
+  const busy = Boolean(pending);
   const submitting = useRef(false);
+  // SCRUM-37 AC4: set once a significant change on an arrangement-possible
+  // event needs a second click before it saves.
+  const [confirming, setConfirming] = useState(false);
 
   function update(field) {
     return (event) => {
       const { value } = event.target;
       setFields((current) => ({ ...current, [field]: value }));
+      // A further edit means the warning the organiser already saw may no
+      // longer describe what's about to be saved - ask again.
+      setConfirming(false);
     };
   }
 
@@ -125,26 +168,62 @@ export default function EventRequestForm({ onSubmitted }) {
     return errors.find((problem) => problem.field === field)?.message ?? "";
   }
 
-  async function submit(event) {
-    event.preventDefault();
-    if (submitting.current) return;
+  async function send(action, write) {
     submitting.current = true;
-    setBusy(true);
+    setPending(action);
     setErrors([]);
     setMessage("");
     try {
-      const result = await submitEventRequest(fields, token);
-      if (result.event) {
-        setFields(EMPTY);
-        onSubmitted(result.event);
-        return;
-      }
+      const result = await write();
+      if (result.event) return result.event;
       setErrors(result.errors);
       setMessage(result.message);
+      return null;
     } finally {
       submitting.current = false;
-      setBusy(false);
+      setPending(false);
     }
+  }
+
+  // AC2: only the name is checked when a draft is saved, so the
+  // registration-window check below waits for the submission too.
+  async function saveAsDraft() {
+    if (submitting.current) return;
+    const saved = await send("draft", () => draft ? updateDraft(draft.id, fields, token) : saveDraft(fields, token));
+    if (saved) onDraftSaved(saved);
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    if (submitting.current) return;
+    const windowError = registrationWindowValidationError(
+      fields.registration_start,
+      fields.registration_end,
+    );
+    if (windowError) {
+      setErrors([{ field: "registration_end", message: windowError }]);
+      setMessage("");
+      return;
+    }
+    const changes = Object.fromEntries(Object.entries(fields).filter(([field, value]) => value !== initial[field]));
+
+    // SCRUM-37 AC4: a significant change on an event that may already have
+    // arrangements is confirmed before saving - the first submit only shows
+    // the warning; a second click (confirming already true) actually saves.
+    if (existingEvent && !confirming &&
+      ARRANGEMENT_STATUSES.includes(existingEvent.status) &&
+      Object.keys(changes).some((field) => SIGNIFICANT_FIELDS.includes(field))) {
+      setConfirming(true);
+      return;
+    }
+
+    const submitted = await send("submit", () => existingEvent
+      ? updateEventRequest(existingEvent.id, { ...changes, ...(reason.trim() ? { reason } : {}) }, token)
+      : draft ? submitDraft(draft.id, fields, token) : submitEventRequest(fields, token));
+    if (!submitted) return;
+    setConfirming(false);
+    if (!existingEvent) setFields(EMPTY);
+    onSubmitted(submitted);
   }
 
   // Shared props for every control, so a field declaration stays one line of
@@ -216,6 +295,29 @@ export default function EventRequestForm({ onSubmitted }) {
           inputMode="numeric"
           placeholder="120"
         />
+        <h2>Registration window</h2>
+        <p>Optional. Times use your local timezone and can be independent of the event schedule.</p>
+        <div className="field-pair">
+          <div>
+            <TextField
+              {...wire("registration_start")}
+              label="Registration opens"
+              type="datetime-local"
+            />
+          </div>
+          <div>
+            <TextField
+              {...wire("registration_end")}
+              label="Registration closes"
+              type="datetime-local"
+            />
+          </div>
+        </div>
+        {registrationEndsAfterEventStarts(fields.registration_end, fields.start_time) && (
+          <p className="field-hint">
+            Registration closes after the event starts. This is allowed, but attendees may register after the event begins.
+          </p>
+        )}
       </div>
 
       <div className="form-section">
@@ -246,6 +348,21 @@ export default function EventRequestForm({ onSubmitted }) {
         />
       </div>
 
+      {existingEvent && (
+        <div className="form-section">
+          <h2>Reason for change</h2>
+          <TextAreaField
+            id="reason"
+            label="Why are you making these changes?"
+            required
+            busy={busy}
+            value={reason}
+            error={errorFor("reason")}
+            onChange={e => setReason(e.target.value)}
+          />
+        </div>
+      )}
+
       {message ? (
         <p className="error" role="alert">
           {message}
@@ -259,13 +376,40 @@ export default function EventRequestForm({ onSubmitted }) {
         )
       )}
 
-      <button className="primary" type="submit" disabled={busy}>
-        {busy ? "Submitting…" : "Submit request"}
+      {confirming && (
+        <p className="error" role="alert">
+          This change sends the event back to your coordinator for re-approval. Your venue and
+          equipment arrangements will be released. If approved, your coordinator will need to
+          arrange new venue and equipment, depending on availability
+          {SAFETY_REVIEWED_STATUSES.includes(existingEvent?.status)
+            ? ", and the event will need to go through safety review again before it can be confirmed"
+            : ""}
+          . If the coordinator rejects the resubmission instead, the event is ended.
+        </p>
+      )}
+
+      <button className="primary" type="submit" disabled={busy || (existingEvent && (Object.keys(fields).every(field => fields[field] === initial[field]) || (existingEvent.status === "SUBMITTED" && !reason.trim())))}>
+        {existingEvent
+          ? (busy ? "Saving…" : confirming ? "Confirm and save changes" : "Save changes")
+          : (pending === "submit" ? "Submitting…" : "Submit request")}
       </button>
-      <p className="card-note">
-        Submitting sends your request to ConnectSphere for coordinator
-        assignment and review.
-      </p>
+      {existingEvent && confirming && (
+        <button className="secondary" type="button" disabled={busy} onClick={() => setConfirming(false)}>Never mind</button>
+      )}
+      {existingEvent && !confirming && <button className="secondary" type="button" disabled={busy} onClick={onCancel}>Cancel editing</button>}
+      {!existingEvent && <button className="secondary" type="button" disabled={busy} onClick={saveAsDraft}>
+        {pending === "draft" ? "Saving draft…" : "Save draft"}
+      </button>}
+      {/* SCRUM-37 reviewer feedback (PR #60): this note claims the status
+          stays the same, which is false while the significant-edit warning
+          above is telling the user the opposite - hidden for that moment. */}
+      {!confirming && (
+        <p className="card-note">
+          {existingEvent ? "Saving updates your event details. Your event's status and assignment stay the same." :
+            "Submitting sends your request to ConnectSphere for coordinator assignment and review. " +
+            "A draft needs only the event name and is visible only to you until you submit it."}
+        </p>
+      )}
     </form>
   );
 }

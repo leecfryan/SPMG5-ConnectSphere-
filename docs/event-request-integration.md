@@ -13,6 +13,13 @@ PR #2 combines `feature/eventRequest` with the SignIn foundation already on
   `/events/new` destination is restored after sign-in.
 - The existing form, all validation, timezone conversion, optional requirements,
   submitted summary and "Submit another request" action are preserved.
+- The request form also accepts optional `registration_start` and
+  `registration_end` values. The client converts `datetime-local` values from
+  the organiser's local timezone to ISO UTC; shared server validation requires
+  the end to be later than the start when both are set. Registration boundaries
+  can be independent of the event dates; an end after event start warns but is
+  allowed. See [Registration integration](registration-integration.md) for
+  attendee enforcement and managed-event extension.
 - The browser attaches the current bearer token. Express verifies it on every
   submission, checks `events.submit`, and uses `req.user.id` for ownership.
   Caller-provided organiser IDs, statuses and coordinator IDs are ignored.
@@ -31,6 +38,15 @@ The existing `events` table and its schema/constraints are prerequisites. This
 integration does not apply migrations, change live data or verify production RLS.
 The former fixed development organiser ID has been removed. Existing test rows
 are not reassigned or deleted.
+
+The project owner added `registration_start` and `registration_end` manually in
+the Supabase dashboard. No migration file exists for either field; a new
+environment must add them manually. Both are nullable `timestamptz` columns
+storing UTC instants. `registration_start` is the earliest allowed instant;
+`registration_end` is the latest allowed instant, inclusive. Null start means
+immediate opening and null end means no closing time. The seed upsert omits
+these fields so a fresh row uses the nullable default while reseeding preserves
+configured windows.
 
 ## Test runners
 

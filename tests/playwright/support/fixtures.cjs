@@ -5,8 +5,8 @@ const test = base.extend({
   accounts: async ({ request }, use) => {
     const headers = { 'X-Test-Control': process.env.PW_CONTROL_KEY };
     await use({
-      async create(roles = ['venue_staff'], metadata = {}) {
-        const response = await request.post(authURL + '/__test/accounts', { headers, data: { roles, metadata } });
+      async create(roles = ['venue_staff'], metadata = {}, appMetadata = {}) {
+        const response = await request.post(authURL + '/__test/accounts', { headers, data: { roles, metadata, appMetadata } });
         expect(response.status()).toBe(201);
         return response.json();
       },

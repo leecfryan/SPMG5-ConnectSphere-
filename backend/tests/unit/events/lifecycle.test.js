@@ -1,0 +1,170 @@
+import { test, expect } from "vitest";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const { STATUSES, TRANSITIONS, ACTIVE_STATUSES, POSTPONABLE_STATUSES, PLANNING_STATUSES, canTransition } = require("../../../src/modules/events/lifecycle");
+
+const AGREED_STATUSES = [
+  "DRAFT",
+  "SUBMITTED",
+  "UNDER_REVIEW",
+  "CHANGES_REQUESTED",
+  "APPROVED",
+  "SAFETY_REVIEW",
+  "PREPARATION",
+  "CONFIRMED",
+  "COMPLETED",
+  "CANCELLED",
+  "REJECTED",
+  "POSTPONED",
+];
+
+const AGREED_TRANSITIONS = [
+  ["DRAFT", "SUBMITTED"],
+  ["SUBMITTED", "UNDER_REVIEW"],
+  ["SUBMITTED", "CANCELLED"],
+  ["SUBMITTED", "POSTPONED"],
+  ["UNDER_REVIEW", "CHANGES_REQUESTED"],
+  ["CHANGES_REQUESTED", "UNDER_REVIEW"],
+  ["CHANGES_REQUESTED", "CANCELLED"],
+  ["CHANGES_REQUESTED", "POSTPONED"],
+  ["UNDER_REVIEW", "APPROVED"],
+  ["UNDER_REVIEW", "REJECTED"],
+  ["UNDER_REVIEW", "CANCELLED"],
+  ["UNDER_REVIEW", "POSTPONED"],
+  ["APPROVED", "SAFETY_REVIEW"],
+  ["APPROVED", "CANCELLED"],
+  ["APPROVED", "POSTPONED"],
+  ["APPROVED", "SUBMITTED"],
+  ["SAFETY_REVIEW", "APPROVED"],
+  ["SAFETY_REVIEW", "PREPARATION"],
+  ["SAFETY_REVIEW", "CANCELLED"],
+  ["SAFETY_REVIEW", "POSTPONED"],
+  ["SAFETY_REVIEW", "SUBMITTED"],
+  ["PREPARATION", "CONFIRMED"],
+  ["PREPARATION", "CANCELLED"],
+  ["PREPARATION", "SUBMITTED"],
+  ["CONFIRMED", "COMPLETED"],
+  ["CONFIRMED", "CANCELLED"],
+  ["CONFIRMED", "POSTPONED"],
+  ["CONFIRMED", "SUBMITTED"],
+  ["POSTPONED", "CANCELLED"],
+];
+
+const isAgreed = (from, to) => AGREED_TRANSITIONS.some(([a, b]) => a === from && b === to);
+
+test("SCRUM-97 AC1 / SCRUM-139 AC3 / SCRUM-149 / SCRUM-141: the lifecycle has exactly the agreed statuses", () => {
+  expect([...STATUSES].sort()).toEqual([...AGREED_STATUSES].sort());
+});
+
+test.each(AGREED_TRANSITIONS)("SCRUM-97 AC2: %s -> %s is a permitted transition", (from, to) => {
+  expect(canTransition(from, to)).toBe(true);
+});
+
+test("SCRUM-97 AC3: every pair not in the agreed table is refused", () => {
+  const refused = [];
+  for (const from of AGREED_STATUSES) {
+    for (const to of AGREED_STATUSES) {
+      if (!isAgreed(from, to) && canTransition(from, to)) refused.push(`${from} -> ${to}`);
+    }
+  }
+  expect(refused).toEqual([]);
+});
+
+test("SCRUM-97 AC3: an event cannot be confirmed directly from draft", () => {
+  expect(canTransition("DRAFT", "CONFIRMED")).toBe(false);
+});
+
+test("SCRUM-97 AC3: a submitted event cannot skip review and be approved", () => {
+  expect(canTransition("SUBMITTED", "APPROVED")).toBe(false);
+});
+
+test.each(["COMPLETED", "CANCELLED", "REJECTED"])(
+  "SCRUM-97 AC3: %s is terminal and refuses every next status",
+  (terminal) => {
+    expect(AGREED_STATUSES.filter((to) => canTransition(terminal, to))).toEqual([]);
+  },
+);
+
+test("SCRUM-97 AC3: an event cannot move backwards to an earlier status", () => {
+  expect(canTransition("UNDER_REVIEW", "SUBMITTED")).toBe(false);
+  expect(canTransition("APPROVED", "UNDER_REVIEW")).toBe(false);
+  expect(canTransition("SUBMITTED", "DRAFT")).toBe(false);
+});
+
+test.each(AGREED_STATUSES)("SCRUM-97 AC3: %s -> itself is not a transition", (status) => {
+  expect(canTransition(status, status)).toBe(false);
+});
+
+test("SCRUM-97 AC3: unknown, missing or wrongly-cased statuses are refused, not thrown", () => {
+  expect(canTransition("BOGUS", "SUBMITTED")).toBe(false);
+  expect(canTransition("DRAFT", "BOGUS")).toBe(false);
+  expect(canTransition(undefined, "SUBMITTED")).toBe(false);
+  expect(canTransition("DRAFT", undefined)).toBe(false);
+  expect(canTransition(null, null)).toBe(false);
+  expect(canTransition("draft", "submitted")).toBe(false);
+  // Inherited object keys must not read as statuses.
+  expect(canTransition("toString", "SUBMITTED")).toBe(false);
+  expect(canTransition("__proto__", "SUBMITTED")).toBe(false);
+});
+
+test("SCRUM-97 AC2: the lifecycle cannot be changed at runtime", () => {
+  expect(Object.isFrozen(STATUSES)).toBe(true);
+  expect(Object.isFrozen(TRANSITIONS)).toBe(true);
+  for (const next of Object.values(TRANSITIONS)) expect(Object.isFrozen(next)).toBe(true);
+});
+
+// Typed from the agreed lifecycle, not read back from the module.
+test("SCRUM-99 AC1: only approved and confirmed events are open to venue and equipment planning", () => {
+  expect([...PLANNING_STATUSES].sort()).toEqual(["APPROVED", "CONFIRMED"]);
+  expect(Object.isFrozen(PLANNING_STATUSES)).toBe(true);
+});
+
+test("SCRUM-139 AC4: an event under safety review is closed to venue and equipment planning", () => {
+  expect(PLANNING_STATUSES).not.toContain("SAFETY_REVIEW");
+});
+
+test("SCRUM-139 AC3: only an approved event can be submitted for the safety check", () => {
+  expect(STATUSES.filter((from) => canTransition(from, "SAFETY_REVIEW"))).toEqual(["APPROVED"]);
+});
+
+test("SCRUM-139 AC4/SCRUM-149/SCRUM-141/SCRUM-37: under safety review, the event can only move to approved, preparation, cancelled, postponed or submitted", () => {
+  expect(STATUSES.filter((to) => canTransition("SAFETY_REVIEW", to)).sort()).toEqual(["APPROVED", "CANCELLED", "POSTPONED", "PREPARATION", "SUBMITTED"]);
+});
+
+test("SCRUM-37: a significant edit with live arrangements can regress APPROVED, PREPARATION or CONFIRMED back to SUBMITTED", () => {
+  for (const from of ["APPROVED", "PREPARATION", "CONFIRMED"]) {
+    expect(canTransition(from, "SUBMITTED")).toBe(true);
+  }
+});
+
+test("SCRUM-141 AC3: only an event under safety review can move to preparation", () => {
+  expect(STATUSES.filter((from) => canTransition(from, "PREPARATION"))).toEqual(["SAFETY_REVIEW"]);
+});
+
+test("SCRUM-141: an event in preparation stays closed to venue and equipment planning", () => {
+  expect(PLANNING_STATUSES).not.toContain("PREPARATION");
+});
+
+test("SCRUM-98/149/141: active events are those submitted, postponed, and not yet finished, rejected or cancelled", () => {
+  expect([...ACTIVE_STATUSES].sort()).toEqual(["APPROVED", "CHANGES_REQUESTED", "CONFIRMED", "POSTPONED", "PREPARATION", "SAFETY_REVIEW", "SUBMITTED", "UNDER_REVIEW"]);
+  expect(Object.isFrozen(ACTIVE_STATUSES)).toBe(true);
+});
+
+test("SCRUM-149: postponable events are the active statuses minus POSTPONED itself", () => {
+  expect([...POSTPONABLE_STATUSES].sort()).toEqual(["APPROVED", "CHANGES_REQUESTED", "CONFIRMED", "SAFETY_REVIEW", "SUBMITTED", "UNDER_REVIEW"]);
+  expect(Object.isFrozen(POSTPONABLE_STATUSES)).toBe(true);
+});
+
+test("SCRUM-144 AC1: only an event that passed the safety check (PREPARATION) can be confirmed", () => {
+  expect(STATUSES.filter((from) => canTransition(from, "CONFIRMED"))).toEqual(["PREPARATION"]);
+  expect(canTransition("APPROVED", "CONFIRMED")).toBe(false);
+});
+
+test("[SCRUM-117-UNIT-001] returned requests retain workload but cannot be reassigned or planned", () => {
+  const { ASSIGNABLE_STATUSES } = require("../../../src/modules/events/lifecycle");
+  expect(ACTIVE_STATUSES).toContain("CHANGES_REQUESTED");
+  expect(ASSIGNABLE_STATUSES).not.toContain("CHANGES_REQUESTED");
+  expect(ASSIGNABLE_STATUSES).toContain("UNDER_REVIEW");
+  expect(PLANNING_STATUSES).not.toContain("CHANGES_REQUESTED");
+});

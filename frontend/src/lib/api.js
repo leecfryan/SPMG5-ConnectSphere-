@@ -12,6 +12,7 @@ async function requestBody(path, token, options = {}) {
       ? ": " + body.details.map((d) => typeof d === "string" ? d : `${d.field} ${d.message}`).join(", ") : "";
     const error = new Error((body.error || body.message || "Request failed") + detail);
     error.status = response.status;
+    error.errors = Array.isArray(body.errors) ? body.errors : [];
     throw error;
   }
   return body;
@@ -30,10 +31,30 @@ export function apiFetch(path, token, options = {}) {
   });
 }
 
-export function fetchVenues({ city, minCapacity } = {}, token) {
+// SCRUM-18: list filters are sent comma separated, which is what the backend
+// splits them on. An empty filter is left out rather than sent empty, so the
+// server never has to tell "not filtering" from "filtering by nothing".
+// SCRUM-19: how well a shortlisted venue matches one of the coordinator's own
+// events, before any booking request exists.
+export function fetchVenueSuitability(venueId, eventId, token) {
+  return request(
+    `/api/venues/${venueId}/suitability?event_id=${encodeURIComponent(eventId)}`,
+    token
+  );
+}
+
+export function fetchVenues(
+  { city, minCapacity, facilities, accessibility, roomLayout, date, slots } = {},
+  token
+) {
   const params = new URLSearchParams();
   if (city) params.set("city", city);
   if (minCapacity) params.set("minCapacity", minCapacity);
+  if (facilities?.length) params.set("facilities", facilities.join(","));
+  if (accessibility?.length) params.set("accessibility", accessibility.join(","));
+  if (roomLayout) params.set("roomLayout", roomLayout);
+  if (date) params.set("date", date);
+  if (date && slots?.length) params.set("slots", slots.join(","));
 
   const query = params.toString();
   return request(`/api/venues${query ? `?${query}` : ""}`, token);
@@ -79,18 +100,122 @@ export function submitBookingRequest(venueId, payload, token) {
   });
 }
 
+// SCRUM-22: Venue Staff approve or reject a request. The note is optional and
+// only meaningful on a rejection.
+export function decideBookingRequest(requestId, decision, note, token) {
+  return request(`/api/venues/booking-requests/${requestId}/decision`, token, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ decision, note }),
+  });
+}
+
 // SCRUM-88: what Venue Staff review
-export function fetchBookingRequests({ status } = {}, token) {
-  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+export function fetchBookingRequests({ status, eventId } = {}, token) {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (eventId) params.set("event_id", eventId);
+  const query = params.toString() ? `?${params.toString()}` : "";
   return request(`/api/venues/booking-requests${query}`, token);
 }
 
-export function fetchEquipmentCatalogue(token) {
-  return request("/api/equipment", token);
+export function searchReplacementVenues(requestId, filters = {}, token) {
+  const params = new URLSearchParams();
+  if (filters.minCapacity) params.set("minCapacity", filters.minCapacity);
+  if (filters.facilities?.length) params.set("facilities", filters.facilities.join(","));
+  if (filters.accessibility?.length) params.set("accessibility", filters.accessibility.join(","));
+  if (filters.roomLayout) params.set("roomLayout", filters.roomLayout);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return request(`/api/venues/booking-requests/${encodeURIComponent(requestId)}/replacement-search${query}`, token);
+}
+
+export function releaseAffectedVenueBooking(requestId, token) {
+  return request(`/api/venues/booking-requests/${encodeURIComponent(requestId)}/release`, token, {
+    method: "POST",
+  });
+}
+
+export function markVenueBookingAffected(requestId, reason, token) {
+  return apiFetch(`/api/venues/booking-requests/${encodeURIComponent(requestId)}/mark-affected`, token, {
+    method: "POST",
+    body: { reason },
+  });
+}
+
+// SCRUM-138: every booking on one event, each checked on its own. Read-only, so
+// it takes no body and changes nothing.
+export function fetchVenueBookingChecks(eventId, token) {
+  return request(`/api/venues/events/${encodeURIComponent(eventId)}/booking-checks`, token);
+}
+
+// SCRUM-154: the assigned coordinator cancels one of their own venue bookings,
+// releasing its period, without touching the event's other venue bookings.
+export function cancelBookingRequest(requestId, token) {
+  return request(`/api/venues/booking-requests/${requestId}/cancel`, token, {
+    method: "PATCH",
+  });
+}
+
+// SCRUM-154: the assigned coordinator changes one of their own venue
+// bookings' date or non-slot details. The booking is sent back to pending for
+// Venue Staff to decide again.
+export function changeBookingRequest(requestId, payload, token) {
+  return request(`/api/venues/booking-requests/${requestId}`, token, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+// Scrum-29 follow-up: with no window, the full catalogue (used for the
+// catalogue page and for labelling existing requests). With both start and
+// end, only equipment bookable for that period - used to filter the request
+// form's dropdown so it stops offering equipment that would just be rejected.
+export function fetchEquipmentCatalogue(token, { start, end } = {}) {
+  const params = new URLSearchParams();
+  if (start) params.set("start", start);
+  if (end) params.set("end", end);
+  const query = params.toString();
+  return request(`/api/equipment${query ? `?${query}` : ""}`, token);
+}
+
+// Scrum-29 follow-up: Technical Support Staff manually record a status
+// change (e.g. AVAILABLE -> MAINTENANCE).
+export function updateEquipmentStatus(id, status, token) {
+  return request(`/api/equipment/${id}/status`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
 }
 
 export function fetchEquipmentRequests(eventId, token) {
   return request(`/api/events/${eventId}/equipment-requests`, token);
+}
+
+// Scrum-30 AC1: add, update and retire a catalogue record.
+export function createEquipment(fields, token) {
+  return request("/api/equipment", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+}
+
+export function updateEquipment(id, fields, token) {
+  return request(`/api/equipment/${id}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+}
+
+export function retireEquipment(id, token) {
+  return request(`/api/equipment/${id}/retire`, token, { method: "PATCH" });
 }
 
 export function createEquipmentRequest(eventId, fields, token) {
@@ -118,6 +243,15 @@ export function updateEquipmentRequestStatus(id, status, token) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ status }),
+  });
+}
+
+// SCRUM-31: reserve as many of a group's still-PENDING siblings as real
+// stock allows (auto-marking the rest UNFULFILLED), unless the group is
+// essential and short - then nothing changes and this rejects (409).
+export function reserveEquipmentRequestGroup(groupId, token) {
+  return request(`/api/equipment-requests/groups/${groupId}/reserve`, token, {
+    method: "PATCH",
   });
 }
 

@@ -14,6 +14,25 @@ const createApp = require("../../src/app");
 
 function makeDataClient(tables = {}) {
   return {
+    rpc(name, args) {
+      const handler = tables.rpc;
+      if (handler) return Promise.resolve(handler({ name, args }));
+      if (name === "registration_availability_for_events") {
+        return Promise.resolve({
+          data: (args.p_event_ids ?? []).map((event_id) => ({
+            event_id,
+            slots_remaining: null,
+            waitlist_queue_count: 0,
+            waitlist_reserved: 0,
+          })),
+          error: null,
+        });
+      }
+      return Promise.resolve({
+        data: { outcome: "claimed", enrolled_attendees: 1 },
+        error: null,
+      });
+    },
     from(table) {
       const q = { table, filters: [] };
       const resolve = (terminal) => {
@@ -110,6 +129,30 @@ test("GET /api/events: returns approved events", async (t) => {
   assert.equal(events[0].status, "APPROVED");
 });
 
+test("GET /api/events: includes registration count and capacity for slot availability", async (t) => {
+  const base = await setup(t, {
+    tables: {
+      events: (q) => {
+        assert.equal(q.select, "id, name, description, start_time, status, enrolled_attendees, expected_attendance");
+        return {
+          data: [{
+            ...APPROVED_EVENT,
+            enrolled_attendees: 7,
+            expected_attendance: 10,
+          }],
+          error: null,
+        };
+      },
+    },
+  });
+
+  const response = await fetch(base + "/api/events", { headers: AUTH });
+  const { events } = await response.json();
+
+  assert.equal(events[0].enrolled_attendees, 7);
+  assert.equal(events[0].expected_attendance, 10);
+});
+
 test("GET /api/events: returns empty array when no approved events exist", async (t) => {
   const base = await setup(t, {
     tables: { events: () => ({ data: [], error: null }) },
@@ -147,13 +190,27 @@ test("GET /api/events: requires authentication", async (t) => {
 
 test("GET /api/events/:eventId: returns an approved event", async (t) => {
   const base = await setup(t, {
-    tables: { events: () => ({ data: APPROVED_EVENT, error: null }) },
+    tables: {
+      events: (q) => {
+        assert.equal(q.select, "id, name, purpose, description, start_time, end_time, enrolled_attendees, expected_attendance, status, registration_fields");
+        return {
+          data: {
+            ...APPROVED_EVENT,
+            enrolled_attendees: 7,
+            expected_attendance: 10,
+          },
+          error: null,
+        };
+      },
+    },
   });
   const res = await fetch(base + "/api/events/event-approved", { headers: AUTH });
   assert.equal(res.status, 200);
   const { event } = await res.json();
   assert.equal(event.name, "Test Event");
   assert.equal(event.status, "APPROVED");
+  assert.equal(event.enrolled_attendees, 7);
+  assert.equal(event.expected_attendance, 10);
 });
 
 test("GET /api/events/:eventId: returns 404 for a non-existent event", async (t) => {
@@ -270,6 +327,21 @@ test("POST /api/registrations: returns 404 for a non-existent event", async (t) 
 test("POST /api/registrations: rejects registration for a non-APPROVED event", async (t) => {
   const base = await setup(t, {
     tables: { events: () => ({ data: DRAFT_EVENT, error: null }) },
+  });
+  const res = await fetch(base + "/api/registrations", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ eventId: "event-draft" }),
+  });
+  assert.equal(res.status, 409);
+  assert.match((await res.json()).message, /not open/);
+});
+
+// SCRUM-149 AC2: postponing moves the event out of APPROVED, so new sign-ups
+// are refused by this existing check - no new code needed.
+test("[TC-149-08] POST /api/registrations: rejects registration for a POSTPONED event", async (t) => {
+  const base = await setup(t, {
+    tables: { events: () => ({ data: { ...DRAFT_EVENT, status: "POSTPONED" }, error: null }) },
   });
   const res = await fetch(base + "/api/registrations", {
     method: "POST",
@@ -625,4 +697,81 @@ test("REG-BACKEND-046: production app never exposes test deletion controls", asy
   const base = await setup(t);
   const res = await fetch(base + "/api/test/control", { method: "POST", headers: { ...JSON_HEADERS, "x-control-key": "test-only-key" }, body: JSON.stringify({ command: "deleteRegistration" }) });
   assert.equal(res.status, 404);
+});
+
+test("[REG-BACKEND-047] AC1/AC2: attendee listings query only approved events despite a requested status", async (t) => {
+  const rows = [
+    APPROVED_EVENT,
+    { ...DRAFT_EVENT, status: "SUBMITTED" },
+    { ...DRAFT_EVENT, id: "rejected-event", status: "REJECTED" },
+    { ...DRAFT_EVENT, id: "under-review-event", status: "UNDER_REVIEW" },
+  ];
+  let query;
+  const base = await setup(t, { tables: {
+    events: (q) => {
+      query = q;
+      return { data: rows.filter(row => q.filters.every(([key, value]) => row[key] === value)), error: null };
+    },
+  } });
+  const response = await fetch(base + "/api/events?status=SUBMITTED", { headers: AUTH });
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).events.map(event => event.id), [APPROVED_EVENT.id]);
+  assert.ok(query.filters.some(([key, value]) => key === "status" && value === "APPROVED"));
+});
+
+test("[REG-BACKEND-048] AC2: event detail queries enforce both the requested ID and approval", async (t) => {
+  const rows = [
+    APPROVED_EVENT,
+    { ...DRAFT_EVENT, status: "SUBMITTED" },
+    { ...DRAFT_EVENT, id: "rejected-event", status: "REJECTED" },
+    { ...DRAFT_EVENT, id: "under-review-event", status: "UNDER_REVIEW" },
+  ];
+  const queries = [];
+  const base = await setup(t, { tables: {
+    events: (q) => {
+      queries.push(q);
+      return { data: rows.find(row => q.filters.every(([key, value]) => row[key] === value)) ?? null, error: null };
+    },
+  } });
+  for (const event of rows) {
+    const response = await fetch(base + "/api/events/" + event.id, { headers: AUTH });
+    assert.equal(response.status, event.status === "APPROVED" ? 200 : 404);
+    const body = await response.json();
+    if (event.status === "APPROVED") assert.equal(body.event.id, event.id);
+    else assert.deepEqual(body, { message: "Event not found." });
+    const query = queries.at(-1);
+    assert.ok(query.filters.some(([key, value]) => key === "id" && value === event.id));
+    assert.ok(query.filters.some(([key, value]) => key === "status" && value === "APPROVED"));
+  }
+});
+
+test("[REG-BACKEND-049] AC3/AC4: registration reads use authenticated ownership even when IDs are tampered with", async (t) => {
+  const other = {
+    ...REGISTRATION, id: "other-registration", attendee_id: "another-attendee",
+    registration_data: { full_name: "PRIVATE other attendee" },
+  };
+  const rows = [REGISTRATION, other];
+  const queries = [];
+  const base = await setup(t, { tables: {
+    registrations: (q) => {
+      queries.push(q);
+      const matches = rows.filter(row => q.filters.every(([key, value]) => row[key] === value));
+      return { data: q.terminal === "maybeSingle" ? matches[0] ?? null : matches, error: null };
+    },
+  } });
+  const list = await fetch(base + "/api/registrations/me?attendee_id=another-attendee", { headers: AUTH });
+  assert.equal(list.status, 200);
+  assert.deepEqual((await list.json()).registrations.map(row => row.id), [REGISTRATION.id]);
+  const own = await fetch(base + "/api/registrations/me/" + REGISTRATION.id, { headers: AUTH });
+  assert.equal(own.status, 200);
+  assert.equal((await own.json()).registration.status, "pending");
+  const forbidden = await fetch(base + "/api/registrations/me/" + other.id + "?attendee_id=another-attendee", { headers: AUTH });
+  assert.equal(forbidden.status, 404);
+  assert.deepEqual(await forbidden.json(), { message: "Registration not found." });
+  assert.equal(queries.length, 3);
+  for (const query of queries) {
+    assert.ok(query.filters.some(([key, value]) => key === "attendee_id" && value === ATTENDEE.id));
+  }
+  assert.ok(queries[1].filters.some(([key, value]) => key === "id" && value === REGISTRATION.id));
+  assert.ok(queries[2].filters.some(([key, value]) => key === "id" && value === other.id));
 });

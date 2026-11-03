@@ -1,0 +1,201 @@
+import { test, expect } from "vitest";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const { findMissingArrangements, checkArrangements } = require("../../../src/modules/events/safetyReadiness");
+
+const venueRequest = (name, date, ...statuses) => ({
+  venue: { name },
+  booking_date: date,
+  slots: statuses.map((status, index) => ({ slot: `slot-${index}`, status })),
+});
+const equipmentRequest = (type, status) => ({ equipment: { type }, status });
+
+const CONFIRMED_HALL_A = venueRequest("Hall A", "2099-05-01", "confirmed", "confirmed");
+const NO_VENUE = { kind: "venue", label: "Venue", reason: "No venue booking has been approved yet." };
+
+test("SCRUM-139 AC1: confirmed venues and approved equipment leave nothing missing", () => {
+  expect(findMissingArrangements({
+    venueRequests: [CONFIRMED_HALL_A, venueRequest("Hall B", "2099-05-02", "confirmed")],
+    equipmentRequests: [equipmentRequest("Projector", "APPROVED")],
+  })).toEqual([]);
+});
+
+test("SCRUM-139 AC1: an event with no venue request is missing a venue", () => {
+  expect(findMissingArrangements({ venueRequests: [], equipmentRequests: [] })).toEqual([NO_VENUE]);
+});
+
+test("SCRUM-139 AC1: a pending venue request is missing, even beside a confirmed one", () => {
+  expect(findMissingArrangements({
+    venueRequests: [CONFIRMED_HALL_A, venueRequest("Hall B", "2099-05-01", "pending")],
+    equipmentRequests: [],
+  })).toEqual([{ kind: "venue", label: "Hall B · 2099-05-01", reason: "Waiting for Venue Staff to decide." }]);
+});
+
+test("SCRUM-139 AC1: rejected and cancelled requests do not block when another venue is confirmed", () => {
+  expect(findMissingArrangements({
+    venueRequests: [
+      CONFIRMED_HALL_A,
+      venueRequest("Hall B", "2099-05-01", "rejected"),
+      venueRequest("Hall C", "2099-05-01", "cancelled"),
+    ],
+    equipmentRequests: [],
+  })).toEqual([]);
+});
+
+test("SCRUM-139 AC1: only rejected or cancelled requests count as no venue", () => {
+  expect(findMissingArrangements({
+    venueRequests: [venueRequest("Hall B", "2099-05-01", "rejected"), venueRequest("Hall C", "2099-05-01", "cancelled")],
+    equipmentRequests: [],
+  })).toEqual([NO_VENUE]);
+});
+
+test("SCRUM-139 AC1: unattended and issue equipment requests are missing", () => {
+  expect(findMissingArrangements({
+    venueRequests: [CONFIRMED_HALL_A],
+    equipmentRequests: [
+      equipmentRequest("Projector", "PENDING"),
+      equipmentRequest("Speaker", "REJECTED"),
+      equipmentRequest("Microphone", "APPROVED"),
+    ],
+  })).toEqual([
+    { kind: "equipment", label: "Projector", reason: "Waiting for Technical Support Staff to reserve it." },
+    { kind: "equipment", label: "Speaker", reason: "Technical Support Staff reported an issue with this request." },
+  ]);
+});
+
+test.each([
+  ["no equipment requests", []],
+  ["only released equipment", [equipmentRequest("Projector", "RELEASED")]],
+])("SCRUM-139 AC1: %s does not block", (_label, equipmentRequests) => {
+  expect(findMissingArrangements({ venueRequests: [CONFIRMED_HALL_A], equipmentRequests })).toEqual([]);
+});
+
+test("SCRUM-150: a REVIEW_REQUIRED request (flagged by a reschedule) blocks, same as PENDING", () => {
+  expect(findMissingArrangements({
+    venueRequests: [CONFIRMED_HALL_A],
+    equipmentRequests: [equipmentRequest("Projector", "REVIEW_REQUIRED")],
+  })).toEqual([
+    { kind: "equipment", label: "Projector", reason: "This reservation needs to be reviewed again after the event was rescheduled." },
+  ]);
+});
+
+test("SCRUM-139 AC2: every missing item is listed together, venue first", () => {
+  expect(findMissingArrangements({
+    venueRequests: [],
+    equipmentRequests: [equipmentRequest("Projector", "PENDING"), equipmentRequest("Speaker", "PENDING")],
+  })).toEqual([
+    NO_VENUE,
+    { kind: "equipment", label: "Projector", reason: "Waiting for Technical Support Staff to reserve it." },
+    { kind: "equipment", label: "Speaker", reason: "Waiting for Technical Support Staff to reserve it." },
+  ]);
+});
+
+test("SCRUM-139 AC1: a request with confirmed and coordinator-cancelled slots counts as booked", () => {
+  expect(findMissingArrangements({
+    venueRequests: [venueRequest("Hall A", "2099-05-01", "confirmed", "confirmed", "cancelled")],
+    equipmentRequests: [],
+  })).toEqual([]);
+});
+
+test("SCRUM-139 AC1: a request with pending and cancelled slots is still pending", () => {
+  expect(findMissingArrangements({
+    venueRequests: [CONFIRMED_HALL_A, venueRequest("Hall B", "2099-05-03", "pending", "cancelled")],
+    equipmentRequests: [],
+  })).toEqual([{ kind: "venue", label: "Hall B · 2099-05-03", reason: "Waiting for Venue Staff to decide." }]);
+});
+
+test("SCRUM-139 AC2: a pending venue with nothing booked is listed once, not twice", () => {
+  expect(findMissingArrangements({
+    venueRequests: [venueRequest("Hall B", "2099-05-01", "pending")],
+    equipmentRequests: [],
+  })).toEqual([{ kind: "venue", label: "Hall B · 2099-05-01", reason: "Waiting for Venue Staff to decide." }]);
+});
+
+// SCRUM-144: the same rule, with each request's id and its essential flag.
+const flagged = (request, id, isEssential) => ({ ...request, id, is_essential: isEssential });
+
+test("SCRUM-144 AC2: on a multi-venue event every essential venue still pending is listed, each with its request id", () => {
+  expect(checkArrangements({
+    venueRequests: [
+      flagged(CONFIRMED_HALL_A, "vr-a", true),
+      flagged(venueRequest("Hall B", "2099-05-02", "pending"), "vr-b", true),
+      flagged(venueRequest("Hall C", "2099-05-03", "pending"), "vr-c", true),
+    ],
+    equipmentRequests: [],
+  })).toEqual({
+    missing: [
+      { kind: "venue", id: "vr-b", label: "Hall B · 2099-05-02", reason: "Waiting for Venue Staff to decide." },
+      { kind: "venue", id: "vr-c", label: "Hall C · 2099-05-03", reason: "Waiting for Venue Staff to decide." },
+    ],
+    optional: [],
+  });
+});
+
+test("SCRUM-144 AC4: outstanding requests marked non-essential do not block and are listed as optional", () => {
+  expect(checkArrangements({
+    venueRequests: [flagged(CONFIRMED_HALL_A, "vr-a", true), flagged(venueRequest("Hall B", "2099-05-02", "pending"), "vr-b", false)],
+    equipmentRequests: [flagged(equipmentRequest("Microphone", "PENDING"), "eq-1", false), flagged(equipmentRequest("Projector", "APPROVED"), "eq-2", false)],
+  })).toEqual({
+    missing: [],
+    optional: [
+      { kind: "venue", id: "vr-b", label: "Hall B · 2099-05-02", reason: "Waiting for Venue Staff to decide." },
+      { kind: "equipment", id: "eq-1", label: "Microphone", reason: "Waiting for Technical Support Staff to reserve it." },
+    ],
+  });
+});
+
+test("SCRUM-144 AC4: an essential item still blocks beside a non-essential one", () => {
+  const { missing, optional } = checkArrangements({
+    venueRequests: [flagged(CONFIRMED_HALL_A, "vr-a", true)],
+    equipmentRequests: [flagged(equipmentRequest("Microphone", "REJECTED"), "eq-1", true), flagged(equipmentRequest("Speaker", "REVIEW_REQUIRED"), "eq-2", false)],
+  });
+  expect(missing.map((item) => item.id)).toEqual(["eq-1"]);
+  expect(optional.map((item) => item.id)).toEqual(["eq-2"]);
+});
+
+test("SCRUM-144 boundary: with no booked venue, a venue is still required even if every pending venue is non-essential", () => {
+  expect(checkArrangements({
+    venueRequests: [flagged(venueRequest("Hall B", "2099-05-02", "pending"), "vr-b", false)],
+    equipmentRequests: [],
+  })).toEqual({
+    missing: [NO_VENUE],
+    optional: [{ kind: "venue", id: "vr-b", label: "Hall B · 2099-05-02", reason: "Waiting for Venue Staff to decide." }],
+  });
+});
+
+test("SCRUM-144: a request without the flag (column default) counts as essential", () => {
+  expect(checkArrangements({
+    venueRequests: [CONFIRMED_HALL_A],
+    equipmentRequests: [{ ...equipmentRequest("Microphone", "PENDING"), id: "eq-1" }],
+  }).missing.map((item) => item.id)).toEqual(["eq-1"]);
+});
+
+// SCRUM-38: a confirmed venue booking flagged as affected (after an event
+// change, or by SCRUM-145) no longer counts as the event's venue.
+const affected = (request, reason) => ({ ...request, is_affected: true, affected_reason: reason });
+
+test("[SCRUM-38] TC-SCRUM-38-10: a confirmed but affected booking is listed as missing with its reason, and is not the booked venue", () => {
+  const reason = "After the event changed: Over capacity: the venues booked on 2099-05-01 hold 50, fewer than the 80 people now expected.";
+  expect(findMissingArrangements({
+    venueRequests: [{ ...affected(CONFIRMED_HALL_A, reason), id: "venue-a" }],
+    equipmentRequests: [],
+  })).toEqual([{ kind: "venue", label: "Hall A · 2099-05-01", reason, id: "venue-a" }]);
+});
+
+test("[SCRUM-38] an affected booking beside a confirmed, unaffected one still blocks; the other venue still counts as booked", () => {
+  const missing = findMissingArrangements({
+    venueRequests: [affected(venueRequest("Hall B", "2099-05-01", "confirmed"), null), venueRequest("Hall C", "2099-05-01", "confirmed")],
+    equipmentRequests: [],
+  });
+  expect(missing).toEqual([{ kind: "venue", label: "Hall B · 2099-05-01", reason: "This venue booking is flagged as no longer suitable. Find a replacement or release it." }]);
+});
+
+test("[SCRUM-38] an affected booking marked non-essential does not block, but is still not the booked venue", () => {
+  const { missing, optional } = checkArrangements({
+    venueRequests: [{ ...affected(CONFIRMED_HALL_A, "Reason"), is_essential: false }],
+    equipmentRequests: [],
+  });
+  expect(optional).toEqual([{ kind: "venue", label: "Hall A · 2099-05-01", reason: "Reason" }]);
+  expect(missing).toEqual([NO_VENUE]);
+});

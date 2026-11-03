@@ -43,7 +43,7 @@ function createAssignmentsController(dependencies) {
     async assign(req, res) {
       if (!assignments) return unconfigured(res);
       try {
-        const result = await assignments.assign(req.params.eventId, req.body?.coordinatorId);
+        const result = await assignments.assign(req.params.eventId, req.body?.coordinatorId, req.user);
         if (result.ok) return res.json({ event: result.event });
         const [status, message] = FAILURES[result.reason];
         return res.status(status).json({ message });

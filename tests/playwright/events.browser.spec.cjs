@@ -48,6 +48,8 @@ for (const [index, role] of ['attendee', 'venue_staff', 'event_coordinator'].ent
     const account = await accounts.create([role]);
     await page.goto('/events/new');
     await signIn(page, account);
+    await expect(page).toHaveURL(/\/account$/);
+    await page.goto('/events/new');
     await expect(page).toHaveURL(/\/forbidden$/);
     await expect(page.getByRole('link', { name: 'New event request' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Submit request' })).toHaveCount(0);

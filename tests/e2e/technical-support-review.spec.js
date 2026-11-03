@@ -9,18 +9,20 @@ const TECH_SUPPORT_EMAIL = "technical.demo@example.com";
 const COORDINATOR_EMAIL = "coordinator.demo@example.com";
 const EVENT_ID = process.env.THREAD_TEST_EVENT_ID;
 
+// Not wired into any CI job - requires a hand-picked event/thread already
+// seeded in the shared dev DB, unlike every other tests/e2e suite which
+// creates and tears down its own fixtures. Runs only when a dev sets both
+// vars locally.
+test.skip(!process.env.SEED_USER_PASSWORD || !EVENT_ID,
+  "Manual suite: set SEED_USER_PASSWORD and THREAD_TEST_EVENT_ID in the root .env to run it.");
+
 async function signIn(page, email) {
   const password = process.env.SEED_USER_PASSWORD;
-  if (!password || !EVENT_ID) {
-    throw new Error(
-      "Set SEED_USER_PASSWORD and THREAD_TEST_EVENT_ID in the root .env before running this live suite.",
-    );
-  }
   await page.goto(email === TECH_SUPPORT_EMAIL ? "/technical-support" : "/equipment/requests?event=" + EVENT_ID);
   await page.locator("#email").fill(email);
   await page.locator("#password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByText("You’re signed in")).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible({ timeout: 15000 });
 }
 
 async function signOut(page) {
@@ -71,8 +73,12 @@ test("Scrum-28-Scrum65/66: a Technical Support message is visible to, and answer
   await expect(page.getByText(messageText)).toBeVisible();
 
   await signOut(page);
+  // signIn() already navigates to /equipment/requests?event=<EVENT_ID> before
+  // signing in, and the app returns to that same URL after auth - the
+  // coordinator no longer has a free-text event id field to fill (removed
+  // alongside Scrum-29's dropdown/borrow-window work; they select from their
+  // assigned-events dropdown instead).
   await signIn(page, COORDINATOR_EMAIL);
-  await page.locator('input[placeholder="Paste the event\'s UUID"]').fill(EVENT_ID);
 
   // AC4: the Coordinator sees the same thread - proves it isn't Technical
   // Support-only storage/UI, and that this Coordinator is authorised for

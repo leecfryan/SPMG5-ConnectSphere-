@@ -1,6 +1,19 @@
 function createAssignmentsService({ repository, directory }) {
+  // SCRUM-159 AC2: each request carries its organiser's name. The Lead needs
+  // the name, not the internal account id, so organiser_id stays server-side.
   async function listQueue() {
-    return { ok: true, events: await repository.findSubmittedUnassigned() };
+    const rows = await repository.findSubmittedUnassigned();
+    const organiserIds = [...new Set(rows.map((row) => row.organiser_id).filter(Boolean))];
+    const names = new Map(await Promise.all(
+      organiserIds.map(async (id) => [id, await directory.displayNameOf(id)]),
+    ));
+    return {
+      ok: true,
+      events: rows.map(({ organiser_id: organiserId, ...event }) => ({
+        ...event,
+        organiser_name: names.get(organiserId) ?? null,
+      })),
+    };
   }
 
   async function listCoordinators() {
@@ -33,7 +46,7 @@ function createAssignmentsService({ repository, directory }) {
     };
   }
 
-  async function assign(eventId, coordinatorId) {
+  async function assign(eventId, coordinatorId, actor) {
     if (typeof coordinatorId !== "string" || coordinatorId.trim() === "") {
       return { ok: false, reason: "invalid_coordinator" };
     }
@@ -43,7 +56,7 @@ function createAssignmentsService({ repository, directory }) {
       return { ok: false, reason: "unknown_coordinator" };
     }
 
-    const event = await repository.assignCoordinator(eventId, coordinatorId);
+    const event = await repository.assignCoordinator(eventId, coordinatorId, actor);
     if (event) return { ok: true, event };
 
     const existing = await repository.findById(eventId);

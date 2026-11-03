@@ -1,6 +1,12 @@
 import { useState } from "react";
 
-export default function RegistrationForm({ fields = [], onSubmit, busy, disabled }) {
+export default function RegistrationForm({
+  fields = [],
+  onSubmit,
+  busy,
+  disabled,
+  disabledReasonId,
+}) {
   const [values, setValues] = useState(() =>
     Object.fromEntries(fields.map((f) => [f.id, ""]))
   );
@@ -24,10 +30,12 @@ export default function RegistrationForm({ fields = [], onSubmit, busy, disabled
         <div key={field.id}>
           <label htmlFor={`reg-${field.id}`}>
             {field.label}
+            <span className="field-required" aria-hidden="true">{field.required ? " (required)" : " (optional)"}</span>
           </label>
           <input
             id={`reg-${field.id}`}
             type={field.type ?? "text"}
+            aria-label={field.label}
             required={field.required}
             maxLength={500}
             disabled={busy || disabled}
@@ -36,7 +44,12 @@ export default function RegistrationForm({ fields = [], onSubmit, busy, disabled
           />
         </div>
       ))}
-      <button className="primary" type="submit" disabled={busy || disabled}>
+      <button
+        className="primary"
+        type="submit"
+        disabled={busy || disabled}
+        aria-describedby={disabled && disabledReasonId ? disabledReasonId : undefined}
+      >
         {busy ? "Registering…" : "Register for this event"}
       </button>
     </form>

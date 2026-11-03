@@ -77,7 +77,8 @@ test("[RBAC-DATA-005] Network failure grants no data access and permits retry", 
 test("[RBAC-DATA-006] An empty permitted list does not invent staff responsibilities", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply(200, { responsibilities: [] })));
   render(<StaffResponsibilities token="verified-token" />);
-  expect(await screen.findByRole("list")).toBeTruthy();
+  expect(await screen.findByText("No responsibilities are assigned to your current roles.")).toBeTruthy();
+  expect(screen.queryByRole("list")).toBeNull();
   expect(screen.queryAllByRole("listitem")).toHaveLength(0);
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.queryByRole("status")).toBeNull();

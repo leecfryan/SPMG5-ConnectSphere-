@@ -1,5 +1,9 @@
 # Coordinator Assignment — Test Documentation
 
+SCRUM-142 renames the current manager role to Event Coordinator Lead (`event_coordinator_lead`).
+Historical acceptance criteria and customer quotations retain their original wording.
+Earlier execution results are historical evidence; rename verification is recorded separately.
+
 **Deliverable evidence for SCRUM-26 (Assign Event Coordinator), under epic SCRUM-7 (Event Request).**
 Branch: `feature/assignCoordinator` · **77 documented cases, all passing**
 — 63 backend (§2–§5) and 14 frontend (§6).
@@ -54,11 +58,11 @@ what is specific to that case.
 | Layer | File | Tests | Pre-conditions for every case in that file |
 | --- | --- | --- | --- |
 | Directory (unit) | `backend/tests/unit/events/coordinators.directory.test.js` | 22 | None beyond a hand-built `{ auth: { admin: { listUsers } } }` client passed to the factory. No `stubSupabase` — the module takes its client as an argument. |
-| Service and repository (unit) | `backend/tests/unit/events/assignments.service.test.js` | 19 | `build()` returns the service with `repository` and `directory` as `vi.fn()` stubs. The repository-filter cases use `recorder()`, a Proxy chain that records every PostgREST builder call. |
+| Service and repository (unit) | `backend/tests/unit/events/assignments.service.test.js` | 19 | `build()` returns the service with `repository` and `directory` as `vi.fn()` stubs. The repository cases use `recorder()`, which records PostgREST builder calls and history RPC arguments. |
 | API (integration) | `backend/tests/integration/events.assign.test.js` | 22 | Express app on an ephemeral port (`listen(0)`); the bearer token **is** the comma-separated role list, so each case states the identity it exercises. Repository and directory both faked. |
 | Page (frontend) | `frontend/src/features/events/AssignmentQueuePage.test.jsx` | 14 | jsdom; `getAuthClient` mocked and `fetch` stubbed, both reset in `afterEach`. The page is rendered through the real `App` and router, so the route guard is exercised rather than bypassed. Permissions come from the **real** `backend/src/auth/permissions.js`, loaded with `createRequire` — removing the manager's capability fails these tests. |
 
-Permission coverage for `event_ops_manager` beyond this feature lives in
+Permission coverage for `event_coordinator_lead` beyond this feature lives in
 `backend/tests/integration/auth.test.js` and `frontend/src/Rbac.test.jsx`.
 
 ---
@@ -77,7 +81,7 @@ Permission coverage for `event_ops_manager` beyond this feature lives in
 | AS-H08 | The queue endpoint returns the repository's order | 2 seeded requests | `200`; both names in order; all SUBMITTED and unassigned | `the queue returns submitted, unassigned requests in the repository's order` |
 | AS-H09 | The coordinator endpoint carries each workload figure | 2 coordinators, 1 assignment | `200`; `activeEvents` 1 and 0; `nextEventStart` ISO and `null` | `the coordinator table carries each coordinator's active workload` |
 | AS-H10 | Assignment succeeds and does not move the event's status | `PUT` with a valid coordinator | `200`; `coordinator_id` set; `status` still `SUBMITTED` | `assignment succeeds and does not move the event's status` |
-| AS-H11 | The write is guarded to first-assignment-only, in the database | `assignCoordinator("evt-1","coord-1")` | `update` carries **only** `coordinator_id`, never `status`; filters are `eq id`, `eq status SUBMITTED`, `is coordinator_id null` | `assignCoordinator writes only coordinator_id, and only to a submitted, unassigned event` |
+| AS-H11 | The repository forwards first-assignment guards and the verified actor to history storage | `assignCoordinator("evt-1","coord-1", actor)` | Calls `assign_event_coordinator` with the event/coordinator IDs, expected coordinator `null`, allowed status `["SUBMITTED"]`, and verified actor ID/name. No lifecycle transition is requested. | `SCRUM-26 / SCRUM-155: assignCoordinator sends first-assignment guards and verified actor to history storage` |
 
 ---
 
@@ -88,7 +92,7 @@ Permission coverage for `event_ops_manager` beyond this feature lives in
 | AS-X01 | No endpoint is reachable unauthenticated | `""`, `"invalid"` × 3 paths | `401` every time | `an unauthenticated caller (%s) reaches no assignment endpoint` |
 | AS-X02 | No other role reaches any endpoint | 6 roles × 3 paths | `403`; repository never called | `%s is signed in but cannot see or change assignments` |
 | AS-X03 | `internal.access` alone is not enough | `event_coordinator` | `403` — the capability is specific, not the area | `an event_coordinator holds internal.access yet is still refused - the capability is specific` |
-| AS-X04 | A multi-role account holding the manager role is admitted | `event_coordinator,event_ops_manager` | `200` | `a multi-role account holding event_ops_manager is admitted` |
+| AS-X04 | A multi-role account holding the manager role is admitted | `event_coordinator,event_coordinator_lead` | `200` | `a multi-role account holding event_coordinator_lead is admitted` |
 
 Forged `x-user-role` headers are sent on **every** request in this file; roles
 come from the verified token's `app_metadata` only. The matching blast-radius
@@ -176,8 +180,9 @@ specs, so the guard is proven by AS-UI-002 in jsdom and by the route tests in
 [Playwright acceptance](testing/playwright-acceptance.md) §Remaining evidence.
 
 **Nothing here proves the database enforces the guard.** AS-H11 asserts the
-filters the repository *sends* — `eq status SUBMITTED`, `is coordinator_id null`
-— against a recording Proxy, not against Postgres. The 409 path (AS-N09) is
+first-assignment parameters sent to `assign_event_coordinator` — allowed status
+`SUBMITTED` and expected coordinator `null` — against a recording client, not
+against Postgres. The 409 path (AS-N09) is
 therefore evidence that the code handles a zero-row update correctly, not that
 two concurrent managers actually produce one. The two-tab step in
 [Coordinator assignment](event-assignment.md) §Manual verification is what
@@ -225,3 +230,67 @@ place.
   green.** Move it when the branch merges, or the board understates the lane.
 - **The Sprint 1 mockup contradicts Clarification #42** on who assigns
   (roadmap D6). The implementation follows the clarification.
+
+
+## SCRUM-155 compatibility verification — 17 Oct 2026
+
+The assignment notification feature passes the verified assigner to history
+storage. The existing service/API assertions now include that identity, and the
+repository test checks the history RPC's first-assignment guards instead of the
+superseded direct-update query. The tampered-body case also supplies forged
+assigner fields and verifies that the authenticated actor still reaches storage.
+The workspace integration fixture reuses the existing assignment RPC adapter.
+
+No original test was removed or skipped. Workspace checks still require unchanged
+lifecycle status, revoked outgoing-coordinator access, refusal of stale changes,
+postponed-event reassignment and refusal of rejected events. Production event
+logic was not changed by this compatibility correction.
+
+The same six-file regression selection that previously had eight failures now
+passes **119/119**, with no failures or skipped tests. It comprises 82 existing
+assignment/workspace tests and 37 notification tests. This is a targeted regression
+result, not a claim that the entire backend or CI pipeline was run.
+
+Run from the repository root:
+
+```sh
+npm --prefix backend run test:events -- tests/unit/events/assignments.service.test.js tests/integration/events.assign.test.js tests/integration/eventWorkspace.test.js tests/unit/notifications/notificationDelivery.test.js tests/integration/notifications.assignment.test.js tests/integration/notifications.delivery.test.js --pool=threads --maxWorkers=1
+```
+
+## SCRUM-159 — the unassigned request queue
+
+> **SCRUM-159:** As an Event Coordinator Lead, I want to see submitted event requests that have no coordinator
+> assigned so that no request goes unattended.
+>
+> 1. A submitted event request with no assigned coordinator appears in the unassigned queue.
+> 2. The queue shows the event name, organiser, proposed dates and expected attendance.
+> 3. Only the Event Coordinator Lead can view the unassigned queue.
+> 4. An event leaves the queue once a coordinator is assigned to it.
+
+SCRUM-26 built the queue, so AC1, AC3 and AC4 were already met; this story adds the organiser and shows all four AC2
+fields in every row. AC3's role denials are the SCRUM-26 cases in §3 (every non-Lead role 403, no token 401, a
+coordinator holding `internal.access` still 403), plus the API refusal inside `[E2E-QUEUE-001]`.
+
+| Epic | Scrum-# | AC # | Type | Test Case ID | Test Scenario | Pre-conditions | Test Steps | Test Data | Expected Result | Created By* | Date of Creation* | Actual Result | Pass / Fail / Not Executed / Blocked | Remarks | Executed By | Date of Execution |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Event Lifecycle | SCRUM-159 | 1, 2 | Happy | TC-SCRUM-159-01 | A submitted, unassigned request reaches the Lead with its four fields | Lead signed in; one `SUBMITTED` request, no coordinator | GET `/api/internal/events/unassigned` | Organiser *Olivia Ong*; 2099-10-02 01:00–05:00Z; 30 attendees | 200; the event has `name`, `organiser_name: "Olivia Ong"`, `start_time`, `end_time`, `expected_attendance: 30` | Agent | 2026-10-22 | As expected | Pass | Automated: `backend/tests/integration/events.assign.test.js` `[SCRUM-159] TC-SCRUM-159-01`; `backend/tests/unit/events/assignments.service.test.js` "each queued request carries its organiser's name…" | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 2 | Boundary | TC-SCRUM-159-02 | An organiser without a usable full name is shown by email | Organiser account exists | `displayNameOf(id)` | `full_name` padded; absent; whitespace only | "Olivia Ong" trimmed; otherwise the email | Agent | 2026-10-22 | As expected | Pass | Automated: `backend/tests/unit/events/coordinators.directory.test.js` "an organiser is shown by…" (3 cases) | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 2 | Failure | TC-SCRUM-159-03 | An organiser who can't be named never hides the request | Auth lookup fails / account deleted / no name or email | GET the queue | `getUserById` error; `user: null`; neither field | `organiser_name: null`; 200 with the request still listed | Agent | 2026-10-22 | As expected | Pass | Automated: directory "an organiser is unknown (null)…" (3 cases); service "…cannot be named, stays in the queue"; integration `TC-SCRUM-159-03/04` | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 2 | Cross-cutting | TC-SCRUM-159-04 | The queue sends only what the screen needs | Repository row includes `organiser_id` | Build the query; GET the queue | — | Explicit column list, never `*`; the response contains no `organiser_id` | Agent | 2026-10-22 | As expected | Pass | Automated: service test "the queue reads an explicit column list…"; integration `TC-SCRUM-159-03/04` | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 2 | Happy | TC-SCRUM-159-05 | An organiser with several requests is looked up once | Three requests, two organisers | `listQueue()` | org-1 ×2, org-2 ×1 | Every row named; two lookups, one per organiser | Agent | 2026-10-22 | As expected | Pass | Automated: service "an organiser with several queued requests is looked up once" | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 2 | Negative | TC-SCRUM-159-06 | A request with no organiser | `organiser_id` null | `listQueue()` | — | `organiser_name: null`; no lookup made for it | Agent | 2026-10-22 | As expected | Pass | Automated: service "…without an organiser…" | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 4 | Negative | TC-SCRUM-159-07 | An assigned request is gone on the next read | Two queued requests | GET queue; PUT coordinator on the first; GET queue | coord-1 | First read both; second read only the unassigned one | Agent | 2026-10-22 | As expected | Pass | Automated: integration `TC-SCRUM-159-07` (the filter itself is proven by SCRUM-26's query-shape unit test and by `[E2E-QUEUE-001]` over fake storage) | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 1–4 | Happy | TC-SCRUM-159-08 | The full journey in a real browser at 375 px | Fake storage; organiser *Olivia Ong*, Lead, coordinator | Organiser submits via API; coordinator GETs the queue; Lead opens `/events/assignments`, checks the row, assigns, reloads | 2099 dates, 30 attendees | Coordinator 403; row shows *Olivia Ong*, 2099, *30 expected*; no sideways scroll; after assigning the row is gone, also after reload; stored event `SUBMITTED` with the coordinator | Agent | 2026-10-22 | As expected | Pass | Automated: `tests/playwright/assignment-queue.browser.spec.cjs` `[E2E-QUEUE-001]` | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 2 | Happy | TC-SCRUM-159-UI-01 | Each row shows name, organiser, proposed dates and attendance | Lead; two queued requests | Open `/events/assignments` | *Olivia Ong* / `peter@example.com`; 2099 dates; 30 / 24 | Each row's text has the organiser, "2099 … 9:00 – 2099 … 1:00" (Singapore time), "30 expected" (its person icon is `aria-hidden`), and the "Ref" | Agent | 2026-10-22 | As expected | Pass | Automated: `frontend/src/features/events/AssignmentQueuePage.test.jsx` `[SCRUM-159-UI-001]` | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 2 | Boundary | TC-SCRUM-159-UI-02 | Missing values read as words | One request with no organiser name, dates or attendance | Open the queue | nulls | *Organiser unavailable*, *Dates not set*, *Attendance not set* | Agent | 2026-10-22 | As expected | Pass | Automated: `[SCRUM-159-UI-002]` | Agent (local) | 2026-10-22 |
+| Event Lifecycle | SCRUM-159 | 2 | Happy | TC-SCRUM-159-UI-03 | The details panel names the organiser | Lead; queued request | Select the request | *Olivia Ong* | *Organiser* reads *Olivia Ong* | Agent | 2026-10-22 | As expected | Pass | Automated: `[SCRUM-159-UI-003]` | Agent (local) | 2026-10-22 |
+
+**Live-DB test:** none. The only query change is the column list, and every column in it is already read live by the
+event workspace's `FIELDS`.
+
+**Test review:** expected values come from the AC and the user's display decisions. Dropping the name lookup fails
+TC-01 and UI-01; returning `organiser_id` fails TC-04; letting a lookup error throw fails TC-03; reverting to `select("*")`
+fails TC-04; removing the coordinator filter from the fake queue or the real query fails `[E2E-QUEUE-001]` or SCRUM-26's
+query-shape test. The shared test helpers gained a `displayNameOf` fake. One pre-existing assertion changed because
+AC2 changed the response: `[SCRUM-142-INT-001/002]` (`backend/tests/integration/roles.rename.test.js`) compares the
+Lead's queue response exactly, and now expects the added `organiser_name: null`. It is still an exact comparison.

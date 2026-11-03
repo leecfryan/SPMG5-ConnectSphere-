@@ -6,6 +6,7 @@ import {
   IconPencil,
   IconUsers,
 } from "./VenueIcons";
+import VenueSuitabilityPanel from "./VenueSuitabilityPanel";
 
 const DAY_ORDER = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const DAY_LABELS = {
@@ -87,7 +88,7 @@ function Stat({ icon, label, value, unit }) {
   );
 }
 
-function VenueDetail({ venue, onBack, onEdit, onViewAvailability }) {
+function VenueDetail({ venue, onBack, onEdit, onViewAvailability, onManageUnavailability, onManageHolds, onViewConflicts, canAssess }) {
   return (
     <div className="venue-detail">
       <button type="button" className="v-back" onClick={onBack}>
@@ -111,6 +112,27 @@ function VenueDetail({ venue, onBack, onEdit, onViewAvailability }) {
             <IconPencil />
             Edit operating information
           </button>}
+
+          {/* SCRUM-133: Venue Staff manage unavailability periods */}
+          {onManageUnavailability && (
+            <button type="button" className="v-btn v-btn-secondary" onClick={onManageUnavailability}>
+              Manage unavailability
+            </button>
+          )}
+
+          {/* SCRUM-146: Venue Staff place and view tentative holds */}
+          {onManageHolds && (
+            <button type="button" className="v-btn v-btn-secondary" onClick={onManageHolds}>
+              Manage holds
+            </button>
+          )}
+
+          {/* SCRUM-135: Venue Staff view conflict flags after a setup/turnaround change */}
+          {onViewConflicts && (
+            <button type="button" className="v-btn v-btn-secondary" onClick={onViewConflicts}>
+              View conflict flags
+            </button>
+          )}
 
           {/* SCRUM-17: view venue availability calendar */}
           <button
@@ -198,6 +220,10 @@ function VenueDetail({ venue, onBack, onEdit, onViewAvailability }) {
               <p className="v-notes">{venue.notes}</p>
             </section>
           )}
+
+          {/* SCRUM-19: only a coordinator has events to assess against, so this
+              follows the same permission as requesting a booking. */}
+          {canAssess && <VenueSuitabilityPanel venue={venue} />}
         </div>
       </div>
     </div>

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   fetchTechSupportDashboard,
   updateEquipmentRequestStatus,
+  reserveEquipmentRequestGroup,
 } from "../../../lib/api";
 import EventEquipmentCard from "../components/EventEquipmentCard";
 import ErrorModal from "../../../components/ui/ErrorModal";
@@ -10,7 +11,8 @@ import "../equipment.css";
 
 // Scrum-28-Scrum63 (AC1): Technical Support Staff review every event's
 // equipment requests from one dashboard. Scrum-28-Scrum64 (AC2): update
-// each line's status as arrangements are made.
+// each line's status as arrangements are made. SCRUM-31: reserve a whole
+// group at once (AC1/AC2/AC5).
 const EMPTY_REQUESTS = [];
 
 function TechnicalSupportDashboardPage() {
@@ -20,6 +22,8 @@ function TechnicalSupportDashboardPage() {
   const [actionError, setActionError] = useState(null);
   const [forbiddenMessage, setForbiddenMessage] = useState(null);
   const [savingId, setSavingId] = useState(null);
+  const [reservingGroupId, setReservingGroupId] = useState(null);
+  const [reserveError, setReserveError] = useState(null);
   const current = result?.token === token;
   const requests = current ? result.requests : EMPTY_REQUESTS;
   const isLoading = !current;
@@ -66,6 +70,32 @@ function TechnicalSupportDashboardPage() {
       .finally(() => setSavingId(null));
   }
 
+  // SCRUM-31: merges the reserved/unfulfilled rows the server actually wrote
+  // back into the dashboard's own list - a 409 (essential group short of
+  // stock) changes nothing server-side, so nothing is merged for it either,
+  // just the error shown against that one group.
+  function handleReserve(groupId) {
+    setReservingGroupId(groupId);
+    setReserveError(null);
+    reserveEquipmentRequestGroup(groupId, token)
+      .then(({ reserved, unfulfilled }) => {
+        const updatedById = new Map([...reserved, ...unfulfilled].map((row) => [row.id, row]));
+        setResult((prev) => ({
+          ...prev,
+          requests: prev.requests.map((r) => updatedById.get(r.id) ?? r),
+        }));
+      })
+      .catch((err) => {
+        if (err.status === 403 || err.status === 401) {
+          setForbiddenMessage(err.message);
+          setResult({ token, requests: [], error: err.message });
+        } else {
+          setReserveError({ groupId, message: err.message });
+        }
+      })
+      .finally(() => setReservingGroupId(null));
+  }
+
   if (!token) {
     return (
       <div className="eq-page">
@@ -109,6 +139,9 @@ function TechnicalSupportDashboardPage() {
               lines={card.lines}
               onStatusChange={handleStatusChange}
               savingId={savingId}
+              onReserve={handleReserve}
+              reservingGroupId={reservingGroupId}
+              reserveError={reserveError}
               token={token}
               currentUserId={currentUserId}
             />

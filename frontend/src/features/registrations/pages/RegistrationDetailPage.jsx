@@ -49,10 +49,11 @@ function RegistrationDetailPage() {
   const blockReason = withdrawBlockReason(registration);
 
   return (
-    <section className="card" aria-labelledby="reg-detail-title">
+    <section className="card registration-detail-page" aria-labelledby="reg-detail-title">
       <Link to="/registrations/me" className="back-link">Back to my registrations</Link>
       <p className="eyebrow">REGISTRATION</p>
       <h1 id="reg-detail-title">Registration details</h1>
+      {registration.events?.name && <div className="registration-detail-event"><span className="eyebrow">YOUR EVENT</span><h2>{registration.events.name}</h2>{registration.events.start_time && <p>{new Date(registration.events.start_time).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>}</div>}
       <dl className="account-details">
         <div><dt>Status</dt><dd><RegistrationStatusBadge status={registration.status} /></dd></div>
         <div><dt>Registered</dt><dd>{new Date(registration.created_at).toLocaleDateString()}</dd></div>

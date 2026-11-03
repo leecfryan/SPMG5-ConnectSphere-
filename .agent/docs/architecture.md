@@ -1,0 +1,325 @@
+# Architecture
+
+The stack, how a request travels, where each kind of code goes, the database, and outside services.
+Team-facing versions: [../../docs/project-structure.md](../../docs/project-structure.md),
+[../../docs/staff-access.md](../../docs/staff-access.md), [../../docs/frontend-routing.md](../../docs/frontend-routing.md).
+
+## Stack
+
+The confirmed stack. Anything not listed here needs the team's agreement and an AC that requires it, and the user
+installs it, not the agent.
+
+| Layer | Choice | Notes |
+|---|---|---|
+| Frontend | React 19 + Vite 8, JavaScript (`.jsx` / `.js`) | No TypeScript, no UI framework, no CSS framework, no state library. Plain CSS files per feature |
+| Routing | React Router 7 (`react-router`), declarative `<Routes>` in `App.jsx` | `BrowserRouter` is mounted once in `main.jsx` |
+| Backend | Node 22 + Express 5, CommonJS (`require` / `module.exports`) | `cors`, `dotenv`; `nodemon` for dev |
+| Auth | Supabase Auth, email + password (`@supabase/supabase-js`) | Browser SDK signs in; Express verifies each token with `auth.getUser` |
+| Database | Supabase Postgres (cloud) | Accessed only from the backend. Schema changed by hand in the dashboard; SQL recorded in each lane guide's *Schema reference*, no migration files |
+| Unit / integration tests | Vitest 5 (backend and frontend), React Testing Library + user-event + jsdom on the frontend | A few older backend suites (`auth`, `permissions`, `equipment`) still run on `node:test`. Leave them; new tests use Vitest |
+| End-to-end tests | Playwright (root `package.json`), Chromium + direct HTTP API projects | `tests/playwright/` runs against a local Auth simulator; no cloud, no `.env` needed. `tests/e2e/` is a separate package that runs against the shared Supabase project (CI job *Live-DB E2E Tests*, one run at a time). Add new specs to `tests/playwright/` unless the story needs real-database behaviour |
+| Lint | ESLint (`backend/eslint.config.mjs`, `frontend/eslint.config.js`) | No Prettier. Match surrounding formatting by hand |
+| Local runtime | npm scripts, or Docker Compose (frontend :5173, backend :3000) | Supabase is never run locally |
+| CI | GitHub Actions on push / PR to `staging` | Frontend lint + test + build, backend check + test, Docker build, Playwright, live-DB E2E (`tests/e2e`) |
+| External APIs | Novu Cloud selected for SCRUM-143 | Backend signs inbox identity locally; @novu/react connects to the US cloud inbox. See *External integrations* below |
+| Deployment | None planned | Don't add hosting, build pipelines or production config |
+
+### Before suggesting a new package
+
+1. Can the existing stack or the platform do it? `fetch`, `Intl.DateTimeFormat`, native `<dialog>`, `URLSearchParams`
+   and Postgres constraints have each replaced a library in this repo already.
+2. Which AC needs it? Name it.
+3. Tell the user the exact command (`npm --prefix frontend install <pkg>` or `npm --prefix backend install <pkg>`),
+   and remind them that Docker users need `docker compose up --build --renew-anon-volumes` afterwards.
+4. Update this file in the same change.
+
+## Request path
+
+```
+Browser (React)
+  └─ features/<f>/<f>Service.js or lib/api.js ── fetch("/api/...", Authorization: Bearer <token>)
+       └─ Vite proxy /api → Express :3000
+            └─ app.js  createApp({...injected dependencies})
+                 └─ routes/<f>.routes.js      authenticate → requirePermission(name, authorizeRecord?) → "configured?" 503 guard
+                      └─ modules/<f>/<f>.controller.js   HTTP in/out: params, status codes, response shape
+                           └─ modules/<f>/<f>.service.js      rules: validation, transitions, decisions ({ ok, reason })
+                                └─ modules/<f>/<f>.repository.js  Supabase queries only
+                                     └─ Supabase Postgres (secret key, backend only)
+```
+
+The browser never talks to Supabase for data. It uses the Supabase SDK only to sign in and hold the session.
+
+## Backend layers
+
+| Layer | File | Owns | Never does |
+|---|---|---|---|
+| Composition | `src/server.js` | Reading `.env`, building real clients, calling `createApp` | Business logic |
+| App | `src/app.js` | Mount order, the `/api/internal` gate, the error handler | Feature logic. Add one `app.use` line per router |
+| Routes | `src/routes/<f>.routes.js` | Which guard protects which path, the order of static paths before `/:id` | Queries, response shaping |
+| Controller | `modules/<f>/<f>.controller.js` | Reading `req`, mapping service results to status codes, safe error messages | SQL, permission decisions |
+| Service | `modules/<f>/<f>.service.js` | Validation, status transitions, domain rules. Returns `{ ok: true, … }` or `{ ok: false, reason }` | `req` / `res`, Supabase calls |
+| Repository | `modules/<f>/<f>.repository.js` | Supabase queries; explicit column lists; `WRITABLE_COLS` allow-list for writes | Deciding who may do it |
+| Validation | `modules/<f>/<f>.validation.js` | Pure input checks with named limits | I/O |
+
+Not every module has every layer (registrations uses handler files; venues has no separate repository). Extend the
+lane's existing shape rather than restructuring it. New modules should use the full set.
+
+### Dependency injection
+
+`createApp` receives every data dependency (`eventsRepository`, `venuesService`, `equipmentDependencies`, …).
+`server.js` builds them only when `SUPABASE_SECRET_KEY` is set, and routes answer **503 "…is not configured"** when
+their dependency is missing, so sign-in still works without data access. Tests pass fakes through the same
+parameters. A new feature follows the same pattern:
+
+1. `createXRoutes(dependencies, authenticate)` in `routes/`.
+2. One new named parameter on `createApp`, one `app.use(...)` line.
+3. One line in `server.js` building the real dependency behind the secret-key check.
+
+Repositories get the Supabase client lazily (`const getSupabase = () => require("../../supabase")`) so importing
+them in tests needs no credentials.
+
+### Mount order matters
+
+`/api/events` is mounted twice: the Event Lifecycle router first (`POST /` and SCRUM-147's `/drafts[/:id[/submit]]`), then Registration's `eventHandlers`
+(`GET /registration-windows[/:eventId]`, `GET /`, `GET /:eventId`). A new static `GET /api/events/<name>` path must
+be declared before `/:eventId` swallows it. That is why staff event actions live under `/api/internal/events/…`
+and managed events under `/api/managed-events`. Inside any router, declare static paths before parameter paths.
+
+## Auth and permissions
+
+- `requireAuth(authClient)` verifies the bearer token with Supabase on **every** request and builds
+  `req.user = { id, email, fullName, roles[], accountTypes[] }` from `app_metadata.roles` only. It never trusts
+  headers, query, body or `user_metadata`.
+- Roles: internal `event_coordinator`, `venue_staff`, `technical_support_staff`, `event_coordinator_lead`, `safety_officer`; external
+  `event_organiser`, `attendee`. `roles` is an array, so a person can hold several.
+- `requireAuth` maps a verified legacy `event_ops_manager` claim to `event_coordinator_lead` (SCRUM-142). Policies
+  and role checks use only the canonical name. The Auth metadata update that retires the legacy claim is in
+  [../../docs/staff-access.md](../../docs/staff-access.md).
+- `safety_officer` holds `internal.access`, `events.safety.read` and `events.safety.decide`.
+- `backend/src/auth/permissions.js` is the single policy table: `"<area>.<action>": { roles: [...], label?, record? }`.
+  - `*.read` permissions are refused for anything but GET/HEAD. A write needs its own action permission
+    (`events.submit`, `bookings.decide`, `equipment.review`, …). Never reuse a read permission for a write.
+  - `label` puts it in the staff Responsibilities list; `events.review` also labels the manager's review workspace.
+  - `record: true` makes `requirePermission` **throw at startup** unless the route supplies
+    `authorizeRecord(req)`, which must load the real relationship from the database and return exactly `true`.
+    Missing record → `false` → 403. Lookup error → 503.
+- Internal (staff) APIs go under the `/api/internal` gate (`internal.access`) **and** their own permission.
+  External-user APIs (organiser, attendee) use `authenticate` + their own permission and scope every query to
+  `req.user.id` or a verified relationship.
+- The frontend gets the permission list from `GET /api/auth/me` and uses it for routes and navigation only. That is
+  UX. The API check is the security boundary, and every AC about "cannot see / cannot change" needs an API-level
+  test.
+
+### Adding a permission
+
+1. Add the entry to `permissions.js`, next to related entries, with a *why* comment if the role choice came from a
+   customer clarification.
+2. Update the matrix and capability table in [../../docs/staff-access.md](../../docs/staff-access.md).
+3. Update the permission expectations in `tests/playwright/api.spec.cjs` and any Vitest role matrix that lists
+   permissions per role. These tests enumerate permissions, so they will fail until you do.
+4. Tell the user: `permissions.js` is shared by every lane.
+
+## Response conventions
+
+- Success: `res.json({ data })` or a named key the lane already uses (`{ event }`, `{ events }`). `lib/api.js`'s
+  `request()` unwraps `.data`; `apiFetch()` returns the whole body.
+- Failure: a sentence a user can read, never a provider or SQL message. The auth and permission layer uses
+  `{ message }`; feature layers use `{ error }` or `{ errors }` / `{ details: [{ field, message }] }` for field
+  validation, which `apiFetch` joins into the thrown `Error.message`. Keep a lane's existing shape.
+- Status codes: 400 invalid input · 401 not signed in / expired · 403 no permission or not your record · 404 no
+  such record · 409 wrong state or lost race · 503 dependency not configured or unreachable · 500 only through
+  `errorHandler`.
+- Log the real error server-side (`console.error("<route> failed:", error.message)`), return the safe sentence.
+- Sensitive responses set `Cache-Control: no-store` (the auth middleware already does).
+
+## Current endpoints
+
+| Area | Method + path | Guard |
+|---|---|---|
+| Health / config | `GET /api/health`, `GET /api/auth/config` | public (config returns the URL and publishable key only) |
+| Identity | `GET /api/auth/me` | authenticated |
+| Notification inbox identity | `GET /api/notifications/inbox-config` | authenticated; caller ID only, no role requirement |
+| Staff | `GET /api/internal/access` | `internal.access` |
+| Event requests | `POST /api/events`; `POST|GET /api/events/drafts`, `GET|PATCH /api/events/drafts/:id`, `POST /api/events/drafts/:id/submit` | `events.submit`; drafts scoped to `organiser_id = req.user.id` (others' drafts 404) |
+| Assignment | `GET /api/internal/events/unassigned`, `GET /api/internal/coordinators`, `PUT /api/internal/events/:eventId/coordinator` | `internal.access` + `events.assign_coordinator` |
+| Review | `POST /api/internal/events/:eventId/{start-review,approve,reject}` | `internal.access` + `events.decide`; assigned coordinator only |
+| Confirmation | `POST /api/internal/events/:eventId/confirm`, `PATCH /api/internal/events/:eventId/arrangements/:kind/:requestId` | `internal.access` + `events.decide`; assigned coordinator only; confirm only from `PREPARATION` (SCRUM-144) |
+| Cancellation | `POST /api/internal/events/:eventId/cancel` | `internal.access` + `events.cancel`; assigned coordinator only (SCRUM-171 removed the lead's unconditional access) |
+| Postponement | `POST /api/internal/events/:eventId/postpone` | `internal.access` + `events.postpone`; assigned coordinator only (SCRUM-170). Optional new start/end: the Venue lane's `checkBookingsForNewDates` checks each live booking on the new date first. One `postpone_event` RPC records it, moves bookings that passed to the new date as pending, releases the other venue rows and holds, writes `EVENT_POSTPONED` history and queues `event-postponed` notifications |
+| Safety check | `GET /api/internal/events/:eventId/safety-readiness`, `POST /api/internal/events/:eventId/{submit-safety-check,withdraw-safety-check}` | `internal.access` + `events.safety.submit`, assigned coordinator only |
+| Safety review | `GET /api/internal/safety-reviews`, `GET /api/internal/safety-reviews/:eventId` | `internal.access` + `events.safety.read` (Safety Officer); `SAFETY_REVIEW` events only |
+| Safety decision | `POST /api/internal/safety-reviews/:eventId/{approve,reject}` | `internal.access` + `events.safety.decide` (Safety Officer); `SAFETY_REVIEW` events only; writes `event_activity_log` |
+| Event workspaces | `GET /api/event-workspace/organiser[/<id>]`, `GET /api/event-workspace/coordinator[/<id>]`, `GET /api/event-workspace/manager[/<id>]`, `GET /api/event-workspace/coordinators`; `PATCH /api/event-workspace/organiser/<id>`, `/<id>/coordinator` | `events.own.read` / `events.own.update` / `events.assigned.read` / `events.review` / `events.assign`, with organisation, ownership and state checks |
+| Managed events | `GET /api/managed-events`, `GET /api/managed-events/:eventId`, `GET|PATCH /api/managed-events/:eventId/registration-window` | `events.managed.read` / `events.registrations.read` / `events.registration-window.update`; the caller's own or assigned event |
+| Coordinator waitlist | `GET /api/managed-events/:eventId/waitlist`, `GET|PATCH /api/managed-events/:eventId/waitlist/settings`, `POST /api/managed-events/:eventId/waitlist/:entryId/promote` | `events.waitlist.manage`; assigned coordinator only |
+| Registration | `GET /api/events`, `GET /api/events/:eventId`, `GET /api/events/registration-windows[/:eventId]` (APPROVED only); `POST /api/registrations`, `GET /api/registrations/me`, `GET /api/registrations/me/:registrationId`, `PATCH /api/registrations/:registrationId/withdraw` | authenticated, `events.browse` / `registrations.manage`, scoped to `req.user.id` |
+| Attendee waitlist | `POST|GET|DELETE /api/waitlist/:eventId`, `GET /api/waitlist/:eventId/state`, `PUT /api/waitlist/:eventId/details`, `POST /api/waitlist/:eventId/offer/{accept,decline}` | `registrations.manage`, scoped to `req.user.id` |
+| Venues | `GET /api/venues`, `GET /api/venues/:id`, `GET /api/venues/:id/availability`, `PATCH /api/venues/:id`, `GET /api/venues/:id/suitability`, `GET /api/venues/booking-events`, `POST /api/venues/:id/booking-requests`, `GET /api/venues/booking-requests[/:requestId]`, `GET /api/venues/events/:eventId/booking-checks`, `PATCH /api/venues/booking-requests/:requestId/decision`, `GET|POST /api/venues/:id/unavailability`, `PATCH|DELETE /api/venues/:id/unavailability/:periodId` | `internal.access` + `venues.read` / `venues.update` / `bookings.request` / `bookings.read` / `bookings.decide` / `venues.unavailability` |
+| Equipment | `GET /api/equipment`, `GET /api/equipment/availability`, `POST /api/equipment`, `PATCH /api/equipment/:id`, `PATCH /api/equipment/:id/{retire,status}`, `GET /api/equipment/events`, `GET|POST /api/events/:eventId/equipment-requests`, `GET /api/technical-support/equipment-requests`, `PATCH /api/equipment-requests/:id/status`, `GET|POST /api/events/:eventId/messages`, `PATCH /api/messages/:id` | `internal.access` + `equipment.read` / `equipment.request` / `equipment.review` / `equipment.manage` / `equipment.messages`, with an event relationship check |
+
+Keep this table current when adding or removing an endpoint.
+
+## Frontend structure
+
+```
+frontend/src/
+  main.jsx                BrowserRouter, once
+  App.jsx                 every route; guards nest RequireAuth → WorkspaceLayout → RequirePermission
+  routes/                 shared routing infrastructure: RequireAuth, RequirePermission, WorkspaceLayout, shared pages
+  lib/api.js              apiFetch / request helpers (bearer token, error shaping)
+  lib/supabase.js         the browser Auth client
+  components/ui/          shared primitives (Modal, ErrorModal)
+  features/<f>/
+    pages/                one component per route
+    components/           used only by this feature
+    hooks/                data hooks used only by this feature
+    <f>Service.js         API calls for this feature (thin wrappers over apiFetch)
+    <f>Format.js          pure display formatting
+    <f>.css               feature styles
+```
+
+### Adding a page
+
+1. Page in `features/<f>/pages/`, API calls in `features/<f>/<f>Service.js` using `apiFetch(path, token, …)`
+   with `token` from `useAuth()`.
+2. Route in `App.jsx` under `RequireAuth` → `WorkspaceLayout`; wrap in `<RequirePermission permission="…">`
+   (and inside the `internal.access` block for staff pages).
+3. `NavLink` in `WorkspaceLayout.jsx` behind the same `hasPermission(...)` checks.
+4. If the page needs the full-width layout, add its path to the `fullWorkspace` test in `App.jsx` (see
+   [ui.md](ui.md)).
+5. Update the route table in [../../docs/frontend-routing.md](../../docs/frontend-routing.md).
+
+## Database
+
+Supabase Postgres in the cloud, shared by the whole team. There is no local database. Only the backend touches data,
+through the service-role client in `backend/src/supabase.js` (secret key). The browser uses Supabase for sign-in
+only.
+
+### Schema changes
+
+The project has no migration files. Don't create one or suggest writing one. Tell the user every SQL change the
+story needs, with the exact SQL, and record it in the task note; the user makes it by hand in the Supabase dashboard.
+The agent never runs it. The user tells teammates before the change and again once it's made, because everyone
+shares the database.
+
+### Known state
+
+- The live `events.status` check was edited by hand, and `seedData.js`
+  writes `APPROVED` rows directly. Before a story changes a table, have the user run this in the SQL
+  Editor and paste the result back, then write the SQL against what is actually live:
+
+  ```sql
+  select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid = 'public.events'::regclass;
+  select column_name, data_type, is_nullable, column_default
+    from information_schema.columns where table_schema = 'public' and table_name = 'events';
+  ```
+- Event statuses (confirmed by the team; don't add, rename or drop one without the team agreeing):
+  `DRAFT` · `SUBMITTED` · `UNDER_REVIEW` · `APPROVED` · `SAFETY_REVIEW` · `PREPARATION` · `CONFIRMED` · `COMPLETED` ·
+  `CANCELLED` · `REJECTED` · `POSTPONED`. `APPROVED` is the stored value for "approved / planning". `SAFETY_REVIEW`
+  (SCRUM-139) and `PREPARATION` (SCRUM-141) are active but not planning statuses, so venue and equipment requests are
+  refused while they hold. The permitted moves are in
+  `backend/src/modules/events/lifecycle.js`. Status is written only by `events.repository.js` (`createSubmitted`,
+  `markSubmitted`, `transitionStatus`, `cancel`, `postpone`, and `undoTransition`, which only reverts a safety
+  decision whose history row failed), each guarded by the expected current status, and by `seedData.js`; never
+  through `WRITABLE_COLS`.
+- `venue_booking_requests.is_essential` and `equipment_requests.is_essential` (SCRUM-144, boolean, default true):
+  written only by the Event Lifecycle lane's `setArrangementEssential`; a non-essential outstanding request does
+  not block the safety check or confirmation. SQL under SCRUM-144's *Schema reference* in
+  [../../docs/event-requests.md](../../docs/event-requests.md). `CONFIRMED` is reached only from `PREPARATION`.
+- `event_activity_log` (SCRUM-141): append-only event history (`user_id`, `action`, `details` jsonb); RLS on, no
+  policies, and only `service_role` may select or insert. SQL in
+  [../../docs/event-requests.md](../../docs/event-requests.md) under SCRUM-141's *Schema reference*.
+- Roles are not in a table. They're in Supabase Auth `app_metadata.roles`, set by `backend/scripts/seedUsers.js`.
+- Relationships used for record checks: `events.organiser_id`, `events.coordinator_id`,
+  `registrations.attendee_id` / `registrations.event_id`, `venue_booking_requests.event_id`,
+  `equipment_requests.event_id`.
+
+Keep this section current: when a manual schema change is made, update this section and remove whatever it resolved.
+
+## External integrations
+
+Novu Cloud is selected for the notification centre (SCRUM-143). The backend
+prepares own inbox identity locally using Node crypto. Iteration 2 adds @novu/react
+on /notifications: the browser connects to the US cloud inbox using that signed
+identity. Approval/rejection delivery uses the saved organiser and a transactional
+Supabase outbox. Ryan must apply the documented SQL and activate event-decision
+in Novu before live use. See [notification setup and tests](../../docs/notifications.md).
+
+server.js reads NOVU_APPLICATION_IDENTIFIER and NOVU_SECRET_KEY from the private
+root .env and injects the signing service. With a data client and Novu key, it also
+starts notificationDelivery.service.js: a 15-second poll claims bounded batches
+through notificationOutbox.repository.js, sends the US REST trigger with stable
+IDs, and deletes acknowledged queue rows. Leases and retry delays survive restart.
+No queue endpoint or browser grant is exposed; history/read state stays in Novu. Empty placeholders are in .env.example.
+GET /api/notifications/inbox-config verifies the caller through requireAuth and
+returns the public application identifier, req.user.id as subscriberId and its
+HMAC-SHA256 subscriberHash. No browser-provided recipient is accepted, no secret
+is returned, and all signed-in accounts have access regardless of role. Novu
+configuration is optional; missing settings return a safe 503 without disabling
+sign-in. Tests use dummy configuration and fake Auth over real local HTTP.
+
+Before using the inbox, the user must create the Novu environment and
+enable its HMAC security setting. Account changes must reset the frontend inbox.
+Novu's cloud enforcement and delivery are not verified by local tests.
+The page mounts only inside RequireAuth. It uses the verified caller's config and
+remounts on account/token changes; pending config requests are cancelled and
+Novu cache/socket state is disposed on unmount. No role capability is required.
+
+When a story's acceptance criteria require another outside service (email, calendar, payments, maps, …), record it
+here: the service, the story that needs it, where the key lives (backend `.env` only, added to `.env.example` without
+a value), which module calls it, and how tests fake it. No code calls out to a service that isn't recorded here.
+
+### SCRUM-155 assignment notifications
+
+Both assignment APIs use the service-role-only assign_event_coordinator RPC to
+lock/compare responsibility, update coordinator_id and save event_assignment_history.
+The authenticated user supplies actor identity. Existing status/permission rules
+remain. Neither queueing nor Novu delivery runs in the assignment transaction.
+
+The worker separately calls enqueue_assignment_notifications before claiming
+outbox deliveries. Pending history is queued and marked processed atomically;
+failed preparation retries and does not prevent claiming existing decision
+notifications. History is retained. Outbox workflow selects event-decision or
+event-assignment; decision uniqueness stays per event. Ryan confirmed the revised
+SQL in docs/notifications.md succeeded on 2026-10-15. The event-assignment workflow is active in Development with three previewed
+message variants. Live delivery and full feature verification remain pending.
+
+### Equipment issue notification extension — live verification pending
+
+SCRUM-155 adds optional, post-save notification hooks for equipment requests
+marked REJECTED (Issues), including the existing retirement flagging path.
+Equipment dependency construction supplies a notification-only service. Its
+separate enqueue_equipment_issue_notifications RPC fans out saved name snapshots
+to all trusted technical_support_staff accounts using workflow equipment-issue.
+The existing worker delivers/retries those queue rows without changes. Queueing
+errors never fail the original equipment operation, but a failure before enqueue
+can lose that notice; there is no durable transition history for this path.
+No equipment storage, validation, permissions or status logic changes. Applied SQL
+and the workflow contract are in docs/notifications.md. Ryan confirmed SQL success
+on 2026-10-15; equipment-issue is active in Development with one previewed In-App
+step, required payload validation and Critical enabled. Restart/live inbox
+verification remain pending. Tests are deferred at Ryan's request.
+
+### Returned requests (SCRUM-117 Task 2)
+
+CHANGES_REQUESTED is an event status. The assigned coordinator returns UNDER_REVIEW
+requests through POST /api/internal/events/:eventId/request-changes using events.decide.
+The service-role request_event_changes RPC locks the event and saves its status, message
+and editable-field snapshot atomically in events/event_activity_log. ACTIVE_STATUSES keeps
+returned events visible/counted/cancellable; ASSIGNABLE_STATUSES excludes them.
+POSTPONABLE_STATUSES includes them; PLANNING_STATUSES does not. Existing event readers
+receive the activity message, not the snapshot. SQL is in docs/event-requests.md.
+Returned-request notification queueing is documented in docs/notifications.md; the existing worker delivers the saved message and request path through event-changes-requested. The owner resubmits through POST /api/event-workspace/organiser/:id/resubmit with the latest cycleId. The resubmit_event_request RPC checks validated saved fields under a lock, retains assignment, records immutable changes and queues event-request-resubmitted atomically. Only the coordinator workspace exposes changed-field comparisons. Both SQL/workflow setups are user-reported; live resubmission verification remains pending.
+
+SCRUM-117 saved-edit correction (24 October 2026): an events trigger records internal REQUEST_BASELINE_RECORDED snapshots at submission/resubmission in event_activity_log. Organiser PATCH preserves this baseline. The assigned coordinator detail derives request_changes from current saved fields and that baseline; internal snapshots never appear in public activity responses. Resubmission compares against this baseline and advances it transactionally. See docs/notifications.md for the applied SQL.
+
+
+SCRUM-163 reuses the notification worker/inbox for venue-hold warnings and expiry facts. Private venue_hold_notification_state tracks immutable hold generations and per-cohort delivery IDs; existing venue release/approval logic remains intact. The exact one-time manual SQL and workflow contract are in docs/venue-integration.md. Local tests never contact shared Supabase.
+
+### SCRUM-43 registration notification extension
+
+The same delivery worker independently prepares assignment history, registration history and due offer reminders before claiming the shared outbox. Registration/waitlist triggers save change history with business writes; sending occurs outside those transactions. Each reminder is validated against the current owned offer immediately before sending. Reuse the current /notifications identity and UI; no new permission or route. Manual schema/workflow setup is documented in docs/notifications.md and must precede live use.
+
+An expired notification claim is retryable, distinct from an obsolete offer. The worker isolates failed retry-storage writes per claimed row so remaining notifications can proceed.
+
+PR #68 integration: the shared notification worker retains both waitlist-offer and venue-hold validation, prepares all four work sources independently, and keeps per-row retry-storage failure isolation. Local fixtures model both families together; the two exported PostgreSQL fixture families run in separate disposable databases.

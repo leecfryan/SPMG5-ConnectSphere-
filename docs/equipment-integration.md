@@ -10,7 +10,11 @@ and sign-in/session handling remain available together on frontend port 5173.
 | --- | --- |
 | `/equipment/requests?event=<uuid>` | `internal.access` + `equipment.request`: event coordinators |
 | `/technical-support` | `internal.access` + `equipment.review`: technical support staff |
-| Equipment catalogue | `equipment.read`: coordinators and technical staff |
+| Equipment catalogue page (`/equipment/catalogue`) | `equipment.review`: technical staff only (Scrum-30; coordinators no longer have a route to it) |
+| `GET /api/equipment` (backend endpoint) | `equipment.read`: coordinators and technical staff - coordinators still use this indirectly via the reserve flow's own fetch |
+| `GET /api/equipment/availability` | `internal.access` + `equipment.read`: coordinators and technical staff |
+| Add / update / retire a catalogue record | `equipment.manage`: technical staff only (Scrum-30) |
+| Restore a retired unit back to `AVAILABLE` | `equipment.review`: technical staff only (SCRUM-103) - the same quick-status endpoint used for day-to-day condition changes, since `AVAILABLE` is already one of its accepted targets |
 | Assigned-event picker | Coordinators; backend filters by `events.coordinator_id` |
 | Read an event's equipment requests | Technical staff across events; coordinator only for assigned events |
 | Submit equipment request | Coordinator assigned to the event |
@@ -36,16 +40,286 @@ revise `APPROVED` (Assigned) and `REJECTED` (Issues). Threads are hidden 30 days
 after event end (with the existing start-time fallback); expired thread writes
 return 410. Only the verified user is saved as requester/author.
 
+## Equipment availability check (Scrum-29)
+
+`GET /api/equipment/availability?start=<ISO datetime>&end=<ISO datetime>&type=<string>&quantity=<int>&location=<string>`
+answers "is enough suitable equipment available for this event?" Guarded the
+same way as the catalogue (`internal.access` + `equipment.read`), not scoped
+to one event or record - equipment catalogue access is not limited by
+location per `staff-access.md`.
+
+All five query parameters are required (AC1). `location` is accepted and
+echoed back in the response but is not used to filter results yet - deferred
+to a later sprint. Response shape:
+
+```json
+{
+  "data": {
+    "equipment_type": "PROJECTOR",
+    "location": "Main Hall",
+    "period": { "start": "2026-09-10T09:00:00.000Z", "end": "2026-09-10T17:00:00.000Z" },
+    "available_quantity": 1,
+    "requested_quantity": 2,
+    "fulfillable": false,
+    "available_equipment_ids": ["..."]
+  }
+}
+```
+
+`available_quantity` counts physical `equipment` rows of the requested
+`type` that are both `AVAILABLE` (AC3 - any other status, including future
+values the team's status-constraint update adds, is excluded) and not
+committed to an overlapping `PENDING`/`APPROVED` request (AC2/AC4). There is
+no stock/quantity column on `equipment` - each row is one physical unit.
+
+**SCRUM-31 resolved the multi-unit-per-type limitation this section used to
+describe.** `POST /events/:eventId/equipment-requests` no longer picks or
+checks one specific unit at submission - it accepts `{ equipment_type,
+quantity_requested, is_essential }` and creates that many sibling rows
+sharing a `group_id`, each `equipment_id` null until Technical Support's
+`PATCH /equipment-requests/groups/:groupId/reserve` assigns real units (see
+`.agent/docs/other/SCRUM-31-equipment-partial-reserve.md` for the full data
+model and decisions). Creation itself never rejects for insufficient stock
+any more - an over-request is accepted, and Reserve resolves the shortfall
+by partially fulfilling (or, for an essential request, refusing to reserve
+anything at all).
+
+**Overlap rule changed for both this check and equipment requests.**
+`equipment.service.js`'s `hasOverlappingRequest` - used by the reserve
+action - previously allowed back-to-back bookings (touching endpoints,
+timestamp precision). The team decided that divergence between the
+reservation path and this availability check was unacceptable, so both now
+share one rule (`isBlockingOverlap` in `equipment.validation.js`):
+day-granularity, touching endpoints blocked ("Return Day + 1" - AC4). The
+prior Rule A query is commented out in
+`equipment.service.js` for reference, not deleted, in case the team revisits
+this.
+
+## Live count, shortfall and Out of Stock on the request form (SCRUM-169)
+
+`EquipmentRequestForm.jsx` shows a coordinator, as soon as a type is selected, how many units of it are
+currently unreserved for the borrow window ("`N` available now") - no new backend call. It's still read from the
+same per-window list `EquipmentRequestPage.jsx` already fetches via `GET /api/equipment?start=&end=`
+(`findAvailableUnits`, unchanged), not the separate `/equipment/availability` endpoint above (that one needs
+`type`/`quantity`/`location` the frontend has no equivalent for and remains unused by any UI).
+
+"Available now," not "available" - a `PENDING` sibling holds no unit (see SCRUM-31's data model above), so the
+count means "currently unreserved," not "guaranteed yours." It is a **warning only and never gates Submit**,
+consistent with Creation never rejecting for insufficient stock:
+
+- `count >= quantity`: "`N` available now."
+- `0 < count < quantity`: "Only `N` available now, the rest may be unfulfilled."
+- `count === 0`: an "Out of Stock" badge, plus "Out of Stock now. You can still submit, but it may be unfulfilled."
+- Essential ticked and `count < quantity` (zero included): an added line - "Essential: if there aren't enough
+  units, nothing will be reserved and your request stays pending until enough are free" - reflecting
+  `reserveGroup`'s actual all-or-nothing behaviour (a 409, nothing written), not a promise of staff follow-up.
+- No type selected, or the quantity typed is empty/zero/negative/non-integer, or the window-filtered fetch is
+  still in flight or has errored: no count/badge/warning is shown at all, to avoid a misleading zero.
+
+**The type dropdown lists the full equipment catalogue, not just types with units free for this window.** Before
+this story, the dropdown was built from the same window-filtered list as the count, so a fully booked or fully
+retired type was invisible rather than selectable-and-flagged - the "Out of Stock" case had no way to be reached.
+`EquipmentRequestPage.jsx` now also passes its already-fetched, unwindowed `GET /api/equipment` catalogue down as
+`allEquipment`; the form builds the dropdown from that instead. A type with every unit retired is treated like any
+other type at zero availability, not specially excluded - `UNAVAILABLE` (retired) isn't more permanent than
+`MAINTENANCE`/`DAMAGED` at the data level, and Technical Support can restore a retired unit straight back to
+`AVAILABLE` (see *Operational status changes* below).
+
+**Loading and a fetch error both have to be told apart from a genuine zero.** `availableResult?.key === windowKey`
+being false (no result yet for the current window) and a resolved error both leave `availableEquipment` as the
+same empty array a real stockout would produce. `EquipmentRequestPage.jsx` derives `isAvailabilityUnknown` from
+both conditions and passes it down so the form suppresses its message rather than flashing "Out of Stock" on every
+window edit, or stacking a false stockout on top of the page's own "Could not check equipment availability" banner.
+
+Deliberately not built: live polling or refetch-on-window-focus, so an already-open form won't pick up a
+reservation someone else makes elsewhere until the coordinator edits the borrow window themselves. A pre-existing
+limitation of this whole live-computed-availability approach (SCRUM-29), not introduced here - just more visible
+now that a number is on screen.
+
+## Operational status changes, audit, and retire-flagging (SCRUM-103)
+
+Every write to `equipment.status` (the quick-status `PATCH /equipment/:id/status`,
+the full `PATCH /equipment/:id`, and `PATCH /equipment/:id/retire`) now also sets
+`updated_by` (the server-verified caller's id, never taken from the request body)
+and `updated_at`. Both columns already existed live; no schema change was needed.
+This is the last change only - no history table.
+
+Retiring equipment (the only action that sets `UNAVAILABLE`) also flags every
+event with an `APPROVED` equipment request for that unit whose borrow window
+covers *today* (UTC calendar day, reusing `isBlockingOverlap`'s day-truncation
+rule with today passed as both the requested start and end - there is no query
+window at retire time, only "now"). One `messages` row is inserted per affected
+request (`author_role: "tech_support"`, `author_id` the retiring user), reaching
+the event via the existing `equipment_request_id -> event_id` relationship - no
+new table. `PENDING` and `REJECTED` requests are not flagged; a future-dated
+`APPROVED` request (starting after today) is also not flagged - only today's
+commitments are affected by an equipment going unavailable *now*. Each affected
+request also moves `APPROVED` -> `REJECTED` (the same transition
+`PATCH /equipment-requests/:id/status` already allows), so the Technical Support
+dashboard's "Assigned" line for it reads "Issues" instead. This reuses
+`messagesService`, which `equipment.routes.js` now also injects into
+`createEquipmentController` alongside `equipmentService`.
+
+The plain catalogue read (`GET /equipment`, no window) also shows an `AVAILABLE`
+unit as `IN_USE` when it has an `APPROVED` request covering today - computed on
+each read from the same data, never written to the row.
+
+**Restoring a retired unit.** `AVAILABLE` was already a valid target on the
+quick-status endpoint (`OPERATIONAL_STATUSES` includes it), so no backend change
+was needed for Technical Support Staff to bring a retired unit back - only a
+"Restore to available" control on the catalogue page's retired rows (shown once
+"Show retired equipment" reveals them), calling that existing endpoint.
+
+**Deferred, not built this story:** marking `equipment.status` away from
+`AVAILABLE` on request approval, and any automatic revert of that status (or
+`current_location`) after the event ends. The availability check above
+already produces the correct "unavailable during an approved booking,
+available again the day after" result dynamically from `equipment_requests`
+alone, with no stored status write needed - so this remains a read-only
+check. If the team still wants an explicit status write on approval (target
+value undecided) plus a scheduled/triggered revert, that needs its own story.
+
+## Releasing reservations on event cancellation (SCRUM-104, extended by SCRUM-148)
+
+SCRUM-104 built the reaction, before any cancellation action existed: `equipment.service.js`'s
+`releaseReservationsForCancelledEvent(eventId, actingUserId)` moves every `APPROVED` `equipment_requests` row for
+that event to a new status, `RELEASED` (added to the status check constraint alongside
+`PENDING`/`APPROVED`/`REJECTED`). Unlike SCRUM-103's retire-flagging, this is not scoped to "today" - a cancelled
+event's future-dated `APPROVED` requests are released too, since the event will never happen. `RELEASED` is
+excluded from `BLOCKING_REQUEST_STATUSES`, so the existing availability check counts the unit again immediately,
+with no change to the predicate itself.
+
+**SCRUM-148 change:** the same function now also moves every `PENDING` request on the event to `RELEASED`, not
+`REJECTED`. SCRUM-104 deliberately left `PENDING` requests untouched, because nothing had decided yet whether the
+event's cancellation should resolve them - that question only had an answer once a real cancel action existed. An
+earlier version of this story moved `PENDING` to `REJECTED`, but `REJECTED` is Technical Support Staff's own status
+for "this request can't be fulfilled" (shown as *Issues* in `EventEquipmentCard.jsx`'s status selector) - it would
+have misreported why the request stopped mattering. A `PENDING` request has nothing left to serve once its event is
+cancelled, same as an `APPROVED` one, so both now resolve to `RELEASED`, matching AC3's own wording ("equipment
+reservations are released"). `releaseReservationsForCancelledEvent`'s return value has one combined `released`
+array; there is no separate `rejected` array.
+
+For each equipment unit that lost a reservation this way, `equipment.status` reverts `IN_USE -> AVAILABLE` only if
+it is still `IN_USE` and no other active (`PENDING`/`APPROVED`) reservation still covers today - a unit a
+technician has deliberately set to `DAMAGED`/`MAINTENANCE`/`UNDER_MAINTENANCE`/`UNAVAILABLE` is left alone.
+`updated_by` is `null` on this write (there is no authenticated caller without a cancellation endpoint).
+
+There are two ways this runs:
+
+- **The real cancel action (SCRUM-148)**, and **approve/reject on a resubmission (SCRUM-37)**. The cancel action,
+  and `review.service.js`'s `approve()`/`reject()`, call this function synchronously as part of the same request,
+  so it is true the moment the decision is saved - see `docs/event-requests.md`'s *Cancelling an event* and
+  [*Significant edits regress the event*](event-requests.md#significant-edits-regress-the-event-scrum-37) sections
+  for the actions themselves. A release that throws there is logged, not thrown further - the status write
+  already committed, so the caller still sees the decision as having succeeded.
+- **Equipment reads self-heal automatically**, for any event that reached `CANCELLED` or `REJECTED` without that
+  synchronous call completing - historical data from before SCRUM-148 existed, or a release that threw (SCRUM-37).
+  `GET /equipment` and `GET /equipment/availability` both call `releaseReservationsForTerminalEvents`
+  (`equipment.controller.js`) before computing their response: it lists every `CANCELLED`/`REJECTED` event
+  (`listReleasableEventIds`, a dependency alongside `findEventById`/`findEventsByIds`) and releases each one's
+  reservations. Calling this on every read is safe and cheap: once an event's requests are `RELEASED`,
+  re-processing it is a no-op. `APPROVED` is deliberately never swept this way - plenty of `APPROVED` events
+  legitimately hold live reservations, so only the logged synchronous call protects a resubmission's `approve()`.
+
+`backend/scripts/releaseCancelledEvents.js` (SCRUM-104's manual on-demand trigger, for use before any cancel
+action existed) was removed once SCRUM-148 made the first path above the normal route to `CANCELLED` - the
+synchronous call and the read-time self-heal between them cover every case the script did.
+
+**SCRUM-150 rename:** `releaseReservationsForCancelledEvent` is now `releaseReservationsForEvent` - the function
+never actually reads `events.status`, it only needs an `eventId`, so the name no longer claimed something the
+function itself didn't check. `postpone()` (`POST /api/internal/events/:eventId/postpone`) now calls it too,
+right after the postpone write succeeds, since postponing an event never carries a new date (see below) and so
+has no window left to hold equipment against - the same release cancel already does. The releasable filter and
+the unit-reversion eligibility set both grew to also include `REVIEW_REQUIRED` (next section), so a cancelled or
+postponed event never leaves a reschedule-flagged request stranded.
+
+## Reviewing equipment on a reschedule (SCRUM-150)
+
+A reschedule is an organiser's `PATCH /api/event-workspace/organiser/:id` that actually changes `start_time`,
+`end_time` or `equipment_needs` (any real value change counts; resubmitting the same values is a no-op). This is
+a different action from postponing (above) - postpone never carries a new date at all, so it releases equipment
+outright; a reschedule still has a date, just a different one, so its equipment needs re-review instead of
+release.
+
+**New status: `REVIEW_REQUIRED`.** `equipment.service.js#flagReservationsForReview(eventId, { startTime, endTime,
+datesChanged })`, called by `eventWorkspace.service.js#updateOrganiserEvent` right after the event write succeeds,
+moves every `PENDING`/`APPROVED`/`REVIEW_REQUIRED` request on the event to `REVIEW_REQUIRED` (re-flagging an
+already-flagged request is deliberate - a second reschedule before Technical Support acts must update the window
+to the latest change, not leave it pointing at a stale one). `borrow_start`/`borrow_end` are only re-derived from
+the event's new window when the dates themselves changed; an `equipment_needs`-only edit leaves the window as-is,
+since there's nothing to re-derive it from. `REVIEW_REQUIRED` is in `BLOCKING_REQUEST_STATUSES` (it still holds
+the unit, since nobody has confirmed the reservation is actually gone) but **not** in `REVIEW_STATUSES` (Technical
+Support's own decision endpoint can never set it directly - only this flagging call does). It only ever leaves
+`REVIEW_REQUIRED` via that same decision endpoint, same as any other request.
+
+**Showing what's no longer available.** `GET /events/:eventId/equipment-requests` (coordinator and Technical
+Support both read this) and `GET /technical-support/equipment-requests` both run every `REVIEW_REQUIRED` row
+through `equipmentService.isRequestAvailableForWindow`, attaching a computed `available_for_window` field -
+`true`/`false`, present **only** on `REVIEW_REQUIRED` rows, never stored. It checks the row's own unit's status
+(an equipment unit that became `DAMAGED`/`MAINTENANCE`/etc. is never available) and whether any other active
+request on that same unit now overlaps its window, excluding the row being checked. `EventEquipmentCard.jsx`
+("Needs re-review" badge) and `EquipmentRequestPage.jsx` both render a "Not available for these dates" sub-label
+when it's `false`.
+
+**Approving a flagged request re-checks availability.** `PATCH /equipment-requests/:id/status` now re-runs
+`isRequestAvailableForWindow` before writing `APPROVED`, but **only** for the `REVIEW_REQUIRED → APPROVED`
+transition - it refuses with `409` if something now blocks it. A plain `PENDING → APPROVED` approval still has no
+such check (a pre-existing gap, not introduced or closed by this story).
+
+**A future "confirm event" gate.** `hasUnresolvedEquipment(eventId)` returns a list of
+`{ type: "equipment", request_id, description, reason, essential: true }` for every `REVIEW_REQUIRED`, `PENDING`,
+or `REJECTED` request on the event - deliberately aligned with the Safety Review stage's own
+`findMissingArrangements` (`safetyReadiness.js`), which already treats `REJECTED` as blocking for the same reason
+("Technical Support can revise it"). There is no caller for this yet: no code anywhere actually transitions an
+event to `CONFIRMED`, so this function is dormant until a future story builds that transition and wires it in.
+
+**SCRUM-37 addendum (2026-10-21): this flagging trigger is retired.** The section above describes SCRUM-150 as
+originally built and is kept for history, but `equipmentService#flagReservationsForReview` has been deleted and
+`eventWorkspace.service.js#updateOrganiserEvent` no longer calls anything equipment-specific at all. A
+significant organiser edit (date, time, expected attendance, venue requirements or equipment needs) now regresses
+the event itself to `SUBMITTED` for the coordinator's re-approval (`apply_organiser_event_edit`, SQL - see
+[event-requests.md](event-requests.md#significant-edits-regress-the-event-scrum-37)), rather than flagging the
+same reservation to `REVIEW_REQUIRED` for Technical Support to re-decide. Approving or rejecting that resubmission
+releases the arrangement outright (`review.service.js#approve`/`#reject`), so the coordinator requests fresh
+equipment from scratch instead of Technical Support ever seeing a re-flagged row.
+
+Concretely: `REVIEW_REQUIRED` is never written by anything in this codebase any more - it's a dead status going
+forward. `isRequestAvailableForWindow`, `hasUnresolvedEquipment`, `BLOCKING_REQUEST_STATUSES`'s `REVIEW_REQUIRED`
+entry, the `available_for_window` badge and the `REVIEW_REQUIRED → APPROVED` availability re-check all stay in
+the code exactly as described above - they're still correct for any row that already carries that status, and a
+future story could still want a hold-style mechanism - but nothing can create a new one. SCRUM-150's own AC1
+("marks reservations for review") is therefore unreachable via the reschedule trigger now, by deliberate team
+decision, not an oversight: see `.agent/docs/other/SCRUM-37-flag-significant-edits.md`'s *Decisions* section and
+`.agent/docs/other/SCRUM-150-equipment-reschedule-review.md`'s own addendum.
+
 ## Database and deployment prerequisites
 
 This branch assumes existing Supabase tables; it did not include Equipment SQL
 migrations. Integration does not create or modify live tables, accounts or roles.
 The existing application contracts require:
 
-- `equipment`: `id`, `type`, `current_location`.
-- `equipment_requests`: `id`, `event_id`, `equipment_id`, `requested_by`,
-  `quantity_requested`, `technical_requirement`, `borrow_start`, `borrow_end`,
-  `status`, `created_at`; generated IDs/timestamps and appropriate foreign keys.
+- `equipment`: `id`, `type`, `current_location`, `status` (`AVAILABLE` today;
+  `IN_USE`, `MAINTENANCE`, and after the team's planned constraint update,
+  `UNAVAILABLE`, `DAMAGED`, `UNDER_MAINTENANCE` - the availability check
+  treats anything not `AVAILABLE` as excluded, so it works before and after
+  that update), `updated_by`, `updated_at` (SCRUM-103 AC4 - set on every
+  status-changing write, server-side only).
+- `equipment_requests`: `id`, `event_id`, `equipment_id` (nullable - SCRUM-31, see below), `equipment_type`
+  (SCRUM-31), `group_id` (SCRUM-31), `requested_by`, `quantity_requested`, `technical_requirement`,
+  `borrow_start`, `borrow_end`, `status` (`PENDING`, `APPROVED`, `REJECTED`, `RELEASED` - SCRUM-104,
+  `REVIEW_REQUIRED` - SCRUM-150, and `UNFULFILLED` - SCRUM-31, all added to the check constraint by hand),
+  `created_at`; generated IDs/timestamps and appropriate foreign keys.
+  SCRUM-144 (Event Lifecycle lane) added `is_essential boolean not null default true` by hand on 2026-10-19:
+  the assigned coordinator marks a request non-essential so it no longer blocks the safety check or
+  confirmation. SCRUM-31 is the first equipment-lane code to read and write it (set once, at submission, from
+  the coordinator's "Essential" checkbox - every sibling in a group gets the same value). SQL and rules in
+  [event-requests.md](event-requests.md#confirm-an-event-scrum-144).
+  **SCRUM-31 (this lane's own schema change, 2026-10-28):** one coordinator submission for N units now creates
+  N sibling rows sharing `group_id`, each with `equipment_type` set and `equipment_id` null until Technical
+  Support's reserve action assigns a real unit (→ `APPROVED`) or gives up on it (→ `UNFULFILLED`, auto-marked,
+  never a client-supplied target). A second check constraint enforces `status <> 'APPROVED' or equipment_id is
+  not null` at the database level. Full SQL and the data model's reasoning: `.agent/docs/other/
+  SCRUM-31-equipment-partial-reserve.md`.
 - `messages`: `id`, `equipment_request_id`, `author_id`, `author_role`, `body`,
   `created_at`, `updated_at`, `deleted_at`; the existing timestamp trigger is used
   for edits. The author-role constraint must accept `tech_support` and
@@ -66,20 +340,164 @@ in a separate schema change. No such database guarantee is claimed by these test
 
 ## Checks
 
-- `npm --prefix backend run test:equipment`: original 63 Node tests, adapted to
-  exercise the production router and canonical permissions.
-- `npm run test:playwright -- tests/playwright/equipment.api.spec.cjs tests/playwright/equipment.browser.spec.cjs`:
-  17 API/browser integration cases (IDs `EQUIPMENT-API-*`, `EQUIPMENT-E2E-*`).
-  These use the real Express routes and React UI with isolated in-memory auth/data
-  services; no live Supabase credentials or writes.
-- `npm --prefix backend test`: auth, Equipment Node tests, and existing Vitest
-  event/Venue suites. Vitest excludes Node test files to avoid duplicate execution.
-- Existing CI also runs frontend tests/lint/build, Docker checks and the entire
-  browser/API acceptance suite.
+The team moved equipment availability integration tests and dedicated equipment
+Playwright workflows to the real dev Supabase project. Pure unit tests and the
+cross-feature RBAC suite remain isolated from the database; this is not a
+repo-wide change to live testing.
 
-The optional `tests/e2e` package contains the Equipment branch's manual live
-Supabase tests. It is separate from CI because it creates requests/messages and
-changes statuses in a real development database. It now follows the routed pages
-and requires `SEED_USER_PASSWORD`, `EQUIPMENT_TEST_EVENT_ID` and
-`THREAD_TEST_EVENT_ID` explicitly, with correctly assigned events and trusted
-account roles. Those tests are not run as part of conflict resolution.
+- `npm --prefix backend run test:equipment`: 64 Node tests, adapted to
+  exercise the production router and canonical permissions. Stays on Node's
+  `node:test` runner and fakes; a legacy holdover, not the pattern to copy for
+  new equipment work.
+- Scrum-29's own backend tests are Vitest: `backend/tests/unit/equipment.availability.test.js`
+  (pure overlap/status/quantity logic, 16 cases, deliberately DB-free - these
+  test plain functions with no I/O, so there's nothing for a live database to
+  add) and `backend/tests/integration/equipment.availability.test.js` (real
+  Express app + the real `createEquipmentService` against the real dev
+  Supabase database - every insert/select/delete is a genuine network call,
+  each test creates its own equipment/equipment_requests rows under a unique
+  `type` and cleans them up in `afterEach`). Both are placed outside
+  `tests/unit/equipment/` so they run under `npm --prefix backend run
+  test:events` (Vitest) rather than the legacy Node glob.
+- SCRUM-103's backend tests are `backend/tests/integration/equipment-status-change.test.js`
+  (live-DB Vitest, same pattern as above): AC4's audit columns on both the
+  quick-status PATCH and retire, the restore-to-available action, and AC3's
+  retire-flagging (today-only APPROVED requests, PENDING/REJECTED excluded,
+  multi-event fan-out, zero-reservation no-op). AC1/AC2 are not retested here -
+  this story added no new code for either; the file's header comment points to
+  the existing SCRUM-30/SCRUM-29 coverage that still proves them.
+- SCRUM-104's backend tests are `backend/tests/integration/equipment-release-cancelled-event.test.js`
+  (live-DB Vitest, same pattern as above, with its own throwaway events - never
+  a shared demo event, since these tests set `status = CANCELLED`): releasing
+  every `APPROVED` request regardless of date, `REJECTED` left untouched
+  (`PENDING` is now auto-rejected too - SCRUM-148), the availability check
+  counting a released unit again, a second still-active reservation still
+  blocking it, the `IN_USE -> AVAILABLE` guard and its DAMAGED/still-in-use
+  exceptions, re-running the release safely, a reservation-free event, a
+  different active event's requests left untouched, and the read-time
+  self-heal itself (cancelling an event and going straight to `GET
+  /equipment/availability`, with no call to
+  the release function or the script at all).
+- SCRUM-150's backend tests are **doubles only, no live Supabase**, unlike the rest of this file's suites -
+  `backend/tests/unit/equipment-release-event.test.js` (the renamed `releaseReservationsForEvent`, including
+  postpone's new call and `REVIEW_REQUIRED` in both the releasable and unit-reversion filters),
+  `backend/tests/unit/equipment-flag-review.test.js` (`flagReservationsForReview` and
+  `isRequestAvailableForWindow`'s DAMAGED/self-exclusion cases), `backend/tests/unit/equipment-reschedule-review.routes.test.js`
+  (`available_for_window` and the approval overlap re-check, over real HTTP via `createApp` with a fake Supabase
+  client), `backend/tests/unit/equipment-unresolved.test.js` (`hasUnresolvedEquipment` in isolation - no caller
+  exists yet), and `backend/tests/unit/events/eventWorkspace.service.test.js`'s new cases (the reschedule
+  diff-detection in `updateOrganiserEvent`). **SCRUM-37 addendum (2026-10-21):** `flagReservationsForReview` and
+  its direct-call tests are gone - `equipment-flag-review.test.js` now covers only `isRequestAvailableForWindow`
+  and the "nothing but the explicit decision sets APPROVED" guard; `eventWorkspace.service.test.js`'s cases now
+  prove the RPC call shape (`apply_organiser_event_edit`), not a diff decided in JS. See
+  [event-lifecycle-tests.md](event-lifecycle-tests.md) for the current test list. Frontend: `EventEquipmentCard.test.jsx` and
+  `EquipmentRequestPage.test.jsx` (new files, scoped to the two new badge lines only - neither component had
+  prior test coverage, and building a harness for each one's full existing behaviour was judged disproportionate,
+  the same call SCRUM-149 made for its own TC-149-15).
+- `tests/playwright/equipment.api.spec.cjs` / `equipment.browser.spec.cjs`
+  (the fake in-memory Auth+backend simulator's equipment coverage) are
+  retired on staging. Their scenarios moved to `tests/e2e/` below. The small
+  `tests/playwright/support/equipment-storage.cjs` adapter remains only for
+  cross-feature RBAC tests, which inject isolated storage instead of writing
+  synthetic identities into the live database. Its equipment is AVAILABLE
+  and its overlap check uses the production Return Day + 1 rule.
+- `npm --prefix backend test`: auth, Equipment Node tests, and existing Vitest
+  event/Venue/equipment-availability suites (the latter now live-DB). Vitest
+  excludes the legacy Node test files to avoid duplicate execution.
+- Existing CI also runs frontend tests/lint/build, Docker checks and the
+  `tests/playwright` browser/API acceptance suite. That suite uses local
+  storage adapters and retains cross-feature equipment assignment/access
+  checks; dedicated equipment workflows use the live suite below.
+
+`tests/e2e/` is the live-Supabase Playwright suite. It writes to the shared
+development database, so it has its own `package.json` and its own CI job,
+`playwright-live` in `.github/workflows/ci.yml`. That job runs on every push
+and PR to `staging`, one run at a time (`concurrency: playwright-live-db`) so
+two PRs never race on the same rows. CI provides only the Supabase
+credentials, so `technical-support-review.spec.js` (below) skips itself
+there. Run it locally with `npm --prefix tests/e2e test`.
+
+- `equipment-request.spec.js`: the request page end-to-end (AC1-4), the
+  Scrum-29 dropdown-filter and event-derived borrow-window behaviour, the
+  catalogue page, and role-gated direct-URL access. Self-contained - creates
+  its own throwaway accounts/event/equipment via `support/live-equipment-fixtures.js`
+  and deletes them afterwards, so it needs no configured event/env var beyond
+  `SEED_USER_PASSWORD`/Supabase credentials.
+- `equipment-api.spec.js`: request creation (including that the server
+  ignores forged `requested_by`/`status`), technical review authority,
+  clarification-message relationships/authorship, the 30-day retention
+  cutoff, and role revocation taking effect on the very next request with an
+  already-issued token. Also self-contained via the same fixture helper.
+  SCRUM-103 added one case: retiring equipment with a same-day `APPROVED`
+  reservation flags the event's thread, proven through the real running
+  backend (not a fake).
+- `equipment-catalogue-manage.spec.js`: add/edit/retire through the real
+  browser UI (Scrum-30). SCRUM-103 added one case: restoring a retired unit
+  back to `AVAILABLE` through the catalogue page's "Restore to available"
+  control, confirmed on a page reload.
+  SCRUM-168 synchronizes TC-103-13 with the initial and reloaded catalogue
+  GET responses before checking rows; both responses must return 200, and the
+  initial payload must contain its UNAVAILABLE fixture. The existing exact
+  status assertions, timeout settings, fixtures and cleanup are retained.
+  PR #78 exposed a successful 5.87-second catalogue response arriving after
+  the default 5-second row assertion. Five controlled local browser replays
+  passed after this fix; real shared-database/CI re-execution is pending.
+- `equipment-release-cancelled-event.spec.js` (SCRUM-104): a cancelled throwaway
+  event, with no script or action run at all, relying only on the next
+  `GET /equipment`/`GET /equipment/availability` call to self-heal. Confirms
+  through the real running backend that the request reads `RELEASED`, the
+  equipment reads `AVAILABLE`, and availability counts the unit again.
+- `technical-support-review.spec.js`: dashboard review/status update and
+  clarification-thread visibility using the real `coordinator.demo`/
+  `technical.demo` seed accounts (requires `SEED_USER_PASSWORD` and
+  `THREAD_TEST_EVENT_ID` in the root `.env`, with that event actually
+  assigned to `coordinator.demo`). Its sign-in helper waits for the shared
+  Sign out button because protected deep links do not visit the account page.
+
+## Assignment and access update
+
+Coordinator request pickers and new equipment requests require an assigned event
+in `APPROVED` or `CONFIRMED` state (`PLANNING_STATUSES` in `events/lifecycle.js`). Technical staff retain all equipment bookings,
+as agreed; a venue + technical account combines both booking workspaces.
+They do not gain general event planning or attendee browsing. See
+[event access](event-access.md) for manager assignment and deployment requirements.
+
+The live availability suite supplies an approved event in its relationship
+fixture so equipment rejection tests reach the availability checks rather than
+passing on the earlier event-status rejection. Those tests assert the rejection
+message as well as HTTP 409.
+
+CI targets lowercase `staging`. Backend CI keeps the incoming live equipment
+test and its Supabase secret references. It needs the existing development schema,
+seed coordinator and assigned event. The conflict-resolution agent does not run
+live database tests locally. For local checks without database writes, run the
+auth/equipment Node suites and Vitest with
+`npm --prefix backend run test:events -- --exclude tests/integration/equipment.availability.test.js`.
+This explicitly leaves the live integration suite unverified locally; it is not
+a replacement for its CI result or the manual live Playwright run.
+
+## Notification-only connection — SCRUM-155 (live verification pending)
+
+The existing Issues status action and the retirement path's existing flagged
+requests call an optional notification service after saving. That service broadcasts
+the event, equipment and reporter names to all Technical Support Staff accounts.
+Validation, access rules, status updates, retirement selection/messages, equipment
+storage and frontend behavior are unchanged. A notification enqueue error is caught
+outside the equipment operation; its successful response remains successful, with
+up to a ten-second enqueue delay. Missing enqueue records are not retried; saved
+outbox rows are retried by the existing worker.
+
+Ryan confirmed successful manual SQL application on 2026-10-15, and the Novu
+`equipment-issue` workflow is active in Development. Restart and live verification
+remain pending. See [equipment issue broadcast setup and limits](notifications.md#equipment-issue-broadcasts--scrum-155-extension-live-verification-pending).
+Catalogue condition edits and ordinary thread messages do not send issue alerts.
+No new tests were authored; live verification remains pending.
+
+## SCRUM-168 fixture performance refactor
+
+The availability integration fixture passes the same generated equipment type used to create its unit into `insertRequest`, matching the existing status-change/release fixtures. This removes four redundant SELECT round-trips across the 13 existing cases. The request payload, real service/API path, 24 assertion statements and cleanup IDs are retained. Production behavior and test runner/timeout settings are unchanged. Controlled original/new fixture checks pass; shared-database timing and live results still require user/CI execution. Raw evidence stays outside the repository in Ryan's `outputs/SCRUM-168-performance/` directory.
+
+SCRUM-168 live verification update (2026-11-02): Ryan's complete backend run passed all 1584 cases with no failures/skips, including the refactored equipment availability fixture. This supplies an actual shared-database pass for the fixture change. No pre/post live speedup or five-run/CI reliability is claimed; raw evidence remains outside the repository in outputs/SCRUM-168-live-cleanup/.
+
+
+SCRUM-168 backend audit-fixture update (2026-11-03): PR #78 run 41486098902 passed the live-browser job but TC-103-08 in equipment-status-change.test.js exceeded the existing 15000ms backend test timeout. The aggregate log does not identify which request stalled. The fixture now returns id and updated_at with the equipment INSERT, so TC-103-08 and TC-103-09 use that same database-supplied timestamp without a subsequent SELECT. All 13 cases and 38 original assertions remain, including who changed the record and the timestamp comparison; the real application/service path, fixture row payloads and cleanup IDs are retained. The installed Supabase SDK with a local intercepted transport verifies equivalent setup with 26 -> 24 fixture requests across the file. All 67 equipment Node unit tests passed. No production code, timeout, retry, skip or CI configuration changed. This reduces requests but does not establish that the live timeout is resolved; Ryan/CI must rerun the live suite and backend CI. Raw evidence remains outside the repository in outputs/PR78-backend-timeout/.

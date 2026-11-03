@@ -9,6 +9,7 @@ import {
   IconChevronRight,
 } from "./VenueIcons";
 import { formatDate } from "../venueFormat";
+import VenueEligibleHoldsSection from "./VenueEligibleHoldsSection";
 
 // SCRUM-95: a day is three slots. A full day booking fills all three.
 const SLOTS = ["am", "pm", "night"];
@@ -30,18 +31,21 @@ const STATUS_LABELS = {
   available: "Available",
   booked: "Booked",
   pending: "Requested",
+  // SCRUM-146: active hold reserves the slot
+  tentative: "Tentative hold",
   unavailable: "Unavailable",
   closed: "Closed",
 };
 
 // a slot whose label repeats the status adds nothing to the cell
-const STATUSES_WITH_DETAIL = ["booked", "pending", "unavailable"];
+const STATUSES_WITH_DETAIL = ["booked", "pending", "tentative", "unavailable"];
 
-// SCRUM-89 closed, SCRUM-93 unavailable, SCRUM-94 booked vs requested
+// SCRUM-89 closed, SCRUM-93 unavailable, SCRUM-94 booked vs requested, SCRUM-146 tentative hold
 const LEGEND = [
   { status: "available", text: "Available, open for booking" },
   { status: "pending", text: "Requested, awaiting Venue Staff, still bookable" },
   { status: "booked", text: "Booked, confirmed booking" },
+  { status: "tentative", text: "Tentative hold, reserved for an event — cannot be requested" },
   { status: "unavailable", text: "Unavailable, recorded by Venue Staff" },
   { status: "closed", text: "Closed, outside operating hours" },
 ];
@@ -61,7 +65,7 @@ function shiftDate(dateString, days) {
   return date.toISOString().slice(0, 10);
 }
 
-function VenueAvailabilityCalendar({ venue, onBack, onRequestBooking }) {
+function VenueAvailabilityCalendar({ venue, onBack, onRequestBooking, onConvertHold }) {
   const { token } = useAuth();
   // Read the id once here rather than inside the effect or a handler. The
   // React Compiler hoists a closure's property reads into its memo check, and
@@ -122,6 +126,11 @@ function VenueAvailabilityCalendar({ venue, onBack, onRequestBooking }) {
           </button>
         </div>}
       </header>
+
+      {/* SCRUM-162: coordinator sees their active holds and can convert from here */}
+      {onConvertHold && (
+        <VenueEligibleHoldsSection venueId={venueId} onConvert={onConvertHold} />
+      )}
 
       <div className="v-card v-cal-toolbar">
         <div className="v-cal-toolbar-left">

@@ -7,10 +7,10 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 
 // Storage stays optional at startup and injectable in integration tests.
 module.exports = function equipmentRoutes({ authenticate, equipmentService, messagesService,
-  findEventById, findEventsByIds, getUserDisplayName, listAssignedEvents }) {
+  findEventById, findEventsByIds, getUserDisplayName, listAssignedEvents, listReleasableEventIds, equipmentIssueNotifications }) {
   const router = express.Router();
   const controller = createEquipmentController({ equipmentService: equipmentService || {},
-    findEventById, findEventsByIds, getUserDisplayName });
+    messagesService: messagesService || {}, findEventById, findEventsByIds, getUserDisplayName, listReleasableEventIds, equipmentIssueNotifications });
   const messages = createMessagesController({ messagesService: messagesService || {},
     equipmentService: equipmentService || {}, findEventById, retention });
   const guards = (permission, configured = equipmentService) => [authenticate,
@@ -33,6 +33,18 @@ module.exports = function equipmentRoutes({ authenticate, equipmentService, mess
   }
 
   router.get("/equipment", ...guards("equipment.read"), controller.getEquipmentCatalogue);
+  // Scrum-30 AC1: add/update/retire a catalogue record - management actions,
+  // separate from equipment.review's quick operational-status PATCH below.
+  router.post("/equipment", ...guards("equipment.manage"), controller.postEquipment);
+  router.patch("/equipment/:id", ...guards("equipment.manage"), controller.patchEquipment);
+  router.patch("/equipment/:id/retire", ...guards("equipment.manage"), controller.patchEquipmentRetire);
+  // Scrum-29: catalogue-wide check, not scoped to one event or record - same
+  // reasoning as GET /equipment above (see staff-access.md: equipment
+  // catalogue access is not limited by assigned venue/equipment/location).
+  router.get("/equipment/availability", ...guards("equipment.read"), controller.getEquipmentAvailability);
+  // Manual status changes are a technical-arrangement
+  // action, same permission as reviewing/updating a request's status.
+  router.patch("/equipment/:id/status", ...guards("equipment.review"), controller.patchEquipmentStatus);
   router.get("/equipment/events", ...guards("equipment.request"), async (req, res, next) => {
     try { res.json({ data: await listAssignedEvents(req.user.id) }); } catch (error) { next(error); }
   });
@@ -42,6 +54,10 @@ module.exports = function equipmentRoutes({ authenticate, equipmentService, mess
     assignedCoordinator, controller.postEquipmentRequest);
   router.get("/technical-support/equipment-requests", ...guards("equipment.review"), controller.getTechSupportDashboard);
   router.patch("/equipment-requests/:id/status", ...guards("equipment.review"), controller.patchRequestStatus);
+  // SCRUM-31: reserve as many of a group's still-PENDING siblings as real
+  // stock allows - same guard as the single-row status action above, since
+  // both are Technical Support's review/arrangement work.
+  router.patch("/equipment-requests/groups/:groupId/reserve", ...guards("equipment.review"), controller.patchReserveGroup);
   // Controllers scope threads and require authorship before editing a message.
   router.get("/events/:eventId/messages", ...guards("equipment.messages", (messagesService && equipmentService) || null), messages.getEventMessages);
   router.post("/events/:eventId/messages", ...guards("equipment.messages", (messagesService && equipmentService) || null), messages.postEventMessage);

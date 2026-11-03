@@ -14,8 +14,12 @@ async function setupEquipment(accounts, request) {
   expect(response.status()).toBe(201);
   const { event } = await response.json();
   await accounts.assignEvent(event.id, coordinator.id);
-  const fields = { equipment_id: coordinator.id, quantity_requested: 2, technical_requirement: 'HDMI and microphone',
-    borrow_start: '2099-10-10T00:00:00Z', borrow_end: '2099-10-10T03:00:00Z' };
+  await accounts.updateEvent(event.id, { status: 'APPROVED' });
+  // SCRUM-31: equipment_type replaces equipment_id - equipment-storage.cjs's
+  // fake gives each account exactly one unit, typed 'Projector ' + its own
+  // id, so this type resolves to exactly the coordinator's own unit.
+  const fields = { equipment_type: 'Projector ' + coordinator.id, quantity_requested: 1, is_essential: false,
+    technical_requirement: 'HDMI and microphone', borrow_start: '2099-10-10T00:00:00Z', borrow_end: '2099-10-10T03:00:00Z' };
   return { organiser, coordinator, technical, outsider, event, headers, fields };
 }
 module.exports = { setupEquipment };

@@ -1,16 +1,20 @@
 # Playwright browser and backend API acceptance tests
 
-> The original sign-in/RBAC cases below are retained. PR #2 adds 7 event browser
-> cases and 9 event API cases (104 total). See [event-request integration](../event-request-integration.md).
+> The original sign-in/RBAC cases below are retained alongside event, venue,
+> registration and safety-review acceptance cases. See [event-request integration](../event-request-integration.md).
 > Feature files now use `*browser.spec.cjs` or `*api.spec.cjs` for discovery.
 
 The root Playwright runner complements the frontend Vitest/React Testing Library
 suite and the existing backend Node integration tests. Every test has a unique
-ID and a descriptive title. There are 17 Chromium browser tests and 71 HTTP API
-tests, including 48 individual role/permission combinations.
+ID and a descriptive title. The current run contains 186 tests across Chromium
+browser and HTTP API projects.
 
-Verified locally on 2026-09-18: **88 passed, 0 failed, 0 skipped, 0 flaky**.
-The existing backend integration suite also passed all 28 tests.
+Latest local verification after the fixture correction on 2026-10-16:
+**186 passed, 0 failed, 0 skipped**. `[VENUE-E2E-002]` enters the required
+purpose before submitting, and `[VENUE-E2E-005]` verifies independent
+per-booking checks. The production behavior remains unchanged.
+The backend suite passed **859 tests**, with 43 live Supabase tests skipped because
+they require live-database configuration.
 
 ## What runs
 
@@ -34,6 +38,11 @@ launcher to exercise the real permission middleware and record-access contract.
 These fixtures are not implemented venue/equipment/client features. The simulator
 issues test tokens from an in-memory allowlist; it does not validate JWT signatures
 or replicate all GoTrue behavior.
+
+Browse Events cards intentionally show event identity, date, description and
+registration availability without venue bookings. Venue bookings are displayed
+after opening the event detail page; My Events cards and details continue to show
+all related bookings.
 
 ## Install and run
 
@@ -109,7 +118,7 @@ Control endpoints require a random per-run key and all services bind to loopback
 No test auth code is imported by production startup or added to Docker images.
 Do not deploy the test launcher. Test credentials are synthetic and disposable.
 
-The `event_ops_manager` policy grants `internal.access` alongside
+The `event_coordinator_lead` policy grants `internal.access` alongside
 `event_organisers.read`, so that role passes the shared gate and is refused by
 each endpoint's own capability instead. Tests expect denial per route rather
 than a blanket 403. This records current behavior; it does not establish
@@ -139,15 +148,27 @@ This is browser-to-backend acceptance coverage with a simulated external Auth
 service. It does not prove live Supabase credential verification, cryptographic
 JWT rejection, database/RLS rules, real event relationship queries, production
 HTTPS/SPA rewrites, or Firefox/WebKit behavior. Live acceptance should use a
-dedicated test Supabase project and actual feature endpoints once they exist.
+dedicated test Supabase project and the actual deployed feature endpoints.
 The record resolver here uses test-owned fixtures, not a database. Complete story
 acceptance still requires those integrations.
 
-This suite is scoped to sign-in and RBAC. Feature pages built on top of it have
-no browser case here: `/events/assignments` (SCRUM-26) is covered in jsdom by
+The original catalog above is scoped to sign-in and RBAC. Additional feature
+workflows live in their own specs and guides. Assignment queue UI `/events/assignments` (SCRUM-26) is covered in jsdom by
 `AssignmentQueuePage.test.jsx` and at the route guard by `Rbac.test.jsx`, and its
 case catalog is [coordinator assignment tests](../event-assignment-tests.md).
 Adding a browser case for it is deliberate future work, not an oversight.
 
 References: [Playwright web servers](https://playwright.dev/docs/test-webserver)
 and [Playwright API testing](https://playwright.dev/docs/api-testing).
+
+## SCRUM-100 organiser event scope (2026-10-05)
+
+The consolidated [Access testing guide](frontend-acceptance.md#scrum-100-organiser-event-scope-2026-10-05) documents the unit, integration, API and browser layers, fourteen agreed TC specifications, exact fixture data, run commands, response matrix, coverage gaps and latest results.
+
+The existing `event-workspace.api.spec.cjs` now has 13 tests (11 SCRUM-100), and `event-workspace.browser.spec.cjs` has 4 (2 SCRUM-100). The story proves own save/read-back, same-company peer view-only, unrelated-client list/search/direct-reference denial, full-row preservation, every non-organiser role denied, missing/forged credentials, role revocation and invalid partial edits. Browser cases use real PATCH responses, including revocation after Edit opens.
+
+From the repository root, run `npm run test:playwright -- tests/playwright/event-workspace.api.spec.cjs tests/playwright/event-workspace.browser.spec.cjs`: latest focused result 17 passed. Full `npm run test:playwright` regression passed 148 (105 API, 43 Chromium), with no failed, flaky or skipped tests on 2026-10-05. Historical totals earlier in this guide describe earlier runs. The current full report is `playwright-report/index.html`, with JSON `test-results/results.json`; `npm run test:playwright:report` opens it. Generated reports are ignored and replaced on the next run. Live Supabase/RLS and GitHub CI remain separate unverified evidence.
+
+### PR #24 merge repair result (2026-10-05)
+
+After removing the duplicate frontend import and updating EVENT-API-101's exact organiser capability list to retain staging's three registration-management permissions, the complete isolated API/browser regression passed all 148 cases (105 API, 43 Chromium), with no failed, flaky or skipped tests. The diagnostic command used --max-failures=3 and reached every case; no runner config changed. See the consolidated Access test guide's PR #24 staging merge repair section for logs, frontend results, unchanged owner/company checks and the separate live-DB CI rerun limitation.

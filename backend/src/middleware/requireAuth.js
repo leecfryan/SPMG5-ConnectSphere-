@@ -2,7 +2,8 @@ const internalRoles = new Set([
   "event_coordinator",
   "venue_staff",
   "technical_support_staff",
-  "event_ops_manager",
+  "event_coordinator_lead",
+  "safety_officer",
 ]);
 const externalRoles = new Set(["event_organiser", "attendee"]);
 
@@ -32,9 +33,10 @@ function requireAuth(authClient) {
       const roles = Array.isArray(rawRoles)
         ? [
             ...new Set(
-              rawRoles.filter(
-                (role) => internalRoles.has(role) || externalRoles.has(role),
-              ),
+              // SCRUM-142: preserve existing assignments while trusted Auth metadata is renamed.
+              rawRoles
+                .map((role) => role === "event_ops_manager" ? "event_coordinator_lead" : role)
+                .filter((role) => internalRoles.has(role) || externalRoles.has(role)),
             ),
           ]
         : [];

@@ -10,8 +10,14 @@ const registrationEventRoutes = require("./modules/registrations/eventHandlers")
 const equipmentRoutes = require("./routes/equipment.routes");
 const createEventsRoutes = require("./routes/events.routes");
 const createAssignmentsRoutes = require("./routes/assignments.routes");
+const createManagedEventsRoutes = require("./routes/managedEvents.routes");
+const createEventWorkspaceRoutes = require("./routes/eventWorkspace.routes");
+const createReviewRoutes = require("./routes/review.routes");
+const createSafetyCheckRoutes = require("./routes/safetyCheck.routes");
+const createSafetyReviewRoutes = require("./routes/safetyReview.routes");
+const createNotificationsRoutes = require("./routes/notifications.routes");
 
-function createApp({ authClient, dataClient, eventsRepository, assignmentDependencies, venuesService, equipmentDependencies, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
+function createApp({ authClient, dataClient, eventsRepository, assignmentDependencies, venuesService, equipmentDependencies, managedEventsService, waitlistCoordinatorService, notificationsService, supabaseUrl, publishableKey, frontendOrigin = "http://localhost:5173" }) {
   const app = express();
   const authenticate = requireAuth(authClient);
   app.disable("x-powered-by");
@@ -26,19 +32,47 @@ function createApp({ authClient, dataClient, eventsRepository, assignmentDepende
   app.get("/api/auth/me", authenticate, (req, res) => {
     res.json({ user: req.user, permissions: getPermissions(req.user.roles) });
   });
+  app.use("/api/notifications", createNotificationsRoutes(notificationsService, authenticate));
   app.use("/api/events", createEventsRoutes(eventsRepository, authenticate));
+  // SCRUM-150's own equipment-flagging on a reschedule is retired (see
+  // equipment.service.js); SCRUM-37's significance check now lives entirely
+  // inside apply_organiser_event_edit (SQL, called by the service itself),
+  // which only regresses the event's own status - it never writes to
+  // equipment_requests/venue_bookings. So equipmentDependencies no longer
+  // needs threading through here.
+  app.use("/api/event-workspace", authenticate, createEventWorkspaceRoutes(dataClient));
   app.use("/api", equipmentRoutes({ authenticate, ...equipmentDependencies }));
   // These routes expose approved event information and each user's own registrations.
-  app.use("/api/events", authenticate, registrationEventRoutes(dataClient));
-  app.use("/api/registrations", authenticate, (req, res, next) => dataClient ? next() :
+  app.use("/api/events", authenticate, requirePermission("events.browse"), registrationEventRoutes(dataClient));
+  app.use("/api/registrations", authenticate, requirePermission("registrations.manage"), (req, res, next) => dataClient ? next() :
     res.status(503).json({ message: "This feature is not yet configured." }), registrationRoutes(dataClient));
+  app.use("/api/waitlist", authenticate, requirePermission("registrations.manage"), (req, res, next) => dataClient ? next() :
+    res.status(503).json({ message: "This feature is not yet configured." }), require("./modules/registrations/waitlistHandlers")(dataClient));
   // All internal routes must be registered after this gate, with their own permission guard.
   app.use("/api/internal", authenticate, requirePermission("internal.access"));
   app.get("/api/internal/access", (req, res) => {
     res.json({ responsibilities: getResponsibilities(req.user.roles) });
   });
   app.use("/api/internal", createAssignmentsRoutes(assignmentDependencies));
+  // SCRUM-148: equipment release is in-lane; venue release is the one
+  // cross-lane addition the Venue owner approved for this story.
+  app.use("/api/internal", createReviewRoutes(eventsRepository, {
+    equipmentService: equipmentDependencies?.equipmentService,
+    releaseVenueBookingsForCancelledEvent: venuesService?.releaseBookingsForCancelledEvent,
+    checkVenuesForNewDates: venuesService?.checkBookingsForNewDates,
+    revalidateVenueBookings: venuesService?.revalidateBookingsForEvent,
+  }, dataClient));
+  app.use("/api/internal", createSafetyCheckRoutes(eventsRepository));
+  app.use("/api/internal", createSafetyReviewRoutes(eventsRepository));
   app.use("/api/venues", authenticate, requirePermission("internal.access"), createVenuesRoutes(venuesService));
+  // Event Organisers hold no internal.access, so this cannot live under
+  // /api/internal. Nor under /api/events: the registration router's GET /:eventId
+  // would swallow the detail path, the same reason Venue sits on its own prefix.
+  app.use("/api/managed-events", createManagedEventsRoutes({
+    authenticate,
+    managedEventsService,
+    waitlistCoordinatorService,
+  }));
   app.use(errorHandler);
   return app;
 }

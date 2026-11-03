@@ -1,13 +1,20 @@
-const { validateVenueUpdate } = require("./venues.validation");
+const { validateVenueUpdate, validateVenueSearch } = require("./venues.validation");
+const { validateUnavailabilityCreate, validateUnavailabilityUpdate } = require("./venues.unavailability.validation");
 const {
   VENUE_TIME_ZONE,
   localDateInTimeZone,
   validateBookingRequestShape,
+  validateChangeRequestShape,
   validateAgainstVenue,
   validateAgainstEvent,
   findSlotProblems,
+  findConfirmedSlotConflicts,
   deriveRequestStatus,
+  validateDecision,
+  REQUESTABLE_STATUSES,
+  assessVenueSuitability,
 } = require("./venues.bookingRequests.validation");
+const { PLANNING_STATUSES } = require("../events/lifecycle");
 const {
   SLOTS,
   MAX_RANGE_DAYS,
@@ -15,40 +22,141 @@ const {
   addDays,
   daysBetween,
   buildAvailabilityCalendar,
+  committedSlots,
 } = require("./venues.availability");
+const { notCheckedResult } = require("./venueBookingChecks");
+const { createBookingChecker } = require("./venueRevalidation");
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// SCRUM-18: rows for many venues come back in one list, so they are bucketed
+// by venue before the calendar runs over each one.
+// SCRUM-19: the distinct values one field holds across the catalogue, longest
+// first so "AV system" is tried before a shorter name it contains.
+function uniqueValues(rows, key) {
+  return [...new Set((rows || []).flatMap((row) => row[key] || []))].sort(
+    (a, b) => b.length - a.length
+  );
+}
+
+function groupBy(rows, key) {
+  const grouped = new Map();
+  for (const row of rows || []) {
+    const bucket = grouped.get(row[key]);
+    if (bucket) bucket.push(row);
+    else grouped.set(row[key], [row]);
+  }
+  return grouped;
+}
+
 function createVenuesController(service) {
   const {
     listVenues,
+    listBookingsForVenuesOnDate,
+    listUnavailabilityForVenuesOnDate,
     getVenueById,
     updateVenue,
     listBookingsInRange,
     listUnavailabilityInRange,
     getEventById,
+    getEventForCheckReport,
     listBookableEvents,
     listSlotRowsForDate,
     submitBookingRequest,
     getBookingRequestById,
     listBookingRequests,
+    decideBookingRequest,
+    changeBookingRequest,
+    cancelBookingRequest,
+    createUnavailabilityPeriod,
+    listUnavailabilityPeriods,
+    getUnavailabilityPeriodById,
+    updateUnavailabilityPeriod,
+    deleteUnavailabilityPeriod: removePeriod,
+    recheckConflictsAfterUpdate,
+    listConflictingRequests,
+    listAffectedBookingRequests,
+    listActiveHoldsInRange,
+    listHolds,
+    createHold,
+    getActiveHoldsByIds,
+    linkHoldsToRequest,
+    listEligibleHoldsForCoordinator,
+    listEventsWithCoordinator,
+    searchReplacementVenues,
+    markVenueBookingAffected,
+    releaseAffectedVenueBooking,
+    releaseBookingsForTerminalEvents,
   } = service;
+  const checkOneBooking = createBookingChecker({ getVenueById, listSlotRowsForDate, listUnavailabilityInRange });
+
+  // SCRUM-18: narrow the catalogue to potential venues.
+  //
+  // The filters a venue carries on its own row are applied by the database.
+  // Date and slot availability cannot be, because it depends on bookings and
+  // blocked periods, so it is applied here by running the SCRUM-17 calendar
+  // over the shortlist. That keeps one definition of what "free" means.
+  //
+  // This narrows; it does not decide. No score, no ranking, and the order
+  // stays alphabetical, because SCRUM-18 says searching does not replace the
+  // separate suitability assessment.
+  async function filterByAvailability(venues, date, slots, slotMatch) {
+    const venueIds = venues.map((venue) => venue.id);
+    const [bookings, unavailability] = await Promise.all([
+      listBookingsForVenuesOnDate(venueIds, date),
+      listUnavailabilityForVenuesOnDate(venueIds, date),
+    ]);
+
+    const bookingsByVenue = groupBy(bookings, "venue_id");
+    const unavailabilityByVenue = groupBy(unavailability, "venue_id");
+
+    return venues.filter((venue) => {
+      const [day] = buildAvailabilityCalendar({
+        operatingHours: venue.operating_hours,
+        bookings: bookingsByVenue.get(venue.id) || [],
+        unavailability: unavailabilityByVenue.get(venue.id) || [],
+        from: date,
+        to: date,
+      });
+
+      // Named slots were asked for, so all of them must be open. A bare date
+      // asks for that day, so one open slot is enough. Either way a pending
+      // request does not take a slot, so it stays a candidate (SCRUM-21).
+      //
+      // SCRUM-134: for named-slot searches, also check the buffer slots that
+      // the committed period (setup + turnaround) extends into, since those
+      // slots must be free for the booking to fit.
+      const isOpen = (slot) => REQUESTABLE_STATUSES.includes(day.slots[slot].status);
+      if (slotMatch === "all") {
+        const slotsToCheck = committedSlots(
+          slots,
+          venue.setup_minutes,
+          venue.turnaround_minutes
+        );
+        return slotsToCheck.every(isOpen);
+      }
+      return slots.some(isOpen);
+    });
+  }
 
   async function getVenues(req, res, next) {
     try {
-      const { city, minCapacity } = req.query;
-
-      if (minCapacity !== undefined && Number.isNaN(Number(minCapacity))) {
-        return res.status(400).json({ error: "minCapacity must be a number" });
+      const { errors, value } = validateVenueSearch(req.query);
+      if (errors.length > 0) {
+        return res.status(400).json({ error: "Validation failed", details: errors });
       }
 
-      const venues = await listVenues({
-        city,
-        minCapacity: minCapacity === undefined ? undefined : Number(minCapacity),
-      });
+      await releaseBookingsForTerminalEvents?.();
+      const venues = await listVenues(value);
 
-      res.status(200).json({ data: venues });
+      // Nothing matched the stored filters, so there is no day to look at.
+      const data =
+        value.date && venues.length > 0
+          ? await filterByAvailability(venues, value.date, value.slots, value.slotMatch)
+          : venues;
+
+      res.status(200).json({ data });
     } catch (err) {
       next(err);
     }
@@ -90,6 +198,15 @@ function createVenuesController(service) {
       }
 
       const venue = await updateVenue(id, value);
+
+      // SCRUM-135: if setup or turnaround changed, recheck existing confirmed
+      // bookings at this venue and update their conflict_flags accordingly.
+      const setupChanged = "setup_minutes" in value && value.setup_minutes !== existing.setup_minutes;
+      const turnaroundChanged = "turnaround_minutes" in value && value.turnaround_minutes !== existing.turnaround_minutes;
+      if (setupChanged || turnaroundChanged) {
+        await recheckConflictsAfterUpdate(id, venue);
+      }
+
       res.status(200).json({ data: venue });
     } catch (err) {
       next(err);
@@ -141,19 +258,24 @@ function createVenuesController(service) {
         );
       }
 
+      await releaseBookingsForTerminalEvents?.();
       const venue = await getVenueById(id);
       if (!venue) return res.status(404).json({ error: "Venue not found" });
 
-      const [bookings, unavailability] = await Promise.all([
+      const [bookings, unavailability, holds] = await Promise.all([
         listBookingsInRange(id, from, to),
         listUnavailabilityInRange(id, from, to),
+        listActiveHoldsInRange(id, from, to),
       ]);
 
       // SCRUM-92, 93, 94, 95 are all decided inside this pure function
       const days = buildAvailabilityCalendar({
         operatingHours: venue.operating_hours,
-        bookings,
+        // Planning needs occupied slots, not another coordinator's event name.
+        bookings: req.user.roles.includes("venue_staff") ? bookings : bookings.map(row => ({ ...row, event_name: "Reserved event" })),
         unavailability,
+        // SCRUM-146: active holds show as tentative; expired holds excluded server-side
+        holds,
         from,
         to,
       });
@@ -166,6 +288,56 @@ function createVenuesController(service) {
           to,
           slots: SLOTS,
           days,
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // SCRUM-19: assess a shortlisted venue against one of the coordinator's own
+  // events, before any request exists. The event is fetched through the same
+  // coordinator-scoped lookup the booking flow uses, so an event that is not
+  // theirs is a 404 rather than an assessment of someone else's requirements.
+  async function getVenueSuitability(req, res, next) {
+    try {
+      const { id } = req.params;
+      const eventId = req.query.event_id;
+
+      if (!UUID_PATTERN.test(id)) {
+        return res.status(400).json({ error: "Invalid venue id" });
+      }
+      if (eventId === undefined || !UUID_PATTERN.test(eventId)) {
+        return validationFailed(res, "event_id must be the id of one of your events");
+      }
+
+      // The catalogue supplies the vocabulary: a requirement is recognised only
+      // if some venue actually offers it by that name. Without this the free
+      // text on an event cannot be compared to anything.
+      const [venue, event, catalogue] = await Promise.all([
+        getVenueById(id),
+        getEventById(eventId, req.user.id),
+        listVenues({}),
+      ]);
+      if (!venue || !venue.is_active) {
+        return res.status(404).json({ error: "Venue not found" });
+      }
+      if (!event) {
+        return res.status(404).json({ error: "Event not found" });
+      }
+
+      const vocabulary = {
+        facilities: uniqueValues(catalogue, "facilities"),
+        accessibility: uniqueValues(catalogue, "accessibility_features"),
+      };
+
+      res.status(200).json({
+        data: {
+          venue_id: venue.id,
+          venue_name: venue.name,
+          event_id: event.id,
+          event_name: event.name,
+          ...assessVenueSuitability(venue, event, vocabulary),
         },
       });
     } catch (err) {
@@ -234,25 +406,70 @@ function createVenuesController(service) {
           .json({ error: "Validation failed", details: contextErrors });
       }
 
+      // SCRUM-162: if hold_ids are supplied, validate each hold before the
+      // calendar check. All must be active (not expired, not already linked),
+      // for this venue, for this date, and named after the submitted event.
+      let validatedHolds = [];
+      if (value.hold_ids) {
+        validatedHolds = await getActiveHoldsByIds(value.hold_ids);
+        if (validatedHolds.length !== value.hold_ids.length) {
+          return res.status(409).json({ error: "One or more holds have expired or are already being converted" });
+        }
+        if (validatedHolds.some((h) => h.venue_id !== id)) {
+          return res.status(409).json({ error: "Holds must belong to this venue" });
+        }
+        if (validatedHolds.some((h) => h.event_id !== value.event_id)) {
+          return res.status(409).json({ error: "Holds do not match the selected event" });
+        }
+        if (validatedHolds.some((h) => h.booking_date !== value.booking_date)) {
+          return res.status(409).json({ error: "Holds must be for the requested booking date" });
+        }
+        // SCRUM-162: ownership check — coordinator_id on the hold must match
+        // the authenticated coordinator so no one can convert another's hold.
+        if (validatedHolds.some((h) => h.coordinator_id !== req.user.id)) {
+          return res.status(409).json({ error: "Holds do not belong to your coordinator account" });
+        }
+      }
+
       // 4. The slots against that day's calendar. 409 rather than 400: the
       // request is well formed, it just clashes with what is already booked.
-      const [slotRows, unavailability] = await Promise.all([
+      const [slotRows, unavailability, holds] = await Promise.all([
         listSlotRowsForDate(id, value.booking_date),
         listUnavailabilityInRange(id, value.booking_date, value.booking_date),
+        // SCRUM-146 AC3: active holds block requests for the same committed period
+        listActiveHoldsInRange(id, value.booking_date, value.booking_date),
       ]);
       const [calendarDay] = buildAvailabilityCalendar({
         operatingHours: venue.operating_hours,
-        bookings: slotRows,
+        bookings: req.user.roles.includes("venue_staff") ? slotRows : slotRows.map(row => ({ ...row, event_name: "Reserved event" })),
         unavailability,
+        holds,
         from: value.booking_date,
         to: value.booking_date,
       });
 
+      // SCRUM-162: for a hold conversion, treat the held slots as available so
+      // findSlotProblems allows them. Only overrides tentative; a confirmed
+      // booking on the same slot still blocks the request.
+      let calendarDayForCheck = calendarDay;
+      if (validatedHolds.length > 0) {
+        const holdSlotSet = new Set(validatedHolds.map((h) => h.slot));
+        const adjustedSlots = { ...calendarDay.slots };
+        for (const slot of holdSlotSet) {
+          if (adjustedSlots[slot]?.status === "tentative") {
+            adjustedSlots[slot] = { status: "available", label: "Available" };
+          }
+        }
+        calendarDayForCheck = { ...calendarDay, slots: adjustedSlots };
+      }
+
+      // SCRUM-134: venue passed so committed period (setup + turnaround) is checked
       const { conflicts, duplicates } = findSlotProblems(
         value,
-        calendarDay,
+        calendarDayForCheck,
         slotRows,
-        value.event_id
+        value.event_id,
+        venue
       );
       if (conflicts.length > 0 || duplicates.length > 0) {
         return res.status(409).json({
@@ -264,9 +481,24 @@ function createVenuesController(service) {
       // This check is for a helpful error message, not for safety. A slot could
       // still be confirmed for someone else between this line and the insert.
       // That is fine: this request is only pending, and the exclusion constraint
-      // from 003_yc_create_venue_bookings.sql stops the slot ever being confirmed
+      // on venue_bookings stops the slot ever being confirmed
       // twice.
-      const requestId = await submitBookingRequest(id, event.name, value, req.user.id);
+      let requestId;
+      try {
+        requestId = await submitBookingRequest(id, event.name, value, req.user.id);
+      } catch (err) {
+        if (err.message.includes("active replacement request") ||
+            err.message.includes("Replacement must reference")) {
+          return res.status(409).json({ error: err.message });
+        }
+        throw err;
+      }
+
+      // SCRUM-162 AC2: link hold rows to this request so decide_venue_booking_request
+      // can cancel them when the booking is approved (AC3).
+      if (validatedHolds.length > 0) {
+        await linkHoldsToRequest(value.hold_ids, requestId);
+      }
 
       // SCRUM-88: return the request exactly as Venue Staff will see it
       const created = await getBookingRequestById(requestId, req.bookingScope || { coordinatorId: req.user.id });
@@ -281,7 +513,7 @@ function createVenuesController(service) {
   // SCRUM-88: submitted requests available to Venue Staff for review
   async function getBookingRequests(req, res, next) {
     try {
-      const { status } = req.query;
+      const { status, event_id: eventId } = req.query;
 
       if (status !== undefined && !REQUEST_STATUS_FILTERS.includes(status)) {
         return validationFailed(
@@ -290,7 +522,15 @@ function createVenuesController(service) {
         );
       }
 
-      const requests = (await listBookingRequests(req.bookingScope)).map(withStatus);
+      if (eventId !== undefined && !UUID_PATTERN.test(eventId)) {
+        return validationFailed(res, "event_id must be a valid event id");
+      }
+
+      const requests = (
+        eventId === undefined
+          ? await listBookingRequests(req.bookingScope)
+          : await listBookingRequests(req.bookingScope, eventId)
+      ).map(withStatus);
       const filtered =
         status === undefined
           ? requests
@@ -321,15 +561,589 @@ function createVenuesController(service) {
     }
   }
 
+  // SCRUM-138: every booking on one event, each checked on its own for
+  // suitability, availability and conflicts. Read-only: nothing here writes, so
+  // a failed check can never alter any booking's status.
+  async function getEventBookingChecks(req, res, next) {
+    try {
+      const { eventId } = req.params;
+
+      if (!UUID_PATTERN.test(eventId)) {
+        return validationFailed(res, "eventId must be a valid event id");
+      }
+
+      const [event, requests] = await Promise.all([
+        getEventForCheckReport(eventId, req.bookingScope),
+        listBookingRequests(req.bookingScope, eventId),
+      ]);
+      // An event outside the caller's scope is 404, the same answer as a
+      // missing event, so the report never reveals another coordinator's event.
+      if (!event) return res.status(404).json({ error: "Event not found" });
+
+      // Each booking is assessed in its own try/catch: one venue whose data
+      // cannot be read must not lose the other venues' results (SCRUM-138 AC1, AC3).
+      const results = [];
+      for (const request of requests) {
+        try {
+          results.push(await checkOneBooking(request, req.bookingScope));
+        } catch {
+          results.push(
+            notCheckedResult(
+              request,
+              "This venue could not be checked right now. The other venues are unaffected."
+            )
+          );
+        }
+      }
+
+      results.sort(
+        (a, b) =>
+          String(a.booking_date).localeCompare(String(b.booking_date)) ||
+          String(a.venue_name).localeCompare(String(b.venue_name))
+      );
+
+      res.status(200).json({
+        data: { event_id: event.id, event_name: event.name, results },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // SCRUM-138: one booking's three checks. The calendar excludes every row this
+  // event already holds, so a slot the event owns is not reported as its own
+  // conflict; other events' names are masked for coordinators exactly as at
+  // submission (SCRUM-21).
+  // SCRUM-20: what the reviewer is told when the database refuses an approval.
+  // Used only when the specific clash cannot be established.
+  const CONFLICT_FALLBACK =
+    "One of these slots is already confirmed for a different request. Refresh the list to see current availability.";
+
+  // SCRUM-20: name the slots that clash and what holds them. Read after the
+  // refusal rather than before it, so this reports what is actually committed
+  // now instead of what was true a moment earlier.
+  async function describeSlotConflicts(requestId, scope) {
+    try {
+      const request = await getBookingRequestById(requestId, scope);
+      if (!request || !request.venue || !request.event) return [CONFLICT_FALLBACK];
+
+      const slotRows = await listSlotRowsForDate(
+        request.venue.id,
+        request.booking_date
+      );
+      const conflicts = findConfirmedSlotConflicts(
+        (request.slots || []).map((row) => row.slot),
+        slotRows,
+        request.event.id
+      );
+
+      if (conflicts.length === 0) return [CONFLICT_FALLBACK];
+
+      return conflicts.map(
+        (conflict) =>
+          `${conflict.slot} on ${request.booking_date} is already confirmed for "${conflict.event_name}"`
+      );
+    } catch {
+      // Explaining the clash must never turn a 409 into a 500. The refusal
+      // itself already stands, so a failure here falls back to the plain
+      // message rather than losing the answer.
+      return [CONFLICT_FALLBACK];
+    }
+  }
+
+  // SCRUM-22: Venue Staff approve or reject a pending booking request.
+  // The router gates this with bookings.decide, so only Venue Staff get here.
+  async function patchBookingRequestDecision(req, res, next) {
+    try {
+      const { requestId } = req.params;
+
+      if (!UUID_PATTERN.test(requestId)) {
+        return res.status(400).json({ error: "Invalid booking request id" });
+      }
+
+      const { errors, value } = validateDecision(req.body);
+      if (errors.length > 0) {
+        return res.status(400).json({ error: "Validation failed", details: errors });
+      }
+
+      let decided;
+      try {
+        decided = await decideBookingRequest(
+          requestId,
+          value.decision,
+          value.note,
+          req.user.id
+        );
+      } catch (err) {
+        // 23P01 is the confirmed-slot exclusion constraint on venue_bookings:
+        // another request already holds one of these slots. That is an answer
+        // for the reviewer, not a server fault, so it is a 409 (SCRUM-20).
+        if (err.code !== "23P01") throw err;
+        // SCRUM-20: the request stays pending and nothing is written, because
+        // the database rejected the whole statement.
+        return res.status(409).json({
+          error: "Slot already confirmed for another booking",
+          details: await describeSlotConflicts(requestId, req.bookingScope),
+        });
+      }
+
+      if (!decided) {
+        return res.status(404).json({ error: "Booking request not found" });
+      }
+
+      // Read back through the same scope rule the review list uses, so the
+      // response is exactly what this reviewer is allowed to see.
+      const request = await getBookingRequestById(requestId, req.bookingScope);
+      res.status(200).json({ data: withStatus(request) });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async function getReplacementSearch(req, res, next) {
+    try {
+      const { requestId } = req.params;
+      if (!UUID_PATTERN.test(requestId)) {
+        return res.status(400).json({ error: "Invalid booking request id" });
+      }
+      const parseList = (value) => value === undefined
+        ? undefined
+        : value.split(",").map((item) => item.trim()).filter(Boolean);
+      const minCapacity = req.query.minCapacity === undefined
+        ? undefined
+        : Number(req.query.minCapacity);
+      if (minCapacity !== undefined && (!Number.isInteger(minCapacity) || minCapacity <= 0)) {
+        return validationFailed(res, "minCapacity must be a positive whole number");
+      }
+      const data = await searchReplacementVenues(requestId, req.user.id, {
+        minCapacity,
+        facilities: parseList(req.query.facilities),
+        accessibility: parseList(req.query.accessibility),
+        roomLayout: req.query.roomLayout || undefined,
+      });
+      res.status(200).json({ data });
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ error: err.message });
+      next(err);
+    }
+  }
+
+  async function postMarkBookingAffected(req, res, next) {
+    try {
+      const { requestId } = req.params;
+      if (!UUID_PATTERN.test(requestId)) {
+        return res.status(400).json({ error: "Invalid booking request id" });
+      }
+      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+      if (!reason) return validationFailed(res, "reason is required");
+      const data = await markVenueBookingAffected(
+        requestId,
+        req.user.id,
+        reason,
+        req.user.roles.includes("venue_staff")
+      );
+      res.status(200).json({ data });
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ error: err.message });
+      next(err);
+    }
+  }
+
+  async function postReleaseAffectedBooking(req, res, next) {
+    try {
+      const { requestId } = req.params;
+      if (!UUID_PATTERN.test(requestId)) {
+        return res.status(400).json({ error: "Invalid booking request id" });
+      }
+      const data = await releaseAffectedVenueBooking(requestId, req.user.id);
+      res.status(200).json({ data });
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ error: err.message });
+      next(err);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // SCRUM-135: view booking conflict flags for a venue
+  // ---------------------------------------------------------------------------
+
+  async function getConflictFlags(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) {
+        return res.status(400).json({ error: "Invalid venue id" });
+      }
+      const venue = await getVenueById(id);
+      if (!venue) return res.status(404).json({ error: "Venue not found" });
+      // SCRUM-135: recheck on every read so flags from expired or released holds
+      // are cleared before the response is sent, not just after a venue update.
+      await recheckConflictsAfterUpdate(id, venue);
+      const requests = await listConflictingRequests(id);
+      res.status(200).json({ data: requests.map(withStatus) });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // SCRUM-154: a coordinator changes or cancels one of their own booking
+  // requests, without touching the event's other venue bookings.
+  //
+  // Both handlers load the request under the same coordinator-scoped query
+  // getBookingRequest/getBookingRequests already use (req.bookingScope), so a
+  // wrong or missing id answers 404 either way - the query itself decides
+  // what is "theirs," the same masking this lane already relies on elsewhere.
+  // ---------------------------------------------------------------------------
+
+  const EVENT_NOT_READY = {
+    error: "This event is not accepting venue booking changes right now",
+  };
+
+  function notLive(res) {
+    return res.status(409).json({ error: "This booking is no longer live" });
+  }
+
+  // SCRUM-154 AC2: change one booking's date and non-slot details (attendees,
+  // room layout, facilities, accessibility, additional requirements). Slot
+  // selection is out of scope by decision - a date change carries the
+  // booking's existing slots over to the new date unchanged, so there is
+  // nothing for the coordinator to pick; only a date move needs an
+  // availability check at all, since an unchanged date already holds (or
+  // contests) exactly what it did before.
+  async function patchBookingRequest(req, res, next) {
+    try {
+      const { requestId } = req.params;
+      if (!UUID_PATTERN.test(requestId)) {
+        return res.status(400).json({ error: "Invalid booking request id" });
+      }
+
+      const { errors, value } = validateChangeRequestShape(req.body);
+      if (errors.length > 0) {
+        return res.status(400).json({ error: "Validation failed", details: errors });
+      }
+
+      const existing = await getBookingRequestById(requestId, req.bookingScope);
+      if (!existing) {
+        return res.status(404).json({ error: "Booking request not found" });
+      }
+
+      if (!PLANNING_STATUSES.includes(existing.event.status)) {
+        return res.status(409).json(EVENT_NOT_READY);
+      }
+
+      const venue = await getVenueById(existing.venue.id);
+      if (!venue) {
+        return res.status(404).json({ error: "Venue not found" });
+      }
+
+      const today = localDateInTimeZone(new Date(), VENUE_TIME_ZONE);
+      const contextErrors = [
+        ...validateAgainstVenue(value, venue),
+        ...validateAgainstEvent(value, existing.event, today),
+      ];
+      if (contextErrors.length > 0) {
+        return res.status(400).json({ error: "Validation failed", details: contextErrors });
+      }
+
+      if (value.booking_date !== existing.booking_date) {
+        const liveSlots = (existing.slots || [])
+          .filter((row) => ["pending", "confirmed"].includes(row.status))
+          .map((row) => row.slot);
+        const [slotRows, unavailability, holds] = await Promise.all([
+          listSlotRowsForDate(venue.id, value.booking_date),
+          listUnavailabilityInRange(venue.id, value.booking_date, value.booking_date),
+          listActiveHoldsInRange(venue.id, value.booking_date, value.booking_date),
+        ]);
+        const [calendarDay] = buildAvailabilityCalendar({
+          operatingHours: venue.operating_hours,
+          bookings: slotRows.map((row) => ({ ...row, event_name: "Reserved event" })),
+          unavailability,
+          holds,
+          from: value.booking_date,
+          to: value.booking_date,
+        });
+        const { conflicts, duplicates } = findSlotProblems(
+          { slots: liveSlots },
+          calendarDay,
+          slotRows,
+          existing.event.id,
+          venue
+        );
+        if (conflicts.length > 0 || duplicates.length > 0) {
+          return res.status(409).json({
+            error: "The new date is not available for this booking's slots",
+            details: [...conflicts, ...duplicates],
+          });
+        }
+      }
+
+      let changedId;
+      try {
+        changedId = await changeBookingRequest(requestId, req.user.id, value);
+      } catch (err) {
+        if (err.code === "P0002") return res.status(404).json({ error: "Booking request not found" });
+        if (err.code === "P0003") return notLive(res);
+        throw err;
+      }
+
+      const updated = await getBookingRequestById(changedId, req.bookingScope);
+      res.status(200).json({ data: withStatus(updated) });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // SCRUM-154 AC1/AC3: cancel one booking, releasing its live slots, without
+  // touching the event's other venue bookings.
+  async function patchBookingRequestCancel(req, res, next) {
+    try {
+      const { requestId } = req.params;
+      if (!UUID_PATTERN.test(requestId)) {
+        return res.status(400).json({ error: "Invalid booking request id" });
+      }
+
+      const existing = await getBookingRequestById(requestId, req.bookingScope);
+      if (!existing) {
+        return res.status(404).json({ error: "Booking request not found" });
+      }
+
+      if (!PLANNING_STATUSES.includes(existing.event.status)) {
+        return res.status(409).json(EVENT_NOT_READY);
+      }
+
+      try {
+        await cancelBookingRequest(requestId, req.user.id);
+      } catch (err) {
+        if (err.code === "P0002") return res.status(404).json({ error: "Booking request not found" });
+        if (err.code === "P0003") return notLive(res);
+        throw err;
+      }
+
+      const cancelled = await getBookingRequestById(requestId, req.bookingScope);
+      res.status(200).json({ data: withStatus(cancelled) });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // SCRUM-133: venue unavailability periods
+  // ---------------------------------------------------------------------------
+
+  async function getUnavailabilityPeriods(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+      const venue = await getVenueById(id);
+      if (!venue) return res.status(404).json({ error: "Venue not found" });
+      const periods = await listUnavailabilityPeriods(id);
+      res.status(200).json({ data: periods });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async function postUnavailabilityPeriod(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+      const { errors, value } = validateUnavailabilityCreate(req.body);
+      if (errors.length > 0) return res.status(400).json({ error: "Validation failed", details: errors });
+      const venue = await getVenueById(id);
+      if (!venue) return res.status(404).json({ error: "Venue not found" });
+      const period = await createUnavailabilityPeriod(id, value, req.user.id);
+      // SCRUM-136: identify confirmed bookings that now overlap the unavailability
+      // period (including setup/turnaround buffer) so the caller can arrange alternatives.
+      // AC4: read-only — no booking is modified.
+      const affected = await listAffectedBookingRequests(id, period, venue);
+      res.status(201).json({ data: period, affected });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async function patchUnavailabilityPeriod(req, res, next) {
+    try {
+      const { id, periodId } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+      if (!UUID_PATTERN.test(periodId)) return res.status(400).json({ error: "Invalid period id" });
+      const { errors, value } = validateUnavailabilityUpdate(req.body);
+      if (errors.length > 0) return res.status(400).json({ error: "Validation failed", details: errors });
+
+      // Fetch existing period to validate cross-field date constraint when only
+      // one date is submitted, and to confirm the period belongs to this venue.
+      const existing = await getUnavailabilityPeriodById(periodId, id);
+      if (!existing) return res.status(404).json({ error: "Unavailability period not found" });
+
+      const effectiveStart = value.start_date ?? existing.start_date;
+      const effectiveEnd = value.end_date ?? existing.end_date;
+      if (effectiveEnd < effectiveStart) {
+        return res.status(400).json({ error: "Validation failed", details: ["end_date must not be before start_date"] });
+      }
+
+      const updated = await updateUnavailabilityPeriod(periodId, id, value);
+      if (!updated) return res.status(404).json({ error: "Unavailability period not found" });
+      res.status(200).json({ data: updated });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async function deleteUnavailabilityPeriod(req, res, next) {
+    try {
+      const { id, periodId } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+      if (!UUID_PATTERN.test(periodId)) return res.status(400).json({ error: "Invalid period id" });
+      const deleted = await removePeriod(periodId, id);
+      if (!deleted) return res.status(404).json({ error: "Unavailability period not found" });
+      res.status(204).end();
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // SCRUM-136: re-fetch affected bookings for an existing period so the list
+  // remains accessible after the creation panel is dismissed or the page reloads.
+  async function getUnavailabilityPeriodAffected(req, res, next) {
+    try {
+      const { id, periodId } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+      if (!UUID_PATTERN.test(periodId)) return res.status(400).json({ error: "Invalid period id" });
+      const venue = await getVenueById(id);
+      if (!venue) return res.status(404).json({ error: "Venue not found" });
+      const period = await getUnavailabilityPeriodById(periodId, id);
+      if (!period) return res.status(404).json({ error: "Unavailability period not found" });
+      const affected = await listAffectedBookingRequests(id, period, venue);
+      res.status(200).json({ data: affected });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // SCRUM-146: venue holds
+  // ---------------------------------------------------------------------------
+
+  const HOLD_SLOTS = ["am", "pm", "night"];
+
+  function validateHoldBody(body) {
+    const errors = [];
+    if (!body.event_id || !UUID_PATTERN.test(body.event_id)) {
+      errors.push("event_id must be a valid event UUID");
+    }
+    if (!body.event_name || typeof body.event_name !== "string" || !body.event_name.trim()) {
+      errors.push("event_name is required");
+    }
+    if (!isValidDateString(body.booking_date)) {
+      errors.push("booking_date must be a valid YYYY-MM-DD date");
+    }
+    if (!Array.isArray(body.slots) || body.slots.length === 0) {
+      errors.push("slots must be a non-empty array");
+    } else if (!body.slots.every((s) => HOLD_SLOTS.includes(s))) {
+      errors.push(`slots must only contain: ${HOLD_SLOTS.join(", ")}`);
+    }
+    if (!body.expires_at) {
+      errors.push("expires_at is required");
+    } else {
+      const exp = new Date(body.expires_at);
+      if (Number.isNaN(exp.getTime())) {
+        errors.push("expires_at must be a valid ISO timestamp");
+      } else if (exp <= new Date()) {
+        // AC2: expiry cannot be in the past
+        errors.push("expires_at must be in the future");
+      }
+    }
+    // SCRUM-162: coordinator_id links the hold to the coordinator whose event it
+    // is, so only that coordinator can later convert it.
+    if (!body.coordinator_id || !UUID_PATTERN.test(body.coordinator_id)) {
+      errors.push("coordinator_id must be a valid user UUID");
+    }
+    return errors;
+  }
+
+  async function postHold(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+
+      const errors = validateHoldBody(req.body);
+      if (errors.length > 0) return res.status(400).json({ error: "Validation failed", details: errors });
+
+      const venue = await getVenueById(id);
+      if (!venue) return res.status(404).json({ error: "Venue not found" });
+
+      const hold = await createHold(id, req.body, req.user.id);
+      res.status(201).json({ data: hold });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async function getHolds(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+      const venue = await getVenueById(id);
+      if (!venue) return res.status(404).json({ error: "Venue not found" });
+      const holds = await listHolds(id);
+      res.status(200).json({ data: holds });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // SCRUM-162: events with an assigned coordinator for the hold placement form.
+  async function getEventsForHolds(req, res, next) {
+    try {
+      const events = await listEventsWithCoordinator();
+      res.status(200).json({ data: events });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // SCRUM-162 AC1: returns active holds for this venue that match one of the
+  // coordinator's approved events by event_id, grouped by (event_id, booking_date).
+  async function getEligibleHolds(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) return res.status(400).json({ error: "Invalid venue id" });
+      const venue = await getVenueById(id);
+      if (!venue) return res.status(404).json({ error: "Venue not found" });
+      const groups = await listEligibleHoldsForCoordinator(id, req.user.id);
+      res.status(200).json({ data: groups });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   return {
     getVenues,
     getVenue,
     patchVenue,
     getVenueAvailability,
+    getVenueSuitability,
     getBookableEvents,
     postBookingRequest,
     getBookingRequests,
     getBookingRequest,
+    getEventBookingChecks,
+    patchBookingRequestDecision,
+    getReplacementSearch,
+    postMarkBookingAffected,
+    postReleaseAffectedBooking,
+    getConflictFlags,
+    patchBookingRequest,
+    patchBookingRequestCancel,
+    getUnavailabilityPeriods,
+    postUnavailabilityPeriod,
+    patchUnavailabilityPeriod,
+    deleteUnavailabilityPeriod,
+    getUnavailabilityPeriodAffected,
+    postHold,
+    getHolds,
+    getEligibleHolds,
+    getEventsForHolds,
   };
 
 }

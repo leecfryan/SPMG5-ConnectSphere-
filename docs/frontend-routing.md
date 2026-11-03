@@ -8,15 +8,22 @@ same frontend port (Docker: 5173); routing does not start another Vite process.
 | --- | --- |
 | `/` | Wait for session verification, then redirect to sign-in or account. |
 | `/sign-in` | Shared email/password form; verified users return to the requested local URL or `/account`. |
-| `/events` and `/events/:eventId` | Authenticated browsing and registration for approved events. |
-| `/registrations/me` and `/registrations/me/:registrationId` | Own registration status, details and eligible withdrawal. |
-| `/events/new` | Requires `events.submit`; organiser event form. |
+| `/events` and `/events/:eventId` | Attendee-only browsing of events open for registration (`events.browse`). |
+| `/registrations/me` and `/registrations/me/:registrationId` | Requires `registrations.manage`; own registration status, details and eligible withdrawal. |
+| `/my-event-requests` and `/:eventId` | Own and same-client requests; requires `events.own.read`. Own detail editing also requires `events.own.update`; colleagues are view only. |
+| `/assigned-events` and `/:eventId` | Coordinator-assigned planning records; requires `events.assigned.read`. |
+| `/event-management` and `/:eventId` | Manager review, assignment and opening registration; requires `events.review`. |
+| `/events/new` | Requires `events.submit`; organiser event form. `?draft=<id>` continues one of the organiser's own drafts (SCRUM-147); anyone else's id shows "Draft not found." |
 | `/venues/*` | Internal venue pages; see [Venue integration](venue-integration.md) for child routes. |
+| `/venues/booking-requests/:requestId/replacement` | Event Coordinator replacement search for an affected booking; requires `bookings.request`. |
 | `/equipment/requests?event=<uuid>` | Assigned coordinator Equipment request page; requires `equipment.request`. |
 | `/technical-support` | Technical dashboard; requires `equipment.review`. |
-| `/events/assignments` | Requires `events.assign_coordinator`; the Event Operations Manager's queue for routing submitted requests to coordinators. See [Coordinator assignment](event-assignment.md). |
+| `/events/assignments` | Requires `events.assign_coordinator`; the Event Coordinator Lead's queue for routing submitted requests to coordinators. See [Coordinator assignment](event-assignment.md). |
 | `/account` | Backend-verified identity for every signed-in role. |
-| `/staff/responsibilities` | Requires `internal.access`; lists responsibilities from the protected staff API. |
+| `/notifications` | Own Novu inbox and unread count for every signed-in account, including accounts without roles; no role capability required. |
+| `/safety-reviews` | Requires `internal.access` + `events.safety.read` (Safety Officer); events awaiting safety review (SCRUM-140). |
+| `/safety-reviews/:eventId` | Same permission; read-only safety facts for one event, one section per confirmed venue (SCRUM-140). With `events.safety.decide`, the *Safety decision* section: *Approve*, or *Reject* with a reason (SCRUM-141). |
+| `/staff/responsibilities` | Requires `internal.access`; lists responsibilities from the protected staff API, or an empty-state message when none are assigned. Safety Officer's one responsibility is *Operational safety review* (SCRUM-140). |
 | `/forbidden` | Signed-in access-denied page. |
 | Other URLs | Not-found page with a home link. |
 
@@ -32,7 +39,8 @@ token with Supabase. No role-to-permission matrix is duplicated in the browser.
 `RequireAuth` prevents page rendering until verification succeeds. Anonymous
 users are redirected to sign-in with a local return destination; outages and
 invalid sessions show recovery controls without protected content. Return paths
-reject external URLs and sign-in loops. `RequirePermission` uses the verified
+reject external URLs, sign-in loops and `/forbidden` as a post-sign-in destination.
+A remembered denial URL falls back to `/account`. `RequirePermission` uses the verified
 capability list. Missing permissions grant no feature access.
 
 Navigation shares one provider, so switching pages does not create SDK clients
@@ -77,7 +85,7 @@ role is removed even before the UI receives another auth event.
 Venue and Equipment implement this integration pattern; other features should follow it.
 See [Equipment integration](equipment-integration.md) for action permissions and event scope.
 Multi-role users share feature URLs; they are not redirected to a single role's
-dashboard. Existing read permissions are retained; Venue adds explicit write capabilities. `event_ops_manager` holds `event_organisers.read` and `internal.access`, and
+dashboard. Existing read permissions are retained; Venue adds explicit write capabilities. `event_coordinator_lead` holds `event_organisers.read` and `internal.access`, and
 reaches the assignment queue at `/events/assignments` through its own
 `events.assign_coordinator` capability. Every other internal page keeps the
 permission it requires, so this role is denied them individually rather than at
@@ -110,3 +118,52 @@ navigation and sign-out with real internal and external Supabase accounts.
 Automated tests use fake providers and do not certify cloud configuration.
 
 Registration uses the same session and routing contract. See [Registration integration](registration-integration.md) for ownership checks and the separate attendee-facing event projection.
+
+
+## Local visual refresh (30 October 2026)
+
+The route table, return destinations and permission gates above are unchanged.
+Signed-in pages now use a shared sidebar with icons and names. On desktop its
+Collapse/Expand control switches to icons only; links keep accessible names and
+hover/focus labels. Phone navigation always displays the names. The toggle does
+not remount page content. See [.agent UI reference](../.agent/docs/ui.md) for tokens,
+responsive layout and attendee presentation. No dependencies or APIs were added.
+
+
+### Windows Docker source updates
+
+The Vite development server uses 500ms source polling so changes on the Windows
+bind mount invalidate cached transforms reliably. If a server started before this
+setting was applied still serves old source, restart only the frontend container
+(`docker restart ConnectSphere-frontend`), then refresh the browser. No image
+rebuild, package installation or backend restart is required for source-only UI
+changes. Routes, guards and API proxy destinations are unchanged.
+
+
+### Explicit sign-out and the next sign-in
+
+AuthProvider records `signedOut` alongside the session on SIGNED_OUT and after a
+successful explicit sign-out. RequireAuth is the single owner of the anonymous
+redirect: it clears return state after sign-out, but preserves an initial
+anonymous protected-page destination. SignOutButton only invokes the original
+sign-out action, avoiding a second, competing navigate after its await.
+Failed sign-out retains the current page/error, and the existing return boolean
+is retained. A new auth event/session resets the sign-out navigation marker.
+
+SignInPage still sanitises return paths and excludes `/forbidden` and sign-in
+loops. Its post-authentication redirect marks the destination `afterSignIn`
+with a `signInReturnKey` from AuthProvider. The key combines a provider-lifetime
+identifier, auth revision and verification attempt. Reloading or re-verifying
+identity invalidates old history markers, so revoked access still reaches
+`/forbidden` rather than reusing the Account landing fallback.
+RequirePermission always checks the verified capability first. If that check
+fails for a post-sign-in destination, it redirects to universal `/account` and
+clears the marker rather than making Access denied the landing screen. Permitted
+deep links keep their URL, query and hash. Ordinary signed-in navigation to an
+unauthorised page still redirects to `/forbidden` as before. The marker changes
+only the denial destination and never grants permission or mounts protected
+content. Backend role/record guards are unchanged.
+
+The existing RBAC-ACCESS-005 expectation now reflects the requested safe landing,
+while retaining assertions that protected data was not loaded. Tests have not
+been run, following Ryan's instruction; this is not a new recorded pass.

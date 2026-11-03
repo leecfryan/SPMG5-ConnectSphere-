@@ -26,7 +26,7 @@ const repository = {
   assignCoordinator: vi.fn(),
   findById: vi.fn(),
 };
-const directory = { listCoordinators: vi.fn() };
+const directory = { listCoordinators: vi.fn(), displayNameOf: vi.fn() };
 
 // The token is the role list, so each case states the identity it is exercising.
 const authClient = { auth: { getUser: async (token) => ({
@@ -34,7 +34,7 @@ const authClient = { auth: { getUser: async (token) => ({
     id: "verified-manager", email: "eventopsmanager.demo@example.com",
     app_metadata: { roles: token.split(",") },
     // Never read: roles come from admin-controlled app_metadata only.
-    user_metadata: { full_name: "Ops Manager", roles: ["event_ops_manager"] },
+    user_metadata: { full_name: "Coordinator Lead", roles: ["event_coordinator_lead"] },
   } }, error: null,
 }) } };
 
@@ -47,7 +47,7 @@ beforeAll(async () => {
 afterAll(() => new Promise((resolve) => server.close(resolve)));
 
 beforeEach(() => {
-  for (const fn of [...Object.values(repository), directory.listCoordinators]) fn.mockReset();
+  for (const fn of [...Object.values(repository), ...Object.values(directory)]) fn.mockReset();
   repository.findSubmittedUnassigned.mockResolvedValue(QUEUE);
   repository.findActiveAssignments.mockResolvedValue([
     { coordinator_id: "coord-1", start_time: "2026-11-15T09:00:00+00:00" },
@@ -58,14 +58,14 @@ beforeEach(() => {
   directory.listCoordinators.mockResolvedValue(COORDINATORS);
 });
 
-function send(path, role = "event_ops_manager", method = "GET", data) {
+function send(path, role = "event_coordinator_lead", method = "GET", data) {
   return fetch(base + "/api/internal" + path, {
     method,
     headers: {
       ...(role ? { Authorization: "Bearer " + role } : {}),
       "Content-Type": "application/json",
       // Forged role claims in headers must change nothing.
-      "x-user-role": "event_ops_manager",
+      "x-user-role": "event_coordinator_lead",
     },
     // fetch refuses a body on GET, so the role loops can pass one for every path.
     ...(data === undefined || method === "GET" ? {} : { body: JSON.stringify(data) }),
@@ -97,8 +97,8 @@ test("SCRUM-26: an event_coordinator holds internal.access yet is still refused 
   expect((await send("/events/unassigned", "event_coordinator")).status).toBe(403);
 });
 
-test("SCRUM-26: a multi-role account holding event_ops_manager is admitted", async () => {
-  expect((await send("/events/unassigned", "attendee,event_ops_manager")).status).toBe(200);
+test("SCRUM-26: a multi-role account holding event_coordinator_lead is admitted", async () => {
+  expect((await send("/events/unassigned", "attendee,event_coordinator_lead")).status).toBe(200);
 });
 
 test("SCRUM-26: the queue returns submitted, unassigned requests in the repository's order", async () => {
@@ -143,32 +143,36 @@ test("SCRUM-26: an empty directory is a 200 with an empty list", async () => {
 });
 
 test("SCRUM-26: assignment succeeds and does not move the event's status", async () => {
-  const response = await send(`/events/${EVENT_ID}/coordinator`, "event_ops_manager", "PUT", { coordinatorId: "coord-1" });
+  const response = await send(`/events/${EVENT_ID}/coordinator`, "event_coordinator_lead", "PUT", { coordinatorId: "coord-1" });
 
   expect(response.status).toBe(200);
   const { event } = await response.json();
   expect(event.coordinator_id).toBe("coord-1");
   // Clarification #1: no acceptance step, so there is no status transition here.
   expect(event.status).toBe("SUBMITTED");
-  expect(repository.assignCoordinator).toHaveBeenCalledWith(EVENT_ID, "coord-1");
+  expect(repository.assignCoordinator).toHaveBeenCalledWith(EVENT_ID, "coord-1", expect.objectContaining({
+    id: "verified-manager", fullName: "Coordinator Lead", email: "eventopsmanager.demo@example.com",
+  }));
 });
 
 test("SCRUM-26: a status or organiser smuggled into the body is ignored", async () => {
-  await send(`/events/${EVENT_ID}/coordinator`, "event_ops_manager", "PUT",
-    { coordinatorId: "coord-1", status: "APPROVED", organiser_id: "someone-else", coordinator_id: "coord-2" });
+  await send(`/events/${EVENT_ID}/coordinator`, "event_coordinator_lead", "PUT",
+    { coordinatorId: "coord-1", status: "APPROVED", organiser_id: "someone-else", coordinator_id: "coord-2", assignedById: "forged-lead", assignedByName: "Forged Lead" });
 
-  // Only the two values the route is allowed to act on reach the repository.
-  expect(repository.assignCoordinator).toHaveBeenCalledWith(EVENT_ID, "coord-1");
+  // SCRUM-155: request fields cannot replace the authenticated assigner identity.
+  expect(repository.assignCoordinator).toHaveBeenCalledWith(EVENT_ID, "coord-1", expect.objectContaining({
+    id: "verified-manager", fullName: "Coordinator Lead", email: "eventopsmanager.demo@example.com",
+  }));
 });
 
 test("SCRUM-26: a missing coordinator is a 400 and writes nothing", async () => {
-  const response = await send(`/events/${EVENT_ID}/coordinator`, "event_ops_manager", "PUT", {});
+  const response = await send(`/events/${EVENT_ID}/coordinator`, "event_coordinator_lead", "PUT", {});
   expect(response.status).toBe(400);
   expect(repository.assignCoordinator).not.toHaveBeenCalled();
 });
 
 test("SCRUM-26: someone who is not an Event Coordinator is a 422 and writes nothing", async () => {
-  const response = await send(`/events/${EVENT_ID}/coordinator`, "event_ops_manager", "PUT", { coordinatorId: "venue-staff-1" });
+  const response = await send(`/events/${EVENT_ID}/coordinator`, "event_coordinator_lead", "PUT", { coordinatorId: "venue-staff-1" });
   expect(response.status).toBe(422);
   expect(repository.assignCoordinator).not.toHaveBeenCalled();
 });
@@ -176,7 +180,7 @@ test("SCRUM-26: someone who is not an Event Coordinator is a 422 and writes noth
 test("SCRUM-26: an unknown event is a 404", async () => {
   repository.assignCoordinator.mockResolvedValue(null);
   repository.findById.mockResolvedValue(null);
-  const response = await send("/events/missing/coordinator", "event_ops_manager", "PUT", { coordinatorId: "coord-1" });
+  const response = await send("/events/missing/coordinator", "event_coordinator_lead", "PUT", { coordinatorId: "coord-1" });
   expect(response.status).toBe(404);
 });
 
@@ -184,7 +188,7 @@ test("SCRUM-26: a request another manager already assigned is a 409, not a silen
   repository.assignCoordinator.mockResolvedValue(null);
   repository.findById.mockResolvedValue({ ...QUEUE[0], coordinator_id: "coord-2" });
 
-  const response = await send(`/events/${EVENT_ID}/coordinator`, "event_ops_manager", "PUT", { coordinatorId: "coord-1" });
+  const response = await send(`/events/${EVENT_ID}/coordinator`, "event_coordinator_lead", "PUT", { coordinatorId: "coord-1" });
 
   expect(response.status).toBe(409);
   // Re-assignment is US-50; the message has to tell the manager that, or they
@@ -208,7 +212,7 @@ test("SCRUM-26: without the server data key, assignment reports 503 and sign-in 
   const unconfigured = createApp({ authClient }).listen(0, "127.0.0.1");
   await once(unconfigured, "listening");
   const url = `http://127.0.0.1:${unconfigured.address().port}`;
-  const headers = { Authorization: "Bearer event_ops_manager", "Content-Type": "application/json" };
+  const headers = { Authorization: "Bearer event_coordinator_lead", "Content-Type": "application/json" };
 
   for (const [path, method] of PATHS) {
     const response = await fetch(url + "/api/internal" + path, { method, headers, ...(method === "GET" ? {} : { body: "{}" }) });
@@ -216,4 +220,55 @@ test("SCRUM-26: without the server data key, assignment reports 503 and sign-in 
   }
   expect((await fetch(url + "/api/health")).status).toBe(200);
   await new Promise((resolve) => unconfigured.close(resolve));
+});
+
+// SCRUM-159: the Lead's unassigned queue shows each request's name, organiser,
+// proposed dates and expected attendance (AC2). Access (AC3) is proven by the
+// SCRUM-26 role tests above; AC1/AC4's filter by the repository query-shape
+// test in tests/unit/events/assignments.service.test.js.
+const OLIVIA = "11111111-0000-0000-0000-000000000001";
+const QUEUED = {
+  id: EVENT_ID, name: "Digital Literacy for Seniors", status: "SUBMITTED", organiser_id: OLIVIA,
+  start_time: "2099-10-02T01:00:00Z", end_time: "2099-10-02T05:00:00Z", expected_attendance: 30,
+};
+
+test("[SCRUM-159] TC-SCRUM-159-01: a submitted, unassigned request reaches the Lead with its name, organiser, proposed dates and attendance", async () => {
+  repository.findSubmittedUnassigned.mockResolvedValue([QUEUED]);
+  directory.displayNameOf.mockResolvedValue("Olivia Ong");
+
+  const response = await send("/events/unassigned");
+
+  expect(response.status).toBe(200);
+  const { events } = await response.json();
+  expect(events).toEqual([expect.objectContaining({
+    name: "Digital Literacy for Seniors", organiser_name: "Olivia Ong",
+    start_time: "2099-10-02T01:00:00Z", end_time: "2099-10-02T05:00:00Z", expected_attendance: 30,
+  })]);
+  expect(directory.displayNameOf).toHaveBeenCalledWith(OLIVIA);
+});
+
+test("[SCRUM-159] TC-SCRUM-159-03/04: an organiser who cannot be named still leaves the request in the queue, and no account id is sent", async () => {
+  repository.findSubmittedUnassigned.mockResolvedValue([QUEUED]);
+  directory.displayNameOf.mockResolvedValue(null);
+
+  const response = await send("/events/unassigned");
+
+  expect(response.status).toBe(200);
+  const { events } = await response.json();
+  expect(events).toHaveLength(1);
+  expect(events[0].organiser_name).toBeNull();
+  expect(JSON.stringify(events)).not.toContain(OLIVIA);
+});
+
+test("[SCRUM-159] TC-SCRUM-159-07: once a request is assigned, the queue the Lead reads no longer contains it", async () => {
+  const waiting = { ...QUEUED, id: "aaaaaaaa-0009-0000-0000-000000000000", name: "Still waiting" };
+  repository.findSubmittedUnassigned.mockResolvedValueOnce([QUEUED, waiting]).mockResolvedValueOnce([waiting]);
+  directory.displayNameOf.mockResolvedValue("Olivia Ong");
+
+  const before = (await (await send("/events/unassigned")).json()).events.map((event) => event.id);
+  expect((await send(`/events/${EVENT_ID}/coordinator`, "event_coordinator_lead", "PUT", { coordinatorId: "coord-1" })).status).toBe(200);
+  const after = (await (await send("/events/unassigned")).json()).events.map((event) => event.id);
+
+  expect(before).toEqual([EVENT_ID, waiting.id]);
+  expect(after).toEqual([waiting.id]);
 });

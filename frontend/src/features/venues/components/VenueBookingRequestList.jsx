@@ -1,6 +1,16 @@
 import { useAuth } from "../../auth/useAuth";
 import { useState, useEffect } from "react";
-import { fetchBookingRequests } from "../../../lib/api";
+import { Link, useSearchParams } from "react-router";
+import {
+  cancelBookingRequest,
+  changeBookingRequest,
+  decideBookingRequest,
+  fetchBookingRequests,
+  fetchVenueBookingChecks,
+  fetchVenueById,
+  markVenueBookingAffected,
+} from "../../../lib/api";
+import ChipToggleGroup from "./ChipToggleGroup";
 import {
   IconAlert,
   IconArrowLeft,
@@ -8,13 +18,17 @@ import {
   IconClock,
   IconInbox,
   IconMapPin,
+  IconSearch,
   IconUsers,
+  IconCheck,
 } from "./VenueIcons";
 import { formatDate, formatDateTime } from "../venueFormat";
+import VenueBookingCheckReport from "./VenueBookingCheckReport";
 
 // SCRUM-88: submitted requests available to Venue Staff for review.
-// Approving and rejecting are a later story. This view only makes every request
-// and its details visible.
+// SCRUM-22: Venue Staff decide them here. Approving confirms every slot on the
+// request; rejecting records the decision and changes no booking, because any
+// resulting change is the Event Coordinator's to make.
 
 const SLOT_LABELS = { am: "AM", pm: "PM", night: "Night" };
 const SLOT_ORDER = ["am", "pm", "night"];
@@ -25,7 +39,7 @@ const STATUS_FILTERS = [
   { value: "confirmed", label: "Confirmed" },
   { value: "rejected", label: "Rejected" },
   { value: "cancelled", label: "Cancelled" },
-  { value: "mixed", label: "Partly decided" },
+  { value: "mixed", label: "Partly confirmed" },
 ];
 
 const STATUS_LABELS = {
@@ -33,7 +47,7 @@ const STATUS_LABELS = {
   confirmed: "Confirmed",
   rejected: "Rejected",
   cancelled: "Cancelled",
-  mixed: "Partly decided",
+  mixed: "Partly confirmed",
   unknown: "Unknown",
 };
 
@@ -58,7 +72,437 @@ function ChipsOrNone({ items }) {
   );
 }
 
-function RequestCard({ request }) {
+// SCRUM-22. Shown only to reviewers who hold bookings.decide, and only while
+// the request is still awaiting a decision.
+function DecisionPanel({ request, onDecided }) {
+  const { token } = useAuth();
+  const [isRejecting, setIsRejecting] = useState(false);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(null);
+  const [error, setError] = useState(null);
+  // SCRUM-20: a clash is kept apart from an ordinary failure, because it is an
+  // answer about the booking rather than something that went wrong.
+  const [conflict, setConflict] = useState(null);
+
+  const requestId = request.id;
+  // SCRUM-102: read during render rather than inside the handler, so the
+  // disabled state and the hint both follow what is typed.
+  const hasReason = note.trim() !== "";
+
+  function decide(decision) {
+    setBusy(decision);
+    setError(null);
+
+    decideBookingRequest(requestId, decision, note.trim() === "" ? null : note.trim(), token)
+      .then(onDecided)
+      .catch((err) => {
+        // 409 means the database refused the approval because a slot is
+        // already confirmed elsewhere. The request is untouched and still
+        // pending, so the decide buttons are replaced by a refresh rather
+        // than inviting the reviewer to try the same thing again.
+        if (err.status === 409) setConflict(err.message);
+        else setError(err.message);
+      })
+      .finally(() => setBusy(null));
+  }
+
+  // SCRUM-20: nothing was written, so the only useful next step is to look at
+  // what is actually committed now.
+  if (conflict) {
+    return (
+      <div className="v-decision">
+        <p className="v-alert v-alert-error" role="alert">
+          <IconAlert />
+          <span>{conflict}</span>
+        </p>
+        <p className="v-hint">
+          This request has not been changed and is still pending. It cannot be
+          approved while another event holds the slot.
+        </p>
+        <div className="v-decision-actions">
+          <button type="button" className="v-btn v-btn-primary" onClick={onDecided}>
+            Refresh list
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="v-decision">
+      {isRejecting && (
+        <label className="v-field">
+          {/* SCRUM-102: required on a rejection, and the same box carries the
+              suggested alternative. */}
+          <span className="v-label">Reason, and a suggested alternative if you have one</span>
+          <textarea
+            className="v-input"
+            rows="2"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="e.g. already held for another event, try Orchard Seminar Room 3"
+            required
+          />
+          <span className="v-hint">
+            {hasReason
+              ? "Shared with the coordinator, who makes any resulting booking change."
+              : "A reason is required to reject. It is shared with the coordinator, who makes any resulting booking change."}
+          </span>
+        </label>
+      )}
+
+      {error && (
+        <p className="v-alert v-alert-error" role="alert">
+          <IconAlert />
+          <span>{error}</span>
+        </p>
+      )}
+
+      <div className="v-decision-actions">
+        {isRejecting ? (
+          <>
+            <button
+              type="button"
+              className="v-btn v-btn-secondary"
+              onClick={() => { setIsRejecting(false); setNote(""); setError(null); }}
+              disabled={busy !== null}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="v-btn v-btn-danger"
+              onClick={() => decide("rejected")}
+              disabled={busy !== null || !hasReason}
+              title={hasReason ? undefined : "Type a reason first"}
+            >
+              {busy === "rejected" ? "Rejecting..." : "Confirm rejection"}
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="v-btn v-btn-secondary"
+              onClick={() => setIsRejecting(true)}
+              disabled={busy !== null}
+            >
+              <IconAlert />
+              Reject
+            </button>
+            <button
+              type="button"
+              className="v-btn v-btn-primary"
+              onClick={() => decide("confirmed")}
+              disabled={busy !== null}
+            >
+              <IconCheck />
+              {busy === "confirmed" ? "Approving..." : "Approve"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// SCRUM-145: Venue Staff mark a confirmed/pending booking as affected when the
+// venue becomes unavailable. Coordinators see the flag and the replacement flow.
+function MarkAffectedPanel({ request, token, onMarked }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const hasReason = reason.trim() !== "";
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (!hasReason) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await markVenueBookingAffected(request.id, reason.trim(), token);
+      onMarked();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return <div className="v-decision"><div className="v-decision-actions">
+      <button type="button" className="v-btn v-btn-secondary" onClick={() => setOpen(true)}>
+        <IconAlert />
+        Mark as affected
+      </button>
+    </div></div>;
+  }
+
+  return (
+    <form className="v-decision" onSubmit={handleSubmit}>
+      <label className="v-field">
+        <span className="v-label">Reason this venue is no longer suitable</span>
+        <textarea className="v-input" rows="2" value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder="e.g. Venue under maintenance on the booking date" required disabled={busy} />
+        <span className="v-hint">{hasReason
+          ? "Shared with the coordinator, who will arrange a replacement."
+          : "A reason is required. It is shared with the coordinator."}</span>
+      </label>
+      {error && <p className="v-alert v-alert-error" role="alert"><IconAlert /><span>{error}</span></p>}
+      <div className="v-decision-actions">
+        <button type="button" className="v-btn v-btn-secondary"
+          onClick={() => { setOpen(false); setReason(""); setError(null); }} disabled={busy}>Cancel</button>
+        <button type="submit" className="v-btn v-btn-danger" disabled={busy || !hasReason}
+          title={hasReason ? undefined : "Type a reason first"}>{busy ? "Marking…" : "Confirm — mark as affected"}</button>
+      </div>
+    </form>
+  );
+}
+
+// SCRUM-154. Shown only to the assigned coordinator who holds bookings.manage,
+// and only while the booking still has something live to release. Cancel is
+// final - there is no undo - so this asks for a second click before it writes
+// anything, same shape as DecisionPanel's rejection step.
+function CancelPanel({ request, onCancelled }) {
+  const { token } = useAuth();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  function cancel() {
+    setBusy(true);
+    setError(null);
+
+    cancelBookingRequest(request.id, token)
+      .then(onCancelled)
+      .catch((err) => setError(err.message))
+      .finally(() => setBusy(false));
+  }
+
+  if (!confirming) {
+    return (
+      <div className="v-decision-actions">
+        <button type="button" className="v-btn v-btn-danger" onClick={() => setConfirming(true)}>
+          Cancel this booking
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="v-decision">
+      <p className="v-alert v-alert-error" role="alert">
+        <IconAlert />
+        <span>
+          This releases the booking's period and cannot be undone. The event's other venue
+          bookings are not affected.
+        </span>
+      </p>
+      {error && (
+        <p className="v-alert v-alert-error" role="alert">
+          <IconAlert />
+          <span>{error}</span>
+        </p>
+      )}
+      <div className="v-decision-actions">
+        <button
+          type="button"
+          className="v-btn v-btn-secondary"
+          onClick={() => { setConfirming(false); setError(null); }}
+          disabled={busy}
+        >
+          Never mind
+        </button>
+        <button type="button" className="v-btn v-btn-danger" onClick={cancel} disabled={busy}>
+          {busy ? "Cancelling..." : "Confirm cancellation"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function toggleItem(list, item) {
+  return list.includes(item) ? list.filter((existing) => existing !== item) : [...list, item];
+}
+
+// SCRUM-154 AC2. Shown only to the assigned coordinator, and only while the
+// booking still has something live to change. Slot selection is out of scope
+// by decision: moving the date carries the booking's existing slots over
+// unchanged, so there is nothing to pick here - only a date field, plus the
+// same non-slot fields the create form offers.
+function EditPanel({ request, onChanged }) {
+  const { token } = useAuth();
+  const [editing, setEditing] = useState(false);
+  const [venueDetail, setVenueDetail] = useState(null);
+  const [venueError, setVenueError] = useState(null);
+
+  const [bookingDate, setBookingDate] = useState(request.booking_date);
+  const [attendees, setAttendees] = useState(String(request.expected_attendees));
+  const [roomLayout, setRoomLayout] = useState(request.room_layout);
+  const [facilities, setFacilities] = useState(request.required_facilities || []);
+  const [accessibility, setAccessibility] = useState(request.accessibility_requirements || []);
+  const [additional, setAdditional] = useState(request.additional_requirements || "");
+
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!editing || venueDetail || venueError) return;
+    fetchVenueById(request.venue.id, token)
+      .then(setVenueDetail)
+      .catch((err) => setVenueError(err.message));
+  }, [editing, venueDetail, venueError, request.venue.id, token]);
+
+  function startEditing() {
+    setBookingDate(request.booking_date);
+    setAttendees(String(request.expected_attendees));
+    setRoomLayout(request.room_layout);
+    setFacilities(request.required_facilities || []);
+    setAccessibility(request.accessibility_requirements || []);
+    setAdditional(request.additional_requirements || "");
+    setError(null);
+    setEditing(true);
+  }
+
+  function save() {
+    setBusy(true);
+    setError(null);
+
+    changeBookingRequest(request.id, {
+      booking_date: bookingDate,
+      expected_attendees: Number(attendees),
+      room_layout: roomLayout,
+      required_facilities: facilities,
+      accessibility_requirements: accessibility,
+      additional_requirements: additional.trim() === "" ? null : additional.trim(),
+    }, token)
+      .then(() => { setEditing(false); onChanged(); })
+      .catch((err) => setError(err.message))
+      .finally(() => setBusy(false));
+  }
+
+  if (!editing) {
+    return (
+      <div className="v-decision-actions">
+        <button type="button" className="v-btn v-btn-secondary" onClick={startEditing}>
+          Edit this booking
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="v-decision">
+      <p className="v-hint">Saving sends this booking back to Venue Staff for review.</p>
+
+      {venueError && (
+        <p className="v-alert v-alert-error" role="alert">
+          <IconAlert />
+          <span>Could not load this venue's requirements: {venueError}</span>
+        </p>
+      )}
+      {error && (
+        <p className="v-alert v-alert-error" role="alert">
+          <IconAlert />
+          <span>{error}</span>
+        </p>
+      )}
+
+      {!venueDetail && !venueError && <p className="v-loading-line">Loading venue requirements...</p>}
+
+      {venueDetail && (
+        <div className="v-form-grid">
+          <label className="v-field">
+            <span className="v-label">Date</span>
+            <input
+              className="v-input"
+              type="date"
+              value={bookingDate}
+              onChange={(e) => setBookingDate(e.target.value)}
+            />
+          </label>
+
+          <label className="v-field">
+            <span className="v-label">Expected attendees</span>
+            <input
+              className="v-input"
+              type="number"
+              min="1"
+              max={venueDetail.capacity}
+              value={attendees}
+              onChange={(e) => setAttendees(e.target.value)}
+            />
+          </label>
+
+          <label className="v-field">
+            <span className="v-label">Room layout</span>
+            <select
+              className="v-input"
+              value={roomLayout}
+              onChange={(e) => setRoomLayout(e.target.value)}
+            >
+              {venueDetail.room_layouts.map((layout) => (
+                <option key={layout} value={layout}>{layout}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+
+      {venueDetail && (
+        <>
+          <ChipToggleGroup
+            legend="Facilities needed"
+            options={venueDetail.facilities}
+            selected={facilities}
+            onToggle={(item) => setFacilities((current) => toggleItem(current, item))}
+            emptyLabel="None recorded for this venue"
+          />
+          <ChipToggleGroup
+            legend="Accessibility needed"
+            options={venueDetail.accessibility_features}
+            selected={accessibility}
+            onToggle={(item) => setAccessibility((current) => toggleItem(current, item))}
+            emptyLabel="None recorded for this venue"
+          />
+
+          <label className="v-field">
+            <span className="v-label">Anything else Venue Staff should know</span>
+            <textarea
+              className="v-input"
+              rows="3"
+              value={additional}
+              onChange={(e) => setAdditional(e.target.value)}
+            />
+          </label>
+        </>
+      )}
+
+      <div className="v-decision-actions">
+        <button
+          type="button"
+          className="v-btn v-btn-secondary"
+          onClick={() => setEditing(false)}
+          disabled={busy}
+        >
+          Discard changes
+        </button>
+        <button
+          type="button"
+          className="v-btn v-btn-primary"
+          onClick={save}
+          disabled={busy || !venueDetail}
+        >
+          {busy ? "Saving..." : "Save changes"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RequestCard({ request, canDecide, canManage, canManageReplacement, onDecided, onCancelled, onChanged, token }) {
   const hasTiming = Boolean(request.event.start_time && request.event.end_time);
 
   return (
@@ -78,6 +522,16 @@ function RequestCard({ request }) {
           {STATUS_LABELS[request.status] || request.status}
         </span>
       </header>
+      {request.replaces_booking_id && (
+        <p className="v-alert" role="status">Replacement request for affected booking {request.replaces_booking_id}.</p>
+      )}
+      {request.is_affected && (
+        <div className="v-alert v-alert-error" role="status" style={{ borderLeft: "4px solid #ef4444", margin: "8px 0", padding: "8px" }}>
+          <strong>Venue arrangement unresolved</strong>
+          <p>{request.affected_reason ? `Reason: ${request.affected_reason}` : "The booked venue has become unavailable."}</p>
+          {canManageReplacement && <Link className="v-btn v-btn-secondary" to={`/venues/booking-requests/${request.id}/replacement`}>Find replacement venue</Link>}
+        </div>
+      )}
 
       <div className="v-request-body">
         {/* SCRUM-86: what was asked for, next to when the event actually runs */}
@@ -121,6 +575,12 @@ function RequestCard({ request }) {
 
         <div className="v-request-requirements">
           <div>
+            <p className="v-subheading">Purpose</p>
+            <p className={request.purpose ? "v-notes" : "v-none"}>
+              {request.purpose || "Not recorded"}
+            </p>
+          </div>
+          <div>
             <p className="v-subheading">Facilities</p>
             <ChipsOrNone items={request.required_facilities} />
           </div>
@@ -137,6 +597,38 @@ function RequestCard({ request }) {
         </div>
       </div>
 
+      {/* SCRUM-22: only pending requests are still open to a decision */}
+      {canDecide && request.status === "pending" && (
+        <div className="v-request-body">
+          <DecisionPanel request={request} onDecided={onDecided} />
+        </div>
+      )}
+
+      {canDecide && !request.is_affected && ["pending", "confirmed"].includes(request.status) && (
+        <div className="v-request-body">
+          <MarkAffectedPanel request={request} token={token} onMarked={onDecided} />
+        </div>
+      )}
+
+      {/* SCRUM-154: only the assigned coordinator, and only while live */}
+      {canManage && ["pending", "confirmed"].includes(request.status) && (
+        <div className="v-request-body">
+          <EditPanel request={request} onChanged={onChanged} />
+          <CancelPanel request={request} onCancelled={onCancelled} />
+        </div>
+      )}
+
+      {request.decided_at && (
+        <div className="v-request-body">
+          <p className="v-subheading">Decision</p>
+          <p className="v-fact-value">
+            {STATUS_LABELS[request.status] || request.status} on{" "}
+            {formatDateTime(request.decided_at)}
+          </p>
+          {request.decision_note && <p className="v-notes">{request.decision_note}</p>}
+        </div>
+      )}
+
       <footer className="v-request-footer">
         <span>Submitted {formatDateTime(request.submitted_at)}</span>
         <span>
@@ -148,22 +640,58 @@ function RequestCard({ request }) {
 }
 
 function VenueBookingRequestList({ onBack }) {
-  const { token } = useAuth();
-  const [status, setStatus] = useState("pending");
+  const { token, hasPermission } = useAuth();
+  const [searchParams] = useSearchParams();
+  const eventId = searchParams.get("event") || searchParams.get("event_id");
+  const canDecide = hasPermission("bookings.decide");
+  const canManage = hasPermission("bookings.manage");
+  const canManageReplacement = hasPermission("bookings.request");
+  const [status, setStatus] = useState(eventId ? "" : "pending");
   const [result, setResult] = useState(null);
-  const queryKey = JSON.stringify([status, token]);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const queryKey = JSON.stringify([status, eventId, token, refreshKey]);
   const current = result?.key === queryKey;
   const requests = current ? result.requests : [];
   const isLoading = !current;
   const error = current ? result.error : null;
 
+  // SCRUM-138: the per-venue check report. It is asked for on demand, not
+  // fetched with the list, and starts empty so nothing is checked until the
+  // coordinator asks for it.
+  const [check, setCheck] = useState(null);
+
+  async function autoMarkFailed(report) {
+    const toMark = (report.results || []).filter((result) => result.overall === "failed" && result.booking_id
+      && requests.some((request) => request.id === result.booking_id && !request.is_affected));
+    if (toMark.length === 0) return;
+    await Promise.allSettled(toMark.map((result) => {
+      const reasons = [
+        ...(result.suitability?.reasons || []),
+        ...(result.availability?.reasons || []),
+        ...(result.conflicts?.reasons || []),
+      ];
+      return markVenueBookingAffected(result.booking_id, reasons.join("; ") || "Venue booking check failed", token);
+    }));
+    setRefreshKey((key) => key + 1);
+  }
+
+  function runCheck() {
+    setCheck({ status: "loading" });
+    fetchVenueBookingChecks(eventId, token)
+      .then(async (report) => {
+        setCheck({ status: "ready", report });
+        await autoMarkFailed(report);
+      })
+      .catch((err) => setCheck({ status: "error", message: err.message }));
+  }
+
   useEffect(() => {
     let active = true;
-    fetchBookingRequests({ status }, token)
+    fetchBookingRequests({ status, eventId }, token)
       .then((requests) => { if (active) setResult({ key: queryKey, requests }); })
       .catch((err) => { if (active) setResult({ key: queryKey, requests: [], error: err.message }); });
     return () => { active = false; };
-  }, [status, token, queryKey]);
+  }, [status, eventId, token, queryKey]);
 
   return (
     <div className="venue-booking-requests">
@@ -175,7 +703,9 @@ function VenueBookingRequestList({ onBack }) {
       <header className="v-page-header">
         <div>
           <p className="v-eyebrow">For Venue Staff to review</p>
-          <h1 className="v-title">Venue booking requests</h1>
+          <h1 className="v-title">
+            {eventId ? "Venue bookings for this event" : "Venue booking requests"}
+          </h1>
           <p className="v-subtitle">
             Requests submitted by event coordinators, with the event timing and
             venue requirements needed to assess them.
@@ -186,8 +716,9 @@ function VenueBookingRequestList({ onBack }) {
           Show
           <select
             className="v-input"
-            value={status}
+            value={eventId ? "" : status}
             onChange={(e) => setStatus(e.target.value)}
+            disabled={Boolean(eventId)}
           >
             {STATUS_FILTERS.map((filter) => (
               <option key={filter.value} value={filter.value}>
@@ -197,6 +728,53 @@ function VenueBookingRequestList({ onBack }) {
           </select>
         </label>
       </header>
+
+      {/* SCRUM-138: one event's bookings, each checked on its own. Shown only
+          in the event-scoped view, which is the only place the event is known. */}
+      {eventId && (
+        <section className="v-check-report" aria-labelledby="venue-check-heading">
+          <div className="v-check-report-bar">
+            <div>
+              <h2 id="venue-check-heading" className="v-subheading">
+                Check each venue booking
+              </h2>
+              <p className="v-hint">
+                Suitability, availability and conflicts are checked separately for every venue on
+                this event. Checking changes nothing.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="v-btn v-btn-secondary"
+              onClick={runCheck}
+              disabled={check?.status === "loading"}
+            >
+              <IconSearch />
+              {check?.status === "loading" ? "Checking..." : "Check venue bookings"}
+            </button>
+          </div>
+
+          {check?.status === "loading" && (
+            <p className="v-hint" role="status">
+              Checking this event's venue bookings...
+            </p>
+          )}
+
+          {check?.status === "error" && (
+            <>
+              <p className="v-alert v-alert-error" role="alert">
+                <IconAlert />
+                <span>Could not check the venue bookings: {check.message}</span>
+              </p>
+              <button type="button" className="v-btn v-btn-secondary" onClick={runCheck}>
+                Try again
+              </button>
+            </>
+          )}
+
+          {check?.status === "ready" && <VenueBookingCheckReport report={check.report} />}
+        </section>
+      )}
 
       {error && (
         <p className="v-alert v-alert-error" role="alert">
@@ -234,7 +812,17 @@ function VenueBookingRequestList({ onBack }) {
           </p>
           <div className="v-request-list">
             {requests.map((request) => (
-              <RequestCard key={request.id} request={request} />
+              <RequestCard
+                key={request.id}
+                request={request}
+                canDecide={canDecide}
+                canManage={canManage}
+                canManageReplacement={canManageReplacement}
+                token={token}
+                onDecided={() => setRefreshKey((key) => key + 1)}
+                onCancelled={() => setRefreshKey((key) => key + 1)}
+                onChanged={() => setRefreshKey((key) => key + 1)}
+              />
             ))}
           </div>
         </>

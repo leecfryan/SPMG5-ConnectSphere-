@@ -45,9 +45,8 @@ column is a copy of a line you can read in the terminal.
 > subtask claims it. `SCRUM-46/47` tags the two tests that walk all four optional
 > text fields in one loop, which spans both subtasks.
 >
-> **`US-13` is the one label here that is not a Jira key.** The draft story has
-> not been raised on the board, so the eight `validateDraft` tests keep the
-> phase-one list's number until it is. Relabel them when the issue exists — see §7.
+> **The draft tests carry `SCRUM-147`.** They were labelled `US-13 (deferred)` until the draft story was raised
+> on the board; SCRUM-147 relabelled them and built drafts. §10 is its record.
 
 ---
 
@@ -80,8 +79,8 @@ happy path → cross-cutting → negative → boundary. IDs below are prefixed a
 | Happy path | 11 | ER-H01–H11 |
 | Negative | 20 | ER-N01–N20, plus the 2 supporting cases named at the end of §4.3 |
 | Boundary | 23 | ER-B01–B23 — heaviest by design; every rule in the validation contract has a threshold |
-| Cross-cutting | **0** | Auth/permissions land with the merge — see §7 |
-| Deferred (US-13, not yet in Jira) | 8 | ER-D01–D08 — `validateDraft` is tested but **called by nothing**, see §7 |
+| Cross-cutting | **0 in the original catalog** | Auth/permissions are covered by the merged HTTP integration tests in `tests/integration/events.submit.test.js` |
+| SCRUM-147 (drafts) | 8 | ER-D01–D08 — `validateDraft`, now called when a draft is saved; see §7 and §10 |
 | **Total** | **64** | 62 with an ER id + the 2 supporting cases. This is the backend suite only; the 16 frontend cases are counted separately in §6 |
 
 **A test case may cover several data points.** Fourteen of the tests below are
@@ -310,13 +309,12 @@ field mapping and lifecycle ownership — `WRITABLE_COLS` in, row out — and th
 no value at which its behaviour changes. Its four tests are happy-path and negative
 only, and that is the correct shape for the layer.
 
-**There are no cross-cutting tests, because there is nothing yet to cross.**
-`POST /api/events` is deliberately unguarded: `feature/SignIn` owns `requireAuth`
-and `requirePermission`, and this lane intentionally did not write a second set.
-`events.controller.js` carries a hardcoded `DEV_ORGANISER_ID` behind a `TODO` for
-the same reason. Authentication, authorisation and ownership tests arrive with the
-merge, and **until then a green suite here is not evidence the endpoint is secure.**
-It is evidence the validation contract holds.
+**The original 64-case catalog has no cross-cutting cases.** The merged
+`tests/integration/events.submit.test.js` now covers authentication, role
+authorization, and verified ownership over HTTP. The controller obtains
+`organiser_id` from the verified `req.user.id`; it does not use a placeholder.
+The historical unit cases below continue to record the original validation and
+repository contract.
 
 **SCRUM-50 is proven indirectly.** "Available for coordinator assignment and
 subsequent review" is satisfied by the shape of the stored row: `status = SUBMITTED`,
@@ -327,28 +325,20 @@ branch had no endpoint in front of it. **That endpoint has since arrived with
 SCRUM-26 (Assign Event Coordinator)**, and its 77 cases are catalogued in
 [coordinator assignment tests](event-assignment-tests.md).
 
-**Eight tests cover deferred work, under the one label that is not a Jira key.**
-`validateDraft` is implemented and tested but **called by nothing** — the submit
-path runs `validateForSubmission`. Those tests are named `US-13 (deferred):`
-precisely so nobody reads their presence as evidence that drafts work.
-
-US-13 (save & continue a draft) is out of phase one and **has not been raised in
-Jira**: the board holds SCRUM-23, SCRUM-25 and SCRUM-26 under epic SCRUM-7, and
-nothing for drafts. The phase-one list's number is therefore the only identifier
-these tests can carry today. **When the story is created, relabel these eight tests
-and this table to its key** — it is the one piece of traceability in this document
-that does not yet point at the board.
+**The eight `validateDraft` tests are SCRUM-147's now.** They were written in phase one, named `US-13 (deferred)`
+and called by nothing. SCRUM-147 relabelled them and calls `validateDraft` whenever a draft is saved; the draft
+story's own cases are in §10.
 
 | ID | Rule proven about `validateDraft` | Automated test |
 | --- | --- | --- |
-| ER-D01 | A name alone is a valid draft | `US-13 (deferred): a name alone is enough for a draft` |
-| ER-D02 | A draft still requires a name | `US-13 (deferred): a draft still requires a name` |
-| ER-D03 | The 200-char name cap applies to drafts too | `US-13 (deferred): an over-long draft name is rejected` |
-| ER-D04 | Purpose and description are not required | `US-13 (deferred): purpose and description are not required for a draft` |
-| ER-D05 | Neither timestamp is required | `US-13 (deferred): a draft needs neither start_time nor end_time` |
-| ER-D06 | A non-string optional field is rejected | `US-13 (deferred): a non-string optional field is rejected` |
-| ER-D07 | Null / undefined optional fields are ignored | `US-13 (deferred): null / undefined optional fields are ignored` |
-| ER-D08 | Optional text cap holds at 2000 / 2001 | `US-13 (deferred) boundary: draft optional text at 2000 / 2001 characters` |
+| ER-D01 | A name alone is a valid draft | `SCRUM-147: a name alone is enough for a draft` |
+| ER-D02 | A draft still requires a name | `SCRUM-147: a draft still requires a name` |
+| ER-D03 | The 200-char name cap applies to drafts too | `SCRUM-147: an over-long draft name is rejected` |
+| ER-D04 | Purpose and description are not required | `SCRUM-147: purpose and description are not required for a draft` |
+| ER-D05 | Neither timestamp is required | `SCRUM-147: a draft needs neither start_time nor end_time` |
+| ER-D06 | A non-string optional field is rejected | `SCRUM-147: a non-string optional field is rejected` |
+| ER-D07 | Null / undefined optional fields are ignored | `SCRUM-147: null / undefined optional fields are ignored` |
+| ER-D08 | Optional text cap holds at 2000 / 2001 | `SCRUM-147 boundary: draft optional text at 2000 / 2001 characters` |
 
 The draft cap matches submission deliberately: a request captured early must not
 become unsavable later because a free-text field was allowed to grow past the limit
@@ -385,7 +375,8 @@ real Supabase instance to close that gap.
    showing the event name, formatted start time, a `Submitted` badge and the row's
    uuid as the reference.
 3. **Confirm the row in Supabase.** `status = 'SUBMITTED'`, `submitted_at` set,
-   `coordinator_id` null, `organiser_id` the `DEV_ORGANISER_ID` placeholder.
+   `coordinator_id` null, and `organiser_id` matching the authenticated
+   Event Organiser's verified user id.
 4. **Confirm the new column does not break inserts.** Registration added
    `registration_fields` to `events` without notice. Writes go through the explicit
    `WRITABLE_COLS` list, so an unknown column cannot break them — verify rather than
@@ -400,7 +391,7 @@ real Supabase instance to close that gap.
    exactly this, because the server reads a zoneless string in its own zone (UTC in
    Docker).
 8. **Delete the test rows.** The database is shared across all four lanes. Remove
-   anything created above, plus the dev-era `organiser_id = 00000000-…0001` rows.
+   anything created above and any identified legacy test rows.
 
 ---
 
@@ -430,7 +421,183 @@ real Supabase instance to close that gap.
 - **SCRUM-49/50/51 are still `To Do` while the code that satisfies them is written
   and green.** SCRUM-25 shows 0% of subtasks done. Move them when the branch merges,
   or the board understates the lane.
-- **US-13 has no Jira issue** — see §7.
 - The exact `CHECK` constraint on `events.status`, which was widened or dropped by
   another lane without a migration — `APPROVED` is now in use and the constraint's
   current definition is unverified.
+
+---
+
+## 10. SCRUM-147 — Save and continue a draft event request
+
+> As an Event Organiser, I want to save an incomplete event request as a draft so that I can return later and
+> continue editing it before submission.
+>
+> 1. An organiser can save an incomplete event request as a draft.
+> 2. Required fields are only enforced on submission.
+> 3. The organiser can view their drafts, continue editing and submit them.
+> 4. Drafts are only visible to the organiser who created them.
+
+Source: *Week 4 Project Instructions*, *Draft Event Requests*. Clarification #116: no retention period. Expected
+values come from the AC: "incomplete" means only the name (the one `NOT NULL` form column), and "only visible to
+the organiser" includes colleagues in the same client organisation, who otherwise share request visibility
+(SCRUM-100).
+
+**Latest execution:** TC-01 to 14: 2026-10-19 · pass · local, Javen (agent run). TC-15: 2026-10-19 · pass ·
+local, shared dev database (run by Javen; `npm --prefix tests/e2e test -- draft-request`). Backend 1086 passed; frontend 496
+passed; Playwright 197 passed, 1 failed (`VENUE-E2E-001`, Venue lane, unrelated and already failing on `staging`).
+
+### 10.1 Test case specifications
+
+| ID | AC | Type | Pre-condition → action | Expected | Automated tests |
+| --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-147-01 | 1 | Happy | Organiser sends only a name (plus a forged `status`/`organiser_id`) | 201; `DRAFT`, owned by the verified caller, no `submitted_at` | `SCRUM-147-UNIT-001`, `-REPO-001`, `-API-002`; `DRAFT-API-001`; `SCRUM-147-UI-004`; `E2E-DRAFT-001` |
+| TC-SCRUM-147-02 | 1 | Negative | Save with no name, a blank name, or only other fields | 400 naming `name`; nothing saved; error shown against the name | `SCRUM-147-UNIT-002`, `-API-003`, `-UI-005`; ER-D02 |
+| TC-SCRUM-147-03 | 2 | Happy | Save with a past start, end before start, blank required fields, reversed registration window | Saved; no submission rule applied | `SCRUM-147-UNIT-003`, `-UI-011`; ER-D04, ER-D05 |
+| TC-SCRUM-147-04 | 2 | Boundary | Save with an unreadable date and attendance `0` | 400 for those two fields only | `SCRUM-147-UNIT-004` |
+| TC-SCRUM-147-05 | 2 | Negative | Submit a draft missing required fields, or whose edit blanks one | 400 listing every missing field; draft stays `DRAFT`; each field highlighted; form stays open | `SCRUM-147-UNIT-008`, `-UNIT-011`, `-API-009`, `-UI-008`; `DRAFT-API-001`; `E2E-DRAFT-001` |
+| TC-SCRUM-147-06 | 3 | Happy | Organiser opens *My event requests* | *Your drafts* lists own drafts newest first, apart from submitted requests; empty state when none | `SCRUM-147-REPO-002`, `-API-004`, `-UI-001`, `-UI-002`; `E2E-DRAFT-001` |
+| TC-SCRUM-147-07 | 3 | Happy | Open a draft (`/events/new?draft=<id>`), including after a refresh | Form pre-filled; event and registration times in local time | `SCRUM-147-API-005`, `-UI-006`; `E2E-DRAFT-001` |
+| TC-SCRUM-147-08 | 3 | Happy / negative | Edit and *Save draft*; then clear the name | Same draft updated (no new row), cleared fields cleared; clearing the name → 400, nothing written | `SCRUM-147-UNIT-005`, `-UNIT-006`, `-REPO-004`, `-API-008`, `-UI-006` |
+| TC-SCRUM-147-09 | 3 | Happy | Complete the draft and submit | `SUBMITTED` with `submitted_at`, edits included, same id; leaves *Your drafts*; appears with submitted requests; "Submit another request" starts a blank form | `SCRUM-147-UNIT-009`, `-UNIT-010`, `-REPO-005`, `-API-010`, `-UI-007`; `DRAFT-API-001`; `E2E-DRAFT-001` |
+| TC-SCRUM-147-10 | 4 | Security | A colleague in the same company lists, opens, edits and submits the owner's draft, by API and by URL | Empty list; 404 "Draft not found." each time; no form; draft unchanged | `SCRUM-147-UNIT-007`, `-API-004`, `-API-006`, `-UI-009`; `DRAFT-API-002`; `E2E-DRAFT-001` |
+| TC-SCRUM-147-11 | 4 | Security | Colleague and owner read the organisation workspace list and detail | No `DRAFT` row for either; detail 404 | `SCRUM-147-UNIT-013`; `DRAFT-API-002`; `E2E-DRAFT-001` |
+| TC-SCRUM-147-12 | 4 | Security | Attendee, venue staff, technical support, coordinator, coordinator lead, safety officer; no token; forged token | 403 / 401 on all five routes; nothing read or written | `SCRUM-147-API-001`; `DRAFT-API-003`…`-007` |
+| TC-SCRUM-147-13 | 3 | Conflict | The draft is submitted or changed between the read and the write; then edited again | 409; afterwards 404 (no longer a draft) | `SCRUM-147-UNIT-012`, `-API-011`; `DRAFT-API-001` |
+| TC-SCRUM-147-14 | — | Failure | Malformed id; storage error; storage not configured; slow and failed loads in the UI; no session | 400 "Invalid draft id."; 500 safe message (no database detail); 503; loading and error states, buttons locked while saving; nothing sent without a session | `SCRUM-147-API-007`, `-API-012`, `-API-013`, `-REPO-006`, `-UI-003`, `-UI-010`, `-SERVICE-001`…`-003` |
+| TC-SCRUM-147-15 | 1, 4 | Live DB | Real Supabase: throwaway organiser saves a name-only draft, reads the workspace, edits, submits | Row stored `DRAFT` with every other form column and `submitted_at` null; absent from the workspace list; then `SUBMITTED` with `submitted_at` set; rows and account deleted afterwards | `LIVE-DRAFT-001` (`tests/e2e/draft-request.spec.js`) |
+
+### 10.2 Coverage
+
+`drafts.controller.js` and the draft functions in `events.service.js` / `events.repository.js`: 100% lines and
+branches. `DraftList.jsx`, `EventRequestPage.jsx` and the SCRUM-147 parts of `EventRequestForm.jsx`: 100% lines
+and functions; the remaining branch entries are V8's JSX conditional counting.
+
+**Test review.** Removing the workspace `DRAFT` filter fails `DRAFT-API-002` and `E2E-DRAFT-001`; applying the
+registration-window check to draft saves fails `SCRUM-147-UI-011`.
+
+### 10.3 Not built
+
+Deleting a draft, auto-save, and draft expiry (#116) are outside the AC.
+
+**Why one live test.** It is the only check that the real `events` table accepts a draft with only a name and that
+PostgREST's `neq` filter really hides `DRAFT` rows from the workspace — both depend on the real schema, which the
+fakes cannot prove.
+
+## SCRUM-117 Task 2 — return for changes
+
+Scope: AC1 and the saved-message display portion of AC3. Notification delivery,
+resubmission and difference presentation are covered in the later sections below; this table describes Task 2 only.
+
+| Source tests | Observable outcome |
+| --- | --- |
+| SCRUM-117-API-001–007 in backend/tests/integration/events.review.test.js | Assigned coordinator only, UNDER_REVIEW only, required note, trusted actor, duplicate/stale refusals, safe storage failure, cancellation and postponement by the assigned coordinator only (SCRUM-171, SCRUM-170). Denials assert unchanged state. |
+| SCRUM-117-API-008 in backend/tests/integration/eventWorkspace.test.js | Returned request remains visible; lead reassignment returns 409 and leaves stored events unchanged. |
+| SCRUM-117-UNIT-001 in lifecycle.test.js | Returned requests count in workload but are neither assignable nor planning eligible. |
+| SCRUM-117-UNIT-002 in eventWorkspace.service.test.js | Saved note is readable without leaking stored snapshots/actor details. |
+| SCRUM-117-UNIT-003–004 in clarification.repository.test.js | Exact atomic RPC arguments, no-row conflict and storage error handling. |
+| SCRUM-117-UNIT-005 in review.service.test.js | Deletion before the atomic return is not found. |
+| SCRUM-117-UI-001–004 in EventDecisionControls.test.jsx | Required note, correct API call, retained input on error, state visibility and duplicate-click prevention. |
+| SCRUM-117-UI-005–006 in EventWorkspaceDetailPage.test.jsx | Organiser reads the note after refresh; permitted cancellation/postponement; no reassignment/approval while returned. |
+| E2E-CLARIFICATION-001 in tests/playwright/clarification.browser.spec.cjs | Real local UI/API return journey, reload, organiser sign-in/read, retained coordinator, one history entry and 375px layout. |
+
+Run from the repository root using installed dependencies:
+
+```sh
+npm --prefix backend run test:events -- tests/unit/events tests/integration/events.review.test.js tests/integration/eventWorkspace.test.js --pool=threads --maxWorkers=1
+npm --prefix frontend test -- --run src/features/events --maxWorkers=1 --reporter=default
+npm run test:playwright -- tests/playwright/clarification.browser.spec.cjs --reporter=list
+```
+
+Expected: all selected tests pass; a nonzero exit requires investigation. These tests use
+local storage substitutes, not deployed Supabase. They do not prove the installed SQL's
+transaction/locking behavior. Human UAT remains Not Executed. Formal execution logs and
+coverage reports are kept in Ryan's external ConnectSphere 2 workspace.
+
+The existing workload/cancellation/postponement query-shape tests now include
+CHANGES_REQUESTED to match Ryan's explicit rules; their assertions were retained.
+
+## SCRUM-117 Task 3 — organiser notification
+
+AC2: The Event Organiser is notified, with the coordinator's message and a link to the request.
+
+| Source ID | Layer | Observable result |
+| --- | --- | --- |
+| SCRUM-117-N01 | Automated worker unit | Saved owner receives the exact message/path and workflow; successful delivery clears pending work. |
+| SCRUM-117-N02 | Automated worker unit | Provider failure retains pending work; recovery sends the identical payload and idempotency ID. |
+| SCRUM-117-N03 | Automated worker unit | Separate return cycles produce separate notices without overwriting the earlier message. |
+| E2E-CLARIFICATION-002 | Automated isolated browser | Owner reads a worker-emitted notice, clicks it and sees the request message at 375px; duplicate return adds no notice and unrelated users receive none. |
+| SCRUM-117-S01–S05 | Automated local PostgreSQL | Exact documented SQL proves denied-input isolation, recipient/message/link, separate cycles, rollback and browser-role restrictions. |
+
+Commands from repository root:
+- Worker regression: `npm --prefix backend run test:events -- tests/unit/notifications tests/integration/notifications.delivery.test.js tests/integration/notifications.assignment.test.js --maxWorkers=1 --reporter=dot`.
+- Frontend: `npm --prefix frontend test -- --run src/features/notifications/NotificationCentre.test.jsx --maxWorkers=1 --reporter=default`.
+- Browser regression: `npm run test:playwright -- tests/playwright/clarification.browser.spec.cjs tests/playwright/assignment-notifications.browser.spec.cjs tests/playwright/notifications.browser.spec.cjs --reporter=list`.
+- SQL: `node tests/sql/run-assignment-notifications.cjs --clarification` with Docker running and the cached postgres:17-alpine image. Never run fixture SQL in Supabase.
+
+All commands return zero on success. SQL prints CLARIFICATION SQL ASSERTIONS PASSED; Vitest and Playwright show passed totals. Investigate named failures before rerunning. No installation is required. Execution logs and coverage remain outside the repository in Ryan's ChatGPT workspace. These checks do not verify deployed Novu templates or shared Supabase schema; manual UAT remains Not Executed.
+
+Executed by Codex on 22 Oct 2026: focused worker regression 40/40, inbox frontend 25/25, related browser regression 10/10, and all five local SQL scenarios passed. Four verification gates met. Earlier failing tests caught missing router integration; the final browser assertion requires the actual request page to render, not just a changed URL.
+
+Final broader regression on 22 Oct 2026: frontend 548/548 across 52 files and isolated Playwright 210/210 passed. All 12 statements and recorded branch arms in NotificationCentrePage are covered. Frontend build passed. Backend source/test lint passed excluding existing generated .vitest UI assets; the plain command encounters those assets. Frontend lint reports zero errors and one existing generated coverage-file warning. Full backend regression and Docker image builds were not repeated for this slice; live cloud UAT is pending. Full execution details and changed-file list are in the external SCRUM-117-task3-review.md.
+
+
+Test pruning requested by Ryan on 22 Oct 2026: removed the redundant SCRUM-117-N04 router-callback component test and three screenshot captures. E2E-CLARIFICATION-002 retains the stronger proof that clicking the actual notification renders the request and its message. Other acceptance and failure-path tests remain. Counts above describe historical runs before this pruning.
+
+## SCRUM-117 resubmission acceptance checks
+
+| Source ID | Acceptance criterion / risk | Observable result |
+| --- | --- | --- |
+| SCRUM-117-R01 | Organiser resubmits; same coordinator; coordinator sees changes | Save leaves returned status; resubmit moves to UNDER_REVIEW, queues one coordinator notice, duplicate is refused and later edits do not alter history. Organiser responses omit comparison values. |
+| SCRUM-117-R02 | Only the responsible organiser can resubmit | Anonymous, wrong-role, unrelated and same-company non-owner attempts leave status, history and queue unchanged. |
+| SCRUM-117-R03 | Valid resubmission before review proceeds | Invalid body, stale cycle, postponed request and invalid saved requirements refuse without a new notice/history. |
+| SCRUM-117-R04 | All request details editable; no-change resubmission allowed | Partial registration edits validate the whole saved window; unchanged resubmission succeeds with an empty comparison. |
+| RSQL01–05 in tests/sql/resubmission.assertions.sql | Database semantics supporting the AC | Real PostgreSQL rejects stale expected values/cycles/owners, compares all twelve fields, preserves snapshots and assignment, emits exact notice once, handles equivalent timestamps/clearing/reverts, rolls back failed queues and denies browser execution. |
+| E2E-CLARIFICATION-002 | Full cross-role AC journey | Owner opens notice, edits attendance/layout, saves then resubmits; retained coordinator opens their notice and sees exactly those two before/after changes at 375px. |
+| SCRUM-117-UI-R01–02 | Organiser can recover from failed resubmission | Conflict remains retryable; validation identifies details to correct; successful retry reloads. |
+
+Run the existing local SQL command with --clarification, the focused browser spec, and backend eventWorkspace.test.js. SQL must print RESUBMISSION SQL ASSERTIONS PASSED. Frontend and backend runners must exit zero with no failed tests. No decorative UI assertions were added.
+
+Manual UAT remains Not Executed until Ryan runs the completed workflow: return an assigned UNDER_REVIEW request with a message; owner opens the inbox link, edits and saves; verify it remains Changes requested; resubmit; verify Under review with the same coordinator; coordinator opens the new inbox notice and checks before/after fields. Also resubmit a second cycle without edits and expect No request fields changed. SQL/workflow setup is reported complete; this is not evidence of live delivery for the new action.
+
+Final local verification, 22 October 2026: full backend Vitest 1158/1158 (live suites excluded), separate Auth 29/29 and equipment 68/68; frontend 549/549; Playwright 210/210; local SQL and production build passed. After final acceptance-case additions, focused backend 448/448 and frontend 252/252 passed. Four acceptance gates met. Source lint passes; backend command excludes pre-existing generated .vitest assets. No Docker application image builds or shared-cloud tests were run. Detailed logs/coverage and coverage limitations are in Ryan's external SCRUM-117-final-review.md.
+
+Additional cases: SCRUM-117-R05 proves outage and concurrent-save refusal without partial resubmission; SCRUM-117-N02 parameterises retry for both workflow identifiers. SCRUM-117-UI-R03/R04 prove stored dates, cleared values, safe text and the latest no-change cycle.
+
+LIVE-CLARIFICATION-001 in tests/e2e/clarification-request.spec.js checks the installed PostgREST RPCs, retained coordinator, saved attendance and immutable request/resubmission history using disposable accounts/request. The late pending-outbox assertion was removed on 30 October 2026 because another delivery worker may legitimately consume its rows. Exact notification workflow, recipient, payload, deduplication and rollback assertions remain in the existing disposable PostgreSQL clarification/resubmission suites; CI runs these with --venue-holds --clarification. This narrows the live case: it no longer certifies queue insertion in the shared installation or actual Novu delivery. Those claims must not be inferred from its result. The updated live case remains Not Executed by the agent. User only: notify teammates, then run npm --prefix tests/e2e test -- clarification-request.spec.js from repository root. Expect one passing workflow smoke test; share failure output if not.
+
+### SCRUM-117 reported no-change review blocker — 24 October 2026
+
+E2E-CLARIFICATION-003 reproduces an organiser editing attendance during UNDER_REVIEW, followed by the assigned coordinator returning the request and the organiser resubmitting without further edits. It asserts No request fields changed, then uses the real coordinator Review decision section to approve and verifies APPROVED with the same coordinator and saved attendance. All three clarification browser cases passed locally (9.3 seconds). This is local fixture evidence, not a resolution of Ryan's reported live blocker.
+
+Review decision is rendered on the assigned coordinator route below event details/activity history. The organiser route does not expose coordinator decisions. Existing organiser editing and no-change resubmission rules are unchanged pending agreement on any policy change. Logs for this run are external in outputs/scrum117-nochange-review-20261024.
+
+### SCRUM-117 saved-edit baseline correction — 24 October 2026
+
+Ryan clarified that saved organiser edits must be visible to the assigned coordinator before a formal return, and must remain in the comparison if resubmitted without more edits. This supersedes the former return-time baseline semantics, including the earlier E2E-CLARIFICATION-003 expectation.
+
+- SCRUM-117-BASE-UNIT-001/002: all twelve editable fields, protected-field exclusion, equivalent times, optional clearing and reverted edits.
+- SCRUM-117-BASE-API-001: owner save becomes visible to assigned coordinator before return; owner/peer/lead responses exclude comparison and internal baseline history; unrelated coordinator gets 404.
+- SCRUM-117-BASE-UI-001/002: current saved changes show the right baseline; unavailable reads and limited older history are explicit.
+- E2E-CLARIFICATION-003: edit 30 → 45 before return; coordinator sees it immediately; unchanged resubmission retains 30 → 45; later save 50 shows 45 → 50 while history stays 30 → 45; coordinator can approve.
+- BASELINE01–06 in requestBaseline.assertions.sql: real SQL submitted-version retention, draft submission, advancement/revert, queue rollback, restricted trigger execution and all twelve field values. The --clarification harness option loads the exact correction block from docs/notifications.md.
+
+Manual retest (Not Executed): create a fresh request with attendance 30 and start review. Owner edits/saves 45 before any return. Assigned coordinator refreshes and sees Saved organiser changes: 30 → 45. Return it, then owner resubmits without another edit. Coordinator sees 30 → 45 under Last resubmission. Owner later saves 50; coordinator refreshes and sees current 45 → 50 while historical 30 → 45 remains. Verify the unchanged status and same coordinator throughout. Earlier overwritten edits on existing requests are only recoverable if retained history contains them.
+
+Final verification, 24 October 2026: local backend regression 1163/1163 (67 files, live Supabase suites excluded), frontend 553/553 (55 files), isolated Playwright 211/211. Focused clarification browser 3/3, exact applied SQL BASELINE01–06, production build and four acceptance gates pass. Source lint has zero errors; frontend retains one pre-existing generated coverage-file warning. No shared-cloud test or Docker application image build performed. Final external evidence/manual instructions: outputs/scrum117-nochange-review-20261024/saved-edit-implementation-review.md and manual-saved-edit-retest.md in Ryan's ConnectSphere 2 workspace. Manual saved-edit UAT remains Not Executed. No commit or push for this correction.
+
+PR #62 integration with staging (SCRUM-117/SCRUM-161): StatusBadge uses the shared statuses.js map, including CHANGES_REQUESTED. The frontend active-status filter includes returned requests, matching the backend. SCRUM-117-UI-MERGE-001 verifies default visibility and explicit filtering in the Lead overview; the SCRUM-161 manager API case now includes returned requests alongside the other active stages. Existing clarification and overview assertions are retained.
+
+PR #62 conflict-resolution verification (24 October 2026): local backend regression 1173/1173 across 68 Vitest files (shared Supabase suites excluded), frontend 564/564 across 56 files, isolated Playwright 213/213, production build and three merge gates passed. The targeted overview/badge/list rerun passed 30/30. Source lint has zero errors; existing generated report exclusions/warnings remain. Earlier focused UI failures were resolved by correcting the new test's field label and using bounded workers; all existing assertions were retained. No shared database, commit, push or PR merge performed during resolution. Evidence is external under ConnectSphere 2/outputs/pr62-merge-20261024.
+
+PR #62 CI correction (2026-10-24): SCRUM-117-UI-R03 explicitly exercises en-US and en-SG date formatting and checks the formatted before/after registration dates, rather than assuming a British date order. This preserves the date-value assertions on both local Windows and CI Linux. Verification: `npm --prefix frontend test -- --run --maxWorkers=2 --reporter=dot` passed 565 tests; frontend lint passed with one existing generated-coverage warning, and production build passed. The first unrestricted run hit an unrelated SCRUM-100-UI-007 loading timeout (563 passed, 1 failed); the reduced-worker full run passed all cases.
+
+
+PR #62 review regression cases (26 October 2026):
+- SCRUM-117-BASE-API-002 (two API scenarios): successful reads with no recorded baseline return NO_BASELINE, whereas storage errors return null; both retain the existing coordinator-only response scope and hide storage details.
+- SCRUM-117-BASE-UI-002 now distinguishes missing baselines (no refresh advice), temporary read failures (refresh advice), limited retained history and genuine zero differences.
+- SCRUM-117-UI-R05: an unexpected rejected resubmission displays a safe error, restores the button and permits a successful retry; the existing conflict and field-validation cases remain.
+These regressions failed against the prior implementation before the fixes. Verification on 26 October 2026: offline backend Vitest 1,175 passed (68 files; shared Supabase suites excluded); frontend Vitest 566 passed (56 files, `--maxWorkers=2 --reporter=dot`); existing clarification Playwright browser journeys 3/3 passed (`npm run test:playwright -- tests/playwright/clarification.browser.spec.cjs --project=chromium`). Backend lint passed; frontend lint had zero errors and one existing generated-coverage warning; frontend production build passed. No live-cloud test, SQL change, commit or push was performed.
+
+### SCRUM-117 active-review edit lock agreement - 28 October 2026
+
+Ryan confirmed the team agreement that organiser edits are locked during UNDER_REVIEW. Removed SCRUM-117-BASE-API-001 and E2E-CLARIFICATION-003 because they required successful saves during active review. The saved-edit scenarios and pending manual retest above describe the superseded behaviour; historical execution results remain historical. Returned-request editing in CHANGES_REQUESTED, resubmission, coordinator retention and change comparisons remain covered by the existing clarification tests, including E2E-CLARIFICATION-002. Existing SCRUM-164 lock checks remain in place. This removal has not been runtime-tested because dependencies are not installed in this checkout.

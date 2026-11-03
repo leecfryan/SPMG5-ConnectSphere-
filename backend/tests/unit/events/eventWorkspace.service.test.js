@@ -1,0 +1,667 @@
+import { createRequire } from "node:module";
+import { expect, test, vi } from "vitest";
+
+const require = createRequire(import.meta.url);
+const { createEventWorkspaceService } = require("../../../src/modules/events/eventWorkspace.service");
+const storage = require("../../../../tests/playwright/support/registration-storage.cjs");
+
+// SCRUM-37: apply_organiser_event_edit (SQL) now owns the write, the
+// significance check and the flagging/regression that used to be split
+// between a plain .update() here and equipmentService.flagReservationsForReview.
+// This fake only replicates the field write - the real function's own
+// significance/flagging/regression logic lives in Postgres and isn't
+// re-implemented in JS here, per the house rule against duplicating a rule
+// in two places; what's tested below is that updateOrganiserEvent calls it
+// with the right, fully-merged arguments, and maps its errcode correctly.
+let fakeNow = 0;
+
+// SCRUM-37 reviewer feedback (PR #60): the real function compares
+// p_expected_updated_at against the row it just locked, and bumps
+// updated_at on every write (events_set_updated_at trigger) - replicated
+// here so a stale p_expected_updated_at behaves the same way as the real
+// EVENT_MODIFIED/P0004 the caller needs to handle.
+function fakeApplyOrganiserEventEdit(records) {
+  return vi.fn((name, args) => {
+    if (name !== "apply_organiser_event_edit") throw new Error(`Unsupported rpc: ${name}`);
+    const chain = {
+      select: () => chain,
+      async maybeSingle() {
+        const record = records.find(r => r.id === args.p_event_id && r.organiser_id === args.p_organiser_id);
+        if (!record) return { data: null, error: { code: "P0002", message: "EVENT_NOT_FOUND" } };
+        if (record.updated_at !== args.p_expected_updated_at) {
+          return { data: null, error: { code: "P0004", message: "EVENT_MODIFIED" } };
+        }
+        fakeNow += 1;
+        Object.assign(record, {
+          name: args.p_name, purpose: args.p_purpose, description: args.p_description,
+          start_time: args.p_start_time, end_time: args.p_end_time,
+          registration_start: args.p_registration_start, registration_end: args.p_registration_end,
+          expected_attendance: args.p_expected_attendance, venue_requirements: args.p_venue_requirements,
+          accessibility_needs: args.p_accessibility_needs, equipment_needs: args.p_equipment_needs,
+          other_comments: args.p_other_comments,
+          updated_at: "2026-10-26T00:00:00." + String(fakeNow).padStart(3, "0") + "Z",
+        });
+        return { data: { ...record }, error: null };
+      },
+    };
+    return chain;
+  });
+}
+
+function setup() {
+  fakeNow = 0;
+  const users = [
+    { id: "alice", app_metadata: { roles: ["event_organiser"], organisation_id: "alpha" }, user_metadata: {} },
+    { id: "bob", app_metadata: { roles: ["event_organiser"], organisation_id: "alpha" }, user_metadata: {} },
+    { id: "cara", app_metadata: { roles: ["event_organiser"], organisation_id: "beta" }, user_metadata: {} },
+  ];
+  // Every WRITABLE_COLS field is given a real value (not left undefined) so a
+  // gap in FIELDS (the columns read() actually selects) shows up as a wrong
+  // merged argument instead of passing silently - see TC-37-21 below,
+  // added after exactly that gap (registration_start/_end) reached the live
+  // database undetected by this suite.
+  const records = users.map((user, index) => ({
+    id: "event-" + user.id, organiser_id: user.id, name: user.id + " workshop",
+    purpose: "Training", description: "Client workshop", expected_attendance: 20,
+    start_time: "2099-01-01T01:00:12.345Z", end_time: "2099-01-01T03:00:12.345Z",
+    registration_start: "2098-12-01T00:00:00.000Z", registration_end: "2098-12-20T00:00:00.000Z",
+    // SCRUM-164 AC2: edits are only allowed at SUBMITTED; fixtures reflect that.
+    status: "SUBMITTED", coordinator_id: null, other_comments: "Private requirements",
+    venue_requirements: "A stage", accessibility_needs: "Step-free access",
+    equipment_needs: "Projector and a lectern",
+    submitted_at: "2026-01-0" + (index + 1) + "T00:00:00Z",
+    updated_at: "2026-01-0" + (index + 1) + "T00:00:00.000Z",
+  }));
+  const client = storage(new Map([["fixture", { events: records }]]));
+  client.auth = { admin: {
+    getUserById: vi.fn(async id => ({ data: { user: users.find(user => user.id === id) }, error: null })),
+    listUsers: vi.fn(async () => ({ data: { users }, error: null })),
+  } };
+  // Kept as a mock (not the raw storage function) so tests can still swap its
+  // implementation for one call, e.g. to simulate a record-read failure.
+  const from = client.from.bind(client);
+  client.from = vi.fn(table => from(table));
+  client.rpc = fakeApplyOrganiserEventEdit(records);
+  return { service: createEventWorkspaceService(client), client, users, records };
+}
+
+test("[SCRUM-100-UNIT-001] Organiser reads own and colleague records but no unrelated client record", async () => {
+  const { service } = setup();
+  const visible = await service.list("organiser", "alice");
+  expect(visible.map(event => event.id).sort()).toEqual(["event-alice", "event-bob"]);
+  expect(await service.find("organiser", "alice", "event-bob")).toMatchObject({ organiser_id: "bob" });
+  expect(await service.find("organiser", "alice", "event-cara")).toBeNull();
+});
+
+test("[SCRUM-100-UNIT-002] Owner saves normalised partial details while protected and untouched fields persist", async () => {
+  const { service, client, records } = setup();
+  const before = structuredClone(records);
+  const result = await service.updateOrganiserEvent("alice", "event-alice", {
+    name: "  Revised workshop  ", expected_attendance: "1", other_comments: "  ", reason: "Fixing workshop name",
+  });
+  expect(result.ok).toBe(true);
+  // updated_at is excluded from the spread below - the write bumps it
+  // (events_set_updated_at trigger, replicated by the fake), so it's never
+  // equal to the pre-save snapshot; that's the whole point of SCRUM-37's
+  // optimistic-concurrency fix (PR #60 reviewer feedback).
+  const beforeRest = { ...before[0] };
+  delete beforeRest.updated_at;
+  expect(result.event).toMatchObject({ ...beforeRest, name: "Revised workshop", expected_attendance: 1, other_comments: null });
+  expect(records[0]).toMatchObject({ ...beforeRest, name: "Revised workshop", expected_attendance: 1, other_comments: null });
+  expect(records[0].updated_at).not.toBe(before[0].updated_at);
+  expect(records.slice(1)).toEqual(before.slice(1));
+  // SCRUM-37: the function always takes every writable column - untouched
+  // ones are carried over from the current row, not omitted.
+  expect(client.rpc).toHaveBeenCalledExactlyOnceWith("apply_organiser_event_edit", expect.objectContaining({
+    p_event_id: "event-alice", p_organiser_id: "alice",
+    p_name: "Revised workshop", p_expected_attendance: 1, p_other_comments: null,
+    p_purpose: before[0].purpose, p_description: before[0].description,
+    p_equipment_needs: before[0].equipment_needs,
+  }));
+});
+
+test("[SCRUM-100-UNIT-003] Visible peer and invisible outsider edits are refused before any write", async () => {
+  const { service, client, records } = setup();
+  const before = structuredClone(records);
+  expect(await service.updateOrganiserEvent("alice", "event-bob", { name: "Denied" })).toEqual({ ok: false, reason: "forbidden" });
+  expect(await service.updateOrganiserEvent("alice", "event-cara", { name: "Denied" })).toEqual({ ok: false, reason: "not_found" });
+  expect(await service.updateOrganiserEvent("alice", "missing", { name: "Denied" })).toEqual({ ok: false, reason: "not_found" });
+  expect(client.rpc).not.toHaveBeenCalled();
+  expect(records).toEqual(before);
+});
+
+test("[SCRUM-100-UNIT-004] Invalid or protected detail changes cannot partly mutate the event", async () => {
+  const { service, client, records } = setup();
+  const before = structuredClone(records);
+  for (const input of [null, [], {}, { name: "Changed", organiser_id: "bob" },
+    { name: "Changed", status: "CONFIRMED" }, { organisation_id: "beta" },
+    { name: " " }, { expected_attendance: "invalid" }, { start_time: "invalid" }]) {
+    const result = await service.updateOrganiserEvent("alice", "event-alice", input);
+    expect(result).toMatchObject({ ok: false, reason: "invalid" });
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(records).toEqual(before);
+  }
+  expect(client.rpc).not.toHaveBeenCalled();
+});
+
+test("[SCRUM-100-UNIT-005] Missing trusted membership ignores profile claims and retains own read and edit access", async () => {
+  const { service, client, users, records } = setup();
+  delete users[0].app_metadata.organisation_id;
+  users[0].user_metadata.organisation_id = "alpha";
+  expect((await service.list("organiser", "alice")).map(event => event.id)).toEqual(["event-alice"]);
+  expect(await service.find("organiser", "alice", "event-bob")).toBeNull();
+  expect((await service.updateOrganiserEvent("alice", "event-alice", { name: "Own correction", reason: "Fixing name" })).ok).toBe(true);
+  expect(records[0].name).toBe("Own correction");
+  expect(client.auth.admin.listUsers).not.toHaveBeenCalled();
+});
+
+test("[SCRUM-100-UNIT-006] Membership, directory or record-read failure propagates before any event write", async () => {
+  for (const stage of ["membership", "directory", "record"]) {
+    const { service, client, records } = setup();
+    const before = structuredClone(records);
+    const error = new Error("Simulated boundary failure");
+    if (stage === "membership") client.auth.admin.getUserById.mockResolvedValue({ data: null, error });
+    if (stage === "directory") client.auth.admin.listUsers.mockResolvedValue({ data: null, error });
+    if (stage === "record") {
+      const from = client.from.getMockImplementation();
+      client.from.mockImplementation(table => {
+        const query = from(table);
+        query.maybeSingle = () => Promise.resolve({ data: null, error });
+        return query;
+      });
+    }
+    await expect(service.updateOrganiserEvent("alice", "event-alice", { name: "Must not save" })).rejects.toBe(error);
+    expect(client.rpc).not.toHaveBeenCalled();
+    expect(records).toEqual(before);
+  }
+});
+
+test("[SCRUM-100-UNIT-007] Changed responsibility prevents the previous owner from saving stale edits", async () => {
+  const { service, client, records } = setup();
+  const before = structuredClone(records);
+  // SCRUM-37: the race now surfaces through apply_organiser_event_edit's own
+  // WHERE id = ... AND organiser_id = ... (EVENT_NOT_FOUND/P0002) instead of
+  // the plain .update()'s zero-rows-matched - same race, same 409, moved.
+  const realRpc = client.rpc;
+  client.rpc = vi.fn((name, args) => { records[0].organiser_id = "bob"; return realRpc(name, args); });
+  expect(await service.updateOrganiserEvent("alice", "event-alice", { name: "Stale change", reason: "Correction" })).toEqual({ ok: false, reason: "conflict" });
+  expect(records).toEqual([{ ...before[0], organiser_id: "bob" }, ...before.slice(1)]);
+});
+
+// SCRUM-37 reviewer feedback (PR #60): same shape as UNIT-007's reassignment
+// race, but here the row is still this organiser's own - only updated_at
+// moved, because another save (e.g. a second open tab) committed in the gap
+// between this call's own read() above and its RPC call below. Without
+// p_expected_updated_at, `merged` (computed from the now-stale `current`)
+// would silently overwrite whatever that other save changed.
+test("[TC-37-24] a save that lands between this read and the write is refused, not silently merged over", async () => {
+  const { service, client, records } = setup();
+  const before = structuredClone(records[0]);
+  const realRpc = client.rpc;
+  client.rpc = vi.fn((name, args) => { records[0].updated_at = "2026-10-26T00:00:00.999Z"; return realRpc(name, args); });
+
+  const result = await service.updateOrganiserEvent("alice", "event-alice", { name: "Stale change", reason: "Updating name" });
+
+  expect(result).toEqual({ ok: false, reason: "conflict" });
+  // Refused outright - the row is exactly as the other save left it, not
+  // half-overwritten with this call's stale merged values.
+  expect(records[0]).toEqual({ ...before, updated_at: "2026-10-26T00:00:00.999Z" });
+});
+
+test("[SCRUM-100-UNIT-008] Current trusted affiliation replaces old colleague access on the next lookup", async () => {
+  const { service, users } = setup();
+  expect(await service.find("organiser", "alice", "event-bob")).not.toBeNull();
+  users[0].app_metadata.organisation_id = "beta";
+  expect(await service.find("organiser", "alice", "event-bob")).toBeNull();
+  expect((await service.list("organiser", "alice")).map(event => event.id).sort()).toEqual(["event-alice", "event-cara"]);
+});
+
+// SCRUM-150 AC1 used to be proven here via equipmentService.
+// flagReservationsForReview, called only when start_time/end_time/
+// equipment_needs changed. SCRUM-37's team design retires that call
+// entirely - a significant edit now regresses the event itself to
+// SUBMITTED (apply_organiser_event_edit, SQL) rather than flagging the
+// reservation for Technical Support to re-decide, so SCRUM-150's AC1 is
+// unreachable via this trigger now, by deliberate decision (see this
+// story's task note). TC-150-01/03/22 are repurposed below (TC-150-02's own
+// scenario, an equipment_needs-only edit with no date change, no longer
+// means anything once there's no datesChanged flag to prove) to show the
+// one thing still true at this JS layer: every successful edit calls the
+// function with the correctly merged arguments, whatever changed. The
+// significance rule itself now lives only in the function's own logic,
+// proven by reading it, not by a JS-level test.
+test("[TC-150-01/SCRUM-37] changing start_time calls apply_organiser_event_edit with the new value merged onto the unchanged fields", async () => {
+  const { service, client, records } = setup();
+  const result = await service.updateOrganiserEvent("alice", "event-alice", { start_time: "2099-01-01T00:30:00.000Z", reason: "Rescheduled" });
+  expect(result.ok).toBe(true);
+  expect(client.rpc).toHaveBeenCalledExactlyOnceWith("apply_organiser_event_edit", expect.objectContaining({
+    p_event_id: "event-alice", p_organiser_id: "alice",
+    p_start_time: "2099-01-01T00:30:00.000Z", p_end_time: records[0].end_time,
+  }));
+});
+
+test("[TC-150-03/SCRUM-37] resubmitting the same start_time/end_time/equipment_needs values still calls the function - significance is its own decision, not the caller's", async () => {
+  const { service, client, records } = setup();
+  const result = await service.updateOrganiserEvent("alice", "event-alice", {
+    start_time: records[0].start_time,
+    end_time: records[0].end_time,
+    equipment_needs: records[0].equipment_needs,
+    reason: "No real change",
+  });
+  expect(result.ok).toBe(true);
+  expect(client.rpc).toHaveBeenCalledExactlyOnceWith("apply_organiser_event_edit", expect.objectContaining({
+    p_start_time: records[0].start_time, p_end_time: records[0].end_time, p_equipment_needs: records[0].equipment_needs,
+  }));
+});
+
+test("[TC-150-22/SCRUM-37] a change unrelated to date/time/equipment needs (name) still calls the function, with name updated and everything else carried over", async () => {
+  const { service, client, records } = setup();
+  const result = await service.updateOrganiserEvent("alice", "event-alice", { name: "Renamed only", reason: "Clearer name" });
+  expect(result.ok).toBe(true);
+  expect(client.rpc).toHaveBeenCalledExactlyOnceWith("apply_organiser_event_edit", expect.objectContaining({
+    p_name: "Renamed only", p_start_time: records[0].start_time, p_equipment_needs: records[0].equipment_needs,
+  }));
+});
+
+// Found live, 2026-10-21: registration_start/registration_end were missing
+// from FIELDS, so current.registration_start/_end read undefined and the RPC
+// call silently dropped those two required parameters - breaking every
+// single edit, not just registration-window ones. expect.objectContaining
+// above would never have caught this (it ignores keys it isn't told to
+// check), so this one asserts the *complete* argument object for every
+// WRITABLE_COLS field - a dropped or undefined parameter anywhere now fails
+// the test, not just in production.
+test("[TC-37-21] every writable column reaches the function as a real value, never undefined, including fields the edit itself didn't touch", async () => {
+  const { service, client, records } = setup();
+  // Snapshotted before acting: the fake RPC writes its own args straight
+  // back onto this same records[0] object, so reading records[0] *after*
+  // the call would silently compare an already-mutated value against
+  // itself - exactly the gap that let the live registration_start/_end bug
+  // through a first draft of this test undetected.
+  const before = structuredClone(records[0]);
+  const result = await service.updateOrganiserEvent("alice", "event-alice", { name: "Renamed only", reason: "Clearer name" });
+  expect(result.ok).toBe(true);
+  expect(client.rpc).toHaveBeenCalledExactlyOnceWith("apply_organiser_event_edit", {
+    p_event_id: "event-alice", p_organiser_id: "alice", p_expected_updated_at: before.updated_at,
+    p_name: "Renamed only", p_purpose: before.purpose, p_description: before.description,
+    p_start_time: before.start_time, p_end_time: before.end_time,
+    p_registration_start: before.registration_start, p_registration_end: before.registration_end,
+    p_expected_attendance: before.expected_attendance,
+    p_venue_requirements: before.venue_requirements, p_accessibility_needs: before.accessibility_needs,
+    p_equipment_needs: before.equipment_needs, p_other_comments: before.other_comments,
+  });
+});
+
+test("[SCRUM-141 AC4] The event detail carries its own activity history, newest first, without naming the officer (no user_id)", async () => {
+  const { service, client } = setup();
+  client.activity.push(
+    // Stored in the live event_activity_log shape: user_id, and the move and note in details.
+    { id: "act-1", event_id: "event-alice", user_id: "officer-1", action: "SAFETY_REJECTED", details: { from_status: "SAFETY_REVIEW", to_status: "APPROVED", note: "One exit only" }, created_at: "2026-10-18T01:00:00.000Z" },
+    { id: "act-2", event_id: "event-bob", user_id: "officer-1", action: "SAFETY_APPROVED", details: { from_status: "SAFETY_REVIEW", to_status: "PREPARATION", note: null }, created_at: "2026-10-18T02:00:00.000Z" },
+    { id: "act-3", event_id: "event-alice", user_id: "officer-2", action: "SAFETY_APPROVED", details: { from_status: "SAFETY_REVIEW", to_status: "PREPARATION", note: null }, created_at: "2026-10-18T03:00:00.000Z" },
+  );
+
+  const event = await service.find("organiser", "alice", "event-alice");
+
+  expect(event.activity).toEqual([
+    { id: "act-3", action: "SAFETY_APPROVED", from_status: "SAFETY_REVIEW", to_status: "PREPARATION", note: null, created_at: "2026-10-18T03:00:00.000Z" },
+    { id: "act-1", action: "SAFETY_REJECTED", from_status: "SAFETY_REVIEW", to_status: "APPROVED", note: "One exit only", created_at: "2026-10-18T01:00:00.000Z" },
+  ]);
+});
+
+// details defaults to {} in the live table, so a row written without it still reads.
+test("[SCRUM-141 AC4] A history row with empty details reads with null move and note", async () => {
+  const { service, client } = setup();
+  client.activity.push({ id: "act-9", event_id: "event-alice", user_id: null, action: "SOMETHING_NEW", details: {}, created_at: "2026-10-18T04:00:00.000Z" });
+
+  expect((await service.find("organiser", "alice", "event-alice")).activity).toEqual([
+    { id: "act-9", action: "SOMETHING_NEW", from_status: null, to_status: null, note: null, created_at: "2026-10-18T04:00:00.000Z" },
+  ]);
+});
+
+test("[SCRUM-141 AC4] An event with no recorded activity has an empty history", async () => {
+  const { service } = setup();
+  expect((await service.find("organiser", "alice", "event-alice")).activity).toEqual([]);
+});
+
+test("[SCRUM-141 AC4] A failed history read still loads the event, with the history unknown", async () => {
+  const { service, client } = setup();
+  const from = client.from;
+  client.from = table => table === "event_activity_log"
+    ? { select: () => ({ eq: () => ({ order: async () => ({ data: null, error: { message: "relation does not exist" } }) }) }) }
+    : from(table);
+
+  const event = await service.find("organiser", "alice", "event-alice");
+
+  expect(event).toMatchObject({ id: "event-alice", activity: null });
+});
+
+// SCRUM-164: status guard, reason requirement and activity log writing.
+
+test("[TC-SCRUM-164-01] organiser saves valid changes to their own SUBMITTED event; activity is recorded", async () => {
+  const { service, records, client } = setup();
+  const result = await service.updateOrganiserEvent("alice", "event-alice", { name: "New title", reason: "Client requested rename" });
+  expect(result.ok).toBe(true);
+  expect(records[0].name).toBe("New title");
+  expect(client.activity).toHaveLength(1);
+  expect(client.activity[0]).toMatchObject({ event_id: "event-alice", user_id: "alice", action: "EDIT" });
+  expect(client.activity[0].details).toMatchObject({ note: "Client requested rename" });
+});
+
+test("[TC-SCRUM-164-02] update is refused when event has moved past SUBMITTED", async () => {
+  const { service, records, client } = setup();
+  records[0].status = "UNDER_REVIEW";
+  const result = await service.updateOrganiserEvent("alice", "event-alice", { name: "Denied", reason: "any reason" });
+  expect(result).toEqual({ ok: false, reason: "locked" });
+  expect(client.rpc).not.toHaveBeenCalled();
+});
+
+test.each(["APPROVED", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED", "CANCELLED", "REJECTED", "POSTPONED"])(
+  "[TC-SCRUM-164-03] update is refused for every non-SUBMITTED status (%s)",
+  async (status) => {
+    const { service, records, client } = setup();
+    records[0].status = status;
+    expect(await service.updateOrganiserEvent("alice", "event-alice", { name: "Any", reason: "any" }))
+      .toEqual({ ok: false, reason: "locked" });
+    expect(client.rpc).not.toHaveBeenCalled();
+  },
+);
+
+test("[TC-SCRUM-164-16] race: coordinator starts review between status check and write; edit is rejected", async () => {
+  // SCRUM-37: the write now goes through apply_organiser_event_edit (RPC).
+  // A coordinator starting review between the service's read and this call
+  // bumps updated_at (events_set_updated_at trigger), so p_expected_updated_at
+  // mismatches and the function returns P0004 (EVENT_MODIFIED) → conflict.
+  const { service, client, records } = setup();
+  const realRpc = client.rpc;
+  client.rpc = vi.fn((name, args) => {
+    records[0].status = "UNDER_REVIEW";
+    records[0].updated_at = "2099-01-01T00:00:00.000Z";
+    return realRpc(name, args);
+  });
+  expect(await service.updateOrganiserEvent("alice", "event-alice", { name: "Too late", reason: "Race" }))
+    .toEqual({ ok: false, reason: "conflict" });
+});
+
+test("[TC-SCRUM-164-04] update without a reason is a 400", async () => {
+  const { service, client } = setup();
+  const result = await service.updateOrganiserEvent("alice", "event-alice", { name: "No reason" });
+  expect(result).toMatchObject({ ok: false, reason: "invalid" });
+  expect(result.errors.some(e => e.field === "reason")).toBe(true);
+  expect(client.rpc).not.toHaveBeenCalled();
+});
+
+test.each([{ name: "Valid", reason: "" }, { name: "Valid", reason: "   " }, { name: "Valid", reason: null }])(
+  "[TC-SCRUM-164-05] a whitespace-only or empty reason is treated as blank (%j)",
+  async (input) => {
+    const { service, client } = setup();
+    const result = await service.updateOrganiserEvent("alice", "event-alice", input);
+    expect(result).toMatchObject({ ok: false, reason: "invalid" });
+    expect(result.errors.some(e => e.field === "reason")).toBe(true);
+    expect(client.rpc).not.toHaveBeenCalled();
+  },
+);
+
+test("[TC-SCRUM-164-06] the activity log row carries actor, action and trimmed reason", async () => {
+  const { service, client } = setup();
+  await service.updateOrganiserEvent("alice", "event-alice", { name: "Updated", reason: "  fix typo  " });
+  expect(client.activity[0]).toMatchObject({
+    event_id: "event-alice",
+    user_id: "alice",
+    action: "EDIT",
+    details: { note: "fix typo" },
+  });
+});
+
+
+test("[SCRUM-147-UNIT-013] AC4: drafts stay out of the organisation view, a colleague's and the owner's alike", async () => {
+  const { service, records } = setup();
+  records.push(
+    { ...records[0], id: "draft-alice", name: "Alice draft", status: "DRAFT" },
+    { ...records[1], id: "draft-bob", name: "Bob draft", status: "DRAFT" },
+  );
+
+  expect((await service.list("organiser", "alice")).map(event => event.id).sort()).toEqual(["event-alice", "event-bob"]);
+  expect(await service.find("organiser", "alice", "draft-bob")).toBeNull();
+  expect(await service.find("organiser", "alice", "draft-alice")).toBeNull();
+  expect(await service.updateOrganiserEvent("alice", "draft-alice", { name: "Renamed" })).toEqual({ ok: false, reason: "not_found" });
+});
+
+// SCRUM-36: submitChangeRequest unit tests
+function setup36() {
+  const users = [
+    { id: "alice", app_metadata: { roles: ["event_organiser"], organisation_id: "alpha" }, user_metadata: {} },
+    { id: "bob",   app_metadata: { roles: ["event_organiser"], organisation_id: "beta"  }, user_metadata: {} },
+  ];
+  const records = [
+    { id: "event-under-review", organiser_id: "alice", name: "Annual Gala",
+      purpose: "Celebration", description: "Year-end gala",
+      start_time: "2099-06-01T10:00:00.000Z", end_time: "2099-06-01T18:00:00.000Z",
+      registration_start: null, registration_end: null,
+      expected_attendance: 100, venue_requirements: "Ballroom",
+      accessibility_needs: null, equipment_needs: null, other_comments: null,
+      status: "UNDER_REVIEW", coordinator_id: "coord-1", submitted_at: "2026-01-01T00:00:00Z",
+      pending_change_request: null },
+    { id: "event-approved", organiser_id: "alice", name: "Tech Summit",
+      purpose: "Networking", description: "Annual tech summit",
+      start_time: "2099-07-01T09:00:00.000Z", end_time: "2099-07-01T17:00:00.000Z",
+      registration_start: null, registration_end: null,
+      expected_attendance: 200, venue_requirements: "Conference hall",
+      accessibility_needs: null, equipment_needs: null, other_comments: null,
+      status: "APPROVED", coordinator_id: "coord-1", submitted_at: "2026-01-02T00:00:00Z",
+      pending_change_request: null },
+    { id: "event-bob", organiser_id: "bob", name: "Bob event",
+      purpose: "Demo", description: "Bob demo",
+      start_time: "2099-08-01T10:00:00.000Z", end_time: "2099-08-01T18:00:00.000Z",
+      registration_start: null, registration_end: null,
+      expected_attendance: 50, venue_requirements: null,
+      accessibility_needs: null, equipment_needs: null, other_comments: null,
+      status: "UNDER_REVIEW", coordinator_id: "coord-2", submitted_at: "2026-01-03T00:00:00Z",
+      pending_change_request: null },
+  ];
+  const client = storage(new Map([["fixture", { events: records }]]));
+  client.auth = { admin: {
+    getUserById: vi.fn(async id => ({ data: { user: users.find(u => u.id === id) }, error: null })),
+    listUsers: vi.fn(async () => ({ data: { users }, error: null })),
+  } };
+  const service = createEventWorkspaceService(client);
+  return { service, records, client };
+}
+
+test("[TC-SCRUM-36-01] organiser submits a valid change request on their UNDER_REVIEW event", async () => {
+  const { service, records } = setup36();
+  const before = structuredClone(records[0]);
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { name: "Revised Gala" },
+    reason: "Venue branding updated",
+  });
+  expect(result.ok).toBe(true);
+  expect(result.event.pending_change_request).toMatchObject({
+    proposed_changes: { name: "Revised Gala" },
+    reason: "Venue branding updated",
+    requested_by: "alice",
+  });
+  expect(result.event.pending_change_request.requested_at).toBeTruthy();
+  // event's own fields are unchanged
+  expect(result.event.name).toBe(before.name);
+  expect(result.event.expected_attendance).toBe(before.expected_attendance);
+});
+
+test("[TC-SCRUM-36-02] change request by a non-owner organiser returns not_found", async () => {
+  const { service, records } = setup36();
+  const before = structuredClone(records);
+  const result = await service.submitChangeRequest("bob", "event-under-review", {
+    proposed_changes: { name: "Hijack" }, reason: "Testing",
+  });
+  expect(result).toEqual({ ok: false, reason: "not_found" });
+  expect(records).toEqual(before);
+});
+
+test("[TC-SCRUM-36-03] change request refused when event is SUBMITTED", async () => {
+  const { service, records } = setup36();
+  records[0].status = "SUBMITTED";
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { name: "New name" }, reason: "Just checking",
+  });
+  expect(result).toEqual({ ok: false, reason: "ineligible" });
+});
+
+test("[TC-SCRUM-36-04] change request accepted for both eligible statuses", async () => {
+  const { service } = setup36();
+  for (const id of ["event-under-review", "event-approved"]) {
+    const result = await service.submitChangeRequest("alice", id, {
+      proposed_changes: { name: "Updated name" }, reason: "Rebranding",
+    });
+    expect(result.ok, id).toBe(true);
+  }
+});
+
+test.each(["SUBMITTED", "SAFETY_REVIEW", "PREPARATION", "CONFIRMED", "CANCELLED", "REJECTED", "POSTPONED"])(
+  "[TC-SCRUM-36-05] change request refused for ineligible status %s",
+  async (status) => {
+    const { service, records } = setup36();
+    records[0].status = status;
+    const result = await service.submitChangeRequest("alice", "event-under-review", {
+      proposed_changes: { name: "New name" }, reason: "Testing",
+    });
+    expect(result).toEqual({ ok: false, reason: "ineligible" });
+  },
+);
+
+test("[TC-SCRUM-36-06] missing reason returns invalid with reason field error", async () => {
+  const { service } = setup36();
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { name: "New name" },
+  });
+  expect(result.ok).toBe(false);
+  expect(result.reason).toBe("invalid");
+  expect(result.errors.some(e => e.field === "reason")).toBe(true);
+});
+
+test.each([undefined, null, "", "   "])(
+  "[TC-SCRUM-36-07] blank/missing reason %s returns invalid",
+  async (reason) => {
+    const { service } = setup36();
+    const result = await service.submitChangeRequest("alice", "event-under-review", {
+      proposed_changes: { name: "New name" }, reason,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errors.some(e => e.field === "reason")).toBe(true);
+  },
+);
+
+test("[TC-SCRUM-36-08] missing proposed_changes returns invalid", async () => {
+  const { service } = setup36();
+  const result = await service.submitChangeRequest("alice", "event-under-review", { reason: "Valid reason" });
+  expect(result.ok).toBe(false);
+  expect(result.errors.some(e => e.field === "proposed_changes")).toBe(true);
+});
+
+test("[TC-SCRUM-36-09] empty proposed_changes object returns invalid", async () => {
+  const { service } = setup36();
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: {}, reason: "Valid reason",
+  });
+  expect(result.ok).toBe(false);
+  expect(result.errors.some(e => e.field === "proposed_changes")).toBe(true);
+});
+
+test("[TC-SCRUM-36-10] non-permitted field in proposed_changes returns invalid", async () => {
+  const { service } = setup36();
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { status: "CONFIRMED" }, reason: "Testing",
+  });
+  expect(result.ok).toBe(false);
+  expect(result.errors.some(e => e.field === "status")).toBe(true);
+});
+
+test("[TC-SCRUM-36-11] invalid proposed value returns 400 with field error", async () => {
+  const { service } = setup36();
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { expected_attendance: -1 }, reason: "Capacity change",
+  });
+  expect(result.ok).toBe(false);
+  expect(result.errors.some(e => e.field === "expected_attendance")).toBe(true);
+});
+
+test("[TC-SCRUM-36-12] end_time before start_time in proposed_changes returns invalid", async () => {
+  const { service } = setup36();
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { start_time: "2099-06-01T18:00:00.000Z", end_time: "2099-06-01T10:00:00.000Z" },
+    reason: "Reschedule",
+  });
+  expect(result.ok).toBe(false);
+  expect(result.errors.some(e => e.field === "end_time")).toBe(true);
+});
+
+test("[TC-SCRUM-36-13] all validation errors are reported together", async () => {
+  const { service } = setup36();
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { expected_attendance: -1, start_time: "not-a-date" },
+    reason: "Testing",
+  });
+  expect(result.ok).toBe(false);
+  expect(result.errors.length).toBeGreaterThanOrEqual(2);
+});
+
+test("[TC-SCRUM-36-14] event fields unchanged after change request submitted", async () => {
+  const { service, records } = setup36();
+  const before = structuredClone(records[0]);
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { name: "Revised Gala" }, reason: "Branding",
+  });
+  expect(result.ok).toBe(true);
+  expect(result.event.name).toBe(before.name);
+  expect(result.event.expected_attendance).toBe(before.expected_attendance);
+  expect(result.event.start_time).toBe(before.start_time);
+});
+
+test("[TC-SCRUM-36-15] second change request refused while one is already pending", async () => {
+  const { service, records } = setup36();
+  records[0].pending_change_request = {
+    proposed_changes: { name: "First request" }, reason: "First",
+    requested_at: "2026-10-26T10:00:00.000Z", requested_by: "alice",
+  };
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { name: "Second request" }, reason: "Second",
+  });
+  expect(result).toEqual({ ok: false, reason: "already_pending" });
+});
+
+test("[TC-SCRUM-36-21] concurrent edit between validation read and write returns conflict", async () => {
+  const { service, records, client } = setup36();
+  records[0].updated_at = "2026-01-01T00:00:00.000Z";
+  // Intercept the second from("events") call (the write) and bump updated_at
+  // right before execute() runs, simulating a concurrent edit that lands
+  // between the validation read above and the conditional update write.
+  const origFrom = client.from.bind(client);
+  let eventsFromCount = 0;
+  vi.spyOn(client, "from").mockImplementation((table) => {
+    const q = origFrom(table);
+    if (table === "events") {
+      eventsFromCount += 1;
+      if (eventsFromCount === 2) {
+        const origMaybeSingle = q.maybeSingle.bind(q);
+        q.maybeSingle = async () => {
+          records[0].updated_at = "2026-02-01T00:00:00.000Z";
+          return origMaybeSingle();
+        };
+      }
+    }
+    return q;
+  });
+  const result = await service.submitChangeRequest("alice", "event-under-review", {
+    proposed_changes: { name: "Revised Gala" }, reason: "Rebranding",
+  });
+  expect(result).toEqual({ ok: false, reason: "conflict" });
+});
+
+test("[SCRUM-117-UNIT-002] organiser sees the saved message without internal snapshot or actor details", async () => {
+  const { service, client, records } = setup();
+  records[0].status = "CHANGES_REQUESTED";
+  client.activity.push({ id: "cycle-1", event_id: records[0].id, user_id: "coordinator-one", action: "CHANGES_REQUESTED",
+    details: { note: "Clarify room layout.", before: { name: "Original" }, coordinator_id: "coordinator-one" }, created_at: "2099-01-01T00:00:00Z" });
+  const result = await service.find("organiser", "alice", records[0].id);
+  expect(result.activity).toEqual([{ id: "cycle-1", action: "CHANGES_REQUESTED", from_status: null, to_status: null,
+    note: "Clarify room layout.", created_at: "2099-01-01T00:00:00Z" }]);
+});

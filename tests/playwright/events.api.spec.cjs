@@ -7,7 +7,7 @@ function eventBody() {
     venue_requirements: 'Accessible room', equipment_needs: 'Projector', accessibility_needs: 'Step-free access', other_comments: 'Tea provided' };
 }
 
-for (const [i, role] of ['attendee', 'venue_staff', 'technical_support_staff', 'event_coordinator', 'event_ops_manager'].entries()) {
+for (const [i, role] of ['attendee', 'venue_staff', 'technical_support_staff', 'event_coordinator', 'event_coordinator_lead'].entries()) {
   test(`[EVENT-API-00${i + 1}] ${role} cannot create an organiser event`, async ({ request, accounts }) => {
     const account = await accounts.create([role], { roles: ['event_organiser'] });
     const session = await accounts.session(account);

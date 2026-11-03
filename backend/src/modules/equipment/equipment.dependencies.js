@@ -1,4 +1,6 @@
 // Constructed only when the server-side data key is configured.
+const { PLANNING_STATUSES } = require("../events/lifecycle");
+
 module.exports = function createEquipmentDependencies() {
   const client = require("../../supabase");
   const { createEquipmentService } = require("./equipment.service");
@@ -11,10 +13,18 @@ module.exports = function createEquipmentDependencies() {
   }
   return {
     equipmentService: createEquipmentService(client),
+    equipmentIssueNotifications: require("../notifications/equipmentIssueNotifications.service").createEquipmentIssueNotificationsService({ client }),
     messagesService: createMessagesService(client),
     findEventById: (id) => unwrap(client.from("events").select(fields).eq("id", id).maybeSingle()),
     findEventsByIds: (ids) => ids.length ? unwrap(client.from("events").select("id, name").in("id", ids)) : Promise.resolve([]),
-    listAssignedEvents: (id) => unwrap(client.from("events").select(fields).eq("coordinator_id", id).neq("status", "DRAFT").order("start_time", { ascending: true })),
+    // SCRUM-104: there is no cancellation endpoint (events.status is set
+    // directly in the database), so equipment reads self-heal instead -
+    // see releaseReservationsForTerminalEvents in equipment.controller.js.
+    // SCRUM-37: REJECTED is swept alongside CANCELLED - both are terminal,
+    // so neither can ever legitimately hold a live reservation, unlike
+    // APPROVED (reviewer feedback: see review.service.js's releaseArrangements).
+    listReleasableEventIds: async () => (await unwrap(client.from("events").select("id").in("status", ["CANCELLED", "REJECTED"]))).map((event) => event.id),
+    listAssignedEvents: (id) => unwrap(client.from("events").select(fields).eq("coordinator_id", id).in("status", PLANNING_STATUSES).order("start_time", { ascending: true })),
     async getUserDisplayName(id) {
       const { data, error } = await client.auth.admin.getUserById(id);
       if (error || !data?.user) return null;

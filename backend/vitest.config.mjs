@@ -2,10 +2,18 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    // Several integration suites hit the live Supabase dev project with
+    // multiple sequential round-trips per test; under load (many test files
+    // running in parallel against the same project) the default 5000ms can
+    // be too tight for an otherwise-correct test.
     include: ["tests/**/*.test.js"],
     // These suites run separately using Node's test runner.
     exclude: ["tests/unit/equipment/**", "tests/integration/auth.test.js", "tests/integration/permissions.test.js"],
     environment: "node",
+    // Live-DB integration suites make many sequential round trips to the shared
+    // free-tier Supabase project; the 5s default is too tight on CI.
+    testTimeout: 15000,
+    hookTimeout: 15000,
     // Test names lead with the Jira key, so the per-test lines the verbose
     // reporter prints are the traceability report docs/event-request-tests.md
     // cites. A summary-only reporter would drop that evidence.

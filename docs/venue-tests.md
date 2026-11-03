@@ -1,0 +1,890 @@
+# Venue — Test Documentation
+
+Test evidence for the Venue lane (epic SCRUM-6). Behaviour, API and the schema reference live in
+[Venue integration](venue-integration.md); this file is the catalogue of what is tested and where.
+
+**232 automated backend tests across twelve suites, plus 7 browser journeys and 28 frontend component tests, all
+passing.** Manual cases are run against the shared Supabase database and recorded in the team's TESTS sheet.
+
+| Suite | File | Tests |
+| --- | --- | --- |
+| Decisions | `backend/tests/integration/venueDecisions.test.js` | 22 |
+| Catalogue, calendar, requests | `backend/tests/integration/venues.integration.test.js` | 53 |
+| Storage and query scope | `backend/tests/integration/venues.storage.test.js` | 9 |
+| Change/cancel one booking (SCRUM-154) | `backend/tests/integration/venueBookingChangeCancel.test.js` | 30 |
+| Change/cancel one booking, live DB (SCRUM-154) | `backend/tests/integration/venueBookingChangeCancel.live.test.js` | 6 |
+| Unavailability periods | `backend/tests/integration/venues.unavailability.test.js` | 21 |
+| Setup and turnaround (committed period) | `backend/tests/integration/venues.turnaround.test.js` | 16 |
+| Release on event cancellation | `backend/tests/integration/venue-release-cancelled-event.test.js` | 3 |
+| Per-venue booking checks (SCRUM-138) | `backend/tests/integration/venueBookingChecks.test.js` | 22 |
+| Per-venue booking checks, unit (SCRUM-138) | `backend/tests/unit/venues/venueBookingChecks.test.js` | 17 |
+| Booking checks (SCRUM-138), edit and cancel actions (SCRUM-154) | `frontend/src/features/venues/components/*.test.jsx` | 24 |
+| Tentative holds | `backend/tests/integration/venues.holds.test.js` | 15 |
+| Conflict flags (SCRUM-135) | `backend/tests/integration/venues.conflicts.test.js` | 18 |
+| Conflict flags page (SCRUM-135) | `frontend/src/features/venues/pages/VenueConflictsPage.test.jsx` | 4 |
+| Browser journeys | `tests/playwright/venues.browser.spec.cjs` | 7 |
+
+Run everything:
+
+```bash
+npm --prefix backend test                # all backend suites
+npm --prefix frontend test -- --run      # frontend components
+npm run test:playwright                  # browser and API
+npm --prefix backend run check
+npm --prefix frontend run lint
+```
+
+**Most backend venue tests connect to no database.** Each builds the real Express app through `createApp({...})`
+with a stubbed venue service and fake verified identities, so routing, permissions, validation and status codes
+are exercised without one. The storage suite stubs the Supabase client itself to assert the exact queries sent.
+Two suites are the deliberate exception - `venue-release-cancelled-event.test.js` and
+`venueBookingChangeCancel.live.test.js` - which make real calls to the shared dev Supabase project specifically
+to prove something a stub cannot (see *Which end-to-end suite* in `AGENTS.md`).
+
+Test names lead with a bracketed tag, so the runner's output is the traceability report. Story tags are
+`[SCRUM-<n>]`; cross-cutting guards that belong to no single story use `[VENUE-…]` and `[ACCESS-VENUE-…]`.
+
+---
+
+## 1. Story coverage
+
+| Story | Title | Automated tags | Sheet rows |
+| --- | --- | --- | --- |
+| SCRUM-15 | Browse the venue catalogue | `[SCRUM-15]` | TC-106 to TC-109, TC-121 |
+| SCRUM-16 | Update operating information | `[SCRUM-16]` | TC-108, TC-122, TC-123 |
+| SCRUM-17 | Availability calendar | `[SCRUM-17]` | TC-110, TC-124 to TC-127 |
+| SCRUM-21 | Submit a booking request | `[SCRUM-21]`, `[VENUE-SCOPE-001/002/003]` | TC-111 to TC-116, TC-128, TC-129 |
+| SCRUM-22 | Decide a venue booking request | `[SCRUM-22]`, `[VENUE-DECIDE-001]` to `[VENUE-DECIDE-004]` | TC-131 to TC-140 |
+
+## Multi-venue event coverage (SCRUM-137)
+
+The multi-venue implementation keeps one request and independent status per
+venue booking. New submissions require `purpose`; existing rows without a
+purpose remain readable as legacy data. The event-scoped request endpoint uses
+`event_id` without weakening coordinator ownership scope.
+
+Coverage includes:
+
+- Multiple venue requests for one event, including different dates or periods.
+- Per-booking venue, purpose, booking date and slot-period display.
+- Independent confirmation and rejection with mixed outcomes visible together.
+- Required purpose validation and legacy `Not recorded` display.
+- Invalid event filters and coordinator cross-event isolation.
+
+The confirmed-slot exclusion constraint remains the concurrency authority for
+venue conflicts. No registration, waitlist, event-capacity or equipment behavior
+is changed by this story.
+
+The shared `EventVenueBookings` component renders all related bookings together
+on Browse Event details, My Events cards and My Event details. Browse Events
+cards deliberately omit venues until the attendee opens an event. Each rendered
+booking includes venue, location, purpose, date, period and derived status.
+
+After the fixture correction and SCRUM-138 browser journey, the full Playwright
+verification on 2026-10-16 ran 186 tests: 186 passed and 0 failed.
+`[VENUE-E2E-002]` supplies `Planning and coordination session`, and
+`[VENUE-E2E-005]` verifies that one failed venue check does not alter the other
+booking results. This matches the current required-purpose contract; production
+behavior was not loosened.
+
+| SCRUM-20 | Block conflicting venue booking | `[SCRUM-20]` | TC-167 to TC-175 |
+| SCRUM-102 | Reject with a reason and suggested alternative | `[SCRUM-102]` | TC-220 to TC-229 |
+| SCRUM-18 | Search and filter potential venues | `[SCRUM-18]` | TC-260 to TC-273 |
+| SCRUM-19 | Assess shortlisted venue suitability | `[SCRUM-19]` | TC-274 to TC-286 |
+| SCRUM-133 | Mark a venue temporarily unavailable | `[TC-SCRUM-133-01]` to `[TC-SCRUM-133-21]` | TC-SCRUM-133-01 to TC-SCRUM-133-21 |
+| SCRUM-134 | Setup and turnaround time in conflict checks | `[TC-SCRUM-134-01]` to `[TC-SCRUM-134-11]` | TC-SCRUM-134-01 to TC-SCRUM-134-11 |
+| SCRUM-135 | Flag bookings conflicting after setup/turnaround change | `[TC-SCRUM-135-01]` to `[TC-SCRUM-135-17]`, `[TC-SCRUM-135-UI-01]` to `[TC-SCRUM-135-UI-04]` | TC-SCRUM-135-01 to TC-SCRUM-135-17 |
+| SCRUM-138 | Check each venue booking of an event independently | `[SCRUM-138]`, `[VENUE-CHECK-001/002]`, `[SCRUM-138-UI-001]` to `[SCRUM-138-UI-008]`, `[VENUE-E2E-005]` | TC-SCRUM-138-01 to TC-SCRUM-138-16 |
+| SCRUM-146 | Tentative venue hold with expiry | `[TC-SCRUM-146-01]` to `[TC-SCRUM-146-15]` | TC-SCRUM-146-01 to TC-SCRUM-146-15 |
+
+Cross-cutting guards that apply to every story: `[VENUE-AUTH-001]` (seven identities against eight endpoints),
+`[VENUE-AUTH-002]`, `[VENUE-INPUT-001]` (forged ownership and role fields), `[VENUE-CONFIG-001]` (missing venue
+storage leaves sign-in working), `[VENUE-DB-001]` to `[VENUE-DB-005]`, `[VENUE-CHECK-001/002]` (the check report
+needs a verified token and `bookings.read`), and `[ACCESS-VENUE-001/002]` from the RBAC
+lane (event names redacted from coordinators; only accepted or approved events may request a venue).
+
+---
+
+## 2. SCRUM-102 — Reject a booking with a reason and suggested alternative
+
+**Acceptance criteria, word for word**
+
+1. A rejection must carry a reason.
+2. Venue Staff may attach a suggested alternative venue or arrangement to the rejection.
+3. The reason and suggestion are visible to the requesting Event Coordinator, who makes any resulting change.
+4. The rejected request remains visible in the event's booking history.
+
+AC3 and AC4 were built by SCRUM-22 and are re-proven here rather than rebuilt. Only AC1 and AC2 needed new code.
+
+### Traceability
+
+| AC | Criterion | Test cases | Where the rule lives |
+| --- | --- | --- | --- |
+| 1 | A rejection must carry a reason | 01, 02, 03, 07, M1 | `validateDecision` in `venues.bookingRequests.validation.js` |
+| 2 | A suggested alternative may be attached | 04, M1 | The same `decision_note`; no separate column, see *Decisions* below |
+| 3 | Reason and suggestion visible to the requesting Coordinator | 05, M2 | `BOOKING_REQUEST_FIELDS` returns `decision_note`; the Decision block renders it |
+| 4 | The rejected request remains in the booking history | 06, M3 | `listBookingRequests` applies no status filter; only pending and confirmed bookings reach the calendar |
+
+### Test cases
+
+| ID | AC | Type | Scenario | Test data | Expected result | Automated by | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-102-01 | 1 | Negative | Reject with no note field at all | `{ decision: "rejected" }` | 400, details name the missing reason, no decision recorded | `[SCRUM-102] A rejection with no reason is refused and nothing is decided` | 2026-10-02 ✅ |
+| TC-SCRUM-102-02 | 1 | Boundary | Reject with nothing that reads as a reason | `note` = `null`, `""`, `"   "`, `"\n\t "` | 400 for all four, no decision recorded | `[SCRUM-102] An empty or whitespace-only reason does not count as a reason` | 2026-10-02 ✅ |
+| TC-SCRUM-102-03 | 1 | Happy | Reject with a real reason | A reason padded with spaces | 200, status rejected, note stored trimmed | `[SCRUM-102] A rejection carrying a reason and a suggested alternative is recorded` | 2026-10-02 ✅ |
+| TC-SCRUM-102-04 | 2 | Happy | The reason names an alternative venue | "Marina is already held… Orchard Seminar Room 3 is free AM…" | The whole text is stored unchanged apart from trimming | same test as 03 | 2026-10-02 ✅ |
+| TC-SCRUM-102-05 | 3 | Happy | The requesting coordinator reads the decided request | `GET /booking-requests/:id` as `event_coordinator` | 200, `decision_note` carries the reason and the suggestion; scope is the coordinator's own | `[SCRUM-102] The requesting coordinator reads the reason under their own scope` | 2026-10-02 ✅ |
+| TC-SCRUM-102-06 | 4 | Happy | The rejected request stays in the history | `GET /booking-requests?status=rejected` | The request is still listed with its reason, while its slot shows available on the calendar | `[SCRUM-102] A rejected request stays in the booking history with its reason, while its slot is freed` | 2026-10-02 ✅ |
+| TC-SCRUM-102-07 | 1 | Happy | Approving needs no reason | `{ decision: "confirmed" }` | 200, unchanged from SCRUM-22 | `[SCRUM-102] Approving still needs no reason` | 2026-10-02 ✅ |
+
+### Manual cases
+
+Run against the shared Supabase database, because they exercise the browser and the live decision function.
+
+| ID | AC | Scenario | Expected result |
+| --- | --- | --- | --- |
+| TC-SCRUM-102-M1 | 1, 2 | Reject in the browser | Confirm rejection is disabled while the box is empty and while it holds only spaces, and becomes available once a reason is typed |
+| TC-SCRUM-102-M2 | 3 | The coordinator reads the outcome | The rejection reason and the suggested alternative are shown under Decision, with no decide controls |
+| TC-SCRUM-102-M3 | 4 | History and availability | The rejected request is still listed under Rejected and All, while the slot returns to Available on the calendar |
+
+### Decisions
+
+- **The suggested alternative shares `decision_note`.** AC2 says staff *may* attach one, which free text
+  satisfies. A separate column would mean a hand made schema change on a database five lanes share, plus a field
+  in four layers that nothing queries. A new story if reporting on alternatives is ever needed.
+- **Approving still needs no reason.** No acceptance criterion has asked staff to justify a yes, so requiring one
+  would be scope beyond the story.
+- **Whitespace is not a reason.** A space bar press would otherwise satisfy AC1 while telling the coordinator
+  nothing.
+- **No schema change.** `decision_note` already existed, nullable, from SCRUM-22.
+
+### Deliberately absent
+
+A separate `suggested_alternative` column; requiring a reason on approval; notifying the coordinator, since no AC
+asks for a message; reversing a decision after the fact.
+
+---
+
+## 3. SCRUM-18 — Search and filter potential venues
+
+**Acceptance criteria, word for word**
+
+1. Venues can be filtered using relevant date and time requirements.
+2. Expected attendance/capacity, location and accessibility can be considered.
+3. Supported layout and required facilities can be considered.
+4. Searching and filtering identifies potential venues but does not replace the separate suitability assessment.
+
+City and minimum capacity already existed from SCRUM-15. This story adds
+accessibility, facilities, layout, and date and slot availability.
+
+### Traceability
+
+| AC | Criterion | Test cases | Where the rule lives |
+| --- | --- | --- | --- |
+| 1 | Date and time requirements | 03, 04, 05, 06, 08, M2, M3 | `filterByAvailability` in `venues.controller.js`, over `buildAvailabilityCalendar` |
+| 2 | Capacity, location, accessibility | 01, 07, 08, M1 | `listVenues` in `venues.service.js` |
+| 3 | Layout and facilities | 01, 02, M1 | `listVenues`, using Postgres array containment |
+| 4 | Narrows, does not assess | 09, M4 | No score or rank in the response; catalogue copy says so |
+
+### Test cases
+
+| ID | AC | Type | Scenario | Expected result | Automated by | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-18-01 | 2, 3 | Happy | All five stored filters at once | Every filter reaches the query unchanged | `[SCRUM-18] Capacity, location, accessibility, facilities and layout all narrow the catalogue` | 2026-10-05 ✅ |
+| TC-SCRUM-18-02 | 3 | Boundary | Two facilities requested | The venue must offer both, not either | `[SCRUM-18] Several facilities must all be offered, not just one of them` | 2026-10-05 ✅ |
+| TC-SCRUM-18-03 | 1 | Happy | A date and one slot | Only venues whose slot is still open are kept; a pending request does not exclude a venue | `[SCRUM-18] A date keeps only venues whose requested slots are still open` | 2026-10-05 ✅ |
+| TC-SCRUM-18-04 | 1 | Negative | Blocked period, and a venue closed that day | Both are dropped from the results | `[SCRUM-18] A blocked period and closed hours both remove a venue from the results` | 2026-10-05 ✅ |
+| TC-SCRUM-18-05 | 1 | Boundary | A date with no slots named | Any one free slot keeps the venue; only a venue booked all day drops out | `[SCRUM-18] A date with no slots keeps a venue that is free for part of the day` | 2026-10-05 ✅ |
+| TC-SCRUM-18-06 | 1 | Boundary | The same venue and day, with and without named slots | Kept for a bare date, dropped once the taken slot is asked for | `[SCRUM-18] Naming slots requires all of them, which a bare date does not` | 2026-10-05 ✅ |
+| TC-SCRUM-18-07 | 2 | Boundary | `minCapacity=0`, the lowest the catalogue's input allows | 200, and no capacity filter is applied | `[SCRUM-18] A minimum capacity of zero means no minimum, matching the catalogue's input` | 2026-10-05 ✅ |
+| TC-SCRUM-18-08 | 1, 2 | Negative | Seven malformed queries | 400 for each, and the catalogue is never queried | `[SCRUM-18] Malformed filters are refused instead of silently returning everything` | 2026-10-05 ✅ |
+| TC-SCRUM-18-09 | 4 | Happy | A search with no date | No score or rank is added, order is the catalogue's own, and the booking tables are not queried | `[SCRUM-18] Searching narrows but does not rank, and never reaches the date tables needlessly` | 2026-10-05 ✅ |
+
+### Manual cases
+
+| ID | AC | Scenario | Expected result |
+| --- | --- | --- | --- |
+| TC-SCRUM-18-M1 | 2, 3 | Filter by facility, accessibility and layout in the browser | Options come from the catalogue itself; results narrow as each is ticked |
+| TC-SCRUM-18-M2 | 1 | Filter by a date with a confirmed booking | The booked venue disappears for that slot and returns when the slot changes |
+| TC-SCRUM-18-M3 | 1 | Slots without a date | The slot chips are replaced by "Pick a date first" |
+| TC-SCRUM-18-M4 | 4 | Read the results page | The copy says these are potential venues to check, and nothing is scored or ranked |
+
+### Decisions
+
+- **The date filter reuses `buildAvailabilityCalendar`** rather than a new
+  Postgres function. No schema change on a shared database, and one definition
+  of what a free slot means. A database function would be faster on a catalogue
+  far larger than this one.
+- **"Free" means `available` or `pending`**, the same list a booking request is
+  allowed on, because only a confirmed booking takes a slot (SCRUM-21).
+- **All, not any.** Asking for two facilities returns venues offering both. A
+  shortlist wider than the requirements is not a shortlist.
+- **Named slots are "all", a bare date is "any"** (changed in review, 5 Oct).
+  The first version required every slot of the day to be free when only a date
+  was given, which contradicted the page's own wording and excluded venues that
+  were genuinely available that evening. The wording was the better behaviour,
+  so the rule changed to match it rather than the other way round.
+- **`minCapacity=0` means no minimum** (changed in review, 5 Oct). The capacity
+  input's lowest allowed value was 0 while validation rejected it, so an input
+  the page permitted produced an error. Zero now behaves exactly like a blank
+  field.
+- **Unknown query parameters are refused**, so a typo surfaces instead of
+  silently returning the whole catalogue.
+
+### Deliberately absent
+
+Scoring, ranking or a "best match"; a suitability verdict, which AC4 puts
+outside this story; filtering by setup, teardown or turnaround time, which
+nothing yet enforces; saved searches; and paging, since the catalogue is small
+and `listVenues` has no limit.
+
+---
+
+## 4. SCRUM-19 — Assess shortlisted venue suitability
+
+**Acceptance criteria, word for word**
+
+1. Suitability is assessed after a venue has been identified or shortlisted.
+2. The assessment compares current event requirements with available venue information.
+3. A venue should not normally be considered suitable when expected attendance exceeds its capacity.
+4. A venue should not normally be considered suitable when a required facility is unavailable.
+5. The exact presentation of the suitability result may be proposed by the solution team.
+
+### Traceability
+
+| AC | Criterion | Test cases | Where the rule lives |
+| --- | --- | --- | --- |
+| 1 | Assessed after shortlisting | 01, 08, 09, 10, M1 | `GET /api/venues/:id/suitability`, reachable from the venue page before any request exists |
+| 2 | Compares event requirements with venue information | 01, 03, 05, 06, 07, M1, M2 | `assessVenueSuitability` in `venues.bookingRequests.validation.js` |
+| 3 | Attendance above capacity | 02, M2 | Same function, capacity check |
+| 4 | Required facility unavailable | 03, 06, M2 | Same function, facility check |
+| 5 | Presentation proposed by the team | M1, M3 | Check suitability panel on the venue page |
+
+### Test cases
+
+| ID | AC | Type | Scenario | Expected result | Automated by | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-19-01 | 1, 2 | Happy | Every recorded requirement is met | `suitable`, three checks all met, and the event is read with the coordinator's own id | `[SCRUM-19] A venue meeting every recorded requirement is assessed suitable` | 2026-10-06 ✅ |
+| TC-SCRUM-19-02 | 3 | Negative | Attendance 201 against capacity 200 | `unsuitable`, the check names both numbers | `[SCRUM-19] Attendance above capacity makes a venue unsuitable` | 2026-10-06 ✅ |
+| TC-SCRUM-19-03 | 2, 4 | Negative | One facility offered, one not | `unsuitable` with one unmet, and the met facility is still listed | `[SCRUM-19] A required facility the venue lacks makes it unsuitable and is named` | 2026-10-06 ✅ |
+| TC-SCRUM-19-04 | 2 | Negative | An accessibility need the venue lacks | `unsuitable`; see *Decisions* for why this counts | `[SCRUM-19] An accessibility need the venue cannot meet also makes it unsuitable` | 2026-10-06 ✅ |
+| TC-SCRUM-19-05 | 2 | Boundary | Requirements arrive as free text | Two checks, not one per character; `Projector` is recognised from "Projector, plus a stage" | `[SCRUM-19] Requirements are read from free text, not treated as a list of characters` | 2026-10-06 ✅ |
+| TC-SCRUM-19-06 | 2, 4 | Boundary | "Somewhere backstage for the choir" | "backstage" does not match the `Stage` facility, and the unmatched sentence is reported rather than passed or failed | `[SCRUM-19] Only whole words count as a requirement, and unknown wording is reported` | 2026-10-06 ✅ |
+| TC-SCRUM-19-07 | 2 | Boundary | The event records no expected attendance | Reported with `met: null` and counted in `unknown_count`, never as met | `[SCRUM-19] A requirement the event never recorded is reported, not counted as met` | 2026-10-06 ✅ |
+| TC-SCRUM-19-08 | 1 | Negative | An event belonging to another coordinator | 404, no assessment of someone else's requirements | `[SCRUM-19] An event that is not the coordinator's own cannot be assessed` | 2026-10-06 ✅ |
+| TC-SCRUM-19-09 | 1 | Negative | Missing event id, malformed event id, malformed venue id | 400 for each, and no lookup is made | `[SCRUM-19] A missing or malformed id is refused before any lookup` | 2026-10-06 ✅ |
+| TC-SCRUM-19-10 | 1 | Negative | Seven other identities, including Venue Staff | 401 or 403 for each, and no lookup is made | `[SCRUM-19] %s cannot assess a venue against someone's event` | 2026-10-06 ✅ |
+
+### Manual cases
+
+| ID | AC | Scenario | Expected result |
+| --- | --- | --- | --- |
+| TC-SCRUM-19-M1 | 1, 2, 5 | Use the Check suitability panel on the venue page | The panel lists the coordinator's own events; choosing one shows a verdict and a row per requirement |
+| TC-SCRUM-19-M2 | 3, 4 | Assess a venue that is too small or lacks a facility | The verdict reads unsuitable and the failing rows are marked |
+| TC-SCRUM-19-M3 | 5 | Check the panel is not offered to Venue Staff | No Check suitability panel appears, because staff hold no `bookings.request` |
+
+### Decisions
+
+- **Requirements are read as free text against the catalogue's own vocabulary**
+  (changed during manual testing, 6 Oct). The first version treated
+  `venue_requirements` as a list and iterated the string character by
+  character, producing one check per letter. The events lane's guide states
+  these fields are free text and that structuring them is the consuming
+  feature's schema change. A term is now recognised only when some venue offers
+  a facility or accessibility feature by that name, matched case-insensitively
+  on whole words. Text matching nothing is reported as unmatched, never passed.
+  The limit is that a requirement naming something no venue offers cannot be
+  recognised at all.
+- **The backend tests did not catch this**, because they stub the venue service
+  and the stub used arrays. A stubbed test proves the code matches what the
+  author believed about the schema, not the schema itself. Found in the browser
+  during TC-SCRUM-19-M1.
+- **Unmet accessibility counts as unsuitable**, which goes slightly beyond the
+  literal wording of AC3 and AC4. AC2 asks for the event's current requirements
+  to be compared, and a recorded accessibility need is one. Flagged to the user
+  before building.
+- **A requirement the event never recorded is reported, not passed.** Staying
+  silent would read as a pass; `met: null` and `unknown_count` say plainly what
+  could not be compared.
+- **The assessment reuses the fields `validateAgainstVenue` reads**, so a venue
+  assessed suitable cannot then be refused at submission for a reason the
+  assessment never mentioned. This is the same class of mismatch review caught
+  in SCRUM-18 between the slot wording and the slot rule.
+- **The verdict is advice, not a gate.** Nothing prevents requesting a venue the
+  assessment calls unsuitable, because AC3 and AC4 say "should not normally",
+  and SCRUM-21 already refuses a request that genuinely breaks the rules.
+- **Shown on the venue page, not in the booking form** (AC5). AC1 puts the
+  assessment after shortlisting, and the point is to avoid requesting an
+  unsuitable venue, which is a decision made before the form is open.
+
+### Deliberately absent
+
+A score or ranking, which SCRUM-18 already ruled out; an override or
+acknowledgement flow for requesting an unsuitable venue, which no AC asks for;
+assessing against room layout, which events do not record; and assessing a venue
+for several events at once.
+
+---
+
+## 5. SCRUM-138 — Check each venue booking of an event independently
+
+**Acceptance criteria, word for word**
+
+1. Suitability, availability and conflict checks run separately for each venue booking.
+2. The result is reported per venue, naming the venue that failed and why.
+3. A failed check on one venue does not alter the status of the other venue bookings.
+
+The gap this story fills: submission already checks one booking as it is made (`postBookingRequest`), but nothing
+re-read an event's existing bookings together and reported per venue. The endpoint is **read-only**, which is how
+AC3 is satisfied: it writes nothing, so a failure cannot change any booking's status.
+
+### Traceability
+
+| AC | Criterion | Test cases | Where the rule lives |
+| --- | --- | --- | --- |
+| 1 | Three checks run separately per booking | 01, 03, 05, 07, 08, 09, 15, 16 | `checkBooking` in `backend/src/modules/venues/venueBookingChecks.js`; the per-booking `try/catch` in `getEventBookingChecks` |
+| 2 | Per-venue result naming the venue and the reason | 02, 04, 15, 16, 17 | `venue_name` on every result and per-check `reasons`; `VenueBookingCheckReport.jsx` renders one card per venue; `EventVenueBookings.jsx` links from the coordinator's event page |
+| 3 | A failed check alters nothing | 06 | `GET .../booking-checks` calls no write function; each calendar excludes the event's own rows |
+| DoD | Who may run the check | 10, 11, 12, 13, 14 | `bookings.read` + `bookingScope` in `backend/src/routes/venues.routes.js` |
+
+### Test cases
+
+| ID | AC | Type | Scenario | Expected result | Automated by | Latest execution |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-138-01 | 1 | Happy | Every booking on the event is checked on its own | 200; one result per booking, ordered by date then venue; the fitting venue all passed, the over-capacity venue suitability failed | `[SCRUM-138] Each booking on the event gets its own verdicts` | 2026-10-15 ✅ |
+| TC-SCRUM-138-02 | 2 | Happy | The failing venue is named with a specific reason | `venue_name` is the failing venue; the reason names the numbers (`expected_attendees (100) exceeds the venue capacity of 50`) | same integration suite; `[SCRUM-138-UI-002]` | 2026-10-15 ✅ |
+| TC-SCRUM-138-03 | 1 | Negative | One venue's data cannot be read, or a booking's own row is incomplete | 200; only that venue is `not_checked` with a note; the other venue still reports | `[SCRUM-138] A venue whose data cannot be read is reported alone`; `[SCRUM-138] A booking whose own row is incomplete is reported, not crashed` | 2026-10-15 ✅ |
+| TC-SCRUM-138-04 | 2 | Boundary | An event with no bookings | 200; `results: []`; the event is still named | `[SCRUM-138] An event with no bookings reports an empty list`; `[SCRUM-138-UI-008]` | 2026-10-15 ✅ |
+| TC-SCRUM-138-05 | 1 | Boundary | A booking with nothing live (rejected or cancelled) | `overall: not_checked`, a note naming the status, all three checks `passed: null` | `[SCRUM-138] A booking with nothing live is reported, not checked`; `[SCRUM-138] a booking with no live slots reports not checked with its status` | 2026-10-15 ✅ |
+| TC-SCRUM-138-06 | 3 | Conflict | A failed check changes nothing | 200; every status identical before and after; no write function called | `[SCRUM-138] The check runs no write and leaves every booking as it was` | 2026-10-15 ✅ |
+| TC-SCRUM-138-07 | 1 | Boundary | A venue is never its own conflict | The event's own confirmed rows are excluded; conflicts passed | `[SCRUM-138] The event's own booking is not reported as its own conflict`; `[SCRUM-138] the booking's own rows are neither a conflict nor a duplicate` | 2026-10-15 ✅ |
+| TC-SCRUM-138-08 | 1 | Boundary | An occupied setup or turnaround buffer slot | The reason names the slot and the setup or turnaround time, for that venue only | `[SCRUM-138] an occupied setup buffer is reported against this booking`; `[SCRUM-138] an occupied turnaround buffer is reported against this booking` | 2026-10-15 ✅ |
+| TC-SCRUM-138-09 | 1 | Boundary | A recorded unavailability period | Availability fails quoting the recorded reason; conflicts still passed | `[SCRUM-138] a recorded unavailability fails availability and keeps its reason`; `[SCRUM-138] A recorded unavailability fails availability for that venue only` | 2026-10-15 ✅ |
+| TC-SCRUM-138-10 | DoD | Cross-cutting | No token, an invalid token | 401; nothing read | `[VENUE-CHECK-001]` (2 cases) | 2026-10-15 ✅ |
+| TC-SCRUM-138-11 | DoD | Cross-cutting | Roles without `bookings.read` | 403 for attendee, organiser, coordinator lead, safety officer, technical support; nothing read | `[VENUE-CHECK-002]` (5 cases) | 2026-10-15 ✅ |
+| TC-SCRUM-138-12 | DoD | Cross-cutting | Another coordinator's event | 404 `Event not found`, the same answer as a missing event; the scope reached the query | `[SCRUM-138] Another coordinator's event is not found, exactly like a missing one` | 2026-10-15 ✅ |
+| TC-SCRUM-138-13 | DoD | Negative | A malformed event id | 400 before any read | `[SCRUM-138] A malformed event id is refused before any read` | 2026-10-15 ✅ |
+| TC-SCRUM-138-14 | DoD | Failure | Missing venue storage | 503 | `[SCRUM-138] Missing venue storage answers 503, not a crash` | 2026-10-15 ✅ |
+| TC-SCRUM-138-15 | 1, 2 | Cross-cutting | The report in the browser and its failure states | One card per venue; the failing venue shows Failed with its reasons, the passing one Passed; a check failure offers Retry | `[SCRUM-138-UI-001]` to `[SCRUM-138-UI-008]` | 2026-10-15 ✅ |
+| TC-SCRUM-138-16 | 1, 2, 3 | Cross-cutting | Full journey through the real UI and backend | Per-venue report rendered; the blocked venue named with its reason; the request cards' statuses unchanged | `[VENUE-E2E-005]` | 2026-10-15 ✅ |
+| TC-SCRUM-138-17 | 2 | Cross-cutting | Reaching the check from the coordinator's own event page | The event's Venues section links to the check; a role without `bookings.read` sees the venues but no link; no link when there are no bookings, no event id, or no session | `[SCRUM-138-UI-009]` to `[SCRUM-138-UI-013]` | 2026-10-15 ✅ |
+
+### Executed results
+
+| Suite | Command | Result (2026-10-16) |
+| --- | --- | --- |
+| Backend unit + integration | `npm --prefix backend test` | 899 passed, 43 skipped, 0 failed |
+| Frontend | `npm --prefix frontend test -- --run --maxWorkers=3` | 456 passed across 45 files, 0 failed |
+| Playwright browser + API | `npm run test:playwright` | 186 passed, 0 failed |
+| Lint | `npm --prefix backend run check` · `npm --prefix frontend run lint` | clean |
+| Build | `npm --prefix frontend run build` | success |
+| Coverage | `npm --prefix backend run test:cov` · `npm --prefix frontend run test:cov -- src/features/venues` | `venueBookingChecks.js` 100% statements/branches/lines; every new controller, service, report and button line covered |
+
+The frontend suite is passed `--maxWorkers=3` locally: on a 20-core machine vitest tries to spawn 20 workers at
+once and Windows fails some of them, which costs `Timeout waiting for worker to respond`. With the limit it is
+reliably green; CI runs on its own runner.
+
+Thirteen frontend cases and the Playwright journey are new in this story; the earlier Playwright tests still pass after
+the fixture change noted under *Decisions*.
+
+### Manual cases
+
+1. Sign in as a seeded coordinator who owns an approved event with two venue bookings, one healthy.
+2. Open **My Events → that event** and click **Check each venue booking** under *Venues*. That opens the
+   event-scoped list `/venues/booking-requests?event=<event id>`, which can also be typed directly.
+3. Click **Check venue bookings**: one card per venue, each listing Suitability, Availability and Conflicts. The
+   problem venue reads Failed with a reason sentence; the other reads Passed.
+4. Have Venue Staff mark the problem booking's slot unavailable (or confirm another event into it), check again, and
+   confirm only that venue's card changes while the booking statuses below stay as they were.
+
+### Decisions
+
+- **Read-only** (AC3): the endpoint writes nothing, proven by asserting no write function runs and every status is
+  identical before and after.
+- **Suitability reuses SCRUM-87's `validateAgainstVenue`** on the booking's own requirements against the venue's
+  current catalogue. SCRUM-19's event-vs-venue assessment stays a pre-submission tool.
+- **Only live bookings are checked**; rejected and cancelled bookings are listed as `not_checked`.
+- **`findSlotProblems` is not reused**: it answers with display strings for the submission 409, while this story
+  classifies each outcome as availability or conflict. Both read the same calendar and `REQUESTABLE_STATUSES` rule.
+- **The Playwright fake storage gained three narrow changes** (`tests/playwright/support/venue-storage.cjs`):
+  `listSlotRowsForDate` returns the request `id` (a booking must not read as its own duplicate), `listBookingRequests`
+  honours the `eventId` argument it already accepted, and `getEventForCheckReport` was added with the real service's
+  scope rule. No production behaviour changed.
+- **The check is linked from the coordinator's own event page.** Nothing linked to
+  `/venues/booking-requests?event=<id>`, so `EventVenueBookings` (venue lane) now offers a **Check each venue
+  booking** link, shown only when it is given an event id and the caller holds `bookings.read`. `ManagedEventDetailPage`
+  passes the id; the *My Events* list does not, because it renders the component inside its own anchor and a second
+  anchor would be invalid. The server still authorises the check itself.
+
+### Deliberately absent
+
+Stored check results or a check history, which no AC asks for and which is why there is no schema change; re-checking
+whether `booking_date` still falls inside the event's dates, which the submission flow owns; overlap between two
+venues of the same event, because a multi-venue event may run parallel streams; remediation actions from the report;
+automatic re-checks on a decision; and equipment arrangements, which the Equipment lane's SCRUM-139 readiness covers.
+
+---
+
+## 6. SCRUM-146 — Tentative venue hold with expiry
+
+**Acceptance criteria, word for word**
+
+1. A hold records the venue, event, period, who placed it and a mandatory expiry date/time.
+2. The expiry cannot be in the past.
+3. An active hold blocks other requests for the same committed period.
+4. Active holds are shown as tentative and are not treated as confirmed bookings.
+5. Once the expiry passes, the venue becomes available again and the expired hold remains in the booking history.
+
+### Traceability
+
+| AC | Criterion | Test cases | Where the rule lives |
+| --- | --- | --- | --- |
+| 1 | Hold created with all required fields; held_by from verified session | 01, 07, 08, 15 | `validateHoldBody` + `createHold` in `venues.controller.js` / `venues.service.js` |
+| 2 | Expiry in the future | 03, 04 | `validateHoldBody` in `venues.controller.js` |
+| 3 | Active hold blocks booking request for same slot | 09, 10 | `listActiveHoldsInRange` → `buildAvailabilityCalendar` → `findSlotProblems`; `tentative` not in `REQUESTABLE_STATUSES` |
+| 4 | Slot shown as tentative (precedence below booked, above pending) | 11, 12, 13, 14 | `buildAvailabilityCalendar` in `venues.availability.js` |
+| 5 | Expired hold absent from calendar; present in history list | 05, 06, 14 | `listActiveHoldsInRange` (`expires_at > now()`); `listHolds` (all hold rows) |
+
+### Test cases
+
+| ID | AC | Type | Scenario | Expected | Automated by | Last run |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-146-01 | 1 | Happy | POST /holds valid body as venue_staff | 201, array of hold records; createHold called with correct args | `[TC-SCRUM-146-01]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-02 | 1 | Negative | POST /holds as event_coordinator | 403; createHold not called | `[TC-SCRUM-146-02]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-03 | 2 | Boundary | expires_at far in past | 400, details name expires_at | `[TC-SCRUM-146-03]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-04 | 2 | Negative | expires_at one hour ago | 400 | `[TC-SCRUM-146-04]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-05 | 5 | Happy | GET /holds returns all holds including expired | 200, array length 2, expired row present | `[TC-SCRUM-146-05]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-06 | 5 | Negative | GET /holds as event_coordinator | 403 | `[TC-SCRUM-146-06]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-07 | 1 | Negative | POST /holds, venue not found | 404; createHold not called | `[TC-SCRUM-146-07]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-08 | 1 | Negative | POST /holds, missing event_name | 400, details name missing field | `[TC-SCRUM-146-08]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-09 | 3 | Happy | Booking request blocked by active hold on same slot | 409, details mention slot name | `[TC-SCRUM-146-09]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-10 | 3 | Happy | Expired hold (not in active list) → booking request succeeds | 201 | `[TC-SCRUM-146-10]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-11 | 4 | Unit | Active hold on am → slot.status = tentative, label = event name | `{ status: "tentative", label: "Charity Gala" }` | `[TC-SCRUM-146-11]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-12 | 4 | Unit | Confirmed booking and hold on same slot → booked outranks tentative | `{ status: "booked" }` | `[TC-SCRUM-146-12]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-13 | 4 | Unit | Hold and pending request on same slot → tentative outranks pending | `{ status: "tentative" }` | `[TC-SCRUM-146-13]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-14 | 4, 5 | Unit | No active holds → slot available | `{ status: "available" }` | `[TC-SCRUM-146-14]` | 2026-10-15 ✅ |
+| TC-SCRUM-146-15 | 1 | Negative | POST /holds with invalid slot value ("morning") | 400, details mention slots | `[TC-SCRUM-146-15]` | 2026-10-15 ✅ |
+
+### Manual cases
+
+| ID | AC | Scenario | Expected |
+| --- | --- | --- | --- |
+| TC-SCRUM-146-M1 | 1, 4 | Sign in as venue_staff; open venue → Manage holds; place a hold; view the calendar | The held slot shows Tentative hold in blue |
+| TC-SCRUM-146-M2 | 3 | Sign in as event_coordinator; try to request the held slot | 409 — the request is blocked |
+| TC-SCRUM-146-M3 | 5 | Wait for the hold to expire (or set a near-future expiry); view the calendar | Slot returns to Available; the hold still appears in the Holds list under Expired |
+
+### Decisions
+
+- Holds stored in `venue_bookings` with `status='hold'` rather than a separate table. Keeps calendar and
+  conflict check unified — see *Tentative venue holds* in `venue-integration.md`.
+- `expires_at > now()` filtered in Postgres before data reaches the calendar. Calendar function stays pure.
+- `tentative` precedence below `booked` (a confirmed booking is harder to reverse) and above `pending`
+  (a hold is explicit staff intent; a request has not been decided).
+
+### Deliberately absent
+
+Coordinator-facing hold request flow; automatic hold cancellation; notify on expiry; delete/cancel a hold.
+
+---
+
+## 6b. SCRUM-162 — Convert a tentative hold into a booking request
+
+**Acceptance criteria, word for word**
+
+1. The coordinator can submit a booking request from an active hold for the same venue and period.
+2. The hold remains in place until the booking request is decided.
+3. Approving the booking request converts the hold into a confirmed booking.
+4. An expired hold cannot be converted; a new request must be submitted.
+
+### Traceability
+
+| AC | Criterion | Test cases | Where the rule lives |
+| --- | --- | --- | --- |
+| 1 | Eligible holds returned per coordinator; coordinator can convert via hold_ids | 01, 02, 03, 05, 08 | `listEligibleHoldsForCoordinator`, `validateHoldBody` (event_id required), `postBookingRequest` hold path |
+| 2 | Hold status stays 'hold' after conversion; calendar shows tentative while request is pending | 07 (unit), VENUE-E2E-007 | `linkHoldsToRequest` sets request_id, not status; `buildAvailabilityCalendar` hold+pending = tentative |
+| 3 | Confirmed booking outranks hold on calendar; hold cleared atomically | TC-146-12 (unit), VENUE-E2E-007 | `buildAvailabilityCalendar` booked > tentative; `decide_venue_booking_request` RPC |
+| 4 | Expired hold_ids rejected 409 | 04 | `getActiveHoldsByIds` filters `expires_at > now()` + `request_id IS NULL` |
+
+### Test cases
+
+| ID | AC | Type | Scenario | Expected | Automated by | Last run |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-162-01 | 1 | Happy | GET /holds/eligible as coordinator with matching holds | 200, one group with event name; service called with venueId + coordinatorId | `[TC-SCRUM-162-01]` | 2026-10-22 ✅ |
+| TC-SCRUM-162-02 | 1 | Negative | GET /holds/eligible as venue_staff | 403; service not called | `[TC-SCRUM-162-02]` | 2026-10-22 ✅ |
+| TC-SCRUM-162-03 | 1 | Boundary | GET /holds/eligible with no matching holds | 200, empty array | `[TC-SCRUM-162-03]` | 2026-10-22 ✅ |
+| TC-SCRUM-162-04 | 4 | Negative | POST /booking-requests with expired hold_ids | 409, error matches expired/no longer available | `[TC-SCRUM-162-04]` | 2026-10-22 ✅ |
+| TC-SCRUM-162-05 | 1, 2 | Happy | POST /booking-requests with valid hold_ids | 201; linkHoldsToRequest called with hold ids + new request id | `[TC-SCRUM-162-05]` | 2026-10-22 ✅ |
+| TC-SCRUM-162-06 | 1 | Conflict | POST /booking-requests where hold event_id differs from request event_id | 409, error mentions event match | `[TC-SCRUM-162-06]` | 2026-10-22 ✅ |
+| TC-SCRUM-162-07 | 2 | Unit | buildAvailabilityCalendar: active hold + pending request on same slot | slot status = tentative (hold outranks pending) | `[TC-SCRUM-162-07]` | 2026-10-22 ✅ |
+| TC-SCRUM-162-08 | 1 | Negative | POST /holds missing coordinator_id | 400, details name coordinator_id | `[TC-SCRUM-162-08]` | 2026-10-22 ✅ |
+| TC-SCRUM-162-09 | 1 | Negative | POST /booking-requests where hold coordinator_id differs from requester | 409, error mentions coordinator | `[TC-SCRUM-162-09]` | 2026-10-22 ✅ |
+| VENUE-E2E-007 | 1–4 | Browser | Staff places hold → coordinator converts → staff approves; slots confirmed via API | Full flow passes; hold linked to request; slots confirmed after approval | `[VENUE-E2E-007]` | 2026-10-22 ✅ |
+
+### Manual cases
+
+| ID | AC | Scenario | Expected |
+| --- | --- | --- | --- |
+| TC-SCRUM-162-M1 | 1, 2 | Staff places hold for APPROVED event on correct date; coordinator views calendar | "Holds ready to convert" section appears with the held date and slots |
+| TC-SCRUM-162-M2 | 1, 3 | Coordinator converts hold; staff approves booking request | Slot shows as booked on calendar; hold no longer blocks |
+| TC-SCRUM-162-M3 | 4 | Hold expires before coordinator converts | Eligible holds section is empty; coordinator must place a new hold |
+
+### Decisions
+
+- `event_id` FK on `venue_bookings` replaces fragile event-name string matching. Name comparison was
+  case-insensitive but broke on renames; a UUID is stable.
+- `listEventsWithCoordinator` restricted to APPROVED/CONFIRMED (matching `listBookableEvents`). A hold for a
+  non-approved event can never be converted, so showing it in the form would be misleading.
+- Hold `booking_date` must fall within the event's `start_time`/`end_time` range. Same constraint
+  `validateAgainstEvent` applies at conversion; filtering earlier avoids showing unconvertible holds.
+- `/coordinators` endpoint (original SCRUM-162 design) removed. The event dropdown (`/venues/events`)
+  carries the coordinator id on the selected event, so a separate coordinator picker is redundant.
+
+### Deliberately absent
+
+Post-conversion coordinator dashboard for tracking request status; automatic hold cancellation on approval
+(calendar shows booked which outranks tentative; explicit cancel is a UX improvement outside this story's AC).
+
+---
+
+## 7. SCRUM-135 — Flag bookings conflicting after setup/turnaround change
+
+**Acceptance criteria, word for word**
+
+1. When setup or turnaround time is changed for a venue, any existing confirmed bookings that now conflict
+   with the new buffer requirements are flagged.
+2. The flag records which slot is problematic, whether it is a setup or turnaround buffer, and which booking
+   occupies it.
+3. Flags are automatically cleared when a booking is cancelled or rescheduled.
+4. Venue Staff can view the list of flagged bookings for a venue.
+
+### Traceability
+
+| AC | Criterion | Test cases | Where the rule lives |
+| --- | --- | --- | --- |
+| 1 | PATCH setup_minutes or turnaround_minutes triggers recheck | 05, 06, 07, 10, 11 | `patchVenue` in `venues.controller.js` calls `recheckConflictsAfterUpdate` only when buffer fields change |
+| 2 | Flag captures slot, type (setup/turnaround), conflicting event name and reason | 02, 03, 17 | `findBufferConflicts` in `venues.conflicts.js`; written to `venue_conflict_flags` via `recheckConflictsAfterUpdate` |
+| 3 | Expired or released holds cleared on every GET; recheck after update | 01, 04, 12, 15, 17 | `recheckConflictsAfterUpdate` fetches active holds (`expires_at > now()`); GET calls recheck before listing |
+| 4 | GET /booking-conflicts returns flags; 403 for wrong role; 404 for missing venue | 12, 13, 14, 15, UI-01–04 | `getConflictFlags` in `venues.controller.js`; `venues.conflicts` permission (venue_staff only) |
+
+### Test cases
+
+| ID | AC | Type | Scenario | Expected | Automated by | Last run |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-135-01 | 1 | Boundary | setup=0, turnaround=0 → no buffer expansion | Empty map | `[TC-SCRUM-135-01]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-02 | 2 | Happy | setup 90 min: pm booking, am occupied by confirmed | Setup conflict on am with conflicting_with | `[TC-SCRUM-135-02]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-03 | 2 | Happy | turnaround 60 min: pm booking, night occupied by pending | Turnaround conflict on night | `[TC-SCRUM-135-03]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-04 | 3 | Boundary | Buffer slot expanded but empty | Empty map | `[TC-SCRUM-135-04]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-05 | 1 | Happy | PATCH setup_minutes change as venue_staff | 200; recheck called once with updated venue | `[TC-SCRUM-135-05]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-06 | 1 | Happy | PATCH turnaround_minutes change as venue_staff | 200; recheck called once with updated venue | `[TC-SCRUM-135-06]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-07 | 1 | Happy | PATCH both setup and turnaround | 200; recheck called exactly once | `[TC-SCRUM-135-07]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-08 | 1 | Boundary | No confirmed requests at all | Empty map | `[TC-SCRUM-135-08]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-09 | — | Boundary | Input booking objects are not mutated | Original arrays unchanged after call | `[TC-SCRUM-135-09]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-10 | 1 | Negative | PATCH non-buffer field (notes) | 200; recheck not called | `[TC-SCRUM-135-10]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-11 | 1 | Boundary | PATCH setup_minutes with unchanged value | 200; recheck not called | `[TC-SCRUM-135-11]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-12 | 4 | Happy | GET /booking-conflicts as venue_staff with flags | 200; data array with flags; recheck called once | `[TC-SCRUM-135-12]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-13 | 4 | Negative | GET /booking-conflicts as event_coordinator | 403; listConflictingRequests not called | `[TC-SCRUM-135-13]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-14 | 4 | Negative | GET /booking-conflicts, venue not found | 404; recheck not called | `[TC-SCRUM-135-14]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-15 | 4 | Boundary | GET /booking-conflicts, no flags | 200; empty array; recheck called once | `[TC-SCRUM-135-15]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-16 | 2 | Boundary | Only conflicting request appears in map; clear request absent | result.has(reqId)=true, result.has(clearReqId)=false | `[TC-SCRUM-135-16]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-17 | 3 | Happy | Active hold in buffer slot is treated as an occupier | Setup conflict logged with hold's event name | `[TC-SCRUM-135-17]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-UI-01 | 4 | Happy | VenueConflictsPage shows event name, date and conflict reason | Event name, 10 Oct 2099, reason text visible | `[TC-SCRUM-135-UI-01]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-UI-02 | 4 | Boundary | No conflict flags | "No conflict flags." shown; no article elements | `[TC-SCRUM-135-UI-02]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-UI-03 | 4 | Failure | Load fails (network error) | Error message containing "Could not load conflict flags" | `[TC-SCRUM-135-UI-03]` | 2026-10-16 ✅ |
+| TC-SCRUM-135-UI-04 | 4 | Boundary | Loading state before data arrives | "Loading conflict flags…" visible | `[TC-SCRUM-135-UI-04]` | 2026-10-16 ✅ |
+
+### Manual cases
+
+| ID | AC | Scenario | Expected |
+| --- | --- | --- | --- |
+| TC-SCRUM-135-M1 | 1, 4 | Sign in as venue_staff; open a venue with confirmed bookings; increase setup_minutes via Edit; open View conflict flags | Flagged bookings listed with slot and reason |
+| TC-SCRUM-135-M2 | 3 | Place a hold on a buffer slot; view conflict flags; let the hold expire; view again | Flag from the hold clears after expiry on the next page load |
+| TC-SCRUM-135-M3 | 4 | Sign in as event_coordinator; navigate to `/venues/:id/booking-conflicts` directly | Redirected or shown 403 |
+
+### Decisions
+
+- `recheckConflictsAfterUpdate` runs on every `GET /booking-conflicts` so flags from expired or released
+  holds are cleared without a cron job. The cost is one extra recheck per read; acceptable for an
+  infrequently visited staff page.
+- Active holds (`status='hold'`, `expires_at > now()`) are included as occupiers in `findBufferConflicts`
+  so a hold on a buffer slot generates the same flag a confirmed booking would. See SCRUM-146 decision
+  in `venue-integration.md`.
+- Flags are stored in `venue_conflict_flags` and rewritten wholesale on each recheck; there is no incremental
+  update. This keeps the logic simple: clear all → recompute → insert fresh rows.
+
+### Deliberately absent
+
+Coordinator notification when a flag is raised; auto-resolution when setup/turnaround is reverted;
+conflict flags for unavailability periods; per-booking flag dismissal.
+
+---
+
+## 8. SCRUM-154 — Change or cancel one venue booking on a multi-venue event
+
+**Acceptance criteria, word for word**
+
+1. Changing or cancelling one venue booking leaves the event's other venue bookings unchanged.
+2. A changed venue booking is checked and approved again.
+3. A cancelled venue booking's period is released.
+4. The change or cancellation is recorded against that venue booking in the event history.
+
+**Status: fully built and proven, 2026-10-19.** Application code, both UIs, the mocked test suite,
+and a live-DB suite proving AC1's cross-request scoping and AC4's transactional `event_activity_log`
+write against the real shared dev database are all passing. The SQL (table + both functions) is
+applied and confirmed working through the live suite.
+
+### Traceability
+
+| AC | Criterion | Test cases | Where the rule lives |
+| --- | --- | --- | --- |
+| 1 | Acting on one booking never touches another | TC-01, TC-02 | `patchBookingRequest`/`patchBookingRequestCancel` in `venues.controller.js`; scoped by `request_id` in both SQL functions |
+| 2 | Changed booking re-flagged to pending; any field triggers it; availability only checked when the date moves | TC-03, TC-06, TC-08, TC-09 | `change_venue_booking_request`; `validateChangeRequestShape`; the `booking_date` comparison in `patchBookingRequest` |
+| 3 | Cancelled booking's slots released | TC-10 | `cancel_venue_booking_request` |
+| 4 | Change/cancel recorded in `event_activity_log` | TC-LIVE-01, TC-LIVE-04 | `event_activity_log` insert inside both SQL functions' own transaction - proven live, since it's invisible to a mocked service |
+| - | Terminal booking cannot be re-actioned | TC-11 | `status in ('pending','confirmed')` guard in both functions |
+| - | Coordinator-only, assigned coordinator only | TC-13 | `bookings.manage` permission; `bookingScope` |
+| - | Frozen outside `PLANNING_STATUSES` | TC-14 | Explicit check in both controller handlers |
+| - | Malformed/missing id, slots/unknown fields refused | TC-15 | `UUID_PATTERN` check; `validateChangeRequestShape`; RPC error-code mapping |
+
+### Test cases
+
+| ID | AC | Type | Scenario | Expected | Automated by | Last run |
+| --- | --- | --- | --- | --- | --- | --- |
+| TC-SCRUM-154-01 | 1 | Happy | Cancel one booking on a multi-venue event | Service called with only that request's id | `[TC-SCRUM-154-01]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-02 | 1 | Happy | Change one booking's details | Service called with only that request's id | `[TC-SCRUM-154-02]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-03 | 2 | Happy | Change non-slot details, same date | 200; booking shows `pending`; no availability check runs | `[TC-SCRUM-154-03]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-06 | 2 | Happy | Change the booking date | New date's existing slots checked; RPC called with the new date | `[TC-SCRUM-154-06]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-08 | 2 | Conflict | Move the date onto a slot another live request already holds there | 409; RPC not called | `[TC-SCRUM-154-08]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-09 | 2 | Boundary | Keep the same date | No availability check runs at all | `[TC-SCRUM-154-09]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-10 | 3 | Happy | Cancel a confirmed booking | 200; response status `cancelled` | `[TC-SCRUM-154-10]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-11 | - | Conflict | Change or cancel a request with no live rows | 409 | `[TC-SCRUM-154-11]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-13 | - | Negative | Wrong role, or a coordinator not assigned to this booking | 401/403 (wrong role); 404 (not assigned, same as missing) | `[TC-SCRUM-154-13]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-14 | - | Boundary | Event outside/inside `PLANNING_STATUSES` | 409 outside; 200 for APPROVED/CONFIRMED | `[TC-SCRUM-154-14]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-15 | - | Failure | Malformed id; RPC-reported not-found; `slots`/`purpose`/`event_id` sent (unknown fields) | 400/404 as appropriate; nothing written | `[TC-SCRUM-154-15]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-DB-06/07/08/09 | 2, 3 | Unit | RPC call shape and errcode passthrough for `changeBookingRequest`/`cancelBookingRequest` | Exact `p_*` args (no `p_slots`); `.code` preserved on throw | `[VENUE-DB-006..009]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-UI-01 | 1 | Happy | Assigned coordinator sees the cancel action on a pending booking | "Cancel this booking" button renders | `[TC-SCRUM-154-UI-01]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-UI-02 | - | Negative | Venue Staff view the same page | No cancel action shown | `[TC-SCRUM-154-UI-02]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-UI-03 | - | Boundary | Click cancel, then back out | Confirmation shown; backing out writes nothing | `[TC-SCRUM-154-UI-03]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-UI-04 | 1, 3 | Happy | Confirm the cancellation | Cancel endpoint called; card re-renders as Cancelled | `[TC-SCRUM-154-UI-04]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-UI-05 | - | Failure | Confirm on a booking the server says is no longer live (409) | Refusal shown in place; no crash; still cancellable again | `[TC-SCRUM-154-UI-05]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-UI-06 | - | Boundary | A rejected booking | No cancel action offered - already terminal | `[TC-SCRUM-154-UI-06]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-UI-07 | 2 | Happy | Assigned coordinator opens the edit action | Form loads pre-filled from the booking and the venue's own requirements | `[TC-SCRUM-154-UI-07]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-UI-08 | - | Negative | Venue Staff view the same page | No edit action shown | `[TC-SCRUM-154-UI-08]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-UI-09 | 2 | Happy | Edit the date and attendees, save | Change endpoint called with both; card shows Pending review | `[TC-SCRUM-154-UI-09]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-UI-10 | - | Boundary | Open the edit form, then discard | Form closes; nothing written | `[TC-SCRUM-154-UI-10]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-UI-11 | - | Failure | Save on a booking the server says is no longer live (409) | Refusal shown in place; no crash; still editable | `[TC-SCRUM-154-UI-11]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-UI-12 | - | Boundary | A rejected booking | No edit action offered - already terminal | `[TC-SCRUM-154-UI-12]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-LIVE-01 | 1, 3, 4 | Happy | Live DB: cancel one of two bookings on an event | Only that booking cancelled; sibling untouched; `event_activity_log` row written | `[TC-SCRUM-154-LIVE-01]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-LIVE-02 | - | Conflict | Live DB: cancel a request with no live rows | Rejected (`P0003`); nothing logged | `[TC-SCRUM-154-LIVE-02]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-LIVE-03 | - | Failure | Live DB: cancel a request id that doesn't exist | Rejected (`P0002`) | `[TC-SCRUM-154-LIVE-03]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-LIVE-04 | 1, 2, 4 | Happy | Live DB: change the date of one of two bookings on an event | Old row cancelled, new `pending` row on the new date with the same slot; sibling untouched; logged with before/after date | `[TC-SCRUM-154-LIVE-04]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-LIVE-05 | 2 | Boundary | Live DB: change non-slot details, same date | The same row flips to `pending` in place - not cancelled-and-reinserted | `[TC-SCRUM-154-LIVE-05]` | 2026-10-19 ✅ |
+| TC-SCRUM-154-LIVE-06 | - | Conflict | Live DB: change a request with no live rows | Rejected (`P0003`) | `[TC-SCRUM-154-LIVE-06]` | 2026-10-19 ✅ |
+
+### Manual cases
+
+| ID | AC | Scenario | Expected |
+| --- | --- | --- | --- |
+| TC-SCRUM-154-M1 | 1, 3 | Sign in as the assigned coordinator; **My Events → the event → Check each venue booking**; click **Cancel this booking**, confirm | The booking shows Cancelled; the event's other venue bookings (if any) are unaffected |
+| TC-SCRUM-154-M2 | 1, 2 | Same page; click **Edit this booking**, change the date and attendees, save | The booking shows Pending review with the new date; other bookings unaffected |
+| TC-SCRUM-154-M3 | 4 | After M1 or M2, check `event_activity_log` in the Supabase dashboard | A row with the matching `action` for that event |
+
+### Decisions
+
+- Slot selection is out of scope; a date change carries the booking's existing slots to the new date
+  unchanged. Changing slots themselves is cancel-and-resubmit through the existing create flow.
+- Any field edit re-flags to `pending`, not only the date - simpler than a significance rule, and
+  SCRUM-138's own suitability check already treats every field as relevant.
+- Availability is checked only when the date actually moves - an unchanged date already holds (or
+  contests) exactly what it did before, so there is nothing new to check, and no self-exclusion is
+  needed on a date move since this request has no rows on a date it doesn't currently hold.
+- `rejected`/`cancelled` bookings are terminal; a rejected booking's replacement is a new request,
+  not an edit of the rejected one in place.
+- `bookings.manage` reuses the existing `bookingScope` resolver (coordinator-only; Venue Staff never
+  hold this permission, so it always resolves to `coordinatorId`) rather than introducing a second
+  authorization mechanism - the same scope rule `bookings.read`/`bookings.decide` already apply to
+  this table.
+- `purpose` and `conflict_flags` are not touched - see *Changing or cancelling one venue booking* in
+  `venue-integration.md`.
+
+### Deliberately absent
+
+| Behaviour | Belongs to |
+| --- | --- |
+| A page/UI to view the event activity log | Deferred - UI not decided; possibly SCRUM-141 |
+| Resubmitting a rejected/cancelled booking by editing it in place | Existing create flow (SCRUM-21/92/102) |
+| Changing which slots a booking holds | Cancel-and-resubmit through the existing create flow, by decision |
+| An in-app viewer for the event activity log | New story flagged by the user during UAT (2026-10-19) - see `.agent` memory/task note |
+
+---
+
+## 9. Coverage note
+## 9. SCRUM-136 — Affected bookings when venue marked unavailable
+
+Story: as Venue Staff, I want to see which bookings are affected when I mark a venue unavailable so that alternative arrangements can be made for them.
+
+### Test case specifications
+
+| ID | AC | Type | Scenario | Expected |
+| --- | --- | --- | --- | --- |
+| TC-SCRUM-136-01 | 1 | Happy | POST period: 201 response always includes an `affected` array | `json.affected` is an array | `[TC-SCRUM-136-01]` | 2026-10-16 ✅ |
+| TC-SCRUM-136-02 | 1, 2 | Happy | Confirmed booking overlapping the period appears in affected | `affected` length 1; entry id matches; `event.coordinator_id` present | `[TC-SCRUM-136-02]` | 2026-10-16 ✅ |
+| TC-SCRUM-136-03 | 1 | Boundary | No confirmed bookings in the period: affected is empty | `affected` length 0 | `[TC-SCRUM-136-03]` | 2026-10-16 ✅ |
+| TC-SCRUM-136-04 | 4 | Negative | Creating a period does not cancel or modify any booking | `decideBookingRequest` not called | `[TC-SCRUM-136-04]` | 2026-10-16 ✅ |
+| TC-SCRUM-136-05 | 1 | Happy | `listAffectedBookingRequests` called with the correct period and venue objects | Called with `(venueId, customPeriod, venue)` | `[TC-SCRUM-136-05]` | 2026-10-16 ✅ |
+| TC-SCRUM-136-06 | — | Negative | Event Coordinator cannot create a period (403) — affected not exposed | 403; `listAffectedBookingRequests` not called | `[TC-SCRUM-136-06]` | 2026-10-16 ✅ |
+| TC-SCRUM-136-07 | 1 | Boundary | No confirmed bookings in range: affected is empty (Playwright API) | `affected` length 0 | `[TC-SCRUM-136-07]` | — |
+| TC-SCRUM-136-08 | 1, 2 | Happy | Confirmed booking in range with coordinator_id (Playwright API) | Entry with `booking_date`, confirmed slot, `event.coordinator_id` set | `[TC-SCRUM-136-08]` | — |
+| TC-SCRUM-136-09 | 1 | Boundary | Pending-only booking not in affected (Playwright API) | No entry with only pending slots | `[TC-SCRUM-136-09]` | — |
+| TC-SCRUM-136-10 | 1 | Boundary | Booking outside period date range not in affected (Playwright API) | No entry with the out-of-range `booking_date` | `[TC-SCRUM-136-10]` | — |
+| TC-SCRUM-136-11 | 4 | Negative | Creating period does not modify affected bookings (Playwright API) | Slot still `confirmed` after period created | `[TC-SCRUM-136-11]` | — |
+
+### Decisions
+
+- Only confirmed slot rows are checked for overlap; pending requests are not yet scheduled so they do not require alternative arrangements.
+- `listAffectedBookingRequests` is a read-only pass over `venue_booking_requests` filtered by `booking_date` in the period range. The overlap check (`committedSlots` + slot-set intersection) is done in JavaScript after the query to reuse existing pure logic without adding a database dependency.
+- `coordinator_id` was added to the `event` join in `BOOKING_REQUEST_FIELDS` so it appears on all booking request reads (harmless addition — it is already in the events table).
+
+### Deliberately absent
+
+UI to display the affected list (the 201 JSON is the delivery channel for this story); coordinator notification; cancellation or rescheduling of affected bookings.
+
+Latest local execution (2026-10-20): the Playwright venue browser suite passed
+all 8 tests after its in-memory venue fixture gained the same read-only
+`listAffectedBookingRequests` behaviour as the production service. This was a
+merge-integration repair; it does not alter production SCRUM-136 behaviour.
+
+---
+
+## 8. Coverage note
+
+`npm --prefix backend run test:cov` reports the whole backend. Most venue modules are exercised through the
+integration suites above rather than by unit tests of their own, so coverage of
+`venues.availability.js`, `venues.validation.js` and `venues.bookingRequests.validation.js` is indirect. Those three
+files import nothing, which is what makes direct unit tests cheap to add; that gap is known and unowned.
+
+`venueBookingChecks.js` (SCRUM-138) is the exception: it has a direct unit suite and reports 100% on statements,
+branches and lines.
+# SCRUM-145 replacement venue coverage
+
+The replacement flow uses the existing venue request and decision pipeline.
+Apply the manual SQL in [`venue-integration.md`](./venue-integration.md) before
+running live database checks.
+
+| Test case | Expected behavior | Automated coverage |
+| --- | --- | --- |
+| `TC-SCRUM-145-01` | Original requirements are returned with the preserved affected booking and candidates. | `backend/tests/unit/venues/venueReplacement.test.js`; `backend/tests/integration/venues.replacement.test.js` |
+| `TC-SCRUM-145-02` | Invalid identifiers and callers without permission are refused before replacement storage is used. | `backend/tests/integration/venues.replacement.test.js` |
+| `TC-SCRUM-145-03` | A replacement is submitted through the existing booking request flow, while release remains available. | `backend/tests/integration/venues.replacement.test.js`; `frontend/src/features/venues/components/VenueReplacementSearch.test.jsx` |
+| `TC-SCRUM-145-04` | A different Event Coordinator cannot inspect an affected booking or its replacement candidates. | `tests/e2e/venue-replacement-api.spec.cjs`; API ownership check in `venueReplacement.service.js` |
+| `TC-SCRUM-145-05` | Only a linked replacement, never an ordinary request, may be made while the event is in `PREPARATION`; only one active replacement can exist. | `backend/tests/integration/venues.replacement.test.js`; SQL/RPC constraint |
+| `TC-SCRUM-145-06` | Approval resolves the original and repeats safety review when required. | SQL/RPC integration test after SQL is applied. |
+| `TC-SCRUM-145-07` | Release cancels the affected booking and pending replacement. | SQL/RPC integration test after SQL is applied. |
+| `TC-SCRUM-145-08` | The affected booking's event and venue details, replacement action and release action are visible to the Event Coordinator; Venue Staff see the red affected state but neither action. | `frontend/src/features/venues/components/EventVenueBookings.test.jsx`; `frontend/src/features/venues/components/VenueReplacementSearch.test.jsx` |
+| `TC-SCRUM-145-09` | Matching available venues are rendered as cards; no candidates gives the coordinator a clear release-and-replan next step. | `frontend/src/features/venues/components/VenueReplacementSearch.test.jsx` |
+
+Latest execution (2026-10-20): the full local backend suite passed 1,034 tests
+(43 opt-in live tests skipped); the full local frontend suite passed 485 tests;
+and the local Playwright API/browser suite passed 190 tests. The venue browser
+subset was rerun after its fixture repair and passed 7 tests. Backend and
+frontend lint passed, and the frontend production build passed. Live-database
+checks are deliberately run by the developer, not the agent: the developer's
+focused rerun passed all three SCRUM-145 cases, `TC-SCRUM-145-01`,
+`TC-SCRUM-145-04`, and `TC-SCRUM-145-07`.
+
+PR #62 CI correction (2026-10-24): TC-SCRUM-154-LIVE-01/02/04 snapshot existing event history before the booking operation. Successful operations must preserve all previous entries and append exactly one entry with the expected action and details; refusal must leave the history identical. This accommodates SCRUM-117 baseline entries without ignoring unexpected writes. These live cases require a new CI or human run; the agent does not execute them against shared Supabase.
+
+Offline verification on 2026-10-24: backend lint passed, and Vitest passed 1,173 tests with `tests/live/**` and the six shared-database integration suites excluded. These results do not count as execution of TC-SCRUM-154-LIVE-01/02/04; their updated assertions await CI.
+
+# SCRUM-38 — Re-validate venue bookings after an event change
+
+> As an Event Coordinator, I want affected venue arrangements to be reconsidered after a event change so that an
+> unsuitable or conflicting venue arrangement is not retained. Venue bookings will have to be re validated when there
+> is a change to event details including date, venue and equipment requirements. Bookings that fail are flagged with
+> the venue name and the reason (e.g. "over capacity", "clashes with Event X", "venue unavailable"). Bookings that
+> pass are left unchanged. The coordinator can request a replacement venue for a failed booking.
+
+Design and the SCRUM-165 hand-off: [venue integration — SCRUM-38](venue-integration.md#re-validating-bookings-after-an-event-change-scrum-38).
+Requirements are numbered R1–R4 in the order of the description above.
+
+| Epic | Scrum-# | AC # | Type | Test Case ID | Test Scenario | Pre-conditions | Test Steps | Test Data | Expected Result | Created By* | Date of Creation* | Actual Result | Pass / Fail / Not Executed / Blocked | Remarks | Executed By | Date of Execution |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Venue | SCRUM-38 | R2 | Happy | TC-SCRUM-38-01 | A booking that still fits the changed event has no event-fit reason | Event on 2099-10-10, 80 expected | `eventFitReasons` | Booking 2099-10-10, capacity 100 | No reason | Agent | 2026-10-30 | As expected | Pass | `backend/tests/unit/venues/venueRevalidation.test.js` | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R2 | Negative | TC-SCRUM-38-02 | A booking outside the event's new dates is flagged | Same event | `eventFitReasons` | Bookings 2099-10-09, 2099-10-11 | "…is outside the event's dates (2099-10-10 to 2099-10-10)." | Agent | 2026-10-30 | As expected | Pass | same file | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R2 | Boundary | TC-SCRUM-38-03 | Attendance at and one above the booked capacity | Capacity 80 | `eventFitReasons` | 80, then 81 expected | 80 passes; 81 gives "Over capacity: … hold 80, fewer than the 81 people now expected." | Agent | 2026-10-30 | As expected | Pass | same file | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R2 | Boundary | TC-SCRUM-38-04 | Two venues on one date together hold enough | 80 expected | `revalidateBookingsForEvent` | Venues of 50 and 40 on 2099-10-10 | Nothing flagged, nothing written | Agent | 2026-10-30 | As expected | Pass | same file | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R2 | Negative | TC-SCRUM-38-05 | Nothing recorded to compare | Event without dates or attendance | `eventFitReasons` | nulls | No reason | Agent | 2026-10-30 | As expected | Pass | same file | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R1–R3 | Happy | TC-SCRUM-38-06 | Only the failing booking is flagged; the passing one is untouched | One fitting venue (200), one too small and on the wrong date | `revalidateBookingsForEvent` | Capacity 20 on 2099-10-11 | One flag with the venue name and "After the event changed: …outside…Over capacity…"; `markVenueBookingAffected` called exactly once, for the failing booking | Agent | 2026-10-30 | As expected | Pass | same file | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R3 | Negative | TC-SCRUM-38-07 | Affected, cancelled and rejected bookings are skipped | Three such bookings | `revalidateBookingsForEvent` | — | `checked: 0`; nothing marked | Agent | 2026-10-30 | As expected | Pass | same file | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R2 | Failure | TC-SCRUM-38-08 | One booking cannot be marked | Mark throws for the first booking | `revalidateBookingsForEvent` | Two failing bookings | Error logged; the second is still marked and reported | Agent | 2026-10-30 | As expected | Pass | same file | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R2 | Cross-cutting | TC-SCRUM-38-09 | A clash never reveals the other event's name | Another event confirmed on the same slot | `revalidateBookingsForEvent` | "Secret board meeting" | Reason contains "Reserved event", not the real name | Agent | 2026-10-30 | As expected | Pass | same file | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R2–R4 | Negative | TC-SCRUM-38-10 | A confirmed but affected booking does not pass the safety check | Only venue is affected | `checkArrangements` | Affected reason | Listed as missing with its reason; no booked venue. Non-essential: optional, still "no venue" | Agent | 2026-10-30 | As expected | Pass | `backend/tests/unit/events/safetyReadiness.test.js` | Agent (local) | 2026-10-30 |
+| Venue | SCRUM-38 | R4 | Happy | (SCRUM-145) | Replacement for a flagged booking | Booking affected | SCRUM-145 flow | — | Search and replacement request work unchanged | — | — | Covered by `TC-SCRUM-145-01…09` | Pass (existing) | Reused, not re-tested | — | — |
+| Venue | SCRUM-38 | R1 | Happy | TC-SCRUM-38-11 | Re-validation runs when an accepted change request is applied | SCRUM-165 merged | Accept a change request raising attendance | — | Covered by TC-SCRUM-38-12 and E2E-REVALIDATE-001 | Agent | 2026-10-30 | As expected | Pass | Executed 2026-11-01 now that SCRUM-165 is merged | Agent (local) | 2026-11-01 |
+| Venue | SCRUM-38 | R1 | Happy | TC-SCRUM-38-12 | Accepting a higher attendance re-validates once | `APPROVED` event, pending change | POST decide-change-request approve | attendance 100 → 300 | 200; re-validation called exactly once with the event id; attendance saved | Agent | 2026-11-01 | As expected | Pass | `backend/tests/integration/venueRevalidation.changeRequest.test.js` | Agent (local) | 2026-11-01 |
+| Venue | SCRUM-38 | R1 | Happy | TC-SCRUM-38-13 | An equipment-requirements change re-validates (SCRUM-165 keeps the event `APPROVED`) | Same | Approve | `equipment_needs` changed | 200; status `APPROVED`; re-validation called once | Agent | 2026-11-01 | As expected | Pass | `backend/tests/integration/venueRevalidation.changeRequest.test.js` | Agent (local) | 2026-11-01 |
+| Venue | SCRUM-38 | R1 | Negative | TC-SCRUM-38-14 | A change that cannot affect venues does not re-validate | Same | Approve | name only | 200; not called | Agent | 2026-11-01 | As expected | Pass | `backend/tests/integration/venueRevalidation.changeRequest.test.js` | Agent (local) | 2026-11-01 |
+| Venue | SCRUM-38 | R1 | Negative | TC-SCRUM-38-15 | Rejecting a change request does not re-validate | Same | Reject | attendance 300 proposed | 200; attendance still 100; not called | Agent | 2026-11-01 | As expected | Pass | `backend/tests/integration/venueRevalidation.changeRequest.test.js` | Agent (local) | 2026-11-01 |
+| Venue | SCRUM-38 | R1 | Boundary | TC-SCRUM-38-16 | The same start time in another format is not a change | Same | Approve | `18:00+08:00` vs `10:00Z` | 200; not called | Agent | 2026-11-01 | As expected | Pass | `backend/tests/integration/venueRevalidation.changeRequest.test.js` | Agent (local) | 2026-11-01 |
+| Venue | SCRUM-38 | R1 | Failure | TC-SCRUM-38-17 | Re-validation throws after the decision is saved | Re-validation stub throws | Approve | attendance 300 | 200; change saved; error logged | Agent | 2026-11-01 | As expected | Pass | `backend/tests/integration/venueRevalidation.changeRequest.test.js` | Agent (local) | 2026-11-01 |
+| Venue | SCRUM-38 | R3 | Failure | TC-SCRUM-38-18 | Re-approval re-validates (Option A) and never releases venues, even when re-validation throws | Re-validation throws | `review.approve` | — | `{ ok: true }`; equipment released; venue release not called; error logged | Agent | 2026-11-01 | As expected | Pass | `backend/tests/unit/events/review.service.test.js` | Agent (local) | 2026-11-01 |
+| Venue | SCRUM-38 | R1–R4 | Happy | E2E-REVALIDATE-001 | Browser journey: coordinator accepts more attendees; too-small venue flagged, kept through re-approval, blocks safety check | Fixture venue (200) confirmed; attendance 30 | Organiser requests 300; coordinator clicks *Approve change*; start review + approve; reload | 300 attendees | Panel note says venues are re-checked; booking `is_affected` with "Over capacity … hold 200, fewer than the 300 …"; slot still confirmed after re-approval; *Missing arrangements* lists it | Agent | 2026-11-01 | As expected | Pass | `tests/playwright/venue-revalidation.browser.spec.cjs` | Agent (local) | 2026-11-01 |
+| Venue | SCRUM-38 | R3 | Happy | E2E-REVALIDATE-002 | An accepted equipment change re-checks a venue that still fits and leaves it unchanged | Same | Approve via API | equipment changed | Booking not affected; slot still confirmed | Agent | 2026-11-01 | As expected | Pass | `tests/playwright/venue-revalidation.browser.spec.cjs` | Agent (local) | 2026-11-01 |
+
+**UI added after manual testing (2026-11-01).** E2E-REVALIDATE-001 now also checks the notice after *Approve change*,
+the *Venue needs attention* section (venue, reason, replacement link) before and after re-approval, and the
+*Venue needs attention* badge on the My assigned events list. My Events is not served by the Playwright test server;
+its *Affected - needs alternative* card is covered by SCRUM-145's existing `EventVenueBookings.test.jsx`.
+
+| Epic | Scrum-# | AC # | Type | Test Case ID | Test Scenario | Pre-conditions | Test Steps | Test Data | Expected Result | Created By* | Date of Creation* | Actual Result | Pass / Fail / Not Executed / Blocked | Remarks | Executed By | Date of Execution |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Venue | SCRUM-38 | R2 | Happy | SCRUM-38-UI-001 | Notice after an accepted change names each venue that no longer fits | Coordinator signed in | As described | — | "1 venue booking no longer fits after this change." with "Hall A: <reason>" | Agent | 2026-11-01 | As expected | Pass | `frontend/src/features/events/components/VenueAttention.test.jsx` | Agent (local) | 2026-11-01 |
+| Venue | SCRUM-38 | R3 | Happy | SCRUM-38-UI-002 | Notice when every venue still fits | Coordinator signed in | As described | — | "…all 2 still fit."; no list | Agent | 2026-11-01 | As expected | Pass | `frontend/src/features/events/components/VenueAttention.test.jsx` | Agent (local) | 2026-11-01 |
+| Venue | SCRUM-38 | R1 | Failure | SCRUM-38-UI-003 | Notice when the re-check could not run | Coordinator signed in | As described | — | Says the change stands and venues are re-checked on re-approval | Agent | 2026-11-01 | As expected | Pass | `frontend/src/features/events/components/VenueAttention.test.jsx` | Agent (local) | 2026-11-01 |
+| Venue | SCRUM-38 | R1 | Negative | SCRUM-38-UI-004 | No re-check, or no bookings | Coordinator signed in | As described | — | No notice | Agent | 2026-11-01 | As expected | Pass | `frontend/src/features/events/components/VenueAttention.test.jsx` | Agent (local) | 2026-11-01 |
+| Venue | SCRUM-38 | R2, R4 | Happy | SCRUM-38-UI-005 | Event page lists flagged bookings only | Coordinator signed in | As described | — | Venue, date, reason, *Find replacement venue* → `/venues/booking-requests/<id>/replacement`; unflagged and released bookings not shown | Agent | 2026-11-01 | As expected | Pass | `frontend/src/features/events/components/VenueAttention.test.jsx` | Agent (local) | 2026-11-01 |
+| Venue | SCRUM-38 | R3 | Negative | SCRUM-38-UI-006 | Nothing flagged | Coordinator signed in | As described | — | No *Venue needs attention* section | Agent | 2026-11-01 | As expected | Pass | `frontend/src/features/events/components/VenueAttention.test.jsx` | Agent (local) | 2026-11-01 |
+| Venue | SCRUM-38 | R2 | Failure | SCRUM-38-UI-007 | Booking list fails to load | Coordinator signed in | As described | — | Safe alert instead of silently showing nothing | Agent | 2026-11-01 | As expected | Pass | `frontend/src/features/events/components/VenueAttention.test.jsx` | Agent (local) | 2026-11-01 |
+
+### Changes to other stories' tests and code (SCRUM-38, 2026-11-01)
+
+Option A changes one agreed behaviour, so these existing tests were updated, not loosened: each still checks the
+same thing SCRUM-37 cared about, with only the venue expectation moved from "released" to "re-validated".
+
+| Story | File | What changed | Why |
+| --- | --- | --- | --- |
+| SCRUM-37 (ky) | `backend/tests/integration/events.review.test.js` · `TC-37-19` | Title and venue assertion: venues re-validated once and **not** released; equipment assertion unchanged | Option A: re-approval keeps venues that still fit (SCRUM-38 R3) |
+| SCRUM-37 (ky) | same file · `TC-37-20` | Same change for a first-time approval (still a no-op) | Same |
+| SCRUM-37 (ky) | same file · shared setup | Added a `revalidateVenueBookings` fake to `venuesService` and its reset in `beforeEach` | Approve now calls it; every other test in the file is unaffected |
+| SCRUM-37 (ky) | `backend/tests/unit/events/review.service.test.js` · `TC-37-22` | Title and venue assertion: re-validation (not release) is still attempted when equipment release throws | Same; the failure-isolation intent is unchanged |
+| SCRUM-165 (jolene) | `frontend/src/features/events/components/ChangeRequestDecisionControls.jsx` | One sentence of the regression note: venues are re-checked straight away; equipment released on re-approval | The old "arrangements stay in place until re-approval" was no longer true. No test asserted the sentence |
+| Shared (Playwright) | `tests/playwright/support/server.cjs` | Production `revalidateBookingsForEvent` built over the fake venue storage; `is_affected`/`affected_reason` added to the fake `findArrangements` | Lets E2E-REVALIDATE-001/002 run the real code; other specs unaffected (full suite green) |
+
+Each changed test carries a comment naming SCRUM-38 and the reason. The register rows for TC-37-19/20/22 in
+[event lifecycle tests](event-lifecycle-tests.md) were updated the same day.
+
+Also: SCRUM-138's booking-checks endpoint now uses the shared `createBookingChecker`; its existing tests
+(`tests/integration/venueBookingChecks.test.js`, `tests/unit/venues/venueBookingChecks.test.js`) pass unchanged.
+Coverage (2026-10-30): `venueRevalidation.js` 47/47 statements, 25/25 branches; `eventFitReasons` and the new
+`checkArrangements` branch fully covered.
+
+## SCRUM-163 — Venue hold expiry notifications
+
+AC1 is covered by fixed-clock SQL and worker/provider tests for the one-hour warning; AC2 by actual expiry, conversion and release queries; AC3 by independently asserted venue/event/deadline text and browser navigation. Supporting checks cover two coordinators, multi-slot grouping, historical setup suppression, cancelled events, obsolete warnings, retry leases, atomicity and simultaneous preparation. The actual business decision body is exercised in disposable PostgreSQL; browser storage doubles do not prove SQL behaviour. Three pending manual UAT cases and execution records remain outside the repository. No notification behaviour is labelled refactoring.
+
+Local SCRUM-163 verification (2026-10-28): 87 notification cases passed under three shuffle seeds, including 18 new worker/provider/storage cases; changed worker/repository line and branch coverage is 100%. All 23 venue SQL scenario IDs passed in three combined disposable runs. New browser cases passed nine repetitions total without retries; the full local browser/API suite passed 217 tests. Local backend regression passed 1,214 plus 68 Node equipment cases; frontend passed 586 tests and build/lint. Shared suites were excluded. Existing live TC-SCRUM-162-12 now also checks installed capture state before/after conversion; Ryan/CI must run it after the manual SQL. This extension avoids another live scenario and remains unexecuted locally.
+
+
+SCRUM-163 test-quality follow-up (2026-10-28): reviewed mock/fake boundaries and prior failed runs. Strengthened provider 422/retained-row assertions and API refusal snapshots. Corrected the pre-existing SCRUM-117 whole-region timestamp assertion to exact attendance values. The updated notification baseline passed 87 tests; venue/clarification browser checks passed 18 executions with retries disabled and no skipped/flaky cases. A separate in-memory fault-injection experiment rejected all 13 selected worker/repository/SQL defects; production source was unchanged on disk. Full logs and the limits of these doubles are in Ryan's external outputs/SCRUM-163/test-quality-audit/REPORT.md. Shared Supabase/Novu/UAT remain pending. These are test-maintenance changes, not application refactoring.
+
+
+PR #68 integration with staging (2026-10-30): the notification worker now independently prepares assignments, registrations, waitlist reminders and venue holds. Mixed-batch cases TC-SCRUM-163-U06/U07/U08-venue/U08-reminder verify all five outgoing workflow families, both stale-notice guards and cross-family failure isolation. U03 now exercises all four preparation failures. Story-specific RPC doubles implement the complete preparer contract and still reject unexpected calls. The latest SCRUM-164 edit-lock behaviour is retained; its intentionally removed direct-edit-under-review browser case is not restored.
+
+Run PostgreSQL fixtures in separate invocations: node tests/sql/run-assignment-notifications.cjs --registration, then node tests/sql/run-assignment-notifications.cjs --venue-holds --clarification. CI runs both separately, preserving registration lease-repair/concurrency and venue cohort/conversion checks. Each owns a fresh disposable database. Combining --registration and --venue-holds is refused before Docker starts because their exported fixtures reuse helper/column names and reset their events. This changes only test execution, not shared schema. Fresh post-merge evidence and any environment blockers are recorded outside the repository in Ryan's outputs/SCRUM-163/PR-68-merge directory. No shared SQL, commit or push is performed as part of conflict resolution.
+
+Fresh PR #68 merge results (2026-10-30): combined notifications 115 tests at each of three seeds; local backend Vitest 1,330; Node equipment unit 67; frontend 614; all local Playwright 226 plus 18 repeated notification cases with retries disabled. Both SQL fixture families passed twice independently, including both concurrency checks and registration expired-lease repair. Source lint, frontend lint/build and merge integrity passed. The initial Docker startup failure was resolved before recording the SQL pass. Four merge gates are met; shared/live UAT remains separate. Evidence remains in Ryan's external outputs/SCRUM-163/PR-68-merge directory.
+
+### SCRUM-168: fewer live-fixture round-trips
+
+`venue-release-cancelled-event.test.js` and `venueBookingChangeCancel.live.test.js` now batch independent fixture rows by table. Each awaited phase completes before dependent requests/bookings are inserted. The same fixture values, generated IDs, cleanup ownership, nine existing cases and 35 assertion statements are retained. Controlled original/new helper checks count setup calls falling from 15 to 10 and 26 to 20 respectively; these are request counts, not measured live durations. Real database constraints/triggers still require the retained live suite, run by the user/CI. No production service, suite inclusion, retry or timeout setting changes. Raw reports remain outside this repository under Ryan's `outputs/SCRUM-168-performance/` directory.
+
+SCRUM-168 live verification update (2026-11-02): Ryan's complete backend run, with live flags enabled, passed all 1584 cases with no failures/skips. This includes all nine cases in the two refactored venue live files. The batching change now has a real-database pass; its isolated live wall-time improvement was not measured against a pre-refactor baseline. Five-run and CI evidence remain pending. Raw evidence stays in the external outputs/SCRUM-168-live-cleanup/ directory.

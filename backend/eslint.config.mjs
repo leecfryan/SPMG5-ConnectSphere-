@@ -24,7 +24,7 @@ export default [
     },
     rules: {
       // A test that builds a value and never asserts on it is a silent pass.
-      "no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+      "no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
     },
   },
   { files: ["tests/unit/equipment/**/*.js"], languageOptions: { sourceType: "commonjs" } },

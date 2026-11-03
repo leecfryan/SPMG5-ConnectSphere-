@@ -1,0 +1,156 @@
+const path = require("node:path");
+require("dotenv").config({ path: path.resolve(__dirname, "../../.env"), quiet: true });
+const { test, expect } = require("@playwright/test");
+const { setupEquipment, getAccessToken, updateAccountRoles, updateEvent } = require("./support/live-equipment-fixtures");
+
+// Live-Supabase suite. Replaces the retired tests/playwright/equipment.api.spec.cjs, which relied
+// on a fake in-memory Auth+backend simulator - incompatible with this story's
+// changes regardless, since equipment_requests.requested_by/event_id are real
+// foreign keys the fake simulator's synthetic account ids could never satisfy.
+function authHeader(token) {
+  return { Authorization: "Bearer " + token };
+}
+
+// SCRUM-31: equipment_type replaces equipment_id - no specific unit is
+// picked at submission any more.
+function requestFields(setup, overrides = {}) {
+  return {
+    equipment_type: setup.equipmentType, quantity_requested: 1,
+    borrow_start: "2099-10-10T00:00:00Z", borrow_end: "2099-10-10T03:00:00Z",
+    ...overrides,
+  };
+}
+
+test.describe("Equipment API: role-scoped requests, technical review, clarifications, retention (live Supabase)", () => {
+  let setup, tokens;
+
+  test.beforeEach(async () => {
+    setup = await setupEquipment();
+    tokens = {
+      coordinator: await getAccessToken(setup.coordinator),
+      technical: await getAccessToken(setup.technical),
+      outsider: await getAccessToken(setup.outsider),
+    };
+  });
+  test.afterEach(async () => { await setup.teardown(); });
+
+  test("an assigned coordinator creates a request; the server ignores forged requested_by/status; unrelated coordinators cannot read or create", async ({ request }) => {
+    const created = await request.post(`/api/events/${setup.eventId}/equipment-requests`, {
+      headers: authHeader(tokens.coordinator),
+      data: requestFields(setup, { quantity_requested: 2, requested_by: "forged", status: "APPROVED" }),
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    // SCRUM-31: quantity_requested: 2 creates 2 sibling rows sharing a
+    // group_id - each sibling's own quantity_requested is always 1.
+    const { data: rows } = await created.json();
+    expect(rows).toHaveLength(2);
+    const groupIds = new Set(rows.map((row) => row.group_id));
+    expect(groupIds.size).toBe(1);
+    for (const row of rows) expect(row).toMatchObject({ requested_by: setup.coordinator.id, status: "PENDING", quantity_requested: 1 });
+
+    expect((await request.get(`/api/events/${setup.eventId}/equipment-requests`, { headers: authHeader(tokens.outsider) })).status()).toBe(403);
+    expect((await request.post(`/api/events/${setup.eventId}/equipment-requests`, { headers: authHeader(tokens.outsider), data: requestFields(setup) })).status()).toBe(403);
+  });
+
+  test("technical support reviews and revises arrangements; a coordinator cannot review statuses", async ({ request }) => {
+    const created = await request.post(`/api/events/${setup.eventId}/equipment-requests`, { headers: authHeader(tokens.coordinator), data: requestFields(setup) });
+    const { data: [row] } = await created.json();
+
+    const dashboard = await request.get("/api/technical-support/equipment-requests", { headers: authHeader(tokens.technical) });
+    expect(dashboard.status()).toBe(200);
+    const line = (await dashboard.json()).data.find((item) => item.id === row.id);
+    expect(line).toMatchObject({ requested_by_name: expect.any(String) });
+    expect(line.event_name).toContain("E2E equipment test");
+
+    expect((await request.get("/api/technical-support/equipment-requests", { headers: authHeader(tokens.coordinator) })).status()).toBe(403);
+    expect((await request.patch(`/api/equipment-requests/${row.id}/status`, { headers: authHeader(tokens.coordinator), data: { status: "APPROVED" } })).status()).toBe(403);
+
+    // SCRUM-31: the row has no unit yet (equipment_id is null) until
+    // Reserve assigns one - the old status endpoint now refuses APPROVED on
+    // a unit-less row (TC-10). Reserve first, then the APPROVED/REJECTED
+    // toggle below is re-approving an already-reserved row, which still
+    // works through the old endpoint exactly as before.
+    const reserved = await request.patch(`/api/equipment-requests/groups/${row.group_id}/reserve`, { headers: authHeader(tokens.technical) });
+    expect(reserved.status(), await reserved.text()).toBe(200);
+
+    for (const status of ["APPROVED", "REJECTED", "APPROVED"]) {
+      const changed = await request.patch(`/api/equipment-requests/${row.id}/status`, { headers: authHeader(tokens.technical), data: { status } });
+      expect(changed.status()).toBe(200);
+      expect((await changed.json()).data.status).toBe(status);
+    }
+  });
+
+  test("clarification messages enforce event relationships, real author identity, and are editable by their author", async ({ request }) => {
+    const created = await request.post(`/api/events/${setup.eventId}/equipment-requests`, { headers: authHeader(tokens.coordinator), data: requestFields(setup) });
+    const { data: [row] } = await created.json();
+
+    const posted = await request.post(`/api/events/${setup.eventId}/messages`, {
+      headers: authHeader(tokens.technical),
+      data: { equipment_request_id: row.id, body: "Need an adapter?", author_id: "forged", author_role: "event_coordinator" },
+    });
+    expect(posted.status(), await posted.text()).toBe(201);
+    const { data: message } = await posted.json();
+    expect(message).toMatchObject({ author_id: setup.technical.id, author_role: "tech_support" });
+
+    expect((await request.get(`/api/events/${setup.eventId}/messages`, { headers: authHeader(tokens.outsider) })).status()).toBe(403);
+    expect((await request.patch(`/api/messages/${message.id}`, { headers: authHeader(tokens.coordinator), data: { body: "Changed" } })).status()).toBe(403);
+
+    const edited = await request.patch(`/api/messages/${message.id}`, { headers: authHeader(tokens.technical), data: { body: "Need two adapters?" } });
+    expect(edited.status()).toBe(200);
+    const shared = await request.get(`/api/events/${setup.eventId}/messages`, { headers: authHeader(tokens.coordinator) });
+    expect((await shared.json()).data[0].body).toBe("Need two adapters?");
+  });
+
+  test("Scrum-28-Scrum65 (AC3): a clarification thread is hidden 30 days after the event ends", async ({ request }) => {
+    const created = await request.post(`/api/events/${setup.eventId}/equipment-requests`, { headers: authHeader(tokens.coordinator), data: requestFields(setup) });
+    const { data: [row] } = await created.json();
+    await request.post(`/api/events/${setup.eventId}/messages`, {
+      headers: authHeader(tokens.technical), data: { equipment_request_id: row.id, body: "Still within the window" },
+    });
+
+    // events has an end_time > start_time check constraint, so both move back.
+    await updateEvent(setup.eventId, { start_time: "1999-12-01T00:00:00Z", end_time: "2000-01-01T00:00:00Z" });
+
+    const afterExpiry = await request.get(`/api/events/${setup.eventId}/messages`, { headers: authHeader(tokens.technical) });
+    expect((await afterExpiry.json()).data).toEqual([]);
+    expect((await request.post(`/api/events/${setup.eventId}/messages`, { headers: authHeader(tokens.technical), data: { equipment_request_id: row.id, body: "Too late" } })).status()).toBe(410);
+  });
+
+  test("revoking a role denies the very next request with the same still-valid token", async ({ request }) => {
+    expect((await request.get("/api/technical-support/equipment-requests", { headers: authHeader(tokens.technical) })).status()).toBe(200);
+    await updateAccountRoles(setup.technical.id, ["attendee"]);
+    expect((await request.get("/api/technical-support/equipment-requests", { headers: authHeader(tokens.technical) })).status()).toBe(403);
+  });
+
+  test("[SCRUM-103 AC3 / TC-103-12] retiring equipment with an APPROVED reservation covering today flags the event's thread", async ({ request }) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const created = await request.post(`/api/events/${setup.eventId}/equipment-requests`, {
+      headers: authHeader(tokens.coordinator),
+      data: requestFields(setup, { borrow_start: today + "T00:00:00Z", borrow_end: today + "T23:59:59Z" }),
+    });
+    const { data: [row] } = await created.json();
+
+    // SCRUM-31: Reserve is now how a unit-less row gets a real equipment_id
+    // and becomes APPROVED - the old status endpoint refuses APPROVED
+    // before a unit is assigned (TC-10).
+    const approved = await request.patch(`/api/equipment-requests/groups/${row.group_id}/reserve`, {
+      headers: authHeader(tokens.technical),
+    });
+    expect(approved.status(), await approved.text()).toBe(200);
+
+    const retired = await request.patch(`/api/equipment/${setup.equipmentId}/retire`, { headers: authHeader(tokens.technical) });
+    expect(retired.status(), await retired.text()).toBe(200);
+    expect((await retired.json()).data.status).toBe("UNAVAILABLE");
+
+    const messages = await request.get(`/api/events/${setup.eventId}/messages`, { headers: authHeader(tokens.technical) });
+    const { data } = await messages.json();
+    const flagged = data.find((m) => m.equipment_request_id === row.id);
+    expect(flagged).toBeTruthy();
+    expect(flagged.author_id).toBe(setup.technical.id);
+    expect(flagged.author_role).toBe("tech_support");
+
+    const dashboard = await request.get("/api/technical-support/equipment-requests", { headers: authHeader(tokens.technical) });
+    const line = (await dashboard.json()).data.find((item) => item.id === row.id);
+    expect(line.status).toBe("REJECTED");
+  });
+});

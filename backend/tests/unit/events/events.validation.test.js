@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url);
 const {
   validateDraft,
   validateForSubmission,
+  validateUpdate,
 } = require("../../../src/modules/events/events.validation");
 
 const fieldsOf = (result) => result.errors.map((e) => e.field).sort();
@@ -34,14 +35,14 @@ test("fixture guard: completeInput passes submission", () => {
 
 // --- validateDraft ---------------------------------------------------------
 
-test("US-13 (deferred): a name alone is enough for a draft", () => {
+test("SCRUM-147: a name alone is enough for a draft", () => {
   expect(validateDraft({ name: "Untitled event" })).toEqual({
     ok: true,
     errors: [],
   });
 });
 
-test("US-13 (deferred): a draft still requires a name", () => {
+test("SCRUM-147: a draft still requires a name", () => {
   for (const bad of [
     undefined,
     null,
@@ -57,27 +58,27 @@ test("US-13 (deferred): a draft still requires a name", () => {
   }
 });
 
-test("US-13 (deferred): an over-long draft name is rejected", () => {
+test("SCRUM-147: an over-long draft name is rejected", () => {
   const result = validateDraft({ name: "x".repeat(201) });
   expect(result.ok).toBe(false);
   expect(fieldsOf(result)).toContain("name");
 });
 
-test("US-13 (deferred): purpose and description are not required for a draft", () => {
+test("SCRUM-147: purpose and description are not required for a draft", () => {
   expect(validateDraft({ name: "ok" }).ok).toBe(true);
 });
 
-test("US-13 (deferred): a draft needs neither start_time nor end_time", () => {
+test("SCRUM-147: a draft needs neither start_time nor end_time", () => {
   expect(validateDraft({ name: "Untitled event" }).ok).toBe(true);
 });
 
-test("US-13 (deferred): a non-string optional field is rejected", () => {
+test("SCRUM-147: a non-string optional field is rejected", () => {
   const result = validateDraft({ name: "ok", venue_requirements: { rooms: 2 } });
   expect(result.ok).toBe(false);
   expect(fieldsOf(result)).toContain("venue_requirements");
 });
 
-test("US-13 (deferred): null / undefined optional fields are ignored", () => {
+test("SCRUM-147: null / undefined optional fields are ignored", () => {
   const result = validateDraft({
     name: "ok",
     equipment_needs: null,
@@ -352,9 +353,9 @@ test("SCRUM-45 boundary: end_time one millisecond after start_time is accepted",
   expect(validateForSubmission(input).ok).toBe(true);
 });
 
-// US-13 keeps the same optional-text cap as submission: a request captured early
+// SCRUM-147 keeps the same optional-text cap as submission: a request captured early
 // must not become unsavable later because a free-text field was allowed to grow.
-test("US-13 (deferred) boundary: draft optional text at 2000 / 2001 characters", () => {
+test("SCRUM-147 boundary: draft optional text at 2000 / 2001 characters", () => {
   for (const field of [
     "venue_requirements",
     "accessibility_needs",
@@ -369,4 +370,23 @@ test("US-13 (deferred) boundary: draft optional text at 2000 / 2001 characters",
     expect(over.ok, `${field} 2001 must fail`).toBe(false);
     expect(fieldsOf(over)).toEqual([field]);
   }
+});
+
+test("[SCRUM-100-VAL-001] Valid edits at existing field limits and attendance one are accepted", () => {
+  const current = { start_time: "2099-01-01T01:00:00Z", end_time: "2099-01-01T02:00:00Z" };
+  expect(validateUpdate({ name: "n".repeat(200), purpose: "p".repeat(2000), description: "d".repeat(2000),
+    other_comments: "c".repeat(2000), expected_attendance: 1, accessibility_needs: null }, current)).toEqual({ ok: true, errors: [] });
+});
+
+test("[SCRUM-100-VAL-002] A changed future schedule needs an end strictly after the start", () => {
+  const current = { start_time: "2099-01-01T01:00:00Z", end_time: "2099-01-01T02:00:00Z" };
+  expect(validateUpdate({ start_time: "2099-01-02T01:00:00Z", end_time: "2099-01-02T01:00:00.001Z" }, current).ok).toBe(true);
+  expect(validateUpdate({ end_time: current.start_time }, current)).toEqual({ ok: false, errors: [{ field: "end_time", message: "must be after start_time" }] });
+  expect(validateUpdate({ start_time: null }, current)).toEqual({ ok: false, errors: [{ field: "start_time", message: "required" }] });
+});
+
+test("[SCRUM-100-VAL-003] Unchanged past timing does not prevent editing an existing event, but a new past start is refused", () => {
+  const current = { start_time: "2020-01-01T01:00:00Z", end_time: "2020-01-01T02:00:00Z" };
+  expect(validateUpdate({ name: "Historical correction", ...current }, current)).toEqual({ ok: true, errors: [] });
+  expect(validateUpdate({ start_time: "2020-01-01T01:30:00Z" }, current)).toEqual({ ok: false, errors: [{ field: "start_time", message: "must be in the future" }] });
 });

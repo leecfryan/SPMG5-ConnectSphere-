@@ -9,26 +9,110 @@ import {
 } from "../../../lib/api";
 import EquipmentRequestForm from "../components/EquipmentRequestForm";
 import ClarificationThread from "../components/ClarificationThread";
+import { STATUS_LABEL } from "../equipmentStatusLabels";
+import { groupRequestsByGroupId } from "../groupRequests";
 import ErrorModal from "../../../components/ui/ErrorModal";
 import "../equipment.css";
 
+// datetime-local inputs want "YYYY-MM-DDTHH:mm" in local time, not ISO/UTC.
+function toLocalInput(date) {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function toIso(localDatetimeValue) {
+  return new Date(localDatetimeValue).toISOString();
+}
+
+function fallbackWindow() {
+  const start = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  start.setMinutes(0, 0, 0);
+  const end = new Date(start.getTime() + 3 * 60 * 60 * 1000);
+  return { start: toLocalInput(start), end: toLocalInput(end) };
+}
+
+// Scrum-29 follow-up: default the request's borrow window to the selected
+// event's own timing, +/-30 minutes for setup/teardown, instead of an
+// unrelated hardcoded default. Falls back when an event has no schedule
+// (start_time/end_time are nullable) - the coordinator can still adjust
+// either field in the form.
+function defaultWindowForEvent(event) {
+  if (!event.start_time || !event.end_time) return fallbackWindow();
+  const start = new Date(event.start_time);
+  start.setMinutes(start.getMinutes() - 30);
+  const end = new Date(event.end_time);
+  end.setMinutes(end.getMinutes() + 30);
+  return { start: toLocalInput(start), end: toLocalInput(end) };
+}
+
 // Event URLs can be bookmarked; the picker uses backend-scoped assignments.
+// Coordinators select from that list only - there is no free-text event id
+// entry, so every eventId here is either empty or one of their own assignments.
 function EquipmentRequestPage() {
   const { token, user } = useAuth();
-  const currentUserId = user.id;
+  // Scrum-30: guarded, not user.id directly - AuthProvider briefly exposes
+  // user/token as null on an auth re-verification blip (e.g. Supabase
+  // re-firing onAuthStateChange on browser tab-focus regain, even with no
+  // real session change), which crashed this unconditionally before the
+  // page's own `if (!token)` check ever got a chance to run.
+  const currentUserId = user?.id;
   const [params, setParams] = useSearchParams();
   const eventId = params.get("event") || "";
   const setEventId = (id) => setParams(id ? { event: id } : {}, { replace: true });
   const [catalogue, setCatalogue] = useState(null);
-  const equipmentOptions = catalogue?.token === token ? catalogue.equipment : [];
-  const eventOptions = catalogue?.token === token ? catalogue.events : [];
-  const catalogueError = catalogue?.token === token ? catalogue.error : null;
+  const catalogueLoaded = catalogue?.token === token;
+  const allEquipment = catalogueLoaded ? catalogue.equipment : [];
+  const eventOptions = catalogueLoaded ? catalogue.events : [];
+  const catalogueError = catalogueLoaded ? catalogue.error : null;
+  const selectedEvent = eventOptions.find((event) => event.id === eventId) || null;
+
+  // Scrum-29 follow-up: the borrow window lives here (not in the form) so it
+  // can also drive the live-filtered equipment fetch below. Recomputed
+  // during render (not in an effect - React's recommended pattern for
+  // "reset derived state when its source changes") whenever the resolved
+  // event changes, including the moment the assigned-events fetch finishes
+  // and resolves an eventId that was already in the URL.
+  const derivedWindowKey = `${eventId}|${catalogueLoaded}`;
+  const [lastDerivedWindowKey, setLastDerivedWindowKey] = useState(derivedWindowKey);
+  const [borrowWindow, setBorrowWindow] = useState(() => (selectedEvent ? defaultWindowForEvent(selectedEvent) : null));
+  if (derivedWindowKey !== lastDerivedWindowKey) {
+    setLastDerivedWindowKey(derivedWindowKey);
+    setBorrowWindow(selectedEvent ? defaultWindowForEvent(selectedEvent) : null);
+  }
+
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  // Scrum-29 AC2/AC3/AC4: only equipment actually bookable for the current
+  // borrow window - re-fetched whenever that window changes, so editing the
+  // times live-updates the dropdown instead of only failing at submit time.
+  // refreshKey is folded in so a successful booking re-fetches availability,
+  // not just the requests list - otherwise the next booking for the same
+  // window keeps being offered the unit that was just reserved.
+  const windowKey = borrowWindow ? [eventId, borrowWindow.start, borrowWindow.end, refreshKey].join("|") : null;
+  const [availableResult, setAvailableResult] = useState(null);
+  useEffect(() => {
+    if (!borrowWindow) return;
+    let active = true;
+    fetchEquipmentCatalogue(token, { start: toIso(borrowWindow.start), end: toIso(borrowWindow.end) })
+      .then((equipment) => { if (active) setAvailableResult({ key: windowKey, equipment }); })
+      .catch((error) => { if (active) setAvailableResult({ key: windowKey, equipment: [], error: error.message }); });
+    return () => { active = false; };
+  }, [windowKey, token, borrowWindow]);
+  const availabilityResultIsCurrent = availableResult?.key === windowKey;
+  const availableEquipment = availabilityResultIsCurrent ? availableResult.equipment : [];
+  const availabilityError = availabilityResultIsCurrent ? availableResult.error : null;
+  // SCRUM-169: without this, "no result yet for this windowKey", "the fetch
+  // for it failed" and "a real zero-unit result" are all just an empty
+  // availableEquipment array - the form can't tell a genuine stockout apart
+  // from a fetch that's still in flight or that errored, and would flash
+  // "Out of Stock" on every window edit until the refetch resolves, or on
+  // top of a real error banner.
+  const isAvailabilityUnknown = Boolean(borrowWindow) && (!availabilityResultIsCurrent || Boolean(availabilityError));
+
   const [requestResult, setRequestResult] = useState(null);
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [forbiddenMessage, setForbiddenMessage] = useState(null);
-  const [refreshKey, setRefreshKey] = useState(0);
   const requestKey = JSON.stringify([eventId, token, refreshKey]);
   const current = requestResult?.key === requestKey;
   const requests = current ? requestResult.requests : [];
@@ -67,7 +151,7 @@ function EquipmentRequestPage() {
   }
 
   function equipmentLabel(equipmentId) {
-    const match = equipmentOptions.find((item) => item.id === equipmentId);
+    const match = allEquipment.find((item) => item.id === equipmentId);
     return match ? match.type : equipmentId;
   }
 
@@ -104,70 +188,100 @@ function EquipmentRequestPage() {
             {eventOptions.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
           </select>
         </label>
-        <label className="eq-field eq-event-picker">
-          Event id
-          <input
-            type="text"
-            value={eventId}
-            onChange={(e) => setEventId(e.target.value.trim())}
-            placeholder="Paste the event's UUID"
-          />
-        </label>
-
         {!eventId ? (
-          <p className="eq-hint">Enter an event id to submit or view its equipment requests.</p>
+          <p className="eq-hint">Select an assigned event to submit or view its equipment requests.</p>
+        ) : !catalogueLoaded ? (
+          <p className="eq-hint">Loading your assigned events…</p>
+        ) : !selectedEvent ? (
+          <p className="eq-hint">This event is not assigned to you.</p>
+        ) : !borrowWindow ? (
+          <p className="eq-hint">Loading event timing…</p>
         ) : (
-          <EquipmentRequestForm
-            key={eventId + ":" + refreshKey}
-            equipmentOptions={equipmentOptions}
-            onSubmit={handleSubmit}
-            isSaving={isSaving}
-            saveError={saveError}
-          />
+          <>
+            {availabilityError && (
+              <p className="eq-error" role="alert">Could not check equipment availability: {availabilityError}</p>
+            )}
+            <EquipmentRequestForm
+              key={eventId + ":" + refreshKey}
+              equipmentOptions={availableEquipment}
+              allEquipment={allEquipment}
+              isAvailabilityUnknown={isAvailabilityUnknown}
+              borrowWindow={borrowWindow}
+              onWindowChange={setBorrowWindow}
+              onSubmit={handleSubmit}
+              isSaving={isSaving}
+              saveError={saveError}
+            />
+          </>
         )}
       </div>
 
-      {eventId && (
+      {eventId && (() => {
+        // SCRUM-31: one submission is now N sibling rows sharing a group_id -
+        // the coordinator sees one line per group ("Projector ×5 — 3
+        // reserved, 2 unfulfilled"), TC-26, not one line per sibling.
+        const groups = groupRequestsByGroupId(requests);
+        return (
         <div className="eq-card">
           <div className="eq-card-header">
             <h2>Requests for this event</h2>
-            <span className="eq-badge">{requests.length} requests</span>
+            <span className="eq-badge">{groups.length} requests</span>
           </div>
 
           {loadError && <p className="eq-error">Could not load: {loadError}</p>}
           {isLoadingRequests && <p className="eq-hint">Loading requests…</p>}
 
-          {!isLoadingRequests && requests.length === 0 && !loadError && (
+          {!isLoadingRequests && groups.length === 0 && !loadError && (
             <p className="eq-hint">No equipment requests yet for this event.</p>
           )}
 
           <ul className="eq-request-list">
-            {requests.map((r) => (
-              <li key={r.id} className="eq-request-row">
+            {groups.map((group) => {
+              const label = group.equipmentType || equipmentLabel(group.siblings[0].equipment_id);
+              return (
+              <li key={group.threadRequestId} className="eq-request-row">
                 <div>
                   <p className="eq-request-title">
-                    {equipmentLabel(r.equipment_id)} × {r.quantity_requested}
+                    {label} × {group.total}
+                    {group.isEssential && <span className="eq-status eq-essential-badge">Essential</span>}
                   </p>
-                  {r.technical_requirement && (
-                    <p className="eq-request-detail">{r.technical_requirement}</p>
+                  {group.technicalRequirement && (
+                    <p className="eq-request-detail">{group.technicalRequirement}</p>
                   )}
+                  <p className="eq-request-detail">
+                    {group.reservedCount} reserved, {group.unfulfilledCount} unfulfilled
+                    {group.pendingCount > 0 && `, ${group.pendingCount} pending`}
+                  </p>
                 </div>
-                <span className={`eq-status eq-status-${r.status.toLowerCase()}`}>
-                  {r.status}
-                </span>
+                {group.otherStatusSiblings.map((sibling) => (
+                  <span key={sibling.id}>
+                    <span className={`eq-status eq-status-${sibling.status.toLowerCase()}`}>
+                      {STATUS_LABEL[sibling.status] || sibling.status}
+                    </span>
+                    {/* SCRUM-150 AC2: same computed, read-only flag Technical Support sees. */}
+                    {sibling.status === "REVIEW_REQUIRED" && sibling.available_for_window === false && (
+                      <span className="eq-status eq-status-unavailable">Not available for these dates</span>
+                    )}
+                  </span>
+                ))}
               </li>
-            ))}
+              );
+            })}
           </ul>
 
           <ClarificationThread
             key={eventId}
             eventId={eventId}
-            lines={requests.map((r) => ({ id: r.id, label: equipmentLabel(r.equipment_id) }))}
+            lines={groups.map((group) => ({
+              id: group.threadRequestId,
+              label: group.equipmentType || equipmentLabel(group.siblings[0].equipment_id),
+            }))}
             token={token}
             currentUserId={currentUserId}
           />
         </div>
-      )}
+        );
+      })()}
 
       <ErrorModal
         open={forbiddenMessage !== null}

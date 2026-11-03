@@ -8,12 +8,14 @@
 //   3. validateAgainstEvent         SCRUM-86, the date fits the event timing
 //   4. findSlotProblems             the slots are actually requestable that day
 
-const { SLOTS, isValidDateString } = require("./venues.availability");
+const { SLOTS, isValidDateString, committedSlots } = require("./venues.availability");
+const { PLANNING_STATUSES } = require("../events/lifecycle");
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const ADDITIONAL_REQUIREMENTS_MAX = 2000;
+const PURPOSE_MAX = 2000;
 
 // All current venues are in Singapore and Kuala Lumpur, both UTC+8. Event times
 // are stored as timestamps, so turning one into "which day is this" needs a
@@ -32,6 +34,10 @@ const ALLOWED_FIELDS = [
   "required_facilities",
   "accessibility_requirements",
   "additional_requirements",
+  "purpose",
+  "replaces_booking_id",
+  // SCRUM-162: IDs of active hold rows being converted to a booking request
+  "hold_ids",
 ];
 
 // Slots a request can be made on. "pending" is included on purpose: SCRUM-94
@@ -77,6 +83,19 @@ function validateBookingRequestShape(payload) {
   // SCRUM-85
   if (typeof payload.event_id !== "string" || !UUID_PATTERN.test(payload.event_id)) {
     errors.push("event_id must be a valid event id");
+  }
+
+  if (payload.replaces_booking_id !== undefined &&
+      (typeof payload.replaces_booking_id !== "string" || !UUID_PATTERN.test(payload.replaces_booking_id))) {
+    errors.push("replaces_booking_id must be a valid booking request id");
+  }
+
+  // SCRUM-162: hold conversion — optional array of UUID strings
+  if (payload.hold_ids !== undefined) {
+    if (!isStringArray(payload.hold_ids) || payload.hold_ids.length === 0 ||
+        !payload.hold_ids.every((id) => UUID_PATTERN.test(id))) {
+      errors.push("hold_ids must be a non-empty array of valid UUIDs");
+    }
   }
 
   // SCRUM-86
@@ -126,12 +145,20 @@ function validateBookingRequestShape(payload) {
         `additional_requirements must be ${ADDITIONAL_REQUIREMENTS_MAX} characters or fewer`
       );
     }
+
+    if (typeof payload.purpose !== "string" || payload.purpose.trim() === "") {
+      errors.push("purpose is required");
+    } else if (payload.purpose.trim().length > PURPOSE_MAX) {
+      errors.push(`purpose must be ${PURPOSE_MAX} characters or fewer`);
+    }
   }
 
   if (errors.length > 0) return { errors, value: null };
 
   const trimmedAdditional =
     typeof additional === "string" ? additional.trim() : "";
+  const trimmedPurpose =
+    typeof payload.purpose === "string" ? payload.purpose.trim() : "";
 
   // Slots are stored in am, pm, night order however the client sent them, so
   // the same request always reads the same way on review.
@@ -141,6 +168,96 @@ function validateBookingRequestShape(payload) {
       event_id: payload.event_id,
       booking_date: payload.booking_date,
       slots: SLOTS.filter((slot) => payload.slots.includes(slot)),
+      expected_attendees: payload.expected_attendees,
+      room_layout: payload.room_layout.trim(),
+      required_facilities: payload.required_facilities || [],
+      accessibility_requirements: payload.accessibility_requirements || [],
+      additional_requirements: trimmedAdditional === "" ? null : trimmedAdditional,
+      purpose: trimmedPurpose,
+      replaces_booking_id: payload.replaces_booking_id || null,
+      // SCRUM-162: only included when the coordinator is converting a hold
+      ...(payload.hold_ids !== undefined ? { hold_ids: payload.hold_ids } : {}),
+    },
+  };
+}
+
+// SCRUM-154: the fields a coordinator may change on an existing booking.
+// slots is not here - slot changes are out of scope by decision; moving to a
+// different date keeps whatever slots the booking already has. event_id is
+// not here either - the request's own id in the URL already says which one,
+// and it never moves to a different event. purpose is not here either, by
+// decision: it is part of the create flow but this story does not touch it.
+const ALLOWED_CHANGE_FIELDS = [
+  "booking_date",
+  "expected_attendees",
+  "room_layout",
+  "required_facilities",
+  "accessibility_requirements",
+  "additional_requirements",
+];
+
+// SCRUM-154 AC2: the coordinator always sends the full merged value - every
+// field, current plus their edit - never a partial patch, so there is no
+// "field omitted means unchanged" ambiguity for change_venue_booking_request
+// to resolve. Mirrors validateBookingRequestShape's field-by-field rules,
+// minus event_id, slots and purpose.
+function validateChangeRequestShape(payload) {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    return { errors: ["Request body must be an object"], value: null };
+  }
+
+  const errors = [];
+
+  const unknown = Object.keys(payload).filter(
+    (key) => !ALLOWED_CHANGE_FIELDS.includes(key)
+  );
+  if (unknown.length > 0) {
+    errors.push(`Unknown fields: ${unknown.join(", ")}`);
+  }
+
+  if (!isValidDateString(payload.booking_date)) {
+    errors.push("booking_date must be a date in YYYY-MM-DD format");
+  }
+
+  if (
+    !Number.isInteger(payload.expected_attendees) ||
+    payload.expected_attendees <= 0
+  ) {
+    errors.push("expected_attendees must be a whole number greater than zero");
+  }
+
+  if (typeof payload.room_layout !== "string" || payload.room_layout.trim() === "") {
+    errors.push("room_layout is required");
+  }
+
+  for (const field of ["required_facilities", "accessibility_requirements"]) {
+    if (payload[field] === undefined) continue;
+    if (!isStringArray(payload[field])) {
+      errors.push(`${field} must be a list of strings`);
+    } else if (hasDuplicates(payload[field])) {
+      errors.push(`${field} must not repeat`);
+    }
+  }
+
+  const additional = payload.additional_requirements;
+  if (additional !== undefined && additional !== null) {
+    if (typeof additional !== "string") {
+      errors.push("additional_requirements must be text or null");
+    } else if (additional.length > ADDITIONAL_REQUIREMENTS_MAX) {
+      errors.push(
+        `additional_requirements must be ${ADDITIONAL_REQUIREMENTS_MAX} characters or fewer`
+      );
+    }
+  }
+
+  if (errors.length > 0) return { errors, value: null };
+
+  const trimmedAdditional = typeof additional === "string" ? additional.trim() : "";
+
+  return {
+    errors: [],
+    value: {
+      booking_date: payload.booking_date,
       expected_attendees: payload.expected_attendees,
       room_layout: payload.room_layout.trim(),
       required_facilities: payload.required_facilities || [],
@@ -197,10 +314,12 @@ function validateAgainstVenue(value, venue) {
 function validateAgainstEvent(value, event, today) {
   const errors = [];
 
-  // A draft is still being written by the organiser. Its timing is not final,
-  // so there is nothing stable for Venue Staff to assess yet.
-  if (event.status === "DRAFT") {
-    errors.push("The event is still a draft. Submit the event before requesting a venue");
+  // SCRUM-145: a replacement is the one arrangement change permitted after
+  // safety approval. Its linked affected booking sends the event back through
+  // safety review when Venue Staff approve it.
+  const isSafetyReplacement = value.replaces_booking_id && event.status === "PREPARATION";
+  if (!PLANNING_STATUSES.includes(event.status) && !isSafetyReplacement) {
+    errors.push("The event must be approved before requesting a venue");
     return errors;
   }
 
@@ -232,9 +351,13 @@ function validateAgainstEvent(value, event, today) {
 // buildAvailabilityCalendar the SCRUM-17 calendar uses, so the two can never
 // disagree about whether a slot is free.
 //
-//   conflicts   slot is closed, recorded unavailable, or already confirmed
+//   conflicts   slot is closed, recorded unavailable, or already confirmed;
+//               SCRUM-134: also includes buffer slots the committed period covers
 //   duplicates  this same event already has a live request on this slot
-function findSlotProblems(value, calendarDay, existingSlotRows, eventId) {
+//
+// SCRUM-134: venue is used to derive the committed period (setup + turnaround).
+// Pass null/undefined to skip the buffer check (preserves pre-134 call sites).
+function findSlotProblems(value, calendarDay, existingSlotRows, eventId, venue) {
   const conflicts = [];
   const duplicates = [];
 
@@ -256,7 +379,159 @@ function findSlotProblems(value, calendarDay, existingSlotRows, eventId) {
     }
   }
 
+  // SCRUM-134: check buffer slots that the committed period (setup + turnaround)
+  // extends into but that are not directly requested. These slots must be
+  // requestable too, because they are occupied by the venue's preparation time.
+  if (venue) {
+    const allCommitted = committedSlots(
+      value.slots,
+      venue.setup_minutes,
+      venue.turnaround_minutes
+    );
+    const bufferSlots = allCommitted.filter((slot) => !value.slots.includes(slot));
+
+    for (const slot of bufferSlots) {
+      const cell = calendarDay.slots[slot];
+      if (!REQUESTABLE_STATUSES.includes(cell.status)) {
+        const slotIndex = SLOTS.indexOf(slot);
+        const firstRequestedIndex = Math.min(
+          ...value.slots.map((s) => SLOTS.indexOf(s))
+        );
+        const bufferType =
+          slotIndex < firstRequestedIndex ? "setup time" : "turnaround time";
+        const reason =
+          cell.status === "closed"
+            ? "outside operating hours"
+            : `${cell.status}: ${cell.label}`;
+        conflicts.push(
+          `${slot} is needed for ${bufferType} but is not available (${reason})`
+        );
+      }
+    }
+  }
+
   return { conflicts, duplicates };
+}
+
+// SCRUM-20: which of this request's slots are already held by a confirmed
+// booking for a different event.
+//
+// The database is what actually blocks the clash, through the confirmed-slot
+// exclusion constraint. This function exists only to say which slot clashed and
+// what holds it, so the refusal names the conflict instead of being generic.
+// Pure, so it can be reasoned about without a database.
+function findConfirmedSlotConflicts(requestedSlots, slotRows, eventId) {
+  const conflicts = [];
+
+  for (const slot of requestedSlots || []) {
+    const held = (slotRows || []).find(
+      (row) =>
+        row.slot === slot &&
+        row.status === "confirmed" &&
+        // A row belonging to this same event is not a clash with itself.
+        // Seed bookings have no request, so they count as somebody else's.
+        (!row.request || row.request.event_id !== eventId)
+    );
+
+    if (held) {
+      conflicts.push({ slot, event_name: held.event_name || "another event" });
+    }
+  }
+
+  return conflicts;
+}
+
+// ---------------------------------------------------------------------------
+// SCRUM-19: assess whether a shortlisted venue suits an event
+// ---------------------------------------------------------------------------
+
+// What makes a venue unsuitable. Capacity and facilities come straight from
+// SCRUM-19 AC3 and AC4. Accessibility is included because AC2 asks for the
+// event's current requirements to be compared, and a recorded accessibility
+// need the venue cannot meet is one of them.
+//
+// This answers the same question validateAgainstVenue asks at submission time,
+// but from the event's own requirements and before a request exists. Both read
+// the same venue fields, so a venue assessed suitable here is not then refused
+// for a reason this check never mentioned.
+// An event's venue_requirements and accessibility_needs are free text, not
+// lists: the event lane's guide states that converting them to structured
+// fields is a schema change belonging to the consuming feature. So a term is
+// recognised only when it appears in the catalogue's own vocabulary, which is
+// the set of facility and accessibility names the venues actually use.
+//
+// Matching is case-insensitive and on whole words, so "Stage" in a requirement
+// matches the facility "Stage" but "backstage" does not.
+function mentions(text, term) {
+  if (typeof text !== "string" || text.trim() === "") return false;
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i").test(text);
+}
+
+function assessVenueSuitability(venue, event, vocabulary = {}) {
+  const checks = [];
+
+  const capacity = venue.capacity;
+  const attendance = event.expected_attendance;
+  if (typeof attendance === "number" && attendance > 0) {
+    checks.push({
+      requirement: "Expected attendance",
+      needed: `${attendance} people`,
+      available: `Capacity ${capacity}`,
+      met: attendance <= capacity,
+    });
+  } else {
+    // Nothing recorded is not the same as a requirement that is met.
+    checks.push({
+      requirement: "Expected attendance",
+      needed: "Not recorded on this event",
+      available: `Capacity ${capacity}`,
+      met: null,
+    });
+  }
+
+  // Each recognised term the event's text asks for becomes one check against
+  // what this venue offers. Terms the catalogue has never heard of cannot be
+  // checked, so the raw text is reported instead of being treated as met.
+  const compare = (label, text, known, offered) => {
+    const asked = (known || []).filter((term) => mentions(text, term));
+
+    for (const term of asked) {
+      checks.push({
+        requirement: label,
+        needed: term,
+        available: (offered || []).includes(term) ? "Offered here" : "Not offered here",
+        met: (offered || []).includes(term),
+      });
+    }
+
+    const hasText = typeof text === "string" && text.trim() !== "";
+    if (hasText && asked.length === 0) {
+      checks.push({
+        requirement: label,
+        needed: text.trim(),
+        available: "Could not be matched automatically",
+        met: null,
+      });
+    }
+  };
+
+  compare("Facility", event.venue_requirements, vocabulary.facilities, venue.facilities);
+  compare("Accessibility", event.accessibility_needs, vocabulary.accessibility, venue.accessibility_features);
+
+  // "Should not normally be considered suitable" (AC3, AC4): one unmet
+  // requirement is enough. A check with nothing recorded, or text that could
+  // not be matched, cannot fail, but it is reported so the coordinator can see
+  // what was never compared.
+  const unmet = checks.filter((check) => check.met === false);
+  const unknown = checks.filter((check) => check.met === null);
+
+  return {
+    verdict: unmet.length > 0 ? "unsuitable" : "suitable",
+    unmet_count: unmet.length,
+    unknown_count: unknown.length,
+    checks,
+  };
 }
 
 // A request spans one or more slot rows, and Venue Staff will eventually decide
@@ -269,13 +544,91 @@ function deriveRequestStatus(slotRows) {
   return "mixed";
 }
 
+// ---------------------------------------------------------------------------
+// SCRUM-22: decide venue booking request
+// ---------------------------------------------------------------------------
+
+const DECISIONS = ["confirmed", "rejected"];
+const DECISION_FIELDS = ["decision", "note"];
+const DECISION_NOTE_MAX = 2000;
+
+// SCRUM-22 let Venue Staff add information, a reason or a suggested
+// alternative when rejecting, without requiring one. SCRUM-102 makes that
+// reason mandatory, and this function is the single place the rule lives.
+// The suggested alternative shares the same note rather than having a column
+// of its own: AC2 only says staff *may* attach one, which free text satisfies.
+//
+// SCRUM-20: a decision carries a decision and an optional note, and nothing
+// else. There is deliberately no override, force or priority field, so an
+// approval cannot be pushed through a conflict on the grounds that the
+// requester matters. Anything else in the body is refused by the allowlist
+// below rather than ignored.
+function validateDecision(payload) {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    return { errors: ["Request body must be an object"], value: null };
+  }
+
+  const errors = [];
+
+  const unknown = Object.keys(payload).filter(
+    (key) => !DECISION_FIELDS.includes(key)
+  );
+  if (unknown.length > 0) {
+    errors.push(`Unknown fields: ${unknown.join(", ")}`);
+  }
+
+  if (!DECISIONS.includes(payload.decision)) {
+    errors.push(`decision must be one of: ${DECISIONS.join(", ")}`);
+  }
+
+  const note = payload.note;
+  if (note !== undefined && note !== null) {
+    if (typeof note !== "string") {
+      errors.push("note must be text or null");
+    } else if (note.length > DECISION_NOTE_MAX) {
+      errors.push(`note must be ${DECISION_NOTE_MAX} characters or fewer`);
+    }
+  }
+
+  // SCRUM-102: a rejection must carry a reason, so the coordinator can act on
+  // it without a separate conversation. Whitespace does not count as one.
+  // Approving stays optional: no acceptance criterion has ever asked staff to
+  // justify a yes.
+  if (
+    payload.decision === "rejected" &&
+    (typeof note !== "string" || note.trim() === "")
+  ) {
+    errors.push(
+      "note is required when rejecting: give a reason, and a suggested alternative venue or arrangement if you have one"
+    );
+  }
+
+  if (errors.length > 0) return { errors, value: null };
+
+  const trimmed = typeof note === "string" ? note.trim() : "";
+  return {
+    errors: [],
+    value: { decision: payload.decision, note: trimmed === "" ? null : trimmed },
+  };
+}
+
 module.exports = {
   VENUE_TIME_ZONE,
   ALLOWED_FIELDS,
+  // SCRUM-18 searches for venues a request could still be made on, which is the
+  // same question SCRUM-21 asks of one venue. Exported so both answer it from
+  // one list rather than each keeping its own idea of "free".
+  REQUESTABLE_STATUSES,
+  DECISIONS,
+  DECISION_NOTE_MAX,
   localDateInTimeZone,
   validateBookingRequestShape,
+  validateChangeRequestShape,
   validateAgainstVenue,
   validateAgainstEvent,
   findSlotProblems,
+  findConfirmedSlotConflicts,
+  assessVenueSuitability,
   deriveRequestStatus,
+  validateDecision,
 };

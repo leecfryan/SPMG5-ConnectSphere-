@@ -1,10 +1,37 @@
 const {
-  validateCreateRequest,
+  validateCreateRequestGroup,
   validateStatusUpdate,
+  validateAvailabilityQuery,
+  validateAvailabilityWindow,
+  validateEquipmentStatusUpdate,
+  validateCreateEquipment,
+  validateUpdateEquipment,
+  checkAvailability,
+  findAvailableUnits,
+  isBlockingOverlap,
+  groupRequestsByEquipmentId,
 } = require("./equipment.validation");
+const { PLANNING_STATUSES } = require("../events/lifecycle");
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// SCRUM-103 (added scope): display-only - never written to the equipment row
+// (see equipment.service.js's listApprovedRequestsForEquipmentIds). An
+// AVAILABLE unit covered by an APPROVED request today reads as IN_USE on
+// this response; the stored status is untouched, so this self-corrects on
+// the next read once today no longer falls in the request's window, with no
+// revert code needed. A unit already in a non-AVAILABLE condition (DAMAGED,
+// etc.) is left alone - that's a more specific problem than "booked today".
+function withLiveInUseToday(equipmentUnits, approvedRequestsByEquipmentId) {
+  const now = new Date().toISOString();
+  return equipmentUnits.map((unit) => {
+    if (unit.status !== "AVAILABLE") return unit;
+    const requests = approvedRequestsByEquipmentId.get(unit.id) || [];
+    const inUseToday = requests.some((request) => isBlockingOverlap(request, now, now));
+    return inUseToday ? { ...unit, status: "IN_USE" } : unit;
+  });
+}
 
 // Takes its data-access dependencies rather than importing them, so tests
 // can supply fakes (see equipment.functional.test.js) instead of hitting the
@@ -14,25 +41,257 @@ const UUID_PATTERN =
 // getUserDisplayName).
 function createEquipmentController({
   equipmentService,
+  messagesService,
   findEventById,
   findEventsByIds,
   getUserDisplayName,
+  listReleasableEventIds,
+  equipmentIssueNotifications,
 }) {
   const {
     listEquipment,
-    findEquipmentById,
+    updateEquipmentStatus,
+    createEquipment,
+    updateEquipment,
+    retireEquipment,
     listRequestsByEvent,
     findRequestById,
     listAllRequests,
-    hasOverlappingRequest,
-    createRequest,
+    listEquipmentByType,
+    listActiveRequestsForEquipment,
+    listApprovedRequestsForEquipment,
+    listApprovedRequestsForEquipmentIds,
+    createRequestGroup,
+    reserveGroup,
     updateStatus,
+    releaseReservationsForEvent,
+    isRequestAvailableForWindow,
   } = equipmentService;
+  const { create: createMessage } = messagesService;
 
+  // SCRUM-104: a safety net for any CANCELLED event whose synchronous release
+  // (review.service.js#cancel, SCRUM-148) didn't run or didn't complete -
+  // e.g. historical data from before SCRUM-148 existed, or a release call
+  // that threw after the status write already committed. Equipment reads
+  // self-heal: before computing a catalogue or availability response, sweep
+  // every CANCELLED or REJECTED event for still-active requests and release
+  // them. Both statuses are terminal - neither can ever legitimately hold a
+  // live reservation, unlike APPROVED, which this sweep deliberately leaves
+  // alone (SCRUM-37 reviewer feedback: see review.service.js's
+  // releaseArrangements for why APPROVED has no equivalent sweep). Safe to
+  // call on every read - releaseReservationsForEvent is a no-op once a given
+  // event's requests are already RELEASED (see its own comment in
+  // equipment.service.js).
+  // SCRUM-150 AC2: available_for_window is computed only for REVIEW_REQUIRED
+  // rows, never stored - Technical Support and the coordinator both read it
+  // through this same helper, so they can never see different answers for
+  // the same request (TC-150-07). Every other status is returned unchanged -
+  // a PENDING/APPROVED/REJECTED/RELEASED row is never marked unavailable just
+  // because a flagged sibling's new window now happens to overlap it
+  // (TC-150-08).
+  async function withAvailabilityFlag(requests) {
+    return Promise.all(requests.map(async (request) => {
+      if (request.status !== "REVIEW_REQUIRED") return request;
+      return { ...request, available_for_window: await isRequestAvailableForWindow(request) };
+    }));
+  }
+
+  async function releaseReservationsForTerminalEvents() {
+    const releasableEventIds = await listReleasableEventIds();
+    for (const eventId of releasableEventIds) {
+      await releaseReservationsForEvent(eventId);
+    }
+  }
+
+  // SCRUM-103 AC3: equipment just went UNAVAILABLE - every APPROVED request
+  // whose reservation covers today is now at risk. "Covers the day" reuses
+  // isBlockingOverlap with today as both the requested start and end, which
+  // collapses its day-truncated overlap rule to a single-day check - retire
+  // has no query window to compare against, only "now" (see the task note's
+  // Decisions for why this is today-only, not future-inclusive).
+  // PENDING/REJECTED requests are excluded by construction -
+  // listApprovedRequestsForEquipment only reads APPROVED rows, unlike
+  // listActiveRequestsForEquipment above.
+  //
+  // Each affected request moves APPROVED -> REJECTED (dashboard label:
+  // Assigned -> Issues - see getTechSupportDashboard's comment), the same
+  // transition patchRequestStatus already allows, since the equipment it was
+  // assigned to is no longer actually available to fulfil it. The attention
+  // message explains why, on the event's own thread.
+  async function flagApprovedReservationsOnRetire(equipmentId, actingUserId) {
+    const requests = await listApprovedRequestsForEquipment(equipmentId);
+    const now = new Date().toISOString();
+    const affected = requests.filter((request) => isBlockingOverlap(request, now, now));
+    if (affected.length === 0) return;
+
+    const eventIds = [...new Set(affected.map((request) => request.event_id))];
+    const events = await findEventsByIds(eventIds);
+    const eventById = new Map(events.map((event) => [event.id, event]));
+
+    for (const request of affected) {
+      const eventName = eventById.get(request.event_id)?.name || "this event";
+      const updated = await updateStatus(request.id, "REJECTED");
+      await createMessage(
+        {
+          equipment_request_id: request.id,
+          body: `This equipment has been marked unavailable while reserved for "${eventName}". Please arrange alternative equipment.`,
+        },
+        actingUserId,
+        "tech_support",
+      );
+      await equipmentIssueNotifications?.notifyIssue(request, updated, actingUserId);
+    }
+  }
+
+  // The request form's equipment dropdown. With no start/end query params,
+  // this is the full catalogue (unchanged behaviour, used e.g. for the
+  // Technical Support dashboard's equipment-type lookups and to label
+  // already-made requests). With both start and end given, it narrows to
+  // only the units bookable for that period (AC2/AC3/AC4, via the same
+  // findAvailableUnits used by getEquipmentAvailability) - so the dropdown
+  // can stop offering equipment that would just be rejected on submit.
   async function getEquipmentCatalogue(req, res, next) {
     try {
+      await releaseReservationsForTerminalEvents();
       const equipment = await listEquipment();
-      res.status(200).json({ data: equipment });
+      if (req.query.start === undefined && req.query.end === undefined) {
+        const approvedRequests = await listApprovedRequestsForEquipmentIds(equipment.map((unit) => unit.id));
+        return res.status(200).json({ data: withLiveInUseToday(equipment, groupRequestsByEquipmentId(approvedRequests)) });
+      }
+
+      const { ok, errors, value } = validateAvailabilityWindow(req.query);
+      if (!ok) {
+        return res.status(400).json({ error: "Validation failed", details: errors });
+      }
+
+      const requests = await listActiveRequestsForEquipment(equipment.map((unit) => unit.id));
+      const available = findAvailableUnits({
+        equipmentUnits: equipment,
+        requestsByEquipmentId: groupRequestsByEquipmentId(requests),
+        requestedStart: value.start,
+        requestedEnd: value.end,
+      });
+      res.status(200).json({ data: available });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Technical Support Staff manually record a status
+  // change (e.g. AVAILABLE -> MAINTENANCE) - the only way equipment.status
+  // ever changes today, since nothing writes it automatically.
+  async function patchEquipmentStatus(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) {
+        return res.status(400).json({ error: "Invalid equipment id" });
+      }
+
+      const { ok, errors, value } = validateEquipmentStatusUpdate(req.body);
+      if (!ok) {
+        return res.status(400).json({ error: "Validation failed", details: errors });
+      }
+
+      const updated = await updateEquipmentStatus(id, value.status, req.user.id);
+      if (!updated) {
+        return res.status(404).json({ error: "Equipment not found" });
+      }
+      res.status(200).json({ data: updated });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Scrum-30 AC1/AC2: add a new catalogue record.
+  async function postEquipment(req, res, next) {
+    try {
+      const { ok, errors, value } = validateCreateEquipment(req.body);
+      if (!ok) {
+        return res.status(400).json({ error: "Validation failed", details: errors });
+      }
+      const created = await createEquipment(value);
+      res.status(201).json({ data: created });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Scrum-30 AC1/AC2: edit an existing record's type, description, location
+  // or status - a fuller management action than patchEquipmentStatus above.
+  async function patchEquipment(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) {
+        return res.status(400).json({ error: "Invalid equipment id" });
+      }
+
+      const { ok, errors, value } = validateUpdateEquipment(req.body);
+      if (!ok) {
+        return res.status(400).json({ error: "Validation failed", details: errors });
+      }
+
+      const updated = await updateEquipment(id, value, req.user.id);
+      if (!updated) {
+        return res.status(404).json({ error: "Equipment not found" });
+      }
+      res.status(200).json({ data: updated });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Scrum-30 AC1: retire - sets status to UNAVAILABLE and nothing else. The
+  // row is never deleted (see equipment.service.js's retireEquipment).
+  async function patchEquipmentRetire(req, res, next) {
+    try {
+      const { id } = req.params;
+      if (!UUID_PATTERN.test(id)) {
+        return res.status(400).json({ error: "Invalid equipment id" });
+      }
+
+      const updated = await retireEquipment(id, req.user.id);
+      if (!updated) {
+        return res.status(404).json({ error: "Equipment not found" });
+      }
+
+      await flagApprovedReservationsOnRetire(id, req.user.id);
+      res.status(200).json({ data: updated });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Scrum-29: is enough suitable equipment available for an event's period?
+  // AC1: accepts start/end date-time, type, quantity and location (location
+  // is validated and echoed back but not used for filtering - deferred).
+  // AC2/AC3/AC4 are all decided inside checkAvailability/findAvailableUnits.
+  async function getEquipmentAvailability(req, res, next) {
+    try {
+      const { ok, errors, value } = validateAvailabilityQuery(req.query);
+      if (!ok) {
+        return res.status(400).json({ error: "Validation failed", details: errors });
+      }
+
+      await releaseReservationsForTerminalEvents();
+      const equipmentUnits = await listEquipmentByType(value.type);
+      const requests = await listActiveRequestsForEquipment(equipmentUnits.map((unit) => unit.id));
+
+      const result = checkAvailability({
+        equipmentUnits,
+        requestsByEquipmentId: groupRequestsByEquipmentId(requests),
+        requestedStart: value.start,
+        requestedEnd: value.end,
+        requestedQuantity: value.quantity,
+      });
+
+      res.status(200).json({
+        data: {
+          equipment_type: value.type,
+          location: value.location,
+          period: { start: value.start, end: value.end },
+          ...result,
+        },
+      });
     } catch (err) {
       next(err);
     }
@@ -46,7 +305,7 @@ function createEquipmentController({
       }
 
       const requests = await listRequestsByEvent(eventId);
-      res.status(200).json({ data: requests });
+      res.status(200).json({ data: await withAvailabilityFlag(requests) });
     } catch (err) {
       next(err);
     }
@@ -73,19 +332,31 @@ function createEquipmentController({
       const equipmentById = new Map(equipment.map((e) => [e.id, e]));
       const nameById = new Map(requesterIds.map((id, i) => [id, requesterNames[i]]));
 
-      const data = requests.map((r) => ({
+      const enriched = requests.map((r) => ({
         ...r,
         event_name: eventById.get(r.event_id)?.name ?? null,
-        equipment_type: equipmentById.get(r.equipment_id)?.type ?? null,
+        // SCRUM-31: equipment_id is null until Reserve assigns a unit, so the
+        // row's own equipment_type (always set at creation) is the primary
+        // source now; the catalogue lookup is only a fallback for any row
+        // that somehow lacks it.
+        equipment_type: r.equipment_type ?? equipmentById.get(r.equipment_id)?.type ?? null,
         requested_by_name: nameById.get(r.requested_by) ?? null,
       }));
 
-      res.status(200).json({ data });
+      res.status(200).json({ data: await withAvailabilityFlag(enriched) });
     } catch (err) {
       next(err);
     }
   }
 
+  // SCRUM-31 AC1/Decision 4: creates `quantity_requested` sibling rows for a
+  // type, no specific unit picked and no availability check here any more -
+  // this never rejects for insufficient stock (an over-request is accepted;
+  // Reserve and SCRUM-169's warning handle the shortfall later, not this
+  // endpoint). The old equipment_id/isStatusAvailable/hasOverlappingRequest
+  // checks are gone with it - they answered "is this one specific unit free
+  // right now", which no longer makes sense once no unit is chosen at
+  // submission time.
   async function postEquipmentRequest(req, res, next) {
     try {
       const { eventId } = req.params;
@@ -96,7 +367,7 @@ function createEquipmentController({
       // event_id comes from the URL, not the body - a requester cannot
       // redirect their own request onto a different event via the body.
       const payload = { ...req.body, event_id: eventId };
-      const { ok, errors, value } = validateCreateRequest(payload);
+      const { ok, errors, value } = validateCreateRequestGroup(payload);
       if (!ok) {
         return res.status(400).json({ error: "Validation failed", details: errors });
       }
@@ -104,25 +375,39 @@ function createEquipmentController({
       const event = await findEventById(value.event_id);
       if (!event) return res.status(404).json({ error: "Event not found" });
       if (event.coordinator_id !== req.user.id) return res.status(403).json({ error: "You can only request equipment for events assigned to you." });
-
-      const equipment = await findEquipmentById(value.equipment_id);
-      if (!equipment) return res.status(404).json({ error: "Equipment not found" });
-
-      const overlapping = await hasOverlappingRequest(
-        value.equipment_id,
-        value.borrow_start,
-        value.borrow_end,
-      );
-      if (overlapping) {
-        return res.status(409).json({
-          error: "This equipment is already requested for an overlapping period",
-        });
-      }
+      if (!PLANNING_STATUSES.includes(event.status)) return res.status(409).json({ error: "The event must be approved before requesting equipment." });
 
       // requireAuth has already verified this identity against Supabase.
       // Never take requested_by from the request body.
-      const request = await createRequest(value, req.user.id);
-      res.status(201).json({ data: request });
+      const requests = await createRequestGroup(value, req.user.id);
+      res.status(201).json({ data: requests });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // SCRUM-31: Technical Support reserves as many of a group's still-PENDING
+  // siblings as real stock allows (AC1), auto-marking the rest UNFULFILLED
+  // (AC2/Decision 8) - unless the group is essential and short, in which
+  // case nothing changes (AC5/Decision 2, a 409). `result` is null only when
+  // no row has this group_id at all.
+  async function patchReserveGroup(req, res, next) {
+    try {
+      const { groupId } = req.params;
+      if (!UUID_PATTERN.test(groupId)) {
+        return res.status(400).json({ error: "Invalid group id" });
+      }
+
+      const result = await reserveGroup(groupId);
+      if (result === null) {
+        return res.status(404).json({ error: "Equipment request not found" });
+      }
+      if (result.ok === false) {
+        return res.status(409).json({
+          error: `Not enough units available to fully reserve this essential item (needs ${result.pendingCount}, ${result.availableCount} available).`,
+        });
+      }
+      res.status(200).json({ data: { reserved: result.reserved, unfulfilled: result.unfulfilled } });
     } catch (err) {
       next(err);
     }
@@ -145,12 +430,36 @@ function createEquipmentController({
         return res.status(404).json({ error: "Equipment request not found" });
       }
 
+      // SCRUM-31 TC-10: this older single-row endpoint predates the reserve
+      // action and still allows APPROVED/REJECTED either way - but a sibling
+      // with no equipment_id yet (PENDING, never reserved) must never reach
+      // APPROVED through it, since that would skip the availability check
+      // reserveGroup does. Backed by the equipment_requests_approved_has_unit
+      // DB constraint too, so a bug here still can't write an invalid row.
+      if (value.status === "APPROVED" && existing.equipment_id === null) {
+        return res.status(409).json({ error: "This request has no unit assigned; use Reserve instead." });
+      }
+
       // Scrum-28-Scrum64 (AC2): unlike Scrum-27's one-way review, status can
       // move between APPROVED and REJECTED repeatedly as arrangements are
       // revised - no precondition on the current status here (see
       // equipment.service.js's updateStatus for the matching data-layer
       // change).
+      //
+      // SCRUM-150 AC2: approving a REVIEW_REQUIRED request re-checks that its
+      // unit is still free for its own borrow window first - showing
+      // available_for_window as false on the read side would otherwise be
+      // purely cosmetic if this endpoint let the approval through anyway.
+      // Deliberately scoped to REVIEW_REQUIRED only: a plain PENDING request
+      // has never had this re-check (pre-existing gap, not this story's to
+      // close - see the task note's Found, not built).
+      if (existing.status === "REVIEW_REQUIRED" && value.status === "APPROVED" &&
+        !(await isRequestAvailableForWindow(existing))) {
+        return res.status(409).json({ error: "This equipment is no longer available for the rescheduled dates." });
+      }
+
       const updated = await updateStatus(id, value.status);
+      await equipmentIssueNotifications?.notifyIssue(existing, updated, req.user.id);
       res.status(200).json({ data: updated });
     } catch (err) {
       next(err);
@@ -159,10 +468,16 @@ function createEquipmentController({
 
   return {
     getEquipmentCatalogue,
+    patchEquipmentStatus,
+    postEquipment,
+    patchEquipment,
+    patchEquipmentRetire,
+    getEquipmentAvailability,
     getEquipmentRequests,
     getTechSupportDashboard,
     postEquipmentRequest,
     patchRequestStatus,
+    patchReserveGroup,
   };
 }
 

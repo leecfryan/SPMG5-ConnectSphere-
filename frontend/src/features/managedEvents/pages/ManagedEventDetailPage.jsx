@@ -1,0 +1,160 @@
+import { useEffect, useState } from "react";
+import { Link, useParams } from "react-router";
+import { useAuth } from "../../auth/useAuth";
+import { fetchEventRegistrationSummary, fetchManagedRegistrationWindow } from "../managedEventsService";
+import RegistrationWindowEditor from "../components/RegistrationWindowEditor";
+import WaitlistCoordinatorPanel from "../components/WaitlistCoordinatorPanel";
+import EventVenueBookings from "../../venues/components/EventVenueBookings";
+import { fetchVenueBookingChecks, markVenueBookingAffected } from "../../../lib/api";
+import "../../events/events.css";
+
+// The server answers 403 for an event that belongs to someone else and for one
+// that does not exist, so the browser cannot tell the two apart and does not
+// need to. They share a message for that reason, not just to save a branch.
+const NOT_ACCESSIBLE = "You don't have access to registration information for that event.";
+
+export default function ManagedEventDetailPage() {
+  const { eventId } = useParams();
+  const { token, hasPermission } = useAuth();
+  const [result, setResult] = useState(null);
+  // Keyed by path and token: a session change must never leave one account's
+  // counts on screen while the next request is in flight.
+  const key = JSON.stringify([eventId, token]);
+
+  useEffect(() => {
+    let active = true;
+    fetchEventRegistrationSummary(eventId, token)
+      .then(async (summary) => {
+        let window;
+        let windowError;
+        try {
+          window = await fetchManagedRegistrationWindow(eventId, token);
+        } catch (error) {
+          windowError = error;
+        }
+        if (active) setResult({
+          key,
+          summary: { ...summary, ...window },
+          windowError,
+        });
+      })
+      .catch((error) => { if (active) setResult({ key, error }); });
+    return () => { active = false; };
+  }, [eventId, token, key]);
+
+  // SCRUM-145: on every load, silently run venue booking checks and mark any
+  // booking that fails a suitability/availability/conflict check as affected.
+  // This is fire-and-forget: a check error must never block the event page from
+  // loading. The mark calls are also fire-and-forget for the same reason.
+  useEffect(() => {
+    if (!token || !eventId) return;
+    let active = true;
+    fetchVenueBookingChecks(eventId, token)
+      .then(async (report) => {
+        if (!active) return;
+        const failed = (report.results || []).filter(
+          (result) => result.overall === "failed" && result.booking_id
+        );
+        await Promise.allSettled(
+          failed.map((result) => {
+            const reasons = [
+              ...((result.suitability?.reasons) || []),
+              ...((result.availability?.reasons) || []),
+              ...((result.conflicts?.reasons) || []),
+            ];
+            const reason =
+              reasons.length > 0 ? reasons.join("; ") : "Venue booking check failed";
+            return markVenueBookingAffected(result.booking_id, reason, token);
+          })
+        );
+        // Re-fetch the summary so the venue list reflects the new affected flags.
+        if (active && failed.length > 0) {
+          fetchEventRegistrationSummary(eventId, token)
+            .then(async (summary) => {
+              let window;
+              try { window = await fetchManagedRegistrationWindow(eventId, token); } catch { /* keep existing */ }
+              if (active) setResult((prev) =>
+                prev?.key === key
+                  ? { ...prev, summary: { ...summary, ...window } }
+                  : prev
+              );
+            })
+            .catch(() => { /* ignore refresh errors */ });
+        }
+      })
+      .catch(() => { /* swallow — check errors must not block the page */ });
+    return () => { active = false; };
+  }, [eventId, token, key]);
+
+  const back = <Link to="/events/managed">Back to my events</Link>;
+
+  if (result?.key !== key) return <p role="status">Loading registration information…</p>;
+  if (result.error) {
+    return (
+      <section className="card">
+        <p className="error" role="alert">
+          {result.error.status === 403 || result.error.status === 404 ? NOT_ACCESSIBLE : result.error.message}
+        </p>
+        {back}
+      </section>
+    );
+  }
+
+  const summary = result.summary;
+  const isFull = Number.isInteger(summary.maxEnrollment) && summary.enrolled >= summary.maxEnrollment;
+  return (
+    <section className="card managed-event-detail" aria-labelledby="managed-event-title">
+      <Link to="/events/managed" className="back-link">Back to my events</Link>
+      <p className="eyebrow">EVENT</p>
+      <h1 id="managed-event-title">{summary.name}</h1>
+      <section className="event-venues-section" aria-labelledby="managed-event-venues-title">
+        <h2 id="managed-event-venues-title">Venues</h2>
+        <EventVenueBookings
+          bookings={summary.venueBookings}
+          eventId={summary.id}
+          canCheck={typeof hasPermission === "function" && hasPermission("bookings.read")}
+          canManageReplacement={typeof hasPermission === "function" && hasPermission("bookings.request")}
+        />
+      </section>
+      <dl className="account-details managed-event-summary">
+        <div>
+          <dt>Current Registrations</dt>
+          <dd>
+            {summary.enrolled}/{summary.maxEnrollment ?? "-"}
+            {isFull && <span className="status-badge status-full"> Full</span>}
+          </dd>
+        </div>
+        <div>
+          <dt>Waiting List</dt>
+          <dd>{summary.waitingList}</dd>
+        </div>
+      </dl>
+      <p className="card-note">
+        {summary.status}{summary.start_time ? ` · ${formatDate(summary.start_time)}` : ""}
+      </p>
+      {result.windowError && (
+        <p className="error" role="alert">
+          Registration window settings could not be loaded. Refresh the page before editing them.
+        </p>
+      )}
+      {!result.windowError && typeof hasPermission === "function" && hasPermission("events.registration-window.update") && (
+        <RegistrationWindowEditor
+          event={summary}
+          token={token}
+          onSaved={(saved) => {
+            setResult((current) => current?.key === key
+              ? { ...current, summary: { ...current.summary, ...saved } }
+              : current);
+          }}
+        />
+      )}
+      {typeof hasPermission === "function" && hasPermission("events.waitlist.manage") && (
+        <WaitlistCoordinatorPanel eventId={eventId} token={token} />
+      )}
+    </section>
+  );
+}
+
+function formatDate(iso) {
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}

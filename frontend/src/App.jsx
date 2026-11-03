@@ -8,11 +8,20 @@ import SignInPage from "./routes/SignInPage";
 import AccountPage from "./routes/AccountPage";
 import ResponsibilitiesPage from "./routes/ResponsibilitiesPage";
 import WorkspaceLayout from "./routes/WorkspaceLayout";
+import NotificationCentrePage from "./features/notifications/pages/NotificationCentrePage";
 import EquipmentRequestPage from "./features/equipment/pages/EquipmentRequestPage";
+import EquipmentCataloguePage from "./features/equipment/pages/EquipmentCataloguePage";
+import EquipmentFormPage from "./features/equipment/pages/EquipmentFormPage";
 import TechnicalSupportDashboardPage from "./features/equipment/pages/TechnicalSupportDashboardPage";
 import VenueRoutes from "./features/venues/VenueRoutes";
 import EventRequestPage from "./features/events/pages/EventRequestPage";
 import AssignmentQueuePage from "./features/events/pages/AssignmentQueuePage";
+import ManagedEventsPage from "./features/managedEvents/pages/ManagedEventsPage";
+import ManagedEventDetailPage from "./features/managedEvents/pages/ManagedEventDetailPage";
+import EventWorkspacePage from "./features/events/pages/EventWorkspacePage";
+import EventWorkspaceDetailPage from "./features/events/pages/EventWorkspaceDetailPage";
+import SafetyReviewListPage from "./features/events/pages/SafetyReviewListPage";
+import SafetyReviewDetailPage from "./features/events/pages/SafetyReviewDetailPage";
 import EventListPage from "./features/registrations/pages/EventListPage";
 import EventDetailPage from "./features/registrations/pages/EventDetailPage";
 import MyRegistrationsPage from "./features/registrations/pages/MyRegistrationsPage";
@@ -29,12 +38,13 @@ function Home() {
 
 export default function App() {
   const location = useLocation();
-  const fullWorkspace = location.pathname === "/venues" || location.pathname.startsWith("/venues/") || location.pathname.startsWith("/equipment/") || location.pathname === "/technical-support" || location.pathname === "/events/assignments";
+  const fullWorkspace = ["/venues", "/equipment", "/technical-support", "/assigned-events", "/my-event-requests", "/event-management", "/events/assignments", "/safety-reviews"].some(path => location.pathname === path || location.pathname.startsWith(path + "/"));
   return (
     <AuthProvider>
       <div className="app-shell">
-        <header className="brand"><span className="brand-mark" aria-hidden="true">C</span>ConnectSphere</header>
-        <main className={fullWorkspace ? "venue-workspace" : location.pathname === "/events/new" ? "wide" : undefined}>
+        <a className="skip-link" href="#main-content">Skip to content</a>
+        <header className="brand"><span className="brand-mark" aria-hidden="true">C</span>ConnectSphere<span className="brand-caption">Extraordinary starts here.</span></header>
+        <main id="main-content" tabIndex={-1} className={fullWorkspace ? "venue-workspace" : location.pathname === "/events/new" ? "wide" : undefined}>
           <aside className="intro">
             <p className="eyebrow">EVENT PLANNING & VENUE BOOKING</p>
             <h2>Great events.<br />Connected people.</h2>
@@ -47,11 +57,33 @@ export default function App() {
             <Route path="/sign-in" element={<SignInPage />} />
             <Route element={<RequireAuth />}>
               <Route element={<WorkspaceLayout />}>
-                <Route path="/events" element={<EventListPage />} />
-                <Route path="/events/:eventId" element={<EventDetailPage />} />
-                <Route path="/registrations/me" element={<MyRegistrationsPage />} />
-                <Route path="/registrations/me/:registrationId" element={<RegistrationDetailPage />} />
+                <Route element={<RequirePermission permission="events.browse" />}>
+                  <Route path="/events" element={<EventListPage />} />
+                  <Route path="/events/:eventId" element={<EventDetailPage />} />
+                </Route>
+                <Route element={<RequirePermission permission="registrations.manage" />}>
+                  <Route path="/registrations/me" element={<MyRegistrationsPage />} />
+                  <Route path="/registrations/me/:registrationId" element={<RegistrationDetailPage />} />
+                </Route>
+                {[
+                  ["events.own.read", "my-event-requests", "organiser"],
+                  ["events.assigned.read", "assigned-events", "coordinator"],
+                  ["events.review", "event-management", "manager"],
+                ].map(([permission, path, scope]) => (
+                  <Route key={path} element={<RequirePermission permission={permission} />}>
+                    <Route path={`/${path}`} element={<EventWorkspacePage scope={scope} />} />
+                    <Route path={`/${path}/:eventId`} element={<EventWorkspaceDetailPage scope={scope} />} />
+                  </Route>
+                ))}
                 <Route path="/account" element={<AccountPage />} />
+                <Route path="/notifications" element={<NotificationCentrePage />} />
+                {/* Organisers hold no internal.access, so this sits beside the other
+                    open routes rather than inside that group. The static "managed"
+                    segment outranks /events/:eventId, as /events/new already does. */}
+                <Route element={<RequirePermission permission="events.managed.read" />}>
+                  <Route path="/events/managed" element={<ManagedEventsPage />} />
+                  <Route path="/events/managed/:eventId" element={<ManagedEventDetailPage />} />
+                </Route>
                 <Route element={<RequirePermission permission="events.submit" />}>
                   <Route path="/events/new" element={<EventRequestPage />} />
                 </Route>
@@ -62,12 +94,28 @@ export default function App() {
                   <Route element={<RequirePermission permission="equipment.request" />}>
                     <Route path="/equipment/requests" element={<EquipmentRequestPage />} />
                   </Route>
+                  {/* Scrum-30: catalogue page restricted to Technical Support Staff (equipment.review) -
+                      Event Coordinators no longer browse it; they still read equipment data indirectly
+                      through the reserve flow's own GET /api/equipment call, gated by equipment.request. */}
+                  <Route element={<RequirePermission permission="equipment.review" />}>
+                    <Route path="/equipment/catalogue" element={<EquipmentCataloguePage />} />
+                  </Route>
+                  {/* Scrum-30 AC1: add/edit a catalogue record - management actions, separate from equipment.review. */}
+                  <Route element={<RequirePermission permission="equipment.manage" />}>
+                    <Route path="/equipment/catalogue/new" element={<EquipmentFormPage mode="create" />} />
+                    <Route path="/equipment/catalogue/:id/edit" element={<EquipmentFormPage mode="edit" />} />
+                  </Route>
                   <Route element={<RequirePermission permission="equipment.review" />}>
                     <Route path="/technical-support" element={<TechnicalSupportDashboardPage />} />
                   </Route>
-                  {/* SCRUM-26: the Event Operations Manager's assignment queue. */}
+                  {/* SCRUM-26: the Event Coordinator Lead's assignment queue. */}
                   <Route element={<RequirePermission permission="events.assign_coordinator" />}>
                     <Route path="/events/assignments" element={<AssignmentQueuePage />} />
+                  </Route>
+                  {/* SCRUM-140: the Safety Officer's read-only review queue. */}
+                  <Route element={<RequirePermission permission="events.safety.read" />}>
+                    <Route path="/safety-reviews" element={<SafetyReviewListPage />} />
+                    <Route path="/safety-reviews/:eventId" element={<SafetyReviewDetailPage />} />
                   </Route>
                   <Route path="/staff/responsibilities" element={<ResponsibilitiesPage />} />
                 </Route>

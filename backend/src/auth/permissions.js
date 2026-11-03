@@ -1,22 +1,97 @@
 // Initial staff matrix agreed for the "Restrict internal staff access by responsibility" story.
 // Feature writes have separate permissions; read grants never authorise mutations.
 const policies = Object.freeze({
+  "events.browse": { roles: ["attendee"] },
+  "registrations.manage": { roles: ["attendee"] },
+  "events.own.read": { roles: ["event_organiser"] },
+  "events.own.update": { roles: ["event_organiser"] },
+  "events.assigned.read": { roles: ["event_coordinator"] },
+  "events.review": { roles: ["event_coordinator_lead"], label: "Event request review and coordinator assignment" },
+  "events.assign": { roles: ["event_coordinator_lead"] },
   // External organisers submit their own requests; this grants no internal access.
   "events.submit": {
     roles: ["event_organiser"],
   },
+  // Registration counts for the caller's own events. No `label`: these are not
+  // staff responsibilities, and adding one would put them on
+  // /staff/responsibilities for coordinators.
+  // The list scopes organiser_id/coordinator_id in its own query, so it needs no
+  // record resolver; the single event does, hence the split.
+  "events.managed.read": {
+    roles: ["event_organiser", "event_coordinator"],
+  },
+  "events.registrations.read": {
+    roles: ["event_organiser", "event_coordinator"],
+    record: true,
+  },
+  "events.registration-window.update": {
+    roles: ["event_organiser", "event_coordinator"],
+    record: true,
+  },
+  "events.waitlist.manage": {
+    roles: ["event_coordinator"],
+    record: true,
+  },
+  "events.assign_coordinator": { roles: ["event_coordinator_lead"] },
   "venues.update": {
     roles: ["venue_staff", "event_coordinator"],
+  },
+  // SCRUM-133: marking and managing unavailable periods is Venue Staff work only.
+  "venues.unavailability": {
+    roles: ["venue_staff"],
+  },
+  // SCRUM-135: viewing conflict flags after a setup/turnaround change is Venue Staff work only.
+  "venues.conflicts": {
+    roles: ["venue_staff"],
+  },
+  // SCRUM-146: placing and viewing tentative holds is Venue Staff work only.
+  "venues.holds": {
+    roles: ["venue_staff"],
   },
   "bookings.request": {
     roles: ["event_coordinator"],
   },
+  // SCRUM-22: deciding a request is Venue Staff work. Coordinators keep
+  // bookings.read so they can see the outcome, but cannot decide their own.
+  "bookings.decide": {
+    roles: ["venue_staff"],
+  },
+  // SCRUM-154: only the coordinator who made a booking request may change or
+  // cancel it. Venue Staff keep bookings.decide for their own review action;
+  // this is not an alternative route to approving or rejecting.
+  "bookings.manage": {
+    roles: ["event_coordinator"],
+    record: true,
+  },
   "equipment.request": { roles: ["event_coordinator"] },
   "equipment.review": { roles: ["technical_support_staff"] },
-  "equipment.messages": { roles: ["technical_support_staff", "event_coordinator"] },
-  "events.assign_coordinator": { roles: ["event_ops_manager"] },
+  "equipment.manage": { roles: ["technical_support_staff"] },
+  "equipment.messages": {
+    roles: ["technical_support_staff", "event_coordinator"],
+  },
+  // SCRUM-98/99: only the event's assigned coordinator reviews and decides it (discussions #80, #101).
+  "events.decide": { roles: ["event_coordinator"], record: true },
+  // SCRUM-139: only the assigned coordinator submits or withdraws the safety check.
+  "events.safety.submit": { roles: ["event_coordinator"], record: true },
+  // SCRUM-140: Safety Officers are a shared pool, not assigned per event, so any
+  // of them may read any event awaiting review. Read-only: no record check needed.
+  "events.safety.read": { roles: ["safety_officer"], label: "Operational safety review" },
+  // SCRUM-141: deciding is a separate write grant; same pool, so no record check.
+  "events.safety.decide": { roles: ["safety_officer"] },
+  // SCRUM-171: narrowed from SCRUM-148/142 - the lead's unconditional cancel access is
+  // removed; only the event's assigned coordinator may cancel it now.
+  "events.cancel": { roles: ["event_coordinator"], record: true },
+  // SCRUM-170 AC1 (PO confirmed 2026-11-02, superseding SCRUM-149 AC1): only the
+  // assigned coordinator may postpone, so the lead's access is removed as SCRUM-171 did for cancel.
+  "events.postpone": { roles: ["event_coordinator"], record: true },
   "internal.access": {
-    roles: ["event_coordinator", "venue_staff", "technical_support_staff", "event_ops_manager"],
+    roles: [
+      "event_coordinator",
+      "venue_staff",
+      "technical_support_staff",
+      "event_coordinator_lead",
+      "safety_officer",
+    ],
   },
   "venues.read": {
     roles: ["venue_staff", "event_coordinator"],
@@ -52,7 +127,7 @@ const policies = Object.freeze({
     record: true,
   },
   "event_organisers.read": {
-    roles: ["event_coordinator", "event_ops_manager"],
+    roles: ["event_coordinator", "event_coordinator_lead"],
     label: "Event organiser information for managed events",
     record: true,
   },

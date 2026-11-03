@@ -3,7 +3,7 @@
 This integration preserves main's shared authentication, account page, staff
 responsibilities, organiser event submission, Docker configuration and tests.
 The Venue branch contributes its catalogue, operating information, calendar,
-booking form, request review, validation and database migrations.
+booking form, request review, validation and SQL schema references.
 
 ## Routes and permissions
 
@@ -20,6 +20,11 @@ middleware and hardcoded development roles have been removed.
 | `/venues/:id/edit` | `venues.update` | Venue Staff, Event Coordinator |
 | `/venues/:id/booking-request` | `bookings.request` | Event Coordinator |
 | `/venues/booking-requests` | `bookings.read` | Venue Staff, Event Coordinator |
+| `/venues/booking-requests/:requestId/replacement` | `bookings.request` | Event Coordinator |
+| `/venues/booking-requests` decide controls | `bookings.decide` | Venue Staff |
+| `/venues/:id/unavailability` | `venues.unavailability` | Venue Staff |
+| `/venues/:id/holds` | `venues.holds` | Venue Staff |
+| `/venues/:id/booking-conflicts` | `venues.conflicts` | Venue Staff |
 
 These are React Router pages with direct links and browser Back/refresh support.
 Shared navigation and sign-out stay available. All calls use relative `/api/venues`
@@ -30,21 +35,532 @@ Frontend visibility is only a convenience; the API enforces each operation.
 `PATCH /api/venues/:id` retains the branch's field validation and update behavior.
 `GET /api/venues/:id/availability` retains confirmed, requested, unavailable and
 closed slots, date windows and AM/PM/Night handling. Catalogue and calendar access
-are not restricted to an assigned venue or location.
+are not restricted to an assigned venue or location. Coordinators see generic
+occupied-slot labels instead of other events' names; venue staff keep event labels.
 
-`GET /api/venues/booking-events` returns upcoming, non-draft events assigned to
+`GET /api/venues/booking-events` returns upcoming, approved (`APPROVED` or `CONFIRMED`, `PLANNING_STATUSES` in `events/lifecycle.js`) events assigned to
 the verified coordinator through the existing `events.coordinator_id` column.
 `POST /api/venues/:id/booking-requests` checks that same relationship, validates
-requirements and slot conflicts, and supplies the verified requester ID to the
-database. Submitted requests remain pending and do not consume confirmed slots.
+requirements and slot conflicts, requires a trimmed per-booking `purpose` (maximum
+2000 characters), and supplies the verified requester ID to the database. The
+database stores one request row per venue booking, so multiple venues may be
+requested for the same event. Submitted requests remain pending and do not consume
+confirmed slots.
 
 Venue Staff can review venue requests across locations. For coordinators, both
 `GET /api/venues/booking-requests` and `GET /api/venues/booking-requests/:id`
 filter by their assigned events. The router establishes this scope from the
 verified identity; the database service applies it using an inner event join.
 Responses select venue requirements and event name/timing/status, not whole
-client, attendee or internal planning records. No event-assignment UI is added.
+client, attendee or internal planning records. Managers assign events through `/event-management`.
 An unassigned event will not appear in a coordinator's picker.
+
+`GET /api/venues/booking-requests?event_id=<uuid>` returns all booking rows for
+the selected event within the caller's existing scope. The event-scoped response
+is intentionally not limited to pending rows, so confirmed, rejected, cancelled
+and mixed slot outcomes remain visible together. The frontend venue request list
+uses this filter for the combined event booking view and displays each booking's
+venue, purpose, date and slot period, and offers the per-venue check report below
+(`GET /api/venues/events/:eventId/booking-checks`).
+
+The public event APIs also attach related venue booking data for event details,
+while the Browse Events list UI intentionally hides venues until an attendee
+opens the event. My Events cards and details show all related bookings together,
+including their independent statuses.
+
+## Deciding a request (SCRUM-22)
+
+`PATCH /api/venues/booking-requests/:requestId/decision` takes
+`{ decision: "confirmed" | "rejected", note?: string }` and requires the new
+`bookings.decide` permission, held by Venue Staff only. Coordinators keep
+`bookings.read`, so they see the outcome on their own requests but cannot
+decide them. The reviewer identity comes from the verified session; a
+`decided_by` sent in the body is rejected with the other unknown fields.
+
+The decision is applied by `decide_venue_booking_request` (SQL recorded below),
+which records `decided_by`, `decided_at` and `decision_note` on the request and
+writes the decision to every one of its slot rows in one transaction, so a
+request is never half decided. Cancelled slots are left alone: a coordinator
+withdrawing a request is not something a later staff decision should undo.
+
+Approving writes `confirmed`, which is where the exclusion constraint from
+003 applies. If another request already holds one of those slots, Postgres
+rejects the whole statement (SQLSTATE 23P01), nothing changes, and the API
+returns 409 rather than 500.
+
+**Gap found during SCRUM-37 UAT, 2026-10-21, not introduced or closed by that story.** This decision endpoint has
+no availability pre-check at all, unlike equipment's `isRequestAvailableForWindow` (`equipment.controller.js#patchRequestStatus`,
+scoped to `REVIEW_REQUIRED → APPROVED`). `venues.controller.js#patchBookingRequestDecision` calls
+`decideBookingRequest` directly — the exclusion constraint above is the only safety net, and it only catches a
+collision between two *already-`confirmed`* rows. There is nothing checking against other `pending` holds on
+approval, and no friendly pre-check message, just the raw 409 if the constraint itself fires. Pre-existing
+(SCRUM-20/22), confirmed by grep — zero hits for `available_for_window`/`isRequestAvailableForWindow` anywhere in
+this lane. Not built into SCRUM-37: estimated at roughly a SCRUM-150-AC2-sized sub-story, since venues have no
+`REVIEW_REQUIRED`-equivalent status to scope it to, so a fix would have to apply to every decision, not just a
+flagged one. See `.agent/docs/other/SCRUM-37-flag-significant-edits.md`'s *Found, not built*.
+
+## Blocking a conflicting booking (SCRUM-20)
+
+The block itself is the database constraint described above, not a check in the
+backend, because a check followed by a write can always be overtaken between the
+two. SCRUM-20 adds the part the constraint cannot do on its own: saying which
+slot clashed, and making sure nobody can approve past it.
+
+After a 23P01 refusal the controller re-reads the request and that day's slot
+rows and runs `findConfirmedSlotConflicts`, so the 409 names each clashing slot
+and the event holding it, for example
+`am on 2026-10-14 is already confirmed for "Charity gala"`. A slot already held
+by the request's own event is not counted as a clash. If that lookup fails for
+any reason the response falls back to the plain message, because explaining a
+refusal must never turn it into a 500.
+
+There is deliberately no override, force or priority field on a decision. The
+decision allowlist accepts `decision` and `note` and refuses anything else, so
+an approval cannot be pushed through a conflict on the grounds that the
+requester matters.
+
+In the review list a 409 is treated as an answer rather than a failure: the
+decide buttons are replaced by the named conflict, a note that the request is
+unchanged and still pending, and a Refresh list action. On the coordinator side
+a slot that is already booked is shown with the event holding it and cannot be
+selected, and other slots on the same day stay bookable.
+
+A rejection records the decision and nothing else: any resulting booking change
+is made by the Event Coordinator, so no counter-offer is applied automatically.
+
+## Venue unavailability periods (SCRUM-133)
+
+Venue Staff can block a venue from accepting new bookings for a defined date range and a subset of slots (am, pm, night). New booking requests that overlap an unavailable slot are rejected with 409; existing confirmed bookings are unaffected.
+
+`POST /api/venues/:id/unavailability` — body: `{ start_date, end_date, slots[], reason }`. `start_date` and `end_date` are `YYYY-MM-DD`; `end_date` must not be before `start_date`. `slots` must be a non-empty subset of `["am", "pm", "night"]`. Returns 201 with `{ data: period, affected: [] }`. `affected` is the array of confirmed booking requests whose committed slots (including setup/turnaround buffer) overlap the new period — these are not modified (see SCRUM-136).
+
+`GET /api/venues/:id/unavailability` — returns 200 with the array of all period records for the venue, ordered by start date.
+
+`PATCH /api/venues/:id/unavailability/:periodId` — any subset of `{ start_date, end_date, slots, reason }`. At least one field is required. The effective end_date (after merging with the existing record) must not be before the effective start_date. Returns 200 with the updated period.
+
+`DELETE /api/venues/:id/unavailability/:periodId` — removes the period entirely. Returns 204. Returns 404 when the period does not exist or belongs to a different venue.
+
+All four endpoints require `venues.unavailability`, held by Venue Staff only. The `created_by` field is set server-side from the verified session; it cannot be supplied in the request body.
+
+**How blocking works.** `listUnavailabilityInRange` reads from both `venue_unavailability` (legacy per-slot seed rows) and `venue_unavailability_periods` (new period records). Period records are expanded into per-slot rows matching the shape the availability calendar already reads. The calendar marks those slots `unavailable`, and `findSlotProblems` rejects any booking request that targets a non-`available`/`pending` slot.
+
+**Affected bookings (SCRUM-136).** After the period is created, `listAffectedBookingRequests(venueId, period, venue)` returns every confirmed booking request whose `booking_date` falls in the period's date range AND whose committed slots (expanded from confirmed slot rows via `committedSlots` with the venue's `setup_minutes`/`turnaround_minutes`) intersect the period's `slots`. The result is returned in `affected` alongside the created period; no booking is changed. Each entry in `affected` includes `event.coordinator_id` so the caller knows who to contact.
+
+## Tentative venue holds (SCRUM-146)
+
+Venue Staff can place a time-limited tentative hold on one or more slots for a named event. A hold reserves
+the slot while the coordinator finalises arrangements without permanently consuming it.
+
+`POST /api/venues/:id/holds` — body: `{ event_id, event_name, booking_date, slots[], expires_at, coordinator_id }`. `booking_date` is
+`YYYY-MM-DD`; `slots` is a non-empty subset of `["am", "pm", "night"]`; `expires_at` is an ISO 8601 timestamp
+that must be in the future (400 if not); `event_id` and `coordinator_id` are UUIDs (SCRUM-162: both required so
+the coordinator can be identified for hold conversion). The `event_id` and `coordinator_id` values come from
+`GET /api/venues/events` (SCRUM-162), which returns only APPROVED/CONFIRMED events with an assigned coordinator.
+Returns 201 with an array of the created slot rows.
+
+`GET /api/venues/:id/holds` — returns 200 with all hold rows for the venue, including expired ones, ordered
+by booking date and creation time descending. Expired holds are kept for history; they are never deleted.
+
+`GET /api/venues/events` — returns 200 with APPROVED/CONFIRMED events that have an assigned coordinator,
+ordered by start_time. Used to populate the hold placement form.
+
+All three endpoints require `venues.holds`, held by Venue Staff only.
+
+**How the hold is stored.** Each hold is one row per slot in `venue_bookings` with `status = 'hold'` and an
+`expires_at` column. Reusing the existing table keeps the calendar query and conflict check unified;
+a separate table would need joins in three places. The `expires_at` column is `NULL` for all non-hold rows.
+
+**How active holds appear on the calendar.** `getVenueAvailability` calls `listActiveHoldsInRange` alongside
+the existing booking and unavailability queries. `listActiveHoldsInRange` filters `expires_at > now()` in
+Postgres, so expired holds are excluded before the data reaches the calendar. `buildAvailabilityCalendar`
+receives the active holds as an `input.holds` array and applies a `tentative` tier in the slot precedence:
+
+```
+closed > unavailable > booked > tentative > pending > available
+```
+
+A confirmed booking still outranks a hold (a booking is harder than a reservation). A hold outranks a pending
+request (a hold is explicit staff intent, a request has not yet been decided). The frontend calendar renders
+the `tentative` status with the label "Tentative hold" and a distinct blue colour.
+
+**How active holds block booking requests.** `postBookingRequest` runs `findSlotProblems`, which checks each
+committed slot against `REQUESTABLE_STATUSES = ["available", "pending"]`. Because `tentative` is not in that
+list, any slot covered by an active hold produces a 409 with the same error format as other conflicts.
+Once the hold expires, `listActiveHoldsInRange` returns nothing for that slot and a new booking request
+can proceed.
+
+## Converting a tentative hold to a booking request (SCRUM-162)
+
+A coordinator whose event has an active hold can convert it to a booking request from the venue's availability
+calendar. The conversion path reuses the existing `POST /api/venues/:id/booking-requests` endpoint with an extra
+`hold_ids` field in the body.
+
+**Finding eligible holds.** `GET /api/venues/:id/holds/eligible` (requires `bookings.request`, coordinator only)
+returns hold groups the signed-in coordinator can convert. The service (`listEligibleHoldsForCoordinator`) queries
+holds where `coordinator_id = req.user.id`, `status = 'hold'`, `expires_at > now()` and `request_id IS NULL`,
+then cross-references each hold's `event_id` against the coordinator's APPROVED/CONFIRMED events. Holds whose
+`booking_date` falls outside the event's `start_time`/`end_time` are excluded (they could not pass
+`validateAgainstEvent` at conversion anyway). Results are grouped by `(event_id, booking_date)` so one card
+covers all slots held for the same event on the same day.
+
+**Converting.** `POST /api/venues/:id/booking-requests` with `hold_ids: [uuid, ...]` in the body. After the
+booking request is created and saved, `linkHoldsToRequest` sets `request_id` on every hold row in the group.
+The hold `status` stays `'hold'` — it remains active on the calendar as `tentative` while the request is
+`pending` (hold outranks pending in the precedence table). A stale or expired hold in `hold_ids` returns 409.
+A hold whose `event_id` or `coordinator_id` doesn't match the request is rejected 409.
+
+**After approval.** `decide_venue_booking_request` confirms the slot rows. A confirmed booking outranks a hold
+(`booked > tentative`), so the calendar shows the slot as booked regardless of whether the hold row is
+still present.
+
+## Committed period: setup and turnaround time (SCRUM-134)
+
+Every booking request carries a **committed period** that extends beyond the requested slot(s): the venue's `setup_minutes` before the first slot starts and `turnaround_minutes` after the last slot ends. `committedSlots(requestedSlots, setupMinutes, turnaroundMinutes)` in `venues.availability.js` computes this by mapping slot names to their time windows (am 08:00–12:00, pm 12:00–18:00, night 18:00–23:00) and returning every slot whose window overlaps the extended range.
+
+Example: requesting pm at Marina Grand Ballroom (setup=120, turnaround=60) → committed start 10:00, committed end 19:00 → committed slots are am, pm and night. All three must be clear.
+
+**How the conflict check works.** `findSlotProblems` receives the venue and calls `committedSlots` to find any buffer slots (those covered by setup/turnaround but not directly requested). Each buffer slot is checked with the same `REQUESTABLE_STATUSES` test as the directly requested slots: `closed`, `booked` or `unavailable` all block the request. The error message distinguishes setup and turnaround buffers, e.g. `am is needed for setup time but is not available (booked: Morning Session)`.
+
+**Where the rule applies.** Both places that decide whether a booking can be made use committed slots: `postBookingRequest` (AC2 conflict check) and `filterByAvailability` (SCRUM-18 catalogue date+slot search). The availability calendar display is unchanged — it shows what is actually booked, not what cannot be requested.
+
+Venues with `setup_minutes = 0` and `turnaround_minutes = 0` are unaffected: `committedSlots` returns exactly the requested slots, so the check is identical to pre-134 behaviour.
+
+## Conflict flags after a setup/turnaround change (SCRUM-135)
+
+When `setup_minutes` or `turnaround_minutes` is changed on a venue, any existing confirmed bookings that
+now require a buffer slot occupied by another booking are flagged for Venue Staff review.
+
+`GET /api/venues/:id/booking-conflicts` — returns 200 with a `{ data: [] }` array of flagged booking
+requests. Each item has the same shape as a booking request row plus a `conflict_flags` array:
+
+```json
+{
+  "slot": "am",
+  "type": "setup",
+  "conflicting_with": "Morning Session",
+  "reason": "am is needed for setup time but is occupied by \"Morning Session\""
+}
+```
+
+Requires `venues.conflicts`, held by Venue Staff only. Returns 404 if the venue does not exist.
+
+**How flags are written.** `recheckConflictsAfterUpdate(venueId, venue)` in `venues.service.js` is called
+after any `PATCH /api/venues/:id` that changes `setup_minutes` or `turnaround_minutes`. It:
+
+1. Fetches all future confirmed booking requests for the venue.
+2. Fetches all active holds (`status='hold'`, `expires_at > now()`).
+3. Passes both to `findBufferConflicts(confirmedRequests, allBookings, setupMinutes, turnaroundMinutes)` in
+   `venues.conflicts.js`. That pure function returns a `Map<request_id, conflict[]>` of every request whose
+   buffer slots are occupied by a different booking.
+4. Deletes all existing conflict flags for the venue and inserts the fresh set.
+
+Active holds are included as occupiers so a hold on a buffer slot generates the same flag a confirmed
+booking would. Hold rows carry `request_id: null`, so the `b.request_id !== request_id` guard in
+`findBufferConflicts` correctly excludes nothing that should be kept.
+
+**How flags are cleared.** The same recheck runs on every `GET /booking-conflicts` request, not only
+after a venue update. `listActiveHoldsInRange` filters `expires_at > now()` in Postgres, so expired
+holds are automatically absent from the recheck. When a hold expires or is released, the next GET
+rewrites the flags without it — no scheduled job required.
+
+## Checking each venue booking independently (SCRUM-138)
+
+`GET /api/venues/events/:eventId/booking-checks` returns one verdict per venue
+booking on an event, so a problem with one venue is reported on its own rather
+than hidden behind a venue that passes. Required capability `bookings.read`
+(`venue_staff`, `event_coordinator`) with the same `bookingScope` resolver as the
+request list: another coordinator's event answers 404 `Event not found`, the same
+answer as a missing event, so the report never reveals an event the caller cannot
+see. Missing venue storage answers 503. A malformed event id answers 400 before
+any read.
+
+**The endpoint is read-only.** It writes nothing, so a failed check can never
+change a booking's status (AC3).
+
+Each booking is assessed on its own in `venueBookingChecks.js`, a pure module,
+reusing the submission flow's own rules so a booking cannot pass here and then be
+refused at submission for a reason this report never mentions:
+
+| Check | Rule | Source |
+| --- | --- | --- |
+| Suitability | The booking's own requirements (`expected_attendees`, `room_layout`, `required_facilities`, `accessibility_requirements`) against the venue's current catalogue | `validateAgainstVenue` (SCRUM-87), unchanged |
+| Availability | The venue's operating hours, a recorded unavailability period, and the venue no longer being active | The same calendar cells `findSlotProblems` reads, built by `buildAvailabilityCalendar` |
+| Conflicts | A slot another event already holds, and a slot already requested for this event at this venue | The same `REQUESTABLE_STATUSES` rule and the same calendar output |
+
+`findSlotProblems` is deliberately not called: it answers with display strings for
+the submission 409, while this story needs each outcome classified as availability
+or conflict. Both read the same calendar, so they cannot disagree about what is
+free. Setup and turnaround buffers (SCRUM-134) are checked through the same
+`committedSlots` rule, and the reason names the buffer ("needed for the event's
+setup time").
+
+**Own rows are excluded.** Each venue's calendar is built without the event's own
+rows, so a slot the event already holds is never reported as its own conflict.
+Other events' names are masked for coordinators as `Reserved event`, exactly as at
+submission; Venue Staff see the real name.
+
+**Bookings that are not checked.** A booking with no pending or confirmed slot
+(rejected or cancelled) is listed with `overall: "not_checked"` and a note, and its
+three checks carry `passed: null`. A booking whose venue data cannot be read is
+reported the same way, on its own, without losing the other venues' results: each
+booking is assessed in its own `try/catch`.
+
+Response: `{ data: { event_id, event_name, results: [...] } }`. Each result carries
+`booking_id`, `venue_id`, `venue_name`, `booking_date`, `slots` (the slots actually
+checked), `status`, `overall` (`passed` / `failed` / `not_checked`), `note`, and
+`suitability` / `availability` / `conflicts`, each `{ passed, reasons[] }`. Results
+are ordered by booking date, then venue name.
+
+The coordinator runs it from the event-scoped booking list
+(`/venues/booking-requests?event=<id>`) with the **Check venue bookings** button,
+which shows one card per venue: the venue's name and date, its three checks, and
+the reason for each check that failed.
+
+**Getting there:** **My Events → the event** shows the event's Venues section with a
+**Check each venue booking** link to that list, so the coordinator does not have to
+type an event id (`EventVenueBookings.jsx`, shown only to roles holding
+`bookings.read`). The *My Events* list renders the same component inside its own
+item link, so it is given no event id and shows no link — a link there would nest
+one anchor in another. The Venue Staff side still reaches the list from
+**Venues → Venue booking requests**.
+
+## Re-validating bookings after an event change (SCRUM-38)
+
+When an event's own details change (date, attendance, venue or equipment requirements), its venue bookings are
+checked again so an arrangement that no longer fits is not kept. `venuesService.revalidateBookingsForEvent(eventId)`
+(`venueRevalidation.js`, exported from `venues.service.js`) does this. It has no route of its own: it is called by
+the code that applies the change.
+
+- **Which bookings.** Every booking of the event with a pending or confirmed slot that is not already affected.
+  Cancelled, rejected and already-affected bookings are skipped; an affected booking keeps the reason it was given.
+- **The checks.** SCRUM-138's three checks, unchanged (the shared `createBookingChecker`, which the booking-checks
+  endpoint now also uses), plus two against the event's current details (`venueBookingChecks.js#eventFitReasons`):
+  - the booking date is outside the event's dates (Singapore dates, as at submission);
+  - **over capacity**: the event's expected attendance is above the combined capacity of the event's live bookings
+    on that date, so a multi-venue day is judged as a whole.
+- **Failing bookings** are marked affected through SCRUM-145's `mark_venue_booking_affected`, with the reason
+  `After the event changed: <reasons>`. The coordinator's venue card already shows the venue name, the reason, and
+  SCRUM-145's **Find a replacement venue** and release actions. **Passing bookings are not written to at all.**
+- **Privacy.** The checks run in the event coordinator's scope, so another event in a clash is named
+  `Reserved event` (the SCRUM-138 rule), never by its real name.
+- **Failure.** Each booking is checked and marked on its own; one that throws is logged and the rest continue.
+- **Safety check.** A confirmed booking that is affected no longer counts as the event's venue in the safety-check
+  and confirmation readiness (`safetyReadiness.js#checkArrangements`); it is listed as missing with its reason until
+  the coordinator replaces or releases it. This also applies to bookings SCRUM-145 marks by hand.
+- Returns `{ checked, flagged: [{ booking_id, venue_name, reason }] }`. No schema change, route or permission.
+
+**When it runs (wired 2026-11-01).**
+1. **Accepting a change request** (SCRUM-165, `eventWorkspace.service.js#decideChangeRequest`): when the accepted
+   change touches `start_time`, `end_time`, `expected_attendance`, `venue_requirements` or `equipment_needs`
+   (times compared as instants). A name/description-only change, or a rejection, does not re-validate.
+2. **Re-approving the event** (`review.service.js#approve`, Option A agreed 2026-11-01): SCRUM-165 sends a
+   significantly changed `APPROVED` event back to `SUBMITTED`; approving it again re-validates venue bookings
+   **instead of releasing them** (SCRUM-37's earlier behaviour). Equipment is still released; reject, cancel and
+   postpone still release everything.
+
+**What the coordinator sees (2026-11-01, after manual testing).**
+- **Straight after *Approve change*:** a notice (`VenueRecheckNotice`) from the decision response's `venue_recheck`:
+  each venue that no longer fits with its reason, or "all N still fit", or that the re-check could not run.
+- **My assigned events → the event:** a *Venue needs attention* section (`VenueAttentionPanel`) listing every
+  flagged booking (venue, date, reason, **Find replacement venue**) until it is replaced or released. It reads the
+  existing `GET /api/venues/booking-requests?event_id=…`.
+- **My assigned events list:** a *Venue needs attention* badge on the event, from one read of the same list.
+- **My Events (list and event):** the existing SCRUM-145 card — *Affected - needs alternative*, the reason, and the
+  replacement and release actions.
+
+Both calls are injected from `app.js` (`revalidateVenueBookings: venuesService?.revalidateBookingsForEvent`) and are
+logged-only on error: the decision has already been saved.
+
+## Changing or cancelling one venue booking (SCRUM-154)
+
+A coordinator may change or cancel a single venue booking request on their own event without
+touching the event's other venue bookings - the schema already scopes every booking by its own
+`request_id`, not by `event_id`, so this needed no restructuring (see SCRUM-148's note above).
+
+`PATCH /api/venues/booking-requests/:requestId` changes the request's date and non-slot details
+(expected attendees, room layout, facilities, accessibility, additional requirements).
+`PATCH /api/venues/booking-requests/:requestId/cancel` cancels it. Both require `bookings.manage`
+(Event Coordinator only - Venue Staff keep `bookings.decide` for their own review action, never
+this). Both load the request through the same coordinator-scoped query
+`getBookingRequest`/`getBookingRequests` already use (`bookingScope`'s `coordinatorId` filter), so
+a wrong or missing id answers 404 either way, revealing nothing about which it was. Neither works
+while the event is outside `PLANNING_STATUSES` (409) - the same gate SCRUM-99 AC1 already applies
+to creating a request in the first place.
+
+**Slot selection is out of scope, by decision.** A coordinator can move a booking to a different
+date, but cannot change which slots (AM/PM/Night) it holds - the booking's existing slots carry
+over to the new date unchanged. Changing slots themselves (not just the date) is cancel-and-resubmit
+through the existing create flow, the same path a rejected booking's replacement already uses.
+
+**Change re-flags the booking (AC2).** Any field edit - not only the date - sends the booking's
+live `venue_bookings` rows back to `pending`, so Venue Staff decide it again through their existing
+`bookings.decide` flow; nothing auto-approves. The coordinator always sends the full merged value
+(every field, current plus their edit), never a partial patch, so `null` is never ambiguous between
+"unchanged" and "clear this." A date change rewrites the booking's `venue_bookings` rows: the old
+ones are cancelled and fresh `pending` rows are inserted on the new date, carrying the same slots.
+
+**The availability check only runs when the date actually moves.** An unchanged date already holds
+(or contests) exactly what it did before, so nothing new needs checking. When the date does move,
+Node runs the same `findSlotProblems`/`buildAvailabilityCalendar` check `postBookingRequest` uses,
+against the booking's own current live slots on the *new* date - no self-exclusion is needed here,
+because this request has no rows on a date it isn't currently booked on. The SQL function does not
+re-check availability; Node already did, and the booking only goes to `pending` either way, same as
+a first-time submission racing a confirm.
+
+**Cancel releases the booking's period (AC1, AC3).** `cancel_venue_booking_request` flips the
+request's live rows to `cancelled`, scoped to one `request_id` - the single-booking sibling of
+SCRUM-148's event-wide `cancel_venue_booking_requests_for_event`, exactly as that story's note
+anticipated. Cancel is final: a later change never restores a booking's cancelled rows.
+
+**Both are one transaction, including the history write (AC4).** Change and cancel are each one
+plpgsql function - no sequential JS-side writes - and each inserts one `event_activity_log` row
+(`venue_booking.changed` / `venue_booking.cancelled`) in the same transaction as the status change.
+This story only writes that row; there is no viewer yet.
+
+**Terminal bookings cannot be changed or cancelled again.** A request with no `pending` or
+`confirmed` row left answers 409. A rejected booking's replacement is a new request through the
+existing create flow (SCRUM-21/92/102), not an edit of the rejected one in place.
+
+`purpose` is accepted by the create flow (`POST .../booking-requests`) but deliberately not
+touched here - this story's change action does not read or write it. `conflict_flags` is present
+on the live `venue_booking_requests` table but is not used anywhere in this codebase; neither
+function touches it either.
+
+**Both actions have a UI.** The assigned coordinator sees **Edit this booking** and **Cancel this
+booking** on each of their own live bookings, on the same page they already use for SCRUM-138's
+check (`/venues/booking-requests?event=<id>`, reached via **Check each venue booking** from their
+event page) - `VenueBookingRequestList.jsx`'s `RequestCard`, next to Venue Staff's existing decide
+controls, gated by `bookings.manage` the same way decide is gated by `bookings.decide`. Edit opens
+an inline form (date, attendees, room layout, facilities, accessibility, additional requirements -
+no slot picker, matching the API) pre-filled from the booking's current values, fetching the full
+venue record on demand for its room layouts/facilities/accessibility list. Cancel asks for a second
+confirmation first (it is final, no undo) before calling the cancel endpoint.
+
+## Rejecting with a reason (SCRUM-102)
+
+A rejection must carry a reason. `validateDecision` refuses a `rejected`
+decision whose note is missing, null, not text, or only whitespace, and returns
+400 before anything is written. Approving still needs no note, because no
+acceptance criterion has asked staff to justify a yes. That one function is the
+only place the rule lives.
+
+The suggested alternative shares the same note rather than having a column of
+its own. SCRUM-102 says Venue Staff *may* attach a suggested venue or
+arrangement, which free text satisfies, and a separate column would mean a hand
+made schema change on a shared database plus a field in four layers that nothing
+queries. If the team ever needs to report on alternatives separately, that is a
+new story and a new column.
+
+The note is trimmed and stored in `decision_note`, returned by both request
+endpoints and shown in the Decision block on the request card, so the requesting
+coordinator reads the reason and the suggestion without a separate conversation.
+In the reject form the reason is required: Confirm rejection stays disabled
+until something is typed, and the hint says so.
+
+A rejected request stays in the booking history. `listBookingRequests` applies
+no status filter, so the Rejected and All filters still show it with its reason.
+Its slot rows leave the calendar, because only pending and confirmed bookings
+are drawn. That is the intended split: rejecting frees the slot without erasing
+the record of what was asked for and why it was refused.
+
+## Searching and filtering the catalogue (SCRUM-18)
+
+`GET /api/venues` accepts seven filters, and refuses any other query parameter
+with 400 rather than ignoring it, so a typo surfaces instead of quietly
+returning the whole catalogue.
+
+| Filter | Meaning |
+| --- | --- |
+| `city` | Case-insensitive match on the venue's city |
+| `minCapacity` | A whole number of zero or more; zero means no minimum, as a blank field does |
+| `facilities` | Comma separated; the venue offers **all** of them |
+| `accessibility` | Comma separated; the venue offers **all** of them |
+| `roomLayout` | The venue supports this layout |
+| `date` | `YYYY-MM-DD`; the venue is free that day |
+| `slots` | Comma separated `am`, `pm`, `night`; needs a `date` |
+
+Everything stored on the venue row is filtered by Postgres. `facilities`,
+`accessibility` and `roomLayout` use array containment, so asking for a
+projector and a stage returns venues with both, not either.
+
+Date availability cannot be a column filter, because it depends on
+`venue_bookings` and `venue_unavailability`. The controller applies it after
+the shortlist comes back: one query for that day's bookings and one for its
+blocked periods across every candidate, then `buildAvailabilityCalendar` from
+SCRUM-17 decides each venue. A slot counts as free when it is `available` or
+`pending`, which is the same list a booking request is allowed on, so "free"
+means one thing across the lane. A pending request therefore leaves a venue in
+the results: only a confirmed booking takes a slot.
+
+Naming slots and giving a bare date ask different questions. Named slots were
+asked for, so **all** of them must be free. A date on its own asks about the
+day, so **any** one free slot keeps the venue: a hall booked in the morning is
+still a candidate for the evening. Only a venue with nothing left that day drops
+out. The catalogue page says the same above the slot chips.
+
+Two queries cover the whole shortlist however many venues match, rather than a
+round trip per venue.
+
+SCRUM-18 says searching identifies potential venues but does not replace the
+separate suitability assessment, so the response carries no score and no
+ranking, and the order is the catalogue's own. The catalogue page says the same
+in words above the results.
+
+## Assessing a shortlisted venue (SCRUM-19)
+
+`GET /api/venues/:id/suitability?event_id=<uuid>` compares one of the
+coordinator's own events with a venue, before any booking request exists. It
+sits behind `bookings.request`, the same permission as the rest of the booking
+flow, and the event is read through the coordinator-scoped lookup, so somebody
+else's event is a 404 rather than an assessment.
+
+The response carries a `verdict`, counts, and a `checks` array with one row per
+requirement: what the event needs, what the venue offers, and whether it is met.
+Every requirement is listed, met or not, so the coordinator sees the whole
+comparison rather than only the failures.
+
+A venue is `unsuitable` when any recognised requirement is unmet:
+
+- expected attendance above the venue's capacity (AC3)
+- a required facility the venue does not offer (AC4)
+- an accessibility need the venue cannot meet
+
+The third goes slightly beyond the literal wording of AC3 and AC4, which name
+only capacity and facilities. It is included because AC2 asks for the event's
+current requirements to be compared, and a recorded accessibility need is one
+of them.
+
+### Reading free text
+
+`events.venue_requirements` and `events.accessibility_needs` are **free text**,
+not lists. [Event requests](event-requests.md) states that converting them to
+structured fields is a schema change belonging to the consuming feature, so the
+venue lane reads them as prose.
+
+A term is recognised only when the catalogue itself uses that name, meaning
+some active venue offers a facility or accessibility feature called that. Those
+names are the vocabulary. Matching is case-insensitive and on whole words, so
+"Stage" in a requirement matches the facility `Stage` while "backstage" does
+not.
+
+Requirement text that matches nothing in the vocabulary is reported with
+`met: null` and `"Could not be matched automatically"`, so the coordinator sees
+the sentence the event actually recorded and knows it was not compared. The
+same applies to an expected attendance the event never recorded. Neither is
+counted as met: silence would otherwise read as a pass.
+
+The limit is worth stating plainly. A requirement naming something no venue in
+the catalogue offers cannot be recognised as a requirement at all, so it is
+reported as unmatched rather than failed. Structured event requirements would
+remove that limit, and the event lane's guide already names it as their schema
+change.
+
+The verdict is advice, not a gate. Nothing stops a coordinator requesting a
+venue the assessment calls unsuitable; `validateAgainstVenue` at submission is
+what refuses a request. Both read the same venue fields, so a venue assessed
+suitable here cannot then be refused for a reason the assessment never
+mentioned. The result is shown in a Check suitability panel on the venue page,
+which AC5 leaves to the solution team to propose.
 
 ## Database deployment
 
@@ -52,18 +568,17 @@ The root `.env` must contain the existing `SUPABASE_URL`,
 `SUPABASE_PUBLISHABLE_KEY` and server-only `SUPABASE_SECRET_KEY`. Missing venue
 storage configuration returns 503 without preventing sign-in or account access.
 
-On the team's Supabase database, apply the schema migrations in dependency order:
+The venue schema is already deployed on the team's shared Supabase database.
+The earlier venue migration files have been replaced by the SQL reference below;
+RBAC's existing event-review SQL reference 007 remains separate. Schema changes are applied by hand in the
+dashboard, and the SQL that produced the current schema is kept in
+*Venue schema reference* at the end of this guide.
 
-1. `001_yc_create_venues.sql`
-2. `003_yc_create_venue_bookings.sql`
-3. `005_yc_create_venue_booking_requests.sql` (requires the event feature's
-   existing `public.events` table)
-4. `006_yc_authenticated_venue_booking_requests.sql` (requires the existing
-   `events.coordinator_id` column)
-
-Files 002 and 004 contain optional demonstration data; they are not required
-schema migrations. If 001, 003 and 005 are already deployed, only 006 is new.
-Do not reset existing tables or re-seed a shared database to deploy this merge.
+Deploy order matters only when rebuilding from nothing: venues, then bookings
+and unavailability, then booking requests (which need the event feature's
+`public.events` table), then the two functions (the authenticated booking
+wrapper needs `events.coordinator_id`). Do not reset existing tables or
+re-seed a shared database.
 
 Migration 006 adds a service-role-only wrapper around the existing atomic booking
 RPC. It rechecks the event assignment and records the verified requester on both
@@ -91,3 +606,1456 @@ their exact Venue Staff capability expectations now include `venues.update`.
 GitHub CI runs the combined existing and new suites on the merge result.
 The tests substitute Supabase storage and do not prove the team's live schema,
 migration deployment, grants or database contents. Those require a live check.
+
+## Venue schema reference
+
+Every statement below is already applied to the shared database. It is recorded
+here so the schema can be read, reviewed and rebuilt without a migrations
+folder, per the no-migration-files rule in [AGENTS.md](../AGENTS.md). Run any of
+it by hand in the Supabase SQL Editor; each statement is written to be safe to
+re-run.
+
+### Venues table and the shared set_updated_at() trigger
+
+```sql
+-- Venues
+-- SCRUM-15 (view catalogue), SCRUM-16 (update operating info)
+
+create extension if not exists "pgcrypto";
+
+create table if not exists public.venues (
+  id                     uuid primary key default gen_random_uuid(),
+
+  -- SCRUM-82: location and capacity
+  name                   text not null,
+  address                text not null,
+  city                   text not null,
+  country                text not null,
+  capacity               integer not null check (capacity > 0),
+
+  -- SCRUM-83: facilities, accessibility, room layouts
+  facilities             text[] not null default '{}',
+  accessibility_features text[] not null default '{}',
+  room_layouts           text[] not null default '{}',
+
+  -- SCRUM-84 / SCRUM-89: operating information
+  operating_hours        jsonb not null default '{}'::jsonb,
+
+  -- SCRUM-90: setup, teardown, turnaround
+  setup_minutes          integer not null default 0 check (setup_minutes >= 0),
+  teardown_minutes       integer not null default 0 check (teardown_minutes >= 0),
+  turnaround_minutes     integer not null default 0 check (turnaround_minutes >= 0),
+
+  notes                  text,
+  is_active              boolean not null default true,
+
+  created_at             timestamptz not null default now(),
+  updated_at             timestamptz not null default now()
+);
+
+-- lets SCRUM-91 prove updates are reflected
+create or replace function public.set_updated_at()
+returns trigger as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists venues_set_updated_at on public.venues;
+create trigger venues_set_updated_at
+  before update on public.venues
+  for each row execute function public.set_updated_at();
+
+-- blocks browser access; the backend uses the secret key and bypasses this
+alter table public.venues enable row level security;
+```
+
+### Bookings, unavailability, slot types and the no-double-booking constraint
+
+```sql
+-- Bookings and unavailability
+-- SCRUM-17 view venue availability calendar
+--   SCRUM-92 calendar reflects existing bookings
+--   SCRUM-93 calendar reflects recorded unavailable periods
+--   SCRUM-94 a confirmed booking affects availability for that period
+--   SCRUM-95 AM / PM / Night slots, a full day booking occupies all three
+
+-- a gist index over plain equality columns (uuid, date, enum) needs btree_gist
+create extension if not exists btree_gist;
+
+-- SCRUM-95: availability is stored per slot, never as free-form timestamps.
+-- A full day booking is three rows (am, pm, night). Storing it that way keeps
+-- the no-double-booking rule a plain equality check instead of range maths.
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'venue_slot') then
+    create type public.venue_slot as enum ('am', 'pm', 'night');
+  end if;
+end
+$$;
+
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'booking_status') then
+    create type public.booking_status as enum
+      ('pending', 'confirmed', 'rejected', 'cancelled');
+  end if;
+end
+$$;
+
+-- SCRUM-92: the bookings the calendar reads.
+-- Creating rows here is SCRUM-21, not this story. SCRUM-17 only displays them.
+create table if not exists public.venue_bookings (
+  id           uuid primary key default gen_random_uuid(),
+  venue_id     uuid not null references public.venues(id) on delete cascade,
+  booking_date date not null,
+  slot         public.venue_slot not null,
+  status       public.booking_status not null default 'pending',
+  event_name   text not null,
+  requested_by text not null,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+-- SCRUM-94: only a confirmed booking consumes the slot. Pending requests may
+-- stack until Venue Staff decide, which is what SCRUM-21 will create.
+--
+-- This lives in Postgres rather than in the Node layer on purpose. Two
+-- coordinators confirming the same slot at the same moment would both pass an
+-- application-level "is it free?" check, because that check and the insert are
+-- not atomic. The database constraint cannot be raced.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'venue_bookings_no_double_booking'
+  ) then
+    alter table public.venue_bookings
+      add constraint venue_bookings_no_double_booking
+      exclude using gist (
+        venue_id     with =,
+        booking_date with =,
+        slot         with =
+      ) where (status = 'confirmed');
+  end if;
+end
+$$;
+
+-- SCRUM-93: periods Venue Staff record as unavailable, independent of bookings
+-- (maintenance, private hire, public holiday).
+create table if not exists public.venue_unavailability (
+  id               uuid primary key default gen_random_uuid(),
+  venue_id         uuid not null references public.venues(id) on delete cascade,
+  unavailable_date date not null,
+  slot             public.venue_slot not null,
+  reason           text not null,
+  created_at       timestamptz not null default now()
+);
+
+-- the same slot recorded unavailable twice is a data entry mistake
+create unique index if not exists venue_unavailability_unique_slot
+  on public.venue_unavailability (venue_id, unavailable_date, slot);
+
+-- the calendar always queries one venue over a date range
+create index if not exists venue_bookings_lookup
+  on public.venue_bookings (venue_id, booking_date);
+create index if not exists venue_unavailability_lookup
+  on public.venue_unavailability (venue_id, unavailable_date);
+
+-- reuses the set_updated_at() trigger function defined above
+drop trigger if exists venue_bookings_set_updated_at on public.venue_bookings;
+create trigger venue_bookings_set_updated_at
+  before update on public.venue_bookings
+  for each row execute function public.set_updated_at();
+
+-- blocks browser access, the backend uses the secret key and bypasses this
+alter table public.venue_bookings enable row level security;
+alter table public.venue_unavailability enable row level security;
+```
+
+### Unavailability periods (SCRUM-133)
+
+```sql
+-- SCRUM-133: venue unavailability periods
+-- New table. The existing venue_unavailability table (per-slot rows used for seed
+-- data and the calendar display) is left untouched. This table records periods as
+-- units so Venue Staff can edit and end them. listUnavailabilityInRange expands
+-- periods into the same row shape the calendar already reads.
+
+create table if not exists public.venue_unavailability_periods (
+  id          uuid primary key default gen_random_uuid(),
+  venue_id    uuid not null references public.venues(id) on delete cascade,
+  start_date  date not null,
+  end_date    date not null,
+  slots       text[] not null,
+  reason      text not null,
+  created_by  uuid references auth.users(id),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  constraint unavailability_period_dates_valid check (end_date >= start_date),
+  constraint unavailability_period_slots_nonempty check (array_length(slots, 1) > 0)
+);
+
+create index if not exists venue_unavailability_periods_venue_date
+  on public.venue_unavailability_periods (venue_id, start_date, end_date);
+
+drop trigger if exists venue_unavailability_periods_set_updated_at
+  on public.venue_unavailability_periods;
+create trigger venue_unavailability_periods_set_updated_at
+  before update on public.venue_unavailability_periods
+  for each row execute function public.set_updated_at();
+
+alter table public.venue_unavailability_periods enable row level security;
+```
+
+### Booking requests and the atomic submit function
+
+```sql
+-- Booking requests
+-- SCRUM-21 submit venue booking request
+--   SCRUM-85 request is associated with the relevant event and selected venue
+--   SCRUM-86 request contains event timing for Venue Staff to assess
+--   SCRUM-87 request contains relevant venue requirements
+--   SCRUM-88 submitted request is available to Venue Staff for review
+--
+-- Depends on:
+--   venues, set_updated_at()
+--   venue_bookings, venue_slot, exclusion constraint
+--   public.events                     owned by the event request feature
+--                                     (feature/eventRequest), referenced the same
+--                                     way 003_kl_create_equipment.sql does
+
+-- One row per request. It holds everything that belongs to the request as a
+-- whole. The slots themselves are NOT stored here: each requested slot becomes
+-- a pending row in venue_bookings, pointing back at this request. That way the
+-- calendar from SCRUM-17 shows new requests with no extra code, and the
+-- double-booking exclusion constraint still applies once Venue Staff confirm.
+create table if not exists public.venue_booking_requests (
+  id                          uuid primary key default gen_random_uuid(),
+
+  -- SCRUM-85
+  venue_id                    uuid not null references public.venues(id) on delete cascade,
+  event_id                    uuid not null references public.events(id) on delete cascade,
+
+  -- SCRUM-86: the day being requested. The slots live on venue_bookings rows.
+  -- The event's own start_time / end_time are read from public.events at review
+  -- time rather than copied here, so Venue Staff always see the current timing.
+  booking_date                date not null,
+
+  -- SCRUM-87
+  expected_attendees          integer not null check (expected_attendees > 0),
+  room_layout                 text not null,
+  required_facilities         text[] not null default '{}',
+  accessibility_requirements  text[] not null default '{}',
+  additional_requirements     text,
+
+  -- Null until real authentication is merged (SCRUM-13). Then it is filled from
+  -- the verified session, never from request input.
+  requested_by                uuid references auth.users(id),
+
+  submitted_at                timestamptz not null default now(),
+  created_at                  timestamptz not null default now(),
+  updated_at                  timestamptz not null default now()
+);
+
+-- SCRUM-88: Venue Staff review newest first, and look requests up by venue
+create index if not exists venue_booking_requests_submitted
+  on public.venue_booking_requests (submitted_at desc);
+create index if not exists venue_booking_requests_venue_date
+  on public.venue_booking_requests (venue_id, booking_date);
+create index if not exists venue_booking_requests_event
+  on public.venue_booking_requests (event_id);
+
+drop trigger if exists venue_booking_requests_set_updated_at
+  on public.venue_booking_requests;
+create trigger venue_booking_requests_set_updated_at
+  before update on public.venue_booking_requests
+  for each row execute function public.set_updated_at();
+
+-- Links each slot row back to the request that created it. Nullable because
+-- the demo bookings below were not made through a request.
+alter table public.venue_bookings
+  add column if not exists request_id uuid
+  references public.venue_booking_requests(id) on delete cascade;
+
+create index if not exists venue_bookings_request
+  on public.venue_bookings (request_id);
+
+-- Writes the request and all of its slot rows in ONE transaction.
+--
+-- supabase-js cannot run a multi-statement transaction from Node. Doing two
+-- separate inserts from the backend would leave a request with no slots, or
+-- slots with no request, if the second insert failed. A plpgsql function body
+-- is atomic, so either everything is written or nothing is.
+--
+-- All validation happens in the backend before this is called. The function
+-- trusts its inputs, which is why only the backend may execute it (see the
+-- grants at the bottom).
+create or replace function public.submit_venue_booking_request(
+  p_venue_id                   uuid,
+  p_event_id                   uuid,
+  p_event_name                 text,
+  p_booking_date               date,
+  p_slots                      text[],
+  p_expected_attendees         integer,
+  p_room_layout                text,
+  p_required_facilities        text[],
+  p_accessibility_requirements text[],
+  p_additional_requirements    text
+)
+returns uuid
+language plpgsql
+as $$
+declare
+  v_request_id uuid;
+begin
+  insert into public.venue_booking_requests (
+    venue_id, event_id, booking_date, expected_attendees, room_layout,
+    required_facilities, accessibility_requirements, additional_requirements
+  ) values (
+    p_venue_id, p_event_id, p_booking_date, p_expected_attendees, p_room_layout,
+    coalesce(p_required_facilities, '{}'),
+    coalesce(p_accessibility_requirements, '{}'),
+    p_additional_requirements
+  )
+  returning id into v_request_id;
+
+  -- SCRUM-94 carries over: a request is pending, so it shows on the calendar
+  -- as Requested but does not consume the slot until Venue Staff confirm it.
+  -- The text[] is cast here rather than typed as venue_slot[] in the signature,
+  -- because PostgREST passes JSON arrays through as text.
+  insert into public.venue_bookings
+    (venue_id, booking_date, slot, status, event_name, requested_by, request_id)
+  select
+    p_venue_id,
+    p_booking_date,
+    requested_slot::public.venue_slot,
+    'pending',
+    p_event_name,
+    'booking-request',
+    v_request_id
+  from unnest(p_slots) as requested_slot;
+
+  return v_request_id;
+end;
+$$;
+
+-- Supabase lets anon and authenticated call public functions through the REST
+-- API by default. This one skips validation, so only the backend (service role)
+-- may run it.
+revoke execute on function public.submit_venue_booking_request(
+  uuid, uuid, text, date, text[], integer, text, text[], text[], text
+) from public, anon, authenticated;
+
+grant execute on function public.submit_venue_booking_request(
+  uuid, uuid, text, date, text[], integer, text, text[], text[], text
+) to service_role;
+
+-- blocks browser access, the backend uses the secret key and bypasses this
+alter table public.venue_booking_requests enable row level security;
+```
+
+### `is_essential` on booking requests (SCRUM-144, written by the Event Lifecycle lane)
+
+Added by hand on 2026-10-19. Venue code does not read or write it; the assigned coordinator sets it from the event
+page when a pending booking request is not essential to the event, so it stops blocking the safety check and
+confirmation (details in [event-requests.md](event-requests.md#confirm-an-event-scrum-144)).
+
+```sql
+alter table public.venue_booking_requests
+  add column if not exists is_essential boolean not null default true;
+```
+
+### Authenticated submit wrapper, which records the verified requester
+
+```sql
+-- Apply after 005. Keeps its atomic request/slot creation and adds verified
+-- requester attribution. The backend alone supplies p_requested_by after auth.
+-- Existing requests and the original function remain intact.
+create or replace function public.submit_authenticated_venue_booking_request(
+  p_venue_id uuid,
+  p_event_id uuid,
+  p_event_name text,
+  p_booking_date date,
+  p_slots text[],
+  p_expected_attendees integer,
+  p_room_layout text,
+  p_required_facilities text[],
+  p_accessibility_requirements text[],
+  p_additional_requirements text,
+  p_requested_by uuid
+)
+returns uuid
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_request_id uuid;
+begin
+  if p_requested_by is null then
+    raise exception 'Verified requester is required';
+  end if;
+
+  -- Recheck the trusted event relationship inside the write transaction.
+  perform 1 from public.events
+    where id = p_event_id and coordinator_id = p_requested_by
+    for share;
+  if not found then
+    raise exception 'Event is not assigned to this coordinator';
+  end if;
+
+  v_request_id := public.submit_venue_booking_request(
+    p_venue_id, p_event_id, p_event_name, p_booking_date, p_slots,
+    p_expected_attendees, p_room_layout, p_required_facilities,
+    p_accessibility_requirements, p_additional_requirements
+  );
+  update public.venue_booking_requests
+    set requested_by = p_requested_by where id = v_request_id;
+  update public.venue_bookings
+    set requested_by = p_requested_by::text where request_id = v_request_id;
+  return v_request_id;
+end;
+$$;
+
+revoke execute on function public.submit_authenticated_venue_booking_request(
+  uuid, uuid, text, date, text[], integer, text, text[], text[], text, uuid
+) from public, anon, authenticated;
+grant execute on function public.submit_authenticated_venue_booking_request(
+  uuid, uuid, text, date, text[], integer, text, text[], text[], text, uuid
+) to service_role;
+```
+
+### Decision columns and decide_venue_booking_request() (SCRUM-22)
+
+```sql
+-- Booking decisions
+-- SCRUM-22 decide venue booking request
+--   Venue Staff can approve an acceptable booking request.
+--   Venue Staff can reject a request that cannot be accepted.
+--   A rejection may carry information, a reason or a suggested alternative.
+--   Any resulting booking change is made by the Event Coordinator, so a
+--   rejection records the decision and nothing else. Nothing is rebooked here.
+--
+-- Apply after 005 and 006.
+
+-- Who decided, when, and anything they wrote with it. decision_note is
+-- deliberately nullable: SCRUM-22 makes it optional, and SCRUM-102 will require
+-- one for rejections without needing another migration.
+alter table public.venue_booking_requests
+  add column if not exists decided_by uuid references auth.users(id),
+  add column if not exists decided_at timestamptz,
+  add column if not exists decision_note text;
+
+-- SCRUM-88: Venue Staff sort their queue by what is still undecided
+create index if not exists venue_booking_requests_decided
+  on public.venue_booking_requests (decided_at);
+
+-- Records the decision on the request and applies it to every slot row in ONE
+-- transaction, so a request can never be half decided.
+--
+-- Approving writes 'confirmed' to the slot rows, which is what makes the
+-- exclusion constraint from 003 bite: if another request already holds one of
+-- these slots, the whole statement is rejected and nothing changes. That is the
+-- guarantee behind SCRUM-20, enforced by Postgres rather than by a check the
+-- backend could race past.
+create or replace function public.decide_venue_booking_request(
+  p_request_id uuid,
+  p_decision   text,
+  p_decided_by uuid,
+  p_note       text
+)
+returns uuid
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_exists boolean;
+begin
+  if p_decided_by is null then
+    raise exception 'Verified reviewer is required';
+  end if;
+  if p_decision not in ('confirmed', 'rejected') then
+    raise exception 'Decision must be confirmed or rejected';
+  end if;
+
+  select true into v_exists
+  from public.venue_booking_requests
+  where id = p_request_id
+  for update;
+
+  if not found then
+    return null;
+  end if;
+
+  update public.venue_booking_requests
+  set decided_by = p_decided_by,
+      decided_at = now(),
+      decision_note = p_note,
+      updated_at = now()
+  where id = p_request_id;
+
+  -- Cancelled slots stay cancelled: a coordinator withdrawing a request is not
+  -- something a later staff decision should quietly undo.
+  update public.venue_bookings
+  set status = p_decision::public.booking_status
+  where request_id = p_request_id
+    and status <> 'cancelled';
+
+  return p_request_id;
+end;
+$$;
+
+-- Validation lives in the backend, so only the backend may call this.
+revoke execute on function public.decide_venue_booking_request(uuid, text, uuid, text)
+  from public, anon, authenticated;
+grant execute on function public.decide_venue_booking_request(uuid, text, uuid, text)
+  to service_role;
+```
+
+### Affected bookings and replacement requests (SCRUM-145)
+
+Apply this SQL manually in the Supabase dashboard after the existing booking
+decision function. Do not add a migration file. The columns preserve the
+original request while linking a replacement to it; the RPCs keep affected
+state and replacement approval atomic.
+
+**Coordinator experience and access.** A failed venue suitability, availability
+or conflict check on the coordinator's **My Events** detail marks that booking
+as affected and reloads the venue list. The affected card is visually distinct
+and states why the arrangement is unresolved. Venue Staff can identify and mark
+an affected booking, but only an Event Coordinator may search for a replacement
+or release it. The frontend hides those two actions from Venue Staff, and the
+API independently requires `bookings.request`, which is Event Coordinator-only.
+
+`GET /api/venues/booking-requests/:requestId/replacement-search` starts from
+the affected booking's date, slots, attendance, layout, facilities and
+accessibility requirements. It returns active venues other than the affected
+venue only when they meet those requirements and are free for the requested
+period. The replacement page displays every returned venue as a card. When the
+list is empty, it states **No suitable venue found** and directs the coordinator
+to release the booking and consider replanning the event. A selected card is
+submitted through the ordinary booking-request endpoint and therefore follows
+the standard Venue Staff approval flow.
+
+```sql
+alter table public.venue_booking_requests
+  add column if not exists purpose text,
+  add column if not exists is_affected boolean not null default false,
+  add column if not exists affected_at timestamptz,
+  add column if not exists affected_reason text,
+  add column if not exists replaces_booking_id uuid
+    references public.venue_booking_requests(id) on delete set null;
+
+create index if not exists venue_booking_requests_affected
+  on public.venue_booking_requests (event_id, is_affected);
+
+create unique index if not exists venue_booking_requests_one_open_replacement
+  on public.venue_booking_requests (replaces_booking_id)
+  where replaces_booking_id is not null
+    and is_affected = false
+    and decided_at is null;
+```
+
+Replace the authenticated submit wrapper with this additive overload. It
+supports the optional purpose and replacement link for SCRUM-145 requests while
+defaulting them to null for older callers.
+
+```sql
+create or replace function public.submit_authenticated_venue_booking_request(
+  p_venue_id uuid,
+  p_event_id uuid,
+  p_event_name text,
+  p_booking_date date,
+  p_slots text[],
+  p_expected_attendees integer,
+  p_room_layout text,
+  p_required_facilities text[],
+  p_accessibility_requirements text[],
+  p_additional_requirements text,
+  p_requested_by uuid,
+  p_purpose text default null,
+  p_replaces_booking_id uuid default null
+)
+returns uuid
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_request_id uuid;
+begin
+  if p_requested_by is null then
+    raise exception 'Verified requester is required';
+  end if;
+
+  perform 1 from public.events
+    where id = p_event_id and coordinator_id = p_requested_by
+    for share;
+  if not found then
+    raise exception 'Event is not assigned to this coordinator';
+  end if;
+
+  if p_replaces_booking_id is not null then
+    perform 1
+      from public.venue_booking_requests
+      where id = p_replaces_booking_id
+        and event_id = p_event_id
+        and is_affected
+      for update;
+    if not found then
+      raise exception 'Replacement must reference an affected booking';
+    end if;
+    if exists (
+      select 1 from public.venue_booking_requests
+      where replaces_booking_id = p_replaces_booking_id
+        and decided_at is null
+    ) then
+      raise exception 'An active replacement request already exists';
+    end if;
+  end if;
+
+  insert into public.venue_booking_requests (
+    venue_id, event_id, booking_date, expected_attendees, room_layout,
+    required_facilities, accessibility_requirements, additional_requirements,
+    purpose, requested_by, replaces_booking_id
+  ) values (
+    p_venue_id, p_event_id, p_booking_date, p_expected_attendees, p_room_layout,
+    coalesce(p_required_facilities, '{}'),
+    coalesce(p_accessibility_requirements, '{}'),
+    p_additional_requirements, p_purpose, p_requested_by, p_replaces_booking_id
+  )
+  returning id into v_request_id;
+
+  insert into public.venue_bookings
+    (venue_id, booking_date, slot, status, event_name, requested_by, request_id)
+  select p_venue_id, p_booking_date, requested_slot::public.venue_slot,
+    'pending', p_event_name, p_requested_by::text, v_request_id
+  from unnest(p_slots) as requested_slot;
+
+  return v_request_id;
+end;
+$$;
+
+revoke execute on function public.submit_authenticated_venue_booking_request(
+  uuid, uuid, text, date, text[], integer, text, text[], text[], text, uuid, text, uuid
+) from public, anon, authenticated;
+grant execute on function public.submit_authenticated_venue_booking_request(
+  uuid, uuid, text, date, text[], integer, text, text[], text[], text, uuid, text, uuid
+) to service_role;
+```
+
+Add the affected/release RPCs. Venue Staff pass `p_is_venue_staff = true`;
+coordinators must own the event. Marking an affected booking returns a
+`CONFIRMED` event to `APPROVED`. Approving a replacement cancels the original
+slot rows but leaves the original request row visible. If the event had
+reached `PREPARATION`, approval returns it to `SAFETY_REVIEW`, requiring the
+existing safety review again before confirmation.
+
+```sql
+create or replace function public.mark_venue_booking_affected(
+  p_booking_id uuid,
+  p_user_id uuid,
+  p_reason text,
+  p_is_venue_staff boolean default false
+)
+returns uuid
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_event_id uuid;
+begin
+  if nullif(trim(p_reason), '') is null then
+    raise exception 'Reason required';
+  end if;
+  select event_id into v_event_id
+  from public.venue_booking_requests
+  where id = p_booking_id
+    and (p_is_venue_staff or requested_by = p_user_id
+      or exists (select 1 from public.events e where e.id = event_id and e.coordinator_id = p_user_id))
+  for update;
+  if not found then raise exception 'Not your event'; end if;
+
+  update public.venue_booking_requests
+  set is_affected = true, affected_at = now(), affected_reason = trim(p_reason)
+  where id = p_booking_id;
+  update public.events set status = 'APPROVED'
+  where id = v_event_id and status = 'CONFIRMED';
+  return p_booking_id;
+end;
+$$;
+
+create or replace function public.release_affected_venue_booking(
+  p_booking_id uuid,
+  p_coordinator_id uuid
+)
+returns uuid
+language plpgsql
+set search_path = public
+as $$
+begin
+  if not exists (
+    select 1 from public.venue_booking_requests r
+    join public.events e on e.id = r.event_id
+    where r.id = p_booking_id and r.is_affected
+      and e.coordinator_id = p_coordinator_id
+  ) then raise exception 'Not your event'; end if;
+
+  update public.venue_bookings
+  set status = 'cancelled'
+  where request_id = p_booking_id and status in ('pending', 'confirmed');
+  update public.venue_booking_requests
+  set is_affected = false, updated_at = now()
+  where id = p_booking_id;
+  update public.venue_bookings
+  set status = 'cancelled'
+  where request_id in (
+    select id from public.venue_booking_requests
+    where replaces_booking_id = p_booking_id
+  ) and status = 'pending';
+  return p_booking_id;
+end;
+$$;
+
+revoke execute on function public.mark_venue_booking_affected(uuid, uuid, text, boolean)
+  from public, anon, authenticated;
+grant execute on function public.mark_venue_booking_affected(uuid, uuid, text, boolean)
+  to service_role;
+revoke execute on function public.release_affected_venue_booking(uuid, uuid)
+  from public, anon, authenticated;
+grant execute on function public.release_affected_venue_booking(uuid, uuid)
+  to service_role;
+```
+
+Extend the existing `decide_venue_booking_request` function in the dashboard
+so its confirmed branch also performs, in the same transaction:
+
+```sql
+-- Inside the existing function, after the replacement request's slots are
+-- confirmed:
+update public.venue_bookings
+set status = 'cancelled'
+where request_id = (select replaces_booking_id
+                    from public.venue_booking_requests
+                    where id = p_request_id)
+  and status in ('pending', 'confirmed');
+
+update public.venue_booking_requests
+set is_affected = false, updated_at = now()
+where id = (select replaces_booking_id
+           from public.venue_booking_requests
+           where id = p_request_id);
+
+update public.events e
+set status = case when e.status = 'PREPARATION'
+                  then 'SAFETY_REVIEW' else 'APPROVED' end
+where e.id = (select event_id from public.venue_booking_requests
+              where id = p_request_id)
+  and exists (select 1 from public.venue_booking_requests r
+             where r.id = p_request_id and r.replaces_booking_id is not null);
+```
+
+The event confirmation routine must reject `CONFIRMED` while an affected
+request exists:
+
+```sql
+if exists (
+  select 1 from public.venue_booking_requests
+  where event_id = p_event_id and is_affected
+) then
+  raise exception 'Venue arrangement unresolved';
+end if;
+```
+
+### Tentative holds schema (SCRUM-146)
+
+```sql
+-- SCRUM-146: extend venue_bookings to store tentative holds.
+-- Holds are rows in venue_bookings with status='hold'.
+-- expires_at is null for every non-hold row; the service only writes it for holds.
+-- Expired rows are kept for history; the service filters expires_at > now() for active holds.
+
+alter type public.booking_status add value if not exists 'hold';
+
+alter table public.venue_bookings
+  add column if not exists expires_at timestamptz;
+
+create index if not exists venue_bookings_expires_at
+  on public.venue_bookings (expires_at)
+  where status = 'hold';
+```
+
+### Hold-to-booking conversion schema (SCRUM-162)
+
+```sql
+-- SCRUM-162: link a hold to its event and coordinator so the conversion path
+-- can match holds to the coordinator's approved events by ID.
+-- coordinator_id is required on every new hold row (400 if missing).
+-- event_id links to events; nullable so old rows without it are not broken.
+
+alter table public.venue_bookings
+  add column if not exists coordinator_id uuid references auth.users (id),
+  add column if not exists event_id       uuid references public.events (id) on delete set null;
+
+create index if not exists venue_bookings_coordinator_id
+  on public.venue_bookings (coordinator_id)
+  where status = 'hold';
+
+create index if not exists venue_bookings_event_id
+  on public.venue_bookings (event_id)
+  where status = 'hold';
+```
+
+Extend `decide_venue_booking_request` by moving the hold `if/else` block to run
+**before** the main `update venue_bookings set status = p_decision` line.
+
+The function already had hold handling after the main UPDATE, but that order causes a
+23P01 exclusion constraint violation on confirmation: the main UPDATE sets both the
+`pending` booking row and the `hold` row to `confirmed` in one statement before the
+cancel runs. Moving the block above the main UPDATE fixes the ordering. The `else`
+branch (clear `request_id` on rejection so the coordinator can retry) is unchanged.
+
+Replace the existing function body with:
+
+```sql
+declare
+  v_exists boolean;
+begin
+  if p_decided_by is null then
+    raise exception 'Verified reviewer is required';
+  end if;
+  if p_decision not in ('confirmed', 'rejected') then
+    raise exception 'Decision must be confirmed or rejected';
+  end if;
+
+  select true into v_exists
+  from public.venue_booking_requests
+  where id = p_request_id
+  for update;
+
+  if not found then
+    return null;
+  end if;
+
+  update public.venue_booking_requests
+  set decided_by = p_decided_by,
+      decided_at = now(),
+      decision_note = p_note,
+      updated_at = now()
+  where id = p_request_id;
+
+  -- SCRUM-162: must run before the booking UPDATE below. On confirm, cancelling
+  -- holds first prevents a 23P01 exclusion constraint violation. On reject,
+  -- clearing request_id releases the hold so the coordinator can retry.
+  if p_decision = 'confirmed' then
+    update public.venue_bookings
+    set status = 'cancelled', updated_at = now()
+    where request_id = p_request_id
+      and status = 'hold';
+  else
+    update public.venue_bookings
+    set request_id = null, updated_at = now()
+    where request_id = p_request_id
+      and status = 'hold';
+  end if;
+
+  update public.venue_bookings
+  set status = p_decision::public.booking_status
+  where request_id = p_request_id
+    and status <> 'cancelled';
+
+  return p_request_id;
+end;
+```
+
+Proven by `tests/e2e/venue-hold-conversion.spec.cjs` (TC-SCRUM-162-12 and -13).
+
+### Releasing bookings on event cancellation (SCRUM-148)
+
+Cross-lane addition, approved by the Venue owner and kept to exactly this: one SQL function and one
+`venues.service.js` export. The Event Lifecycle lane's cancel action (`POST
+/api/internal/events/:eventId/cancel`, see `docs/event-requests.md`'s *Cancelling an event* section) has no
+coordinator-triggered path of its own into `venue_bookings`/`venue_booking_requests` — the only existing write
+path was `decide_venue_booking_request` above, which is Venue Staff's decision, not a coordinator's cancellation.
+
+```sql
+-- SCRUM-148: releases every slot tied to a cancelled event's booking request(s),
+-- across however many venues the event used, in one call. Joins through
+-- venue_booking_requests.event_id rather than taking a request id directly, so
+-- a multi-venue event's bookings are all released together.
+create or replace function public.cancel_venue_booking_requests_for_event(
+  p_event_id uuid
+)
+returns setof uuid
+language plpgsql
+set search_path = public
+as $$
+begin
+  return query
+  update public.venue_bookings b
+  set status = 'cancelled', updated_at = now()
+  from public.venue_booking_requests r
+  where b.request_id = r.id
+    and r.event_id = p_event_id
+    and b.status <> 'cancelled'
+  returning b.id;
+end;
+$$;
+
+revoke execute on function public.cancel_venue_booking_requests_for_event(uuid)
+  from public, anon, authenticated;
+grant execute on function public.cancel_venue_booking_requests_for_event(uuid)
+  to service_role;
+```
+
+The `status <> 'cancelled'` guard makes it idempotent, same as `decide_venue_booking_request`'s. `venues.service.js`
+exports a thin wrapper, `releaseBookingsForCancelledEvent(eventId)`, called from the cancel action synchronously
+(the same timing as the equipment release) — if nothing calls it, cancelling still succeeds; the venue release is
+simply skipped. A later story wanting to change or cancel one booking on a multi-venue event without touching the
+others should share the "flip to cancelled" primitive here rather than duplicate it, scoped to one `request_id`
+instead of a whole event.
+
+**SCRUM-37 reuses this same wrapper.** `review.service.js#approve`/`#reject` both call
+`releaseVenueBookingsForCancelledEvent(eventId)` (the Event-Lifecycle-side name for this same function) after a
+successful decision on a resubmission — the event a significant edit sent back to `SUBMITTED` for the
+coordinator's re-approval. The idempotent guard already makes this safe on an ordinary first-time approval or
+rejection too, since there's nothing to release yet at that point. See
+[event-requests.md](event-requests.md#significant-edits-regress-the-event-scrum-37).
+
+**Reviewer feedback on PR #60 added one new Venue-lane function, `releaseBookingsForTerminalEvents`.**
+`approve()`/`reject()` write the event's new status before calling the release above; if that call throws, the
+status change has already committed, so the error is now caught and logged in `review.service.js` rather than
+turned into a misleading 500. A caught failure here needs a safety net, the same way equipment already has one
+for `CANCELLED` (SCRUM-104): `getVenues`/`getVenueAvailability` (`venues.controller.js`) both call
+`releaseBookingsForTerminalEvents()` before computing their response — it lists every `CANCELLED`/`REJECTED`
+event and releases each one's bookings through the wrapper above. Both statuses are terminal, so a venue booking
+can never legitimately survive against either one. `APPROVED` is deliberately not swept this way: plenty of
+`APPROVED` events hold live bookings on purpose, so only the logged synchronous call protects a resubmission's
+`approve()` — a known, accepted gap if that one call fails.
+
+### Changing or cancelling one booking (SCRUM-154)
+
+**Applied to the shared dev database, confirmed 2026-10-19.** All three objects below - the table
+and both functions, with `change_venue_booking_request` already in its revised, slot-free form -
+are live. Recorded here per the project's no-migration-file rule; applied by hand in the Supabase
+dashboard, since `venue_booking_requests`, `venue_bookings` and `events` are
+shared tables.
+
+`event_activity_log` is new and generic on purpose: SCRUM-154 is its only writer today, but it is
+designed to also serve SCRUM-141's general event activity history later, which is why it has no
+`entity_id` column of its own - `details` carries whatever the action needs, found through
+`event_id` first, since every entry is always read in the context of one event's history.
+
+```sql
+create table public.event_activity_log (
+  id uuid primary key default gen_random_uuid(),
+  event_id uuid not null references public.events (id) on delete cascade,
+  user_id uuid references auth.users (id),
+  action text not null,
+  details jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index event_activity_log_event_idx
+  on public.event_activity_log (event_id, created_at desc);
+
+alter table public.event_activity_log enable row level security;
+
+revoke all on public.event_activity_log from public, anon, authenticated;
+grant select, insert on public.event_activity_log to service_role;
+```
+
+`cancel_venue_booking_request` is the single-request sibling of SCRUM-148's
+`cancel_venue_booking_requests_for_event`, scoped by `request_id` instead of joining through
+`event_id`. The live-row guard is a positive allowlist, `status in ('pending', 'confirmed')`,
+not `status <> 'cancelled'` - that closes a race where Venue Staff reject the request between the
+service's own check and this function running; a negative guard would still match and cancel an
+already-`rejected` row.
+
+```sql
+create or replace function public.cancel_venue_booking_request(
+  p_request_id uuid,
+  p_user_id uuid
+)
+returns integer
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_event_id uuid;
+  v_venue_id uuid;
+  v_date date;
+  v_slots text[];
+begin
+  select event_id, venue_id, booking_date
+    into v_event_id, v_venue_id, v_date
+  from public.venue_booking_requests
+  where id = p_request_id
+  for update;
+
+  if not found then
+    raise exception 'REQUEST_NOT_FOUND' using errcode = 'P0002';
+  end if;
+
+  with u as (
+    update public.venue_bookings
+    set status = 'cancelled', updated_at = now()
+    where request_id = p_request_id
+      and status in ('pending', 'confirmed')
+    returning slot
+  )
+  select array_agg(slot::text order by slot) into v_slots from u;
+
+  if v_slots is null then
+    raise exception 'NOT_LIVE' using errcode = 'P0003';
+  end if;
+
+  insert into public.event_activity_log (event_id, user_id, action, details)
+  values (
+    v_event_id, p_user_id, 'venue_booking.cancelled',
+    jsonb_build_object(
+      'request_id', p_request_id,
+      'venue_id', v_venue_id,
+      'booking_date', v_date,
+      'slots', to_jsonb(v_slots)
+    )
+  );
+
+  return array_length(v_slots, 1);
+end;
+$$;
+
+revoke execute on function public.cancel_venue_booking_request(uuid, uuid)
+  from public, anon, authenticated;
+grant execute on function public.cancel_venue_booking_request(uuid, uuid)
+  to service_role;
+```
+
+`change_venue_booking_request` updates the request's non-slot details and, only when `p_booking_date`
+actually differs from the request's current value, cancels its live rows and inserts fresh `pending`
+ones for the new date - carrying over whatever slots the booking already had, read from those live
+rows itself rather than supplied by the caller. Slot selection was dropped from scope after this
+function's first draft; `p_slots` and its `NO_SLOTS` guard are gone with it - a request with no live
+rows at all is still caught by `NOT_LIVE`.
+
+```sql
+-- Drop the original 9-parameter version (p_slots included) before creating the
+-- revised 8-parameter one below - a different parameter list is a different
+-- overload in Postgres, not a replacement.
+drop function if exists public.change_venue_booking_request(
+  uuid, uuid, date, text[], integer, text, text[], text[], text
+);
+
+create or replace function public.change_venue_booking_request(
+  p_request_id uuid,
+  p_user_id uuid,
+  p_booking_date date,
+  p_expected_attendees integer,
+  p_room_layout text,
+  p_required_facilities text[],
+  p_accessibility_requirements text[],
+  p_additional_requirements text
+)
+returns uuid
+language plpgsql
+set search_path = public
+as $$
+declare
+  r public.venue_booking_requests%rowtype;
+  v_slots text[];
+  v_event_name text;
+begin
+  select * into r
+  from public.venue_booking_requests
+  where id = p_request_id
+  for update;
+
+  if not found then
+    raise exception 'REQUEST_NOT_FOUND' using errcode = 'P0002';
+  end if;
+
+  select array_agg(slot::text order by slot), min(event_name)
+    into v_slots, v_event_name
+  from public.venue_bookings
+  where request_id = p_request_id
+    and status in ('pending', 'confirmed');
+
+  if v_slots is null then
+    raise exception 'NOT_LIVE' using errcode = 'P0003';
+  end if;
+
+  update public.venue_booking_requests
+  set booking_date = p_booking_date,
+      expected_attendees = p_expected_attendees,
+      room_layout = p_room_layout,
+      required_facilities = coalesce(p_required_facilities, '{}'),
+      accessibility_requirements = coalesce(p_accessibility_requirements, '{}'),
+      additional_requirements = p_additional_requirements,
+      decided_by = null,
+      decided_at = null,
+      decision_note = null
+  where id = p_request_id;
+
+  if p_booking_date is distinct from r.booking_date then
+    update public.venue_bookings
+    set status = 'cancelled', updated_at = now()
+    where request_id = p_request_id
+      and status in ('pending', 'confirmed');
+
+    insert into public.venue_bookings
+      (venue_id, booking_date, slot, status, event_name, requested_by, request_id)
+    select r.venue_id, p_booking_date, s::public.venue_slot, 'pending',
+           v_event_name, 'booking-request', p_request_id
+    from unnest(v_slots) as s;
+  else
+    update public.venue_bookings
+    set status = 'pending', updated_at = now()
+    where request_id = p_request_id
+      and status in ('pending', 'confirmed');
+  end if;
+
+  insert into public.event_activity_log (event_id, user_id, action, details)
+  values (
+    r.event_id, p_user_id, 'venue_booking.changed',
+    jsonb_build_object(
+      'request_id', p_request_id,
+      'venue_id', r.venue_id,
+      'booking_date', jsonb_build_object('from', r.booking_date, 'to', p_booking_date),
+      'slots', to_jsonb(v_slots),
+      'expected_attendees', jsonb_build_object('from', r.expected_attendees, 'to', p_expected_attendees),
+      'room_layout', jsonb_build_object('from', r.room_layout, 'to', p_room_layout),
+      'required_facilities', jsonb_build_object('from', r.required_facilities, 'to', coalesce(p_required_facilities, '{}')),
+      'accessibility_requirements', jsonb_build_object('from', r.accessibility_requirements, 'to', coalesce(p_accessibility_requirements, '{}')),
+      'additional_requirements', jsonb_build_object('from', r.additional_requirements, 'to', p_additional_requirements)
+    )
+  );
+
+  return p_request_id;
+end;
+$$;
+
+revoke execute on function public.change_venue_booking_request(uuid, uuid, date, integer, text, text[], text[], text)
+  from public, anon, authenticated;
+grant execute on function public.change_venue_booking_request(uuid, uuid, date, integer, text, text[], text[], text)
+  to service_role;
+```
+
+`venue_booking_requests_set_updated_at` and `venue_bookings_set_updated_at` (defined earlier in
+this file) already bump `updated_at` on any row update, so neither function above sets it on the
+request row manually.
+
+### Demonstration data
+
+The two blocks below are test data, not schema. They are what the manual test
+guides in the team's TESTS sheet expect to find. The booking seed anchors its
+dates to the next Monday, so re-running it refreshes dates that have gone stale.
+
+#### Demonstration venues
+
+```sql
+-- Demo venues
+-- Development seed data for SCRUM-15
+
+insert into public.venues
+  (name, address, city, country, capacity, facilities,
+   accessibility_features, room_layouts, operating_hours,
+   setup_minutes, teardown_minutes, turnaround_minutes, notes)
+values
+  ('Marina Grand Ballroom',
+   '10 Bayfront Avenue', 'Singapore', 'Singapore', 500,
+   '{"Stage","AV system","Wi-Fi","Catering kitchen"}',
+   '{"Step-free access","Accessible restrooms","Hearing loop"}',
+   '{"Theatre","Banquet","Cabaret"}',
+   '{"mon":{"open":"08:00","close":"22:00"},
+     "tue":{"open":"08:00","close":"22:00"},
+     "wed":{"open":"08:00","close":"22:00"},
+     "thu":{"open":"08:00","close":"22:00"},
+     "fri":{"open":"08:00","close":"23:00"},
+     "sat":{"open":"10:00","close":"23:00"},
+     "sun":{"closed":true}}'::jsonb,
+   120, 90, 60, 'Loading bay available at basement level.'),
+
+  ('Orchard Seminar Room 3',
+   '350 Orchard Road', 'Singapore', 'Singapore', 60,
+   '{"Projector","Whiteboard","Wi-Fi"}',
+   '{"Step-free access","Lift access"}',
+   '{"Classroom","U-shape","Boardroom"}',
+   '{"mon":{"open":"09:00","close":"18:00"},
+     "tue":{"open":"09:00","close":"18:00"},
+     "wed":{"open":"09:00","close":"18:00"},
+     "thu":{"open":"09:00","close":"18:00"},
+     "fri":{"open":"09:00","close":"18:00"},
+     "sat":{"closed":true},
+     "sun":{"closed":true}}'::jsonb,
+   30, 30, 15, null),
+
+  ('KLCC Conference Hall A',
+   'Jalan Ampang', 'Kuala Lumpur', 'Malaysia', 220,
+   '{"Stage","AV system","Wi-Fi","Breakout rooms"}',
+   '{"Step-free access","Accessible restrooms"}',
+   '{"Theatre","Banquet"}',
+   '{"mon":{"open":"08:30","close":"21:00"},
+     "tue":{"open":"08:30","close":"21:00"},
+     "wed":{"open":"08:30","close":"21:00"},
+     "thu":{"open":"08:30","close":"21:00"},
+     "fri":{"open":"08:30","close":"21:00"},
+     "sat":{"open":"09:00","close":"17:00"},
+     "sun":{"closed":true}}'::jsonb,
+   90, 60, 45, 'Shared loading dock with adjacent hall.');
+```
+
+#### Demonstration bookings and unavailable periods
+
+```sql
+-- Demo bookings
+-- Dev data for SCRUM-17.
+-- Safe to re-run: seed rows are tagged and removed first.
+--
+-- Every row is anchored to the NEXT MONDAY rather than to a raw offset from
+-- current_date. That matters because "closed" outranks every other state on
+-- the calendar: a booking or unavailable period placed on a day the venue is
+-- shut renders as Closed and the row becomes invisible. All three venues are
+-- open Monday to Friday, so anchoring to Monday keeps the seed meaningful on
+-- whichever day it happens to be run.
+--   date_trunc('week', ...) returns the Monday of the current week in Postgres,
+--   so + 7 is always the Monday that is still ahead of us.
+
+-- SCRUM-92 existing bookings, SCRUM-94 confirmed vs pending, SCRUM-95 full day
+delete from public.venue_bookings where requested_by = 'seed';
+delete from public.venue_unavailability where reason like 'Seed:%';
+
+insert into public.venue_bookings
+  (venue_id, booking_date, slot, status, event_name, requested_by)
+select
+  v.id,
+  (date_trunc('week', current_date)::date + 7) + b.weekday_offset,
+  b.slot::public.venue_slot,
+  b.status::public.booking_status,
+  b.event_name,
+  'seed'
+from (values
+  -- Monday
+  ('Orchard Seminar Room 3',  0, 'am',    'confirmed', 'IS212 Sprint Review'),
+
+  -- Tuesday, half day across two adjacent slots
+  ('Marina Grand Ballroom',   1, 'am',    'confirmed', 'Freshman Orientation'),
+  ('Marina Grand Ballroom',   1, 'pm',    'confirmed', 'Freshman Orientation'),
+
+  -- Wednesday, SCRUM-94: pending shows on the calendar but does NOT consume
+  -- the slot, so these two stay bookable
+  ('Marina Grand Ballroom',   2, 'pm',    'pending',   'Alumni Mixer'),
+  ('Orchard Seminar Room 3',  2, 'pm',    'pending',   'Study Group'),
+
+  -- Friday, SCRUM-95: a full day booking occupies all three slots
+  ('Marina Grand Ballroom',   4, 'am',    'confirmed', 'Annual Dinner'),
+  ('Marina Grand Ballroom',   4, 'pm',    'confirmed', 'Annual Dinner'),
+  ('Marina Grand Ballroom',   4, 'night', 'confirmed', 'Annual Dinner'),
+  ('KLCC Conference Hall A',  4, 'night', 'confirmed', 'Product Launch')
+) as b(venue_name, weekday_offset, slot, status, event_name)
+join public.venues v on v.name = b.venue_name;
+
+-- SCRUM-93: recorded unavailable periods, independent of any booking.
+-- The full day example is on Marina because it is open into the evening, so
+-- all three of its slots are genuinely open and the Unavailable state is
+-- visible in every one of them.
+insert into public.venue_unavailability
+  (venue_id, unavailable_date, slot, reason)
+select
+  v.id,
+  (date_trunc('week', current_date)::date + 7) + u.weekday_offset,
+  u.slot::public.venue_slot,
+  u.reason
+from (values
+  -- Tuesday, single slot
+  ('KLCC Conference Hall A',  1, 'pm',    'Seed: Floor repairs'),
+
+  -- Thursday, whole day out of service recorded as all three slots
+  ('Marina Grand Ballroom',   3, 'am',    'Seed: Deep cleaning'),
+  ('Marina Grand Ballroom',   3, 'pm',    'Seed: Deep cleaning'),
+  ('Marina Grand Ballroom',   3, 'night', 'Seed: Deep cleaning')
+) as u(venue_name, weekday_offset, slot, reason)
+join public.venues v on v.name = u.venue_name;
+```
+
+
+## Coordinator venue hold expiry notifications — SCRUM-163
+
+Local implementation. Shared SQL and the Novu workflow require Ryan's manual setup; live UAT is not yet executed.
+
+The saved hold coordinator receives a warning in the last hour and an expiry/release notice when that reservation ends. Both name the canonical venue and event and label the expiry in UTC. The existing inbox and 15-second worker are reused; no new page, package or scheduler is added. Notifications are feature behaviour, not refactoring.
+
+Slots sharing venue, event, coordinator, booking date, creation timestamp and expiry form one notification cohort. The creation timestamp is stable across the existing atomic multi-slot insert. Private per-generation state and an advisory transaction lock keep concurrent preparation from splitting that cohort into duplicate notices. Markers survive successful outbox removal. Existing expired rows are not enrolled during setup; active holds are enrolled.
+
+The capture trigger records when a hold generation ends. Conversion before expiry suppresses an expiry notice; conversion after natural expiry preserves the historical expiry fact. Pending conversion does not end the hold. The actual decide_venue_booking_request function, booking status enum, constraints, timestamp trigger and availability release rules are preserved. Notification history shares each write transaction: capture failure rolls back that business write. Provider delivery is background work.
+
+Warnings are revalidated before every attempt. A partially converted cohort can still warn about remaining active reservations; messages do not claim all slots remain held. An expired reservation being released does not assert that the venue has no other bookings. Historical expiry notices remain retryable. Missing/expired leases raise retryable errors rather than silently deleting unsent work. There remains a small interval between validation and provider acceptance; this is not an exactly-once external-delivery guarantee.
+
+### Schema reference — SCRUM-163 (Ryan applies manually)
+
+Tell teammates before and after applying this single transactional block. It preserves the complete current outbox workflow check, including installed SCRUM-43 values. Copy from begin through commit into Supabase SQL Editor. Expected: Success/no error. A busy or incompatible schema fails the transaction; share the error before rerunning. The script is a one-time installation, not a rerunnable update.
+
+```sql
+begin;
+set local lock_timeout = '3s';
+
+do $$ declare prior_check text; begin
+  perform b.id,b.venue_id,b.event_id,b.coordinator_id,b.booking_date,b.created_at,b.expires_at,b.status from public.venue_bookings b limit 0;
+  perform v.id,v.name from public.venues v limit 0;
+  perform e.id,e.name,e.status,e.cancelled_at from public.events e limit 0;
+  select pg_get_expr(conbin,conrelid) into strict prior_check from pg_constraint
+    where conrelid='public.notification_outbox'::regclass and conname='notification_outbox_workflow_check' and contype='c';
+  alter table public.notification_outbox drop constraint notification_outbox_workflow_check;
+  execute format('alter table public.notification_outbox add constraint notification_outbox_workflow_check check ((%s) or workflow=%L)',prior_check,'venue-hold-expiry');
+end $$;
+
+create table public.venue_hold_notification_state (
+  id uuid primary key default gen_random_uuid(),
+  hold_id uuid not null,
+  venue_id uuid not null references public.venues(id) on delete cascade,
+  event_id uuid not null references public.events(id) on delete cascade,
+  coordinator_id uuid not null references auth.users(id) on delete cascade,
+  venue_name text not null,
+  event_name text not null,
+  booking_date date not null,
+  held_at timestamptz not null,
+  expires_at timestamptz not null,
+  ended_at timestamptz,
+  warning_id uuid,
+  expired_id uuid
+);
+create index venue_hold_notification_open on public.venue_hold_notification_state(hold_id) where ended_at is null;
+create index venue_hold_warning_pending on public.venue_hold_notification_state(expires_at,id) where warning_id is null and ended_at is null;
+create index venue_hold_expired_pending on public.venue_hold_notification_state(expires_at,id)
+  where expired_id is null and (ended_at is null or ended_at>=expires_at);
+create index venue_hold_notification_cohort on public.venue_hold_notification_state(venue_id,event_id,coordinator_id,booking_date,held_at,expires_at);
+alter table public.venue_hold_notification_state enable row level security;
+revoke all on public.venue_hold_notification_state from public,anon,authenticated;
+grant all on public.venue_hold_notification_state to service_role;
+
+create function public.capture_venue_hold_notification() returns trigger
+language plpgsql security definer set search_path='' as $$
+begin
+  if tg_op='DELETE' then
+    if old.status='hold' and old.event_id is not null and old.coordinator_id is not null and old.expires_at is not null then
+      update public.venue_hold_notification_state set ended_at=clock_timestamp() where hold_id=old.id and ended_at is null;
+    end if;
+    return old;
+  end if;
+  if tg_op='UPDATE' then
+    if (old.status,old.venue_id,old.event_id,old.coordinator_id,old.booking_date,old.created_at,old.expires_at)
+      is not distinct from (new.status,new.venue_id,new.event_id,new.coordinator_id,new.booking_date,new.created_at,new.expires_at) then return new; end if;
+    if old.status='hold' and old.event_id is not null and old.coordinator_id is not null and old.expires_at is not null then
+      update public.venue_hold_notification_state set ended_at=clock_timestamp() where hold_id=old.id and ended_at is null;
+    end if;
+  end if;
+  if new.status='hold' and new.expires_at is not null and new.coordinator_id is not null and new.event_id is not null then
+    insert into public.venue_hold_notification_state(hold_id,venue_id,event_id,coordinator_id,venue_name,event_name,booking_date,held_at,expires_at)
+      select new.id,new.venue_id,new.event_id,new.coordinator_id,v.name,e.name,new.booking_date,new.created_at,new.expires_at
+      from public.venues v join public.events e on e.id=new.event_id
+      join auth.users u on u.id=new.coordinator_id where v.id=new.venue_id;
+  end if;
+  return new;
+end $$;
+revoke all on function public.capture_venue_hold_notification() from public,anon,authenticated;
+create trigger capture_venue_hold_notification
+  after insert or delete or update of status,venue_id,event_id,coordinator_id,booking_date,created_at,expires_at on public.venue_bookings
+  for each row execute function public.capture_venue_hold_notification();
+
+-- SCRUM-163: enroll current holds without replaying historical expiries.
+insert into public.venue_hold_notification_state(hold_id,venue_id,event_id,coordinator_id,venue_name,event_name,booking_date,held_at,expires_at)
+select b.id,b.venue_id,b.event_id,b.coordinator_id,v.name,e.name,b.booking_date,b.created_at,b.expires_at
+from public.venue_bookings b join public.venues v on v.id=b.venue_id
+join public.events e on e.id=b.event_id join auth.users u on u.id=b.coordinator_id
+where b.status='hold' and b.expires_at>now();
+
+create function public.enqueue_venue_hold_notifications() returns integer
+language plpgsql security definer set search_path='' as $$
+declare cohort record; phase text; state_ids uuid[]; delivery_id uuid;
+  venue_label text; event_label text; message text; total integer:=0; checked_at timestamptz:=now();
+begin
+  foreach phase in array array['expiring','expired'] loop
+    for cohort in
+      select s.venue_id,s.event_id,s.coordinator_id,s.booking_date,s.held_at,s.expires_at
+      from public.venue_hold_notification_state s join public.events e on e.id=s.event_id
+      where e.status in ('APPROVED','CONFIRMED') and e.cancelled_at is null and
+        ((phase='expiring' and s.warning_id is null and s.ended_at is null and s.expires_at>checked_at and s.expires_at<=checked_at+interval '1 hour')
+          or (phase='expired' and s.expired_id is null and s.expires_at<=checked_at and (s.ended_at is null or s.ended_at>=s.expires_at)))
+      group by s.venue_id,s.event_id,s.coordinator_id,s.booking_date,s.held_at,s.expires_at
+      order by s.expires_at,s.venue_id,s.event_id,s.coordinator_id,s.booking_date,s.held_at limit 100
+    loop
+      -- SCRUM-163: lock the whole slot cohort, not independently skipped rows that could split one notice.
+      if not pg_try_advisory_xact_lock(hashtextextended(jsonb_build_array(cohort.venue_id,cohort.event_id,cohort.coordinator_id,
+        cohort.booking_date,extract(epoch from cohort.held_at),extract(epoch from cohort.expires_at))::text,163)) then continue; end if;
+      select array_agg(p.id order by p.id),min(p.venue_name),min(p.event_name) into state_ids,venue_label,event_label
+      from (
+        select s.id,s.venue_name,s.event_name from public.venue_hold_notification_state s
+        join public.events e on e.id=s.event_id
+        where s.venue_id=cohort.venue_id and s.event_id=cohort.event_id and s.coordinator_id=cohort.coordinator_id
+          and s.booking_date=cohort.booking_date and s.held_at=cohort.held_at and s.expires_at=cohort.expires_at
+          and e.status in ('APPROVED','CONFIRMED') and e.cancelled_at is null and
+          ((phase='expiring' and s.warning_id is null and s.ended_at is null and s.expires_at>checked_at and s.expires_at<=checked_at+interval '1 hour')
+            or (phase='expired' and s.expired_id is null and s.expires_at<=checked_at and (s.ended_at is null or s.ended_at>=s.expires_at)))
+        for update of s
+      ) p;
+      if state_ids is null then continue; end if;
+      delivery_id:=gen_random_uuid();
+      message:='Your tentative hold at '||venue_label||' for '||event_label||' on '||cohort.booking_date::text||
+        case when phase='expiring' then ' expires at ' else ' expired at ' end||
+        to_char(cohort.expires_at at time zone 'UTC','YYYY-MM-DD HH24:MI:SS')||' UTC.'||
+        case when phase='expiring' then ' Open venue availability to review it.' else ' The expired reservation has been released.' end;
+      insert into public.notification_outbox(id,event_id,recipient_id,workflow,payload)
+        values(delivery_id,cohort.event_id,cohort.coordinator_id,'venue-hold-expiry',jsonb_build_object(
+          'venueId',cohort.venue_id,'venueName',venue_label,'eventId',cohort.event_id,'eventName',event_label,
+          'bookingDate',cohort.booking_date,'expiresAt',cohort.expires_at,'changeType',phase,
+          'message',message,'requestPath','/venues/'||cohort.venue_id::text||'/availability','stateIds',state_ids));
+      if phase='expiring' then update public.venue_hold_notification_state set warning_id=delivery_id where id=any(state_ids);
+      else update public.venue_hold_notification_state set expired_id=delivery_id where id=any(state_ids); end if;
+      total:=total+1;
+    end loop;
+  end loop;
+  return total;
+end $$;
+
+create function public.validate_venue_hold_notification(delivery_id uuid,claim_token uuid) returns boolean
+language plpgsql security definer set search_path='' as $$
+declare q public.notification_outbox%rowtype; checked_at timestamptz;
+begin
+  select * into q from public.notification_outbox where id=delivery_id and lease_token=claim_token
+    and workflow='venue-hold-expiry' for update;
+  if not found then return false; end if;
+  checked_at:=clock_timestamp();
+  if q.locked_until is null or q.locked_until<=checked_at then
+    raise exception using errcode='55000',message='Notification lease expired.';
+  end if;
+  return exists(
+    select 1 from public.venue_hold_notification_state s join public.events e on e.id=s.event_id
+    where s.id in (select value::uuid from jsonb_array_elements_text(q.payload->'stateIds'))
+      and s.coordinator_id=q.recipient_id and s.event_id=q.event_id
+      and s.event_id=(q.payload->>'eventId')::uuid and s.venue_id=(q.payload->>'venueId')::uuid
+      and s.venue_name=q.payload->>'venueName' and s.event_name=q.payload->>'eventName'
+      and s.booking_date=(q.payload->>'bookingDate')::date and s.expires_at=(q.payload->>'expiresAt')::timestamptz
+      and q.payload->>'requestPath'='/venues/'||s.venue_id::text||'/availability'
+      and e.status in ('APPROVED','CONFIRMED') and e.cancelled_at is null and (
+        (q.payload->>'changeType'='expiring' and s.warning_id=q.id and s.ended_at is null
+          and s.expires_at>checked_at and s.expires_at<=checked_at+interval '1 hour'
+          and exists(select 1 from public.venue_bookings b where b.id=s.hold_id and b.status='hold'
+            and b.venue_id=s.venue_id and b.event_id=s.event_id and b.coordinator_id=s.coordinator_id and b.expires_at=s.expires_at))
+        or (q.payload->>'changeType'='expired' and s.expired_id=q.id and s.expires_at<=checked_at
+          and (s.ended_at is null or s.ended_at>=s.expires_at))
+      )
+  );
+end $$;
+revoke all on function public.enqueue_venue_hold_notifications() from public,anon,authenticated;
+revoke all on function public.validate_venue_hold_notification(uuid,uuid) from public,anon,authenticated;
+grant execute on function public.enqueue_venue_hold_notifications() to service_role;
+grant execute on function public.validate_venue_hold_notification(uuid,uuid) to service_role;
+commit;
+```
+
+### Novu configuration
+
+In the same environment as the existing US inbox, create venue-hold-expiry with one active In-App step. Subject: Venue hold update: {{payload.venueName}}. Body: {{payload.message}}. Same-tab redirect: {{payload.requestPath}}. Required string fields: venueId, venueName, eventId, eventName, bookingDate, expiresAt, changeType, message, requestPath. changeType is expiring or expired; stateIds is an additional UUID-array correlation field. Keep extra fields allowed and existing HMAC security enabled. No Delay step is needed; the backend prepares notifications when due. Restart the backend after setup and run the three manual cases. Dashboard previews do not establish live delivery or ownership.
+
+### Local tests
+
+Run from the application root: npm --prefix backend run test:events -- tests/unit/notifications tests/integration/notifications; node tests/sql/run-assignment-notifications.cjs --venue-holds; npm run test:e2e -- tests/playwright/venue-hold-notifications.browser.spec.cjs --retries=0. The SQL harness uses a disposable network-isolated PostgreSQL container and the exact supplied decision-function body. No shared database is contacted. Manual test specifications/evidence remain outside the repository.

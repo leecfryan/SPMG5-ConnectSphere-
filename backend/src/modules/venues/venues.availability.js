@@ -80,6 +80,7 @@ function slotIsOpen(operatingHoursEntry, slot) {
 //   closed      venue is not open for that slot at all (SCRUM-84 / SCRUM-89)
 //   unavailable Venue Staff recorded the period as unavailable (SCRUM-93)
 //   booked      a confirmed booking consumes the slot (SCRUM-94)
+//   tentative   an active hold reserves the slot (SCRUM-146)
 //   pending     a request exists but has not been confirmed, slot still free
 //   available   nothing in the way
 function buildAvailabilityCalendar(input) {
@@ -102,6 +103,13 @@ function buildAvailabilityCalendar(input) {
   const unavailableBySlot = new Map();
   for (const period of input.unavailability || []) {
     unavailableBySlot.set(`${period.unavailable_date}|${period.slot}`, period);
+  }
+
+  // SCRUM-146: active holds (expires_at > now() filtered server-side before this call)
+  const tentativeBySlot = new Map();
+  for (const hold of input.holds || []) {
+    const key = `${hold.booking_date}|${hold.slot}`;
+    if (!tentativeBySlot.has(key)) tentativeBySlot.set(key, hold);
   }
 
   return eachDateInRange(input.from, input.to).map((date) => {
@@ -129,6 +137,12 @@ function buildAvailabilityCalendar(input) {
         continue;
       }
 
+      const tentative = tentativeBySlot.get(key);
+      if (tentative) {
+        slots[slot] = { status: "tentative", label: tentative.event_name };
+        continue;
+      }
+
       const pending = pendingBySlot.get(key);
       if (pending) {
         slots[slot] = { status: "pending", label: pending.event_name };
@@ -139,6 +153,39 @@ function buildAvailabilityCalendar(input) {
     }
 
     return { date, day: dayKey, slots };
+  });
+}
+
+// SCRUM-134: converts "HH:MM" to minutes from midnight for range overlap maths.
+function timeToMinutes(timeStr) {
+  const [h, m] = timeStr.split(":").map(Number);
+  return h * 60 + m;
+}
+
+// SCRUM-134: returns every slot whose time window the committed period covers.
+// The committed period is [earliest_slot_start - setup, latest_slot_end + turnaround].
+// A slot is included when its window overlaps the committed period.
+// Buffer slots (those not in requestedSlots) are what `findSlotProblems` checks
+// for setup/turnaround conflicts.
+function committedSlots(requestedSlots, setupMinutes, turnaroundMinutes) {
+  if (!requestedSlots || requestedSlots.length === 0) return [];
+  const setup = Number.isFinite(setupMinutes) && setupMinutes > 0 ? setupMinutes : 0;
+  const turnaround =
+    Number.isFinite(turnaroundMinutes) && turnaroundMinutes > 0 ? turnaroundMinutes : 0;
+
+  const ordered = SLOTS.filter((s) => requestedSlots.includes(s));
+  if (ordered.length === 0) return [];
+
+  const eventStart = timeToMinutes(SLOT_WINDOWS[ordered[0]].start);
+  const eventEnd = timeToMinutes(SLOT_WINDOWS[ordered[ordered.length - 1]].end);
+
+  const committedStart = eventStart - setup;
+  const committedEnd = eventEnd + turnaround;
+
+  return SLOTS.filter((slot) => {
+    const slotStart = timeToMinutes(SLOT_WINDOWS[slot].start);
+    const slotEnd = timeToMinutes(SLOT_WINDOWS[slot].end);
+    return slotStart < committedEnd && slotEnd > committedStart;
   });
 }
 
@@ -153,4 +200,6 @@ module.exports = {
   dayKeyFor,
   slotIsOpen,
   buildAvailabilityCalendar,
+  timeToMinutes,
+  committedSlots,
 };

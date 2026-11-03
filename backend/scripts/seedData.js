@@ -3,6 +3,9 @@ require("dotenv").config({ path: path.resolve(__dirname, "../../.env"), quiet: t
 const supabase = require("../src/supabase");
 
 // Fixed UUIDs so repeated runs are idempotent.
+// Deliberately omit registration_start/registration_end: inserts use their
+// nullable database defaults, while upserts preserve windows already configured
+// on existing demo events.
 const makeEvents = (organiserId) => [
   {
     id: "aaaaaaaa-0001-0000-0000-000000000000",

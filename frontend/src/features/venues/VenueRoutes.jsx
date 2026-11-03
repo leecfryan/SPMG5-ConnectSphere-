@@ -9,6 +9,10 @@ import VenueEditForm from "./components/VenueEditForm";
 import VenueAvailabilityCalendar from "./components/VenueAvailabilityCalendar";
 import VenueBookingRequestForm from "./components/VenueBookingRequestForm";
 import VenueBookingRequestList from "./components/VenueBookingRequestList";
+import VenueUnavailabilityPage from "./pages/VenueUnavailabilityPage";
+import VenueHoldsPage from "./pages/VenueHoldsPage";
+import VenueConflictsPage from "./pages/VenueConflictsPage";
+import VenueReplacementSearch from "./components/VenueReplacementSearch";
 import "./venues.css";
 
 function VenueRecordPage({ mode = "detail" }) {
@@ -54,13 +58,37 @@ function VenueRecordPage({ mode = "detail" }) {
   if (mode === "edit") return <VenueEditForm venue={venue} onSave={save}
     onCancel={() => navigate(detailPath)} isSaving={isSaving} saveError={saveError} />;
   if (mode === "availability") return <VenueAvailabilityCalendar venue={venue}
-    onBack={() => navigate(detailPath)} onRequestBooking={hasPermission("bookings.request")
-      ? () => navigate(`${detailPath}/booking-request`) : undefined} />;
+    onBack={() => navigate(detailPath)}
+    onRequestBooking={hasPermission("bookings.request")
+      ? () => navigate(`${detailPath}/booking-request`) : undefined}
+    onConvertHold={hasPermission("bookings.request") ? (group) => navigate(
+      `${detailPath}/booking-request`,
+      { state: { holdConversion: {
+        holdIds: group.slots.map((s) => s.id),
+        eventId: group.event.id,
+        eventName: group.event.name,
+        bookingDate: group.booking_date,
+        slots: group.slots.map((s) => s.slot),
+      }}}
+    ) : undefined} />;
   if (mode === "booking") return <VenueBookingRequestForm venue={venue}
-    onDone={() => navigate(availabilityPath)} onCancel={() => navigate(availabilityPath)} />;
+    onDone={() => navigate("/venues/booking-requests")} onCancel={() => navigate(availabilityPath)} />;
+  // SCRUM-133: Venue Staff manage unavailability periods
+  if (mode === "unavailability") return <VenueUnavailabilityPage venue={venue}
+    onBack={() => navigate(detailPath)} />;
+  // SCRUM-146: Venue Staff place and view tentative holds
+  if (mode === "holds") return <VenueHoldsPage venue={venue}
+    onBack={() => navigate(detailPath)} />;
+  // SCRUM-135: Venue Staff view conflict flags after a setup/turnaround change
+  if (mode === "conflicts") return <VenueConflictsPage venue={venue}
+    onBack={() => navigate(detailPath)} />;
   return <VenueDetail venue={venue} onBack={() => navigate("/venues")}
     onEdit={hasPermission("venues.update") ? () => navigate(`${detailPath}/edit`) : undefined}
-    onViewAvailability={() => navigate(availabilityPath)} />;
+    onViewAvailability={() => navigate(availabilityPath)}
+    onManageUnavailability={hasPermission("venues.unavailability") ? () => navigate(`${detailPath}/unavailability`) : undefined}
+    onManageHolds={hasPermission("venues.holds") ? () => navigate(`${detailPath}/holds`) : undefined}
+    onViewConflicts={hasPermission("venues.conflicts") ? () => navigate(`${detailPath}/booking-conflicts`) : undefined}
+    canAssess={hasPermission("bookings.request")} />;
 }
 
 export default function VenueRoutes() {
@@ -77,7 +105,17 @@ export default function VenueRoutes() {
         <Route path=":id/edit" element={<VenueRecordPage key="edit" mode="edit" />} />
       </Route>
       <Route element={<RequirePermission permission="bookings.request" />}>
+        <Route path="booking-requests/:requestId/replacement" element={<VenueReplacementSearch />} />
         <Route path=":id/booking-request" element={<VenueRecordPage key="booking" mode="booking" />} />
+      </Route>
+      <Route element={<RequirePermission permission="venues.unavailability" />}>
+        <Route path=":id/unavailability" element={<VenueRecordPage key="unavailability" mode="unavailability" />} />
+      </Route>
+      <Route element={<RequirePermission permission="venues.holds" />}>
+        <Route path=":id/holds" element={<VenueRecordPage key="holds" mode="holds" />} />
+      </Route>
+      <Route element={<RequirePermission permission="venues.conflicts" />}>
+        <Route path=":id/booking-conflicts" element={<VenueRecordPage key="conflicts" mode="conflicts" />} />
       </Route>
       <Route path="*" element={<><h1>Page not found</h1><Link to="/venues">Back to venues</Link></>} />
     </Routes>

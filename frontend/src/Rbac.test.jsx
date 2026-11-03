@@ -44,6 +44,8 @@ function setup(roles, { profile = {}, initialSession = session, permissions } = 
       user: identity, permissions: permissions === undefined ? getPermissions(roles) : permissions,
     });
     if (url === "/api/internal/access") return response({ responsibilities: getResponsibilities(roles) });
+    if (url === "/api/internal/events/unassigned") return response({ events: [] });
+    if (url === "/api/managed-events") return response({ events: [] });
     throw new Error("Unexpected test request: " + url);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -64,6 +66,46 @@ const labels = {
   "clients.read": "Client information for managed events",
   "event_organisers.read": "Event organiser information for managed events",
 };
+
+test.each([
+  ["event_coordinator", "My assigned events"],
+  ["event_coordinator_lead", "Manage event requests"],
+  ["event_organiser", "My event requests"],
+  ["venue_staff", "Venues"],
+  ["technical_support_staff", "Technical support"],
+])("[ACCESS-UI-001] %s sees the relevant workspace without attendee browsing", async (role, link) => {
+  setup([role]);
+  render(<MemoryRouter initialEntries={["/account"]}><App /></MemoryRouter>);
+  const nav = await screen.findByRole("navigation", { name: "Workspace" });
+  expect(within(nav).getByRole("link", { name: link, exact: true })).toBeTruthy();
+  expect(within(nav).queryByRole("link", { name: "Browse events" })).toBeNull();
+  expect(within(nav).queryByRole("link", { name: "My registrations" })).toBeNull();
+});
+
+test("[ACCESS-UI-002] Venue and technical account combines both workspaces without coordinator access", async () => {
+  setup(["venue_staff", "technical_support_staff"]);
+  render(<MemoryRouter initialEntries={["/account"]}><App /></MemoryRouter>);
+  const nav = await screen.findByRole("navigation", { name: "Workspace" });
+  for (const name of ["Venues", "Technical support"]) expect(within(nav).getByRole("link", { name, exact: true })).toBeTruthy();
+  for (const name of ["Browse events", "My assigned events", "Manage event requests"]) expect(within(nav).queryByRole("link", { name })).toBeNull();
+});
+
+test.each(["/events", "/events/an-id", "/registrations/me", "/registrations/me/an-id", "/event-management"])(
+  "[ACCESS-UI-003] Coordinator cannot bypass a role guard by opening %s directly", async path => {
+    const { fetchMock } = setup(["event_coordinator"]);
+    render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>);
+    expect(await screen.findByRole("heading", { name: "Access denied" })).toBeTruthy();
+    expect(fetchMock.mock.calls.every(([url]) => url === "/api/auth/me")).toBe(true);
+  },
+);
+
+test("[ACCESS-UI-004] Attendee sees registration navigation without staff workspaces", async () => {
+  setup(["attendee"]);
+  render(<MemoryRouter initialEntries={["/account"]}><App /></MemoryRouter>);
+  const nav = await screen.findByRole("navigation", { name: "Workspace" });
+  for (const name of ["Browse events", "My registrations"]) expect(within(nav).getByRole("link", { name })).toBeTruthy();
+  for (const name of ["My assigned events", "Venues", "Technical support"]) expect(within(nav).queryByRole("link", { name, exact: true })).toBeNull();
+});
 
 test("[RBAC-ROLE-001] Venue Staff see venue and booking responsibilities only", async () => {
   const { fetchMock } = setup(["venue_staff"]);
@@ -104,9 +146,38 @@ test("[RBAC-ROLE-004] Multiple staff roles combine responsibilities without dupl
   renderStaffPage();
   const list = await screen.findByRole("list");
   expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
-    labels["venues.read"], labels["bookings.read"], labels["equipment.read"], labels["technical_requests.read"],
+    labels["venues.read"], labels["bookings.read"],
+    labels["equipment.read"], labels["technical_requests.read"],
   ]);
   expect(screen.queryByText(labels["clients.read"])).toBeNull();
+});
+
+test("[RBAC-ASSIGNMENT-001] Event Coordinator Leads can open the coordinator assignment queue", async () => {
+  setup(["event_coordinator_lead"]);
+  render(<MemoryRouter initialEntries={["/events/assignments"]}><App /></MemoryRouter>);
+  expect(await screen.findByRole("heading", { name: "Assign an Event Coordinator" })).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Assign coordinators" })).toBeTruthy();
+});
+
+test("[RBAC-ASSIGNMENT-002] Event Coordinators cannot open the coordinator assignment queue", async () => {
+  setup(["event_coordinator"]);
+  render(<MemoryRouter initialEntries={["/events/assignments"]}><App /></MemoryRouter>);
+  expect(await screen.findByRole("heading", { name: "Access denied" })).toBeTruthy();
+});
+
+test.each(["event_organiser", "event_coordinator"])(
+  "[RBAC-MANAGED-EVENTS-001] %s can open their managed events",
+  async (role) => {
+    setup([role]);
+    render(<MemoryRouter initialEntries={["/events/managed"]}><App /></MemoryRouter>);
+    expect(await screen.findByRole("heading", { name: "My Events" })).toBeTruthy();
+  },
+);
+
+test("[RBAC-MANAGED-EVENTS-002] Event Coordinator Leads cannot open managed-event pages", async () => {
+  setup(["event_coordinator_lead"]);
+  render(<MemoryRouter initialEntries={["/events/managed"]}><App /></MemoryRouter>);
+  expect(await screen.findByRole("heading", { name: "Access denied" })).toBeTruthy();
 });
 
 // Real guards with test-only child content. No unfinished business pages are invented.
@@ -148,7 +219,7 @@ const roleMatrix = [
   { role: "event_coordinator", allowed: ["venues.read", "bookings.read", "equipment.read", "technical_requests.read", "event_planning.read", "attendees.read", "clients.read", "event_organisers.read"] },
   { role: "event_organiser", allowed: [] },
   { role: "attendee", allowed: [] },
-  { role: "event_ops_manager", allowed: ["event_organisers.read"] },
+  { role: "event_coordinator_lead", allowed: ["event_organisers.read"] },
 ];
 const guardCases = roleMatrix.flatMap(({ role, allowed }, roleIndex) =>
   Object.keys(labels).map((permission, permissionIndex) => ({
@@ -239,4 +310,52 @@ test("[RBAC-DENY-012] Unknown feature permissions deny access even to coordinato
   const { onRender } = renderFeature("unknown.read");
   await screen.findByRole("heading", { name: "Access denied" });
   expect(onRender).not.toHaveBeenCalled();
+});
+
+test("[SCRUM-142-UI-001] the account displays Event Coordinator Lead alongside another assigned role", async () => {
+  setup(["event_coordinator_lead", "attendee"], { profile: { accountTypes: ["internal", "external"] } });
+  render(<MemoryRouter initialEntries={["/account"]}><App /></MemoryRouter>);
+  expect(await screen.findByText("Event Coordinator Lead · Attendee")).toBeTruthy();
+  expect(screen.queryByText("Event Operations Manager")).toBeNull();
+  expect(screen.getByRole("link", { name: "Manage event requests", exact: true })).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Assign coordinators", exact: true })).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Browse events", exact: true })).toBeTruthy();
+  expect(screen.queryByRole("link", { name: "Venues", exact: true })).toBeNull();
+});
+
+
+// SCRUM-140 adds the deferred safety review queue; nothing else is granted.
+test("[SCRUM-142-SAFETY-UI-001] Safety Officer sees its account label, basic staff navigation and the safety review queue only", async () => {
+  setup(["safety_officer"]);
+  render(<MemoryRouter initialEntries={["/account"]}><App /></MemoryRouter>);
+  expect(await screen.findByText("Safety Officer", { exact: true })).toBeTruthy();
+  const nav = screen.getByRole("navigation", { name: "Workspace" });
+  expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["Account", "Notifications", "Safety reviews", "Responsibilities"]);
+});
+
+test("[SCRUM-142-SAFETY-UI-002] Safety Officer plus attendee displays both roles and keeps registration navigation", async () => {
+  setup(["safety_officer", "attendee"], { profile: { accountTypes: ["internal", "external"] } });
+  render(<MemoryRouter initialEntries={["/account"]}><App /></MemoryRouter>);
+  expect(await screen.findByText("Safety Officer · Attendee")).toBeTruthy();
+  const nav = screen.getByRole("navigation", { name: "Workspace" });
+  for (const name of ["Responsibilities", "Browse events", "My registrations"]) expect(within(nav).getByRole("link", { name })).toBeTruthy();
+  expect(within(nav).queryByRole("link", { name: "Manage event requests" })).toBeNull();
+});
+
+test("[SCRUM-142-SAFETY-UI-003] officer staff access lists operational safety review as its only responsibility", async () => {
+  setup(["safety_officer"]);
+  renderStaffPage();
+  expect(await screen.findByText("Operational safety review")).toBeTruthy();
+  expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Operational safety review"]);
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test.each([
+  ["004", "/event-management"], ["005", "/events/assignments"], ["006", "/venues"],
+  ["007", "/technical-support"], ["008", "/assigned-events"],
+])("[SCRUM-142-SAFETY-UI-%s] Safety Officer cannot bypass the permission guard at %s", async (_id, url) => {
+  const { fetchMock } = setup(["safety_officer"]);
+  render(<MemoryRouter initialEntries={[url]}><App /></MemoryRouter>);
+  expect(await screen.findByRole("heading", { name: "Access denied" })).toBeTruthy();
+  expect(fetchMock.mock.calls.every(([path]) => path === "/api/auth/me")).toBe(true);
 });
