@@ -7,7 +7,7 @@ Repository: [SPMG5-ConnectSphere-](https://github.com/leecfryan/SPMG5-ConnectSph
 Tech stack:
 
 - React 19 + Vite (frontend)
-- Express 5 on Node.js 22 (backend)
+- Express 5 on Node.js 22.13.0 (backend)
 - Supabase Cloud (Postgres database and email/password sign-in)
 - Novu (notification inbox)
 
